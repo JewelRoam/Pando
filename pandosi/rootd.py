@@ -22,6 +22,7 @@ class _PandoHTTPServer(ThreadingHTTPServer):
 from .common import DecisionRequest, Vote, aggregate
 from .spore import build_manifest, generate_signing_key
 from .rollout import RolloutRecorder
+from .calibrate import Calibrator
 
 HEARTBEAT_TTL = 15.0
 QUORUM_K = 5
@@ -44,6 +45,7 @@ class Coordinator:
         self.quorum_k = quorum_k
         self.gating = gating or {}
         self.playbook_hash: str | None = None
+        self._calibrator = Calibrator()
         self.known_questions: set[str] | None = None  # None = accept any
         self._recorder = RolloutRecorder()
 
@@ -122,8 +124,13 @@ class Coordinator:
             except Exception:
                 continue  # dead node: shrink quorum, never block the vote
 
+        # Calibrate probabilities before aggregation (blueprint 3.2.1)
+        calibrated_votes = []
+        for v in votes:
+            cp, _ = self._calibrator.calibrate(v.checkpoint, v.probability)
+            calibrated_votes.append(Vote(v.node_id, v.checkpoint, v.choice, cp))
         result = aggregate(
-            votes, min_quorum=min(3, len(quorum)),
+            calibrated_votes, min_quorum=min(3, len(quorum)),
             auto_min_agreement=self.gating.get("auto_min_agreement", 0.6),
             auto_min_probability=self.gating.get("auto_min_probability", 0.6))
         self._log_decision(req, result, len(quorum))
