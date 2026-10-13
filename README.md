@@ -109,11 +109,14 @@ python -m pandosi.service --role root --json
 python -m pandosi.service --role root
 ```
 
-On Windows, verify the full lifecycle without leaving a task behind:
+On a native host, verify the full lifecycle without leaving artifacts:
 
 ```bash
 python tools/service_check.py --yes
 ```
+
+CI also runs this check for Linux `systemd --user`; Termux still needs a
+real Android host.
 
 Adapters cover Windows user Startup files, Linux `systemd --user`, and
 Termux `sv`. Tokens are read from a file, never embedded in argv; the planner

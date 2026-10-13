@@ -126,8 +126,8 @@ def _windows_commands(name: str, argv: list[str], working_dir: Path,
         ],
         "uninstall": powershell + [
             "-Command",
-            f"Remove-Item -LiteralPath '{startup_literal}',"
-            f"'{runner_literal}' -Force -ErrorAction SilentlyContinue",
+            f"Remove-Item -LiteralPath '{startup_literal}' -Force "
+            "-ErrorAction SilentlyContinue; exit 0",
         ],
     }
 
@@ -155,19 +155,30 @@ def _unit_content(platform: str, argv: list[str],
 
 def _posix_commands(name: str, platform: str) -> dict[str, list[str]]:
     if platform == "termux":
+        service_dir = Path(sys.prefix) / "var/service" / name
+        remove = shlex.quote(str(service_dir))
         return {
             "start": ["sv", "up", name],
             "status": ["sv", "status", name],
             "stop": ["sv", "down", name],
-            "uninstall": ["sv", "down", name],
+            "uninstall": ["sh", "-c",
+                          f"sv down {shlex.quote(name)} 2>/dev/null || true; "
+                          f"rm -rf -- {remove}"],
         }
+    unit_path = Path.home() / ".config/systemd/user" / f"{name}.service"
     unit = f"{name}.service"
+    remove = shlex.quote(str(unit_path))
     return {
         "install": ["systemctl", "--user", "enable", "--now", unit],
         "start": ["systemctl", "--user", "start", unit],
         "status": ["systemctl", "--user", "status", unit],
         "stop": ["systemctl", "--user", "stop", unit],
-        "uninstall": ["systemctl", "--user", "disable", "--now", unit],
+        "uninstall": ["sh", "-c",
+                      "systemctl --user disable --now "
+                      f"{shlex.quote(unit)} 2>/dev/null || true; "
+                      f"rm -f -- {remove}; "
+                      "systemctl --user daemon-reload; "
+                      "systemctl --user reset-failed 2>/dev/null || true"],
     }
 
 

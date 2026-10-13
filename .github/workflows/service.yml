@@ -1,0 +1,49 @@
+name: Service lifecycle
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/service.yml"
+      - "pandosi/service.py"
+      - "pandosi/rootd.py"
+      - "pandosi/grants.py"
+      - "tools/service_check.py"
+  workflow_dispatch:
+
+jobs:
+  linux-systemd-user:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install PyNaCl
+      - name: Prepare user systemd bus
+        run: |
+          set -euxo pipefail
+          uid="$(id -u)"
+          runtime="/run/user/$uid"
+          sudo mkdir -p "$runtime"
+          sudo chown "$USER:$USER" "$runtime"
+          chmod 700 "$runtime"
+          sudo loginctl enable-linger "$USER" || true
+          export XDG_RUNTIME_DIR="$runtime"
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus"
+          if [ ! -S "$runtime/bus" ]; then
+            dbus-daemon --session --fork \
+              --address="unix:path=$runtime/bus" || true
+          fi
+          systemctl --user --no-pager status || true
+          {
+            echo "XDG_RUNTIME_DIR=$runtime"
+            echo "DBUS_SESSION_BUS_ADDRESS=unix:path=$runtime/bus"
+          } >> "$GITHUB_ENV"
+      - name: Run isolated Linux service lifecycle check
+        run: |
+          set -euxo pipefail
+          test -n "$XDG_RUNTIME_DIR"
+          test -n "$DBUS_SESSION_BUS_ADDRESS"
+          python tools/service_check.py --platform linux --yes
