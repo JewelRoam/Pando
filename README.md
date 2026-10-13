@@ -82,6 +82,8 @@ graph TB
 
 ```bash
 pip install pynacl zeroconf                  # deps
+python -m pandosi.doctor --plan              # safe onboarding plan
+python -m pandosi.onboard --dry-run          # no install/elevation
 python -m pandosi.join                       # join or start a swarm
 python -m pandosi.doctor                     # capability report
 python tools/dashboard.py                    # render local metrics

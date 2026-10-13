@@ -18,6 +18,7 @@ from pandosi.backend import MockBackend
 from pandosi.common import DecisionRequest, Vote, aggregate
 from pandosi.rootd import Coordinator, Root
 from pandosi.stemd import Stem
+from pandosi.onboard import build_plan
 
 
 class TestSmoke(unittest.TestCase):
@@ -35,6 +36,19 @@ class TestSmoke(unittest.TestCase):
         self.assertEqual(result.tier, "verify")
 
         self.assertEqual(aggregate(strong[:2]).tier, "escalate")
+
+    def test_onboarding_plan_prioritizes_ring0_over_sandbox(self):
+        rows = [
+            {"status": "ok", "item": "python", "fix": ""},
+            {"status": "ok", "item": "model backend", "fix": ""},
+            {"status": "locked", "item": "lab sandbox: none",
+             "fix": "run inside Docker/Podman/WSL"},
+        ]
+        plan = build_plan(rows)
+        self.assertTrue(plan["ring0_ready"])
+        self.assertFalse(plan["sandbox_ready"])
+        self.assertEqual(plan["next_command"], "python tools/demo.py")
+        self.assertEqual(plan["counts"]["sandbox_required"], 1)
 
     def test_end_to_end_http_vote(self):
         """Real root + real HTTP stems; dead node shrinks quorum gracefully."""

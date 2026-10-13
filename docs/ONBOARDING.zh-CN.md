@@ -108,8 +108,8 @@ observer，但禁止繁殖/执行载荷。
 
 ## 下一步实现清单
 
-1. `doctor --json` 增加 `plan` 字段：`ready / nonprivileged / consent_required / sandbox_required`。
-2. 新增 `pandosi/onboard.py`：只实现 dry-run 和非特权安装，先不做 UAC/sudo。
+1. [x] `doctor --json` 已包含 `plan`；另有只读的 `doctor --plan`。
+2. [x] `pandosi/onboard.py --dry-run` 已实现；明确拒绝安装/提权/改授权。
 3. join 协议加 root pairing token：root 启动生成短码，stem 必须携带。
 4. `grants.toml` 读写与过期检查，接入 join/lab 的启动前置条件。
 5. 发布前先补 `pip install pandosi`/PyPI 或 `pipx install git+...` 验收。
