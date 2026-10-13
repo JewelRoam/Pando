@@ -19,3 +19,5 @@ assets/playbook-history.jsonl
 assets/playbook.bad.toml
 _final_verify.py
 fi_*_log.txt
+mu_join_log.txt
+*_log.txt

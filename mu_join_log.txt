@@ -1,11 +1,0 @@
-capability probe:
-  arch=AMD64 ram=31.43GB cpus=16 -> role=worker
-  execution units: ['CPU', 'GPU', 'NPU']
-  backend: onnx {'onnx_path': 'artifacts\\laya-en-static-fixed.onnx'}
-found existing root at http://127.0.0.1:8098 - joining as stem
-Fetching 4 files:   0%|          | 0/4 [00:00<?, ?it/s]Fetching 4 files: 100%|██████████| 4/4 [00:00<00:00, 937.43it/s]
-D:\PandoSI\pandosi\backend.py:82: RuntimeWarning: laya ONNX: this checkpoint ships temperatures outside [0.5, 5] which would distort confidence; clamping choice:11+=0.10058280825614929 -> 0.5. Treat confidence from the affected buckets as uncalibrated.
-  self._agent = ONNXAgent(repo, onnx_path=onnx_path)
-Fetching 4 files:   0%|          | 0/4 [00:00<?, ?it/s]Fetching 4 files: 100%|██████████| 4/4 [00:00<00:00, 838.65it/s]
-[ov-lazy] compiling GPU for shapes (('attention_mask', (1, 256)), ('input_ids', (1, 256)), ('marker_mask', (1, 8)), ('marker_pos', (1, 8)), ('qtype', (1,)))...
-multi-EU: iGPU stem added (static surgery graph)
