@@ -110,5 +110,5 @@ observer，但禁止繁殖/执行载荷。
 3. [x] root pairing token 已覆盖注册、节点、决策、playbook 和 root Spore 面。
 4. [x] `grants.toml` 读写、过期检查、hash-chain 审计已接入 join/rootd/lab。
 5. [x] `pandosi.service plan` 已生成 Windows/Linux/Termux 方案；安装保持手动。
-6. 在真实 Windows/Linux/Termux 目标主机上验收 service plan 的启动/停止/卸载。
+6. [x] Windows 用户级 Startup 生命周期已用临时任务名实机验收；Linux/Termux 仍待真机。
 7. 发布前先补 `pip install pandosi`/PyPI 或 `pipx install git+...` 验收。

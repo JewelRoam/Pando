@@ -109,9 +109,15 @@ python -m pandosi.service --role root --json
 python -m pandosi.service --role root
 ```
 
-Adapters cover Windows scheduled tasks, Linux `systemd --user`, and Termux
-`sv`. Tokens are read from a file, never embedded in argv; the planner does
-not install, start, or uninstall anything.
+On Windows, verify the full lifecycle without leaving a task behind:
+
+```bash
+python tools/service_check.py --yes
+```
+
+Adapters cover Windows user Startup files, Linux `systemd --user`, and
+Termux `sv`. Tokens are read from a file, never embedded in argv; the planner
+does not install, start, or uninstall anything.
 
 Real-model mode: install `laya`, export ONNX (tools/vendor/export_onnx.py),
 then `python -m pandosi.join --backend onnx --onnx-path artifacts/laya-en.int8.onnx`.
@@ -134,6 +140,7 @@ python -m pandosi.stemd --node-id stem-2 --root http://ROOT_IP:8080 \
 - [ROADMAP](docs/ROADMAP.md) — phases with measurable gates
 - [Research notes](docs/research/) — 28 rounds of evidence-backed findings
 - [TERMUX.md](TERMUX.md) — Android TV box onboarding guide
+- [Windows service check](docs/SERVICE-CHECK-WINDOWS.md) — real lifecycle validation record
 
 ## Status
 

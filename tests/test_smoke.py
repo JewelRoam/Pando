@@ -170,6 +170,9 @@ class TestSmoke(unittest.TestCase):
             self.assertIn("--pairing-token-file", plan["process_argv"])
             self.assertEqual(set(plan["commands"]), {
                 "install", "start", "status", "stop", "uninstall"})
+            self.assertNotIn("schtasks", plan["commands"]["install"])
+            self.assertTrue(any("Startup" in item["path"]
+                                for item in plan["files"]))
             audit = audit_status(grants.with_name(
                 grants.name + ".audit.jsonl"))
             self.assertEqual(audit["status"], "valid")

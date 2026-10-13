@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -58,15 +59,76 @@ def _shell(argv: list[str], platform: str) -> str:
     return shlex.join(argv)
 
 
-def _windows_commands(name: str, argv: list[str]) -> dict[str, list[str]]:
-    tr = subprocess.list2cmdline(argv)
+def _windows_paths(name: str, config_dir: Path) -> tuple[Path, Path, Path]:
+    config_dir = config_dir.expanduser()
+    runner = config_dir / f"{name}.ps1"
+    startup_dir = Path(os.environ.get("APPDATA", "")) / \
+        "Microsoft/Windows/Start Menu/Programs/Startup"
+    startup = startup_dir / f"{name}.cmd"
+    return runner, startup, config_dir / f"{name}.pid"
+
+
+def _powershell_array(values: list[str]) -> str:
+    escaped = [value.replace("'", "''") for value in values]
+    return "@(" + ",".join(f"'{value}'" for value in escaped) + ")"
+
+
+def _windows_runner(name: str, argv: list[str], working_dir: Path,
+                    config_dir: Path) -> tuple[str, Path, Path, Path]:
+    runner, startup, pid_path = _windows_paths(name, config_dir)
+    arguments = _powershell_array(argv[1:])
+    content = "\n".join([
+        "$ErrorActionPreference = 'Stop'",
+        f"Set-Location -LiteralPath {json.dumps(str(working_dir))}",
+        f"$arguments = {arguments}",
+        "$process = Start-Process -FilePath "
+        f"{json.dumps(sys.executable)} -ArgumentList $arguments "
+        "-WindowStyle Hidden -PassThru",
+        f"Set-Content -LiteralPath {json.dumps(str(pid_path))} "
+        "-Value $process.Id",
+        "",
+    ])
+    startup_content = "\n".join([
+        "@echo off",
+        "powershell.exe -NoProfile -ExecutionPolicy Bypass -File "
+        f"\"{runner}\"",
+        "",
+    ])
+    return content, startup_content, startup, pid_path
+
+
+def _windows_commands(name: str, argv: list[str], working_dir: Path,
+                      config_dir: Path) -> dict[str, list[str]]:
+    runner, startup, pid_path = _windows_paths(name, config_dir)
+    powershell = ["powershell.exe", "-NoProfile",
+                  "-ExecutionPolicy", "Bypass"]
+    startup_literal = str(startup).replace("'", "''")
+    pid_literal = str(pid_path).replace("'", "''")
+    runner_literal = str(runner).replace("'", "''")
     return {
-        "install": ["schtasks", "/Create", "/TN", name, "/SC", "ONLOGON",
-                    "/RL", "LIMITED", "/F", "/TR", tr],
-        "start": ["schtasks", "/Run", "/TN", name],
-        "status": ["schtasks", "/Query", "/TN", name, "/V", "/FO", "LIST"],
-        "stop": ["schtasks", "/End", "/TN", name],
-        "uninstall": ["schtasks", "/Delete", "/TN", name, "/F"],
+        "install": powershell + [
+            "-Command",
+            f"Get-Item -LiteralPath '{startup_literal}' -ErrorAction Stop "
+            "| Out-Null",
+        ],
+        "start": powershell + ["-File", str(runner)],
+        "status": powershell + [
+            "-Command",
+            f"$processId = Get-Content -LiteralPath '{pid_literal}'; "
+            "Get-Process -Id $processId | "
+            "Select-Object Id,ProcessName,StartTime",
+        ],
+        "stop": powershell + [
+            "-Command",
+            f"$processId = Get-Content -LiteralPath '{pid_literal}'; "
+            "Stop-Process -Id $processId -Force; "
+            f"Remove-Item -LiteralPath '{pid_literal}' -Force",
+        ],
+        "uninstall": powershell + [
+            "-Command",
+            f"Remove-Item -LiteralPath '{startup_literal}',"
+            f"'{runner_literal}' -Force -ErrorAction SilentlyContinue",
+        ],
     }
 
 
@@ -131,6 +193,8 @@ def build_service_plan(role: str = "root", *, platform: str = "auto",
                        root_url: str = "http://127.0.0.1:8080",
                        node_id: str = "service-stem",
                        token_path: str | None = None,
+                       name: str | None = None,
+                       config_dir: Path | None = None,
                        working_dir: Path | None = None,
                        grants_path: Path | str | None = None,
                        audit: bool = True) -> dict:
@@ -139,7 +203,8 @@ def build_service_plan(role: str = "root", *, platform: str = "auto",
     detected = detect_platform(platform)
     working = (working_dir or Path.cwd()).resolve()
     token = _token_path(role, token_path)
-    service_name = f"pandosi-{role}"
+    service_config_dir = config_dir or Path.home() / ".pandosi"
+    service_name = name or f"pandosi-{role}"
     autostart = grant_status("service_autostart", grants_path,
                              include_audit=False)
     lan_grant = grant_status("lan_listen", grants_path, include_audit=False)
@@ -220,7 +285,15 @@ def build_service_plan(role: str = "root", *, platform: str = "auto",
     result["process_command"] = _shell(argv, detected)
 
     if detected == "windows":
-        result["commands"] = _windows_commands(service_name, argv)
+        runner_content, startup_content, startup_path, _ = _windows_runner(
+            service_name, argv, working, service_config_dir)
+        result["files"] = [
+            {"path": str(service_config_dir / f"{service_name}.ps1"),
+             "content": runner_content},
+            {"path": str(startup_path), "content": startup_content},
+        ]
+        result["commands"] = _windows_commands(
+            service_name, argv, working, service_config_dir)
     elif detected in ("linux", "termux"):
         result["commands"] = _posix_commands(service_name, detected)
         if detected == "linux":
@@ -297,6 +370,8 @@ def main() -> None:
     parser.add_argument("--root-url", default="http://127.0.0.1:8080")
     parser.add_argument("--node-id", default="service-stem")
     parser.add_argument("--token-path")
+    parser.add_argument("--service-name")
+    parser.add_argument("--config-dir")
     parser.add_argument("--working-dir", default=None)
     parser.add_argument("--grants-path")
     parser.add_argument("--no-audit", action="store_true")
@@ -309,6 +384,8 @@ def main() -> None:
             args.role, platform=args.platform, lan=args.lan, port=args.port,
             root_url=args.root_url, node_id=args.node_id,
             token_path=args.token_path,
+            name=args.service_name,
+            config_dir=Path(args.config_dir) if args.config_dir else None,
             working_dir=Path(args.working_dir) if args.working_dir else None,
             grants_path=Path(args.grants_path) if args.grants_path else None,
             audit=not args.no_audit)

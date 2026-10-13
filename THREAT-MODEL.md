@@ -31,6 +31,8 @@ software on third-party machines.
 9. **Review-only service planning**: service adapters output platform plans
    and require a separate expiring autostart grant; they do not install
    services and refuse cross-host generation to avoid embedding wrong paths.
+   Windows uses user Startup files rather than an administrator-only logon
+   task, and an explicit checker removes its temporary lifecycle artifacts.
 
 ## What this project does NOT do
 
