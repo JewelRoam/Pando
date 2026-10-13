@@ -7,6 +7,7 @@ checkpoint-diverse quorum, and aggregates votes via common.aggregate.
 from __future__ import annotations
 
 import argparse
+import hmac
 import json
 import threading
 import time
@@ -174,7 +175,10 @@ def build_handler(coordinator: Coordinator, root=None):
             self.wfile.write(body)
 
         def do_GET(self):  # noqa: N802
-            if self.path == "/nodes":
+            if self.path == "/pairing":
+                required = bool(root and root.pairing_token)
+                self._send(200, {"required": required})
+            elif self.path == "/nodes":
                 self._send(200, {"nodes": coordinator.live_nodes()})
             elif self.path == "/playbook" and root is not None \
                     and getattr(root, "playbook", None) is not None:
@@ -224,6 +228,13 @@ def build_handler(coordinator: Coordinator, root=None):
             raw = self.rfile.read(length)
             if self.path == "/register":
                 data = json.loads(raw)
+                expected = getattr(root, "pairing_token", None) if root else None
+                supplied = data.get("pairing_token", "")
+                if expected and not hmac.compare_digest(
+                        str(supplied).encode("utf-8"),
+                        str(expected).encode("utf-8")):
+                    self._send(403, {"error": "invalid or missing pairing token"})
+                    return
                 coordinator.register(data["node_id"], data["url"],
                                      data["checkpoint"], data.get("capability"))
                 self._send(200, {"ok": True})
@@ -287,6 +298,7 @@ class Root:
                         data[i:i + 64 * 1024]
         self.shutdown_event = threading.Event()
         self._auth_token = None
+        self._pairing_token = None
         self._httpd = _PandoHTTPServer(
             (host, port), build_handler(self.coordinator, root=self))
         self.port = self._httpd.server_address[1]
@@ -294,6 +306,16 @@ class Root:
 
     def set_auth_token(self, token: str) -> None:
         self._auth_token = token
+
+    @property
+    def pairing_token(self) -> str | None:
+        return self._pairing_token
+
+    def set_pairing_token(self, token: str) -> None:
+        """Require this secret on every HTTP /register request."""
+        if not token:
+            raise ValueError("pairing token must not be empty")
+        self._pairing_token = token
 
     def url(self) -> str:
         return f"http://127.0.0.1:{self.port}"
@@ -318,6 +340,8 @@ def main() -> None:
     parser.add_argument("--allow-non-head", action="store_true")
     parser.add_argument("--auth-token", default=None,
                         help="enable /shutdown with this token")
+    parser.add_argument("--pairing-token", default=None,
+                        help="fixed stem admission token; generated when omitted")
     args = parser.parse_args()
     from .common import bypass_proxy_for_lan
     bypass_proxy_for_lan()
@@ -328,6 +352,9 @@ def main() -> None:
         if args.playbook:
             spore_files["playbook.toml"] = _P(args.playbook)
     root = Root(port=args.port, spore_files=spore_files)
+    import secrets
+    root.set_pairing_token(args.pairing_token or secrets.token_urlsafe(18))
+    print(f"stem pairing token: {root.pairing_token}", flush=True)
     if args.auth_token:
         root.set_auth_token(args.auth_token)
         print(f"kill-switch enabled (token set)", flush=True)

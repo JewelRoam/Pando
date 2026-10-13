@@ -92,6 +92,14 @@ python tools/dashboard.py                    # render local metrics
 Real-model mode: install `laya`, export ONNX (tools/vendor/export_onnx.py),
 then `python -m pandosi.join --backend onnx --onnx-path artifacts/laya-en.int8.onnx`.
 
+LAN roots generate a pairing token and refuse untokened `/register` requests.
+For an additional stem, pass the token printed by the root:
+
+```bash
+python -m pandosi.stemd --node-id stem-2 --root http://ROOT_IP:8080 \
+  --pairing-token TOKEN_FROM_ROOT
+```
+
 ## Docs
 
 - [Blueprint (zh-CN)](docs/BLUEPRINT.zh-CN.md) — architecture v0.7

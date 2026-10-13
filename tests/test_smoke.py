@@ -9,6 +9,7 @@ end-to-end vote including node death and checkpoint-diverse quorum picking.
 import json
 import sys
 import unittest
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -49,6 +50,38 @@ class TestSmoke(unittest.TestCase):
         self.assertFalse(plan["sandbox_ready"])
         self.assertEqual(plan["next_command"], "python tools/demo.py")
         self.assertEqual(plan["counts"]["sandbox_required"], 1)
+
+    def test_root_pairing_token_gates_registration(self):
+        root = Root()
+        root.set_pairing_token("pairing-secret")
+        root.start()
+        try:
+            with urllib.request.urlopen(f"{root.url()}/pairing",
+                                        timeout=2) as resp:
+                self.assertTrue(json.loads(resp.read())["required"])
+
+            payload = json.dumps({
+                "node_id": "unauthorized", "url": "http://127.0.0.1:1",
+                "checkpoint": "mock", "pairing_token": "wrong"
+            }).encode()
+            request = urllib.request.Request(
+                f"{root.url()}/register", data=payload,
+                headers={"Content-Type": "application/json"})
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(request, timeout=2)
+            self.assertEqual(caught.exception.code, 403)
+
+            payload = json.dumps({
+                "node_id": "paired", "url": "http://127.0.0.1:1",
+                "checkpoint": "mock", "pairing_token": "pairing-secret"
+            }).encode()
+            request = urllib.request.Request(
+                f"{root.url()}/register", data=payload,
+                headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(request, timeout=2) as resp:
+                self.assertTrue(json.loads(resp.read())["ok"])
+        finally:
+            root.stop()
 
     def test_end_to_end_http_vote(self):
         """Real root + real HTTP stems; dead node shrinks quorum gracefully."""

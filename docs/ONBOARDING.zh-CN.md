@@ -27,8 +27,8 @@ Step 4  沙箱实验室     Docker/Podman/WSL 中运行 Spore 复制实验
 Step 5  常驻服务       systemd --user / Windows 计划任务 / Termux sv，显式开启
 ```
 
-当前仓库已有 Step 0/1/4 的最小实现；Step 3/5 应先补“精确授权令牌”，
-再追求后台服务。
+当前仓库已有 Step 0/1/3/4 的最小实现。Step 3 已使用 HTTP pairing token；
+Step 5 仍应先补授权过期和平台服务适配，再追求常驻。
 
 ## 授权记录
 

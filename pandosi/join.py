@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import secrets
 import socket
 import sys
 import threading
@@ -76,7 +77,7 @@ def advertise_root(port: int) -> threading.Event:
     zc = Zeroconf()
     info = ServiceInfo(SERVICE_TYPE, f"pandosi-root-{port}.{SERVICE_TYPE}",
                        addresses=[socket.inet_aton(lan_ip())], port=port,
-                       properties={"version": "0"})
+                       properties={"version": "1", "pairing": "required"})
     zc.register_service(info)
     stop = threading.Event()
 
@@ -87,6 +88,15 @@ def advertise_root(port: int) -> threading.Event:
 
     threading.Thread(target=_wait, daemon=True).start()
     return stop
+
+
+def pairing_required(root_url: str) -> bool:
+    """Ask a root whether it requires a token without exposing the secret."""
+    try:
+        with urllib.request.urlopen(f"{root_url}/pairing", timeout=2) as resp:
+            return bool(json.loads(resp.read()).get("required"))
+    except Exception:
+        return False
 
 
 def pick_backend(node_id: str) -> tuple[str, dict]:
@@ -112,6 +122,9 @@ def main() -> None:
                         help="confirm this target is a sandbox (required for spore)")
     parser.add_argument("--root", default=None,
                         help="explicit root URL (skips mDNS discovery)")
+    parser.add_argument("--pairing-token", default=os.getenv("PANDOSI_PAIRING_TOKEN"),
+                        help="secret required by a pairing-enabled root "
+                             "(default: PANDOSI_PAIRING_TOKEN)")
     parser.add_argument("--onnx-path", default=None,
                         help="use this ONNX file as the decision backend")
     args = parser.parse_args()
@@ -147,13 +160,21 @@ def main() -> None:
         root_url = f"http://{root_info['ip']}:{root_info['port']}"
         print(f"found existing root at {root_url} - joining as stem", flush=True)
         root = None
+        if pairing_required(root_url) and not args.pairing_token:
+            raise SystemExit(
+                f"root {root_url} requires --pairing-token "
+                "(or PANDOSI_PAIRING_TOKEN); refusing automatic join")
     else:
         print("no root on this LAN - becoming root + stem", flush=True)
+        args.pairing_token = args.pairing_token or secrets.token_urlsafe(18)
         root = Root(host="0.0.0.0", port=args.port or 8080)
+        root.set_pairing_token(args.pairing_token)
         root.start()
         root_url = root.url()
         advertise_root(root.port)
         print(f"rootd listening on {root_url} (advertised via mDNS)", flush=True)
+        print(f"stem pairing token: {args.pairing_token}", flush=True)
+        print("other stems must pass the same --pairing-token", flush=True)
 
     from .spore import pull_spore, generate_signing_key, verify_manifest
     if args.spore and not args.spore_url and root_info:
@@ -277,6 +298,9 @@ def main() -> None:
 
     registrations = [{"node_id": s.node_id, "url": f"http://{lan_ip()}:{s.port}",
                       "checkpoint": s.backend.checkpoint} for s in stems]
+    if args.pairing_token:
+        for reg in registrations:
+            reg["pairing_token"] = args.pairing_token
     while True:
         try:
             for reg in registrations:

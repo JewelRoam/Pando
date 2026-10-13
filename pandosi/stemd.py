@@ -85,12 +85,17 @@ class Stem:
         self._httpd.shutdown()
 
 
-def heartbeat_loop(stem: Stem, root_url: str, interval: float = 5.0) -> None:
+def heartbeat_loop(stem: Stem, root_url: str,
+                   pairing_token: str | None = None,
+                   interval: float = 5.0) -> None:
     """Register with root and heartbeat until the process exits."""
     cap = capability()
-    payload = json.dumps({"node_id": stem.node_id, "url": stem.url(),
-                          "checkpoint": stem.backend.checkpoint,
-                          "capability": cap}).encode("utf-8")
+    registration = {"node_id": stem.node_id, "url": stem.url(),
+                    "checkpoint": stem.backend.checkpoint,
+                    "capability": cap}
+    if pairing_token:
+        registration["pairing_token"] = pairing_token
+    payload = json.dumps(registration).encode("utf-8")
     while True:
         try:
             with urllib.request.urlopen(
@@ -109,6 +114,8 @@ def main() -> None:
     parser.add_argument("--checkpoint", default="mock")
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--root", default=None, help="rootd URL to register with")
+    parser.add_argument("--pairing-token", default=None,
+                        help="secret required by a pairing-enabled root")
     parser.add_argument("--backend", default="mock", choices=["mock", "onnx"])
     parser.add_argument("--onnx-path", default="artifacts/laya-en.int8.onnx")
     parser.add_argument("--repo", default="convaiinnovations/laya")
@@ -132,7 +139,8 @@ def main() -> None:
     print(f"stemd {args.node_id} listening on {stem.url()} "
           f"(checkpoint={args.checkpoint})")
     if args.root:
-        threading.Thread(target=heartbeat_loop, args=(stem, args.root),
+        threading.Thread(target=heartbeat_loop,
+                         args=(stem, args.root, args.pairing_token),
                          daemon=True).start()
         print(f"registering with root at {args.root}")
     try:
