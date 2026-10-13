@@ -12,6 +12,7 @@ Design (blueprint v0.5):
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 from pathlib import Path
 
@@ -119,8 +120,10 @@ class SporeServer:
     """
 
     def __init__(self, manifest: dict, files: dict[str, Path],
-                 host: str = "0.0.0.0", port: int = 0):
+                 host: str = "0.0.0.0", port: int = 0,
+                 auth_token: str | None = None):
         self.manifest = manifest
+        self.auth_token = auth_token
         self._chunks: dict[tuple[str, int], bytes] = {}
         for name, path in files.items():
             for i, chunk in enumerate(chunk_file(path)):
@@ -139,6 +142,16 @@ class SporeServer:
                 self.wfile.write(body)
 
             def do_GET(self):  # noqa: N802
+                expected = server.auth_token
+                supplied = self.headers.get("X-Pairing-Token", "")
+                authorization = self.headers.get("Authorization", "")
+                if authorization.startswith("Bearer "):
+                    supplied = authorization[7:]
+                if expected and not hmac.compare_digest(
+                        supplied.encode("utf-8"),
+                        expected.encode("utf-8")):
+                    self._send(403, b'{"error":"invalid or missing token"}')
+                    return
                 if self.path == "/spore/manifest":
                     self._send(200, json.dumps(manifest).encode())
                 elif self.path.startswith("/spore/chunk/"):
@@ -169,7 +182,8 @@ class SporeServer:
 
 
 def pull_spore(manifest_url: str, out_dir: Path, verify_key,
-               sandbox_confirmed: bool = False) -> dict:
+               sandbox_confirmed: bool = False,
+               auth_token: str | None = None) -> dict:
     """Pull a spore payload with verify-on-arrival for every chunk.
 
     Refuses without sandbox_confirmed=True (see THREAT-MODEL.md). Verifies:
@@ -182,8 +196,11 @@ def pull_spore(manifest_url: str, out_dir: Path, verify_key,
 
     import urllib.request  # local import keeps module import light
 
-    with urllib.request.urlopen(f"{manifest_url}/spore/manifest",
-                                timeout=30) as resp:
+    headers = ({"Authorization": f"Bearer {auth_token}"}
+               if auth_token else {})
+    with urllib.request.urlopen(urllib.request.Request(
+            f"{manifest_url}/spore/manifest", headers=headers),
+            timeout=30) as resp:
         manifest = json.loads(resp.read())
     if not verify_manifest(manifest, verify_key):
         raise ValueError("manifest signature verification FAILED")
@@ -203,7 +220,8 @@ def pull_spore(manifest_url: str, out_dir: Path, verify_key,
                 # 3 times (transient corruption vs persistent tampering).
                 for attempt in range(3):
                     url = f"{manifest_url}/spore/chunk/{name}/{i}"
-                    with urllib.request.urlopen(url, timeout=30) as resp:
+                    with urllib.request.urlopen(urllib.request.Request(
+                            url, headers=headers), timeout=30) as resp:
                         chunk = resp.read()
                     if hashlib.sha256(chunk).digest() == expected:
                         break

@@ -92,7 +92,7 @@ python tools/dashboard.py                    # render local metrics
 Real-model mode: install `laya`, export ONNX (tools/vendor/export_onnx.py),
 then `python -m pandosi.join --backend onnx --onnx-path artifacts/laya-en.int8.onnx`.
 
-LAN roots generate a pairing token and refuse untokened `/register` requests.
+LAN roots generate a pairing token and protect registration, `/nodes`, `/decide`, playbook, and root Spore endpoints.
 For an additional stem, pass the token printed by the root:
 
 ```bash

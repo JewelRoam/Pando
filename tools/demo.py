@@ -18,6 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PORT = "8090"
+TOKEN = "pandosi-demo-token"
 
 
 def start(args):
@@ -28,23 +29,30 @@ def start(args):
 
 def main() -> None:
     print("PandoSI demo: root + 3 mock stems + 3 consensus votes", flush=True)
-    procs = [start(["-m", "pandosi.rootd", "--port", PORT]),
+    procs = [start(["-m", "pandosi.rootd", "--port", PORT,
+                    "--pairing-token", TOKEN]),
              start(["-m", "pandosi.stemd", "--node-id", "stem0",
-                    "--root", f"http://127.0.0.1:{PORT}"]),
+                    "--root", f"http://127.0.0.1:{PORT}",
+                    "--pairing-token", TOKEN]),
              start(["-m", "pandosi.stemd", "--node-id", "stem1",
                     "--checkpoint", "multilingual",
-                    "--root", f"http://127.0.0.1:{PORT}"]),
+                    "--root", f"http://127.0.0.1:{PORT}",
+                    "--pairing-token", TOKEN]),
              start(["-m", "pandosi.stemd", "--node-id", "stem2",
                     "--checkpoint", "typed-decisions",
-                    "--root", f"http://127.0.0.1:{PORT}"])]
+                    "--root", f"http://127.0.0.1:{PORT}",
+                    "--pairing-token", TOKEN])]
     verdict = "INCOMPLETE"
     try:
         time.sleep(8)
         registered = []
         for _ in range(10):
             try:
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{PORT}/nodes",
+                    headers={"Authorization": f"Bearer {TOKEN}"})
                 nodes = json.loads(urllib.request.urlopen(
-                    f"http://127.0.0.1:{PORT}/nodes", timeout=5).read())
+                    request, timeout=5).read())
                 registered = sorted(nodes["nodes"].keys())
             except Exception:
                 pass
@@ -67,7 +75,8 @@ def main() -> None:
             t0 = time.perf_counter()
             req = urllib.request.Request(
                 f"http://127.0.0.1:{PORT}/decide", data=body,
-                headers={"Content-Type": "application/json"})
+                headers={"Content-Type": "application/json",
+                         "Authorization": f"Bearer {TOKEN}"})
             result = json.loads(urllib.request.urlopen(req, timeout=30).read())
             ms = (time.perf_counter() - t0) * 1000
             print(f"  [{state[:40]}] -> {result['choice']} "

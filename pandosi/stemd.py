@@ -93,14 +93,16 @@ def heartbeat_loop(stem: Stem, root_url: str,
     registration = {"node_id": stem.node_id, "url": stem.url(),
                     "checkpoint": stem.backend.checkpoint,
                     "capability": cap}
+    headers = {"Content-Type": "application/json"}
     if pairing_token:
         registration["pairing_token"] = pairing_token
+        headers["Authorization"] = f"Bearer {pairing_token}"
     payload = json.dumps(registration).encode("utf-8")
     while True:
         try:
             with urllib.request.urlopen(
                 urllib.request.Request(f"{root_url}/register", data=payload,
-                                       headers={"Content-Type": "application/json"}),
+                                       headers=headers),
                 timeout=3) as resp:
                 resp.read()
         except Exception:

@@ -99,6 +99,13 @@ def pairing_required(root_url: str) -> bool:
         return False
 
 
+def auth_headers(token: str | None) -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
 def pick_backend(node_id: str) -> tuple[str, dict]:
     for cand in ARTIFACT_CANDIDATES:
         if cand.exists():
@@ -187,8 +194,10 @@ def main() -> None:
         #    --spore (root mode): fetch from the root, pin on first use.
         #    --spore-url (explicit seed): must come from PANDOSI_SEED_PUBKEY.
         if args.spore:
-            with urllib.request.urlopen(f"{args.spore_url}/spore/pubkey",
-                                        timeout=15) as resp:
+            with urllib.request.urlopen(urllib.request.Request(
+                    f"{args.spore_url}/spore/pubkey",
+                    headers=auth_headers(args.pairing_token)),
+                    timeout=15) as resp:
                 seed_pub_hex = json.loads(resp.read())["pubkey"]
             pin_file = Path("spore-cache") / "pinned-pubkey.txt"
             pin_file.parent.mkdir(parents=True, exist_ok=True)
@@ -213,8 +222,10 @@ def main() -> None:
         verify_key = nacl.signing.VerifyKey(bytes.fromhex(seed_pub_hex))
 
         # 2) Fetch and verify the manifest, then pull with per-chunk checks.
-        with urllib.request.urlopen(f"{args.spore_url}/spore/manifest",
-                                    timeout=60) as resp:
+        with urllib.request.urlopen(urllib.request.Request(
+                f"{args.spore_url}/spore/manifest",
+                headers=auth_headers(args.pairing_token)),
+                timeout=60) as resp:
             manifest = json.loads(resp.read())
         if not verify_manifest(manifest, verify_key):
             raise SystemExit("SECURITY: manifest signature verification FAILED")
@@ -224,7 +235,8 @@ def main() -> None:
 
         cache_dir = Path("spore-cache") / node_id
         stats = pull_spore(args.spore_url, cache_dir, verify_key,
-                           sandbox_confirmed=True)
+                           sandbox_confirmed=True,
+                           auth_token=args.pairing_token)
         pulled_file = cache_dir / next(iter(manifest["files"]))
         print(f"SPROUT: pulled {stats['chunks_pulled']} chunks -> {pulled_file}",
               flush=True)
@@ -308,8 +320,8 @@ def main() -> None:
                 urllib.request.urlopen(
                     urllib.request.Request(f"{root_url}/register",
                                            data=payload,
-                                           headers={"Content-Type":
-                                                    "application/json"}),
+                                           headers=auth_headers(
+                                               args.pairing_token)),
                     timeout=3)
             print(f"registered {len(registrations)} stem(s) with root "
                   f"{root_url}", flush=True)
@@ -329,7 +341,7 @@ def main() -> None:
                     urllib.request.urlopen(
                         urllib.request.Request(
                             f"{root_url}/register", data=payload,
-                            headers={"Content-Type": "application/json"}),
+                            headers=auth_headers(args.pairing_token)),
                         timeout=3)
             except Exception:
                 pass
@@ -337,7 +349,11 @@ def main() -> None:
     threading.Thread(target=heartbeat, daemon=True).start()
 
     print("PandoSI is up. Try:", flush=True)
-    print(f'  curl -X POST {root_url}/decide -d "{{\\"state\\":\\"test\\",\\"question\\":\\"ok?\\",\\"candidates\\":[\\"yes\\",\\"no\\"]}}"', flush=True)
+    auth_arg = (f' -H "Authorization: Bearer {args.pairing_token}"'
+                if args.pairing_token else "")
+    print(f'  curl -X POST {root_url}/decide{auth_arg} '
+          f'-d "{{\\"state\\":\\"test\\",\\"question\\":\\"ok?\\",'
+          f'\\"candidates\\":[\\"yes\\",\\"no\\"]}}"', flush=True)
     try:
         while True:
             time.sleep(3600)

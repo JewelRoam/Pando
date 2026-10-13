@@ -166,19 +166,35 @@ def build_handler(coordinator: Coordinator, root=None):
         def log_message(self, fmt, *args):
             pass
 
-        def _send(self, code: int, payload: dict) -> None:
-            body = json.dumps(payload).encode("utf-8")
+        def _send(self, code: int, payload) -> None:
+            body = (payload if isinstance(payload, bytes)
+                    else json.dumps(payload).encode("utf-8"))
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
 
+        def _pairing_authorized(self) -> bool:
+            expected = getattr(root, "pairing_token", None) if root else None
+            if not expected:
+                return True
+            supplied = self.headers.get("X-Pairing-Token", "")
+            authorization = self.headers.get("Authorization", "")
+            if authorization.startswith("Bearer "):
+                supplied = authorization[7:]
+            return hmac.compare_digest(
+                supplied.encode("utf-8"), expected.encode("utf-8"))
+
         def do_GET(self):  # noqa: N802
             if self.path == "/pairing":
                 required = bool(root and root.pairing_token)
                 self._send(200, {"required": required})
-            elif self.path == "/nodes":
+                return
+            if not self._pairing_authorized():
+                self._send(403, {"error": "invalid or missing pairing token"})
+                return
+            if self.path == "/nodes":
                 self._send(200, {"nodes": coordinator.live_nodes()})
             elif self.path == "/playbook" and root is not None \
                     and getattr(root, "playbook", None) is not None:
@@ -226,6 +242,9 @@ def build_handler(coordinator: Coordinator, root=None):
         def do_POST(self):  # noqa: N802
             length = int(self.headers.get("Content-Length", 0))
             raw = self.rfile.read(length)
+            if self.path != "/register" and not self._pairing_authorized():
+                self._send(403, {"error": "invalid or missing pairing token"})
+                return
             if self.path == "/register":
                 data = json.loads(raw)
                 expected = getattr(root, "pairing_token", None) if root else None

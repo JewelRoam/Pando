@@ -80,6 +80,25 @@ class TestSmoke(unittest.TestCase):
                 headers={"Content-Type": "application/json"})
             with urllib.request.urlopen(request, timeout=2) as resp:
                 self.assertTrue(json.loads(resp.read())["ok"])
+
+            # Pairing protects the full root surface, not just admission.
+            for path in ("/nodes",):
+                with self.assertRaises(urllib.error.HTTPError) as caught:
+                    urllib.request.urlopen(f"{root.url()}{path}", timeout=2)
+                self.assertEqual(caught.exception.code, 403)
+            headers = {"Authorization": "Bearer pairing-secret"}
+            with urllib.request.urlopen(
+                    urllib.request.Request(f"{root.url()}/nodes",
+                                           headers=headers),
+                    timeout=2) as resp:
+                self.assertIn("paired", json.loads(resp.read())["nodes"])
+            decision = json.dumps({"state": "x", "question": "ok?",
+                                   "candidates": ["yes", "no"]}).encode()
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(
+                    urllib.request.Request(f"{root.url()}/decide",
+                                           data=decision), timeout=2)
+            self.assertEqual(caught.exception.code, 403)
         finally:
             root.stop()
 

@@ -19,6 +19,9 @@ software on third-party machines.
    metrics logs. The system is deliberately loud, unlike malware.
 5. **Human kill-switch**: rootd exposes /shutdown (authenticated) and stems
    honor a signed revocation list of playbook versions.
+6. **Tokenized root surface**: CLI roots generate a pairing token;
+   `/register`, `/nodes`, `/decide`, playbook reads, and root-served
+   Spore endpoints fail closed unless it is presented.
 
 ## What this project does NOT do
 
