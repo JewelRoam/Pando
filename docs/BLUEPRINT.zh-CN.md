@@ -68,6 +68,7 @@ ONNX Runtime 单 session 单 EP 实例限制 → 双 GPU 用 OpenVINO
 Stem/Root/Graft 协议贯穿 EU → 设备 → 集群三个层级。
 Graft 能力探测必须枚举 EU（OpenVINO `core.available_devices`
 或 L0/DXVA），不再假设单加速器。
+已实现：`graft.enumerate_execution_units()`（OpenVINO 优先，排除虚拟设备，CPU/nvidia-smi/Metal 回退）。注意：OpenVINO AUTO 自动选择默认把 NPU 排除在优先级外，让 NPU 参与必须显式指定优先级。
 
 ## 3. 核心协议
 
