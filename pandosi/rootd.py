@@ -183,6 +183,14 @@ def build_handler(coordinator: Coordinator, root=None):
                     "version": root.playbook.version,
                     "hash": root.playbook.hash(),
                     "canonical": json.loads(root.playbook.canonical_json()),
+                    "gating": root.playbook.gating,
+                    "questions": [
+                        {"id": q["id"], "type": q["type"],
+                         "instructions": q.get("instructions", ""),
+                         "criteria": q.get("criteria", []),
+                         "informational": q.get("informational", False)}
+                        for q in root.playbook.questions
+                    ],
                 })
             elif (self.path == "/spore/pubkey"
                     and root is not None
