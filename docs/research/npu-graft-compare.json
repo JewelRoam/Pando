@@ -1,0 +1,13 @@
+{
+  "device": "NPU (AI Boost, IsNaN-free static graph, pad_to=256)",
+  "tasks": 40,
+  "match": 40,
+  "diverge": 0,
+  "cpu_p50_ms": 51.2,
+  "npu_p50_ms": 102.0,
+  "per_checkpoint": {
+    "english": {"match": 14, "total": 14},
+    "multilingual": {"match": 14, "total": 14},
+    "typed-decisions": {"match": 12, "total": 12}
+  }
+}
