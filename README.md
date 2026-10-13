@@ -34,19 +34,11 @@ runtime with zero external model dependency.
 - [Roadmap](docs/ROADMAP.md) — phases, milestones, measurable targets.
 - [Research Notes](docs/RESEARCH-NOTES.md) — evidence base with citations.
 
-## Quickstart (mock mode, no model weights needed)
+## Quickstart (Ring 0 - zero privilege)
 
 ```bash
-# terminal 1: root coordinator
-python -m pandosi.rootd --port 8080
-
-# terminals 2+: heterogeneous stems
-python -m pandosi.stemd --node-id box1 --checkpoint english --root http://127.0.0.1:8080
-python -m pandosi.stemd --node-id box2 --checkpoint multilingual --root http://127.0.0.1:8080
-
-# vote
-curl -X POST http://127.0.0.1:8080/decide -d "{"state":"...","question":"approve?","candidates":["approve","reject"]}"
-
-# tests
-python -m unittest discover -s tests
+pip install pynacl zeroconf          # deps (onnxruntime optional for real Laya)
+python -m pandosi.join               # becomes root+stem if no swarm on LAN,
+                                     # otherwise discovers and joins via mDNS
 ```
+
