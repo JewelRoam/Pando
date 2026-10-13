@@ -1,0 +1,62 @@
+# PandoSI Project State
+
+*Last updated: 2026-10-14 (after ~3 hours of continuous development)*
+
+## Where we are
+
+PandoSI v0.1 research preview is **feature-complete for Phase 1-2** and
+**Phase 5 data layer is verified**. The system runs on a single Intel AI PC
+(Core Ultra 7 255H) with three heterogeneous execution units (CPU, iGPU,
+NPU) all voting in the same consensus quorum.
+
+## What exists (verified)
+
+| Component | Files | Status |
+|---|---|---|
+| Decision swarm (rootd + stemd) | rootd.py, stemd.py, backend.py, common.py | 2/2 tests, live smokes |
+| Capability probe + EU enumeration | graft.py | 3 EUs detected live |
+| Calibration layer (temperature scaling) | calibrate.py | math verified |
+| Signed self-replication (Spore) | spore.py | 3-hop chain, 0 failures |
+| Sandbox gate (Ring 2) | lab.py | refusal + attested paths |
+| Playbook governance (5 layers) | playbook.py + rootd integration | 6/6 E2E |
+| RLCD evolution data path | rollout.py + export | trainer-compatible |
+| 40-task graft suite | assets/graft_suite.jsonl + graft_eval.py | 3 lineages measured |
+| NPU-compatible graph | postprocess_onnx.py + IsNaN removal | GPU compile OK |
+| Multi-bucket iGPU serving | backend.py (_MultiBucketSession) | 25-40ms variable-length |
+| Dashboard v2 | tools/dashboard.py | lineage + attribution + disagreements |
+
+## What is proven (key numbers)
+
+| finding | value | source |
+|---|---|---|
+| iGPU graph p50 | 25.6ms (4x faster than CPU 106ms) | eu_bench, round 34 |
+| NPU graph p50 | 95.7ms (IsNaN-free surgery graph) | round 54 |
+| iGPU full suite accuracy | 65% (matches CPU exactly, 0/40 diverge) | round 48 |
+| NPU full suite accuracy | 65% (matches CPU exactly, 0/40 diverge) | round 56b |
+| Cross-lineage divergence (en vs ml) | 32.5% (most independent pair) | round 57 |
+| Split-case majority reliability | 36% (verify routing is NECESSARY) | round 57b |
+| RLCD fine-tune confidence delta | +0.25 universal, no regression | round 57e/f |
+| Spore 3-hop chain | 97 chunks, 0 integrity failures | round 62 |
+
+## What is NOT yet done
+
+| item | blocker | effort estimate |
+|---|---|---|
+| NPU deep op analysis | IsNaN removed but other ops may block | 1-2 days |
+| Termux/TV box real test | needs Android hardware | 0.5 day on device |
+| Docker image build test | needs Docker environment | 0.5 day |
+| RLCD actual training (not dry_run) | needs GPU + more contrast pairs | 1-2 days |
+| Multi-hop with graph adaptation | origin -> B(NPU) -> C(CPU) format conversion | 1 day |
+| Dashboard live update mode | design done, not coded | 0.5 day |
+| Rootd calibration from held-out set | needs labeled eval data | 0.5 day |
+
+## How to resume
+
+1. Read RESEARCH-SUMMARY.md for the definitive findings
+2. Run `python tools/demo.py` to verify everything still works
+3. Pick any item from "What is NOT yet done" above
+4. All code, docs, and research logs are in this repo and on GitHub
+
+## Repository
+
+https://github.com/JewelRoam/PandoSI (main branch, ~30 commits)
