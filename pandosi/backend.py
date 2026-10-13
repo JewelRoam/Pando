@@ -132,6 +132,20 @@ class _OVLazySession:
     def _bucket(dim: int, pad_to: int) -> int:
         return ((dim + pad_to - 1) // pad_to) * pad_to
 
+    def _target_dim(self, name: str, axis: int, dim: int) -> int:
+        """Per-dim-position bucket sizes for the Laya graph.
+
+        dim 0 = question rows (batch): exact - the set of batch values is
+        small and exactness avoids wasted rows.
+        dim 1 = sequence length for input_ids/attention_mask (bucket 128),
+        option-marker count for marker inputs (bucket 8).
+        """
+        if self._pad_to is None or dim == 0:
+            return dim
+        if name in ("input_ids", "attention_mask"):
+            return self._bucket(dim, self._pad_to)
+        return self._bucket(dim, min(self._pad_to, 8))
+
     def _pad_feed(self, input_feed: dict) -> tuple[dict, int]:
         padded = {}
         true_batch = 0
@@ -144,9 +158,7 @@ class _OVLazySession:
             target = list(a.shape)
             changed = False
             for i, d in enumerate(a.shape):
-                if d == 0:
-                    continue
-                bucketed = self._bucket(d, self._pad_to)
+                bucketed = self._target_dim(name, i, d)
                 if bucketed != d:
                     target[i] = bucketed
                     changed = True
