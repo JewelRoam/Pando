@@ -30,6 +30,54 @@ devices, one mind.
 - **One-command onboarding**: `python -m pandosi.join` discovers a LAN
   swarm via mDNS or becomes root+stem. Zero privilege.
 
+
+## Architecture
+
+\\mermaid
+graph TB
+    subgraph playbook[Playbook - strategy layer]
+        PB[playbook.toml<br/>authored offline]
+        PH[pb_history.jsonl<br/>hash chain]
+    end
+
+    subgraph root[rootd - governance]
+        QV[question enforcement]
+        GT[confidence gating<br/>playbook thresholds]
+        RC[RolloutRecorder<br/>full vote matrix]
+        SD[/shutdown kill-switch/]
+    end
+
+    subgraph stems[Execution stems - heterogeneous]
+        S1[stem CPU<br/>ORT fp32<br/>en lineage]
+        S2[stem iGPU<br/>OpenVINO<br/>en lineage]
+        S3[stem NPU<br/>OpenVINO IsNaN-free<br/>en lineage]
+        S4[stem ml<br/>ORT fp32<br/>ml lineage]
+    end
+
+    subgraph spore[Spore - self-replication]
+        MS[manifest<br/>Ed25519 signed]
+        CH[chunk Merkle tree<br/>64KiB verify-on-arrival]
+        SB[sandbox gate<br/>THREAT-MODEL enforced]
+    end
+
+    PB --> PH --> QV
+    QV --> GT
+    GT --> RC
+    root -->|fan-out| S1 & S2 & S3 & S4
+    S1 & S2 & S3 & S4 -->|votes| RC
+    MS --> CH --> SB
+    SB -.->|lab only| stems
+\
+### Data flow
+
+1. **Playbook** (TOML) defines: question schemas, confidence gating, action bindings
+2. **rootd** validates: question in playbook, thresholds from [gating]
+3. **Fan-out**: request sent to k stems with checkpoint diversity
+4. **Votes collected**: each stem runs Laya inference, returns {choice, probability}
+5. **Aggregation**: majority vote + tier assignment (auto/verify/escalate)
+6. **Rollout recorded**: full vote matrix + playbook_hash for A/B attribution
+7. **Evolution**: disagreement pairs exported to RLCD trainer → new lineage
+
 ## Quickstart
 
 ```bash
