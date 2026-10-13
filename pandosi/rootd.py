@@ -136,6 +136,14 @@ def build_handler(coordinator: Coordinator, root=None):
         def do_GET(self):  # noqa: N802
             if self.path == "/nodes":
                 self._send(200, {"nodes": coordinator.live_nodes()})
+            elif self.path == "/playbook" and root is not None \
+                    and getattr(root, "playbook", None) is not None:
+                self._send(200, {
+                    "name": root.playbook.name,
+                    "version": root.playbook.version,
+                    "hash": root.playbook.hash(),
+                    "canonical": json.loads(root.playbook.canonical_json()),
+                })
             elif (self.path == "/spore/pubkey"
                     and root is not None
                     and getattr(root, chr(115)+chr(112)+chr(111)+chr(114)+chr(101)+chr(95)+chr(109)+chr(97)+chr(110)+chr(105)+chr(102)+chr(101)+chr(115)+chr(116), None) is not None):
@@ -218,12 +226,21 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--serve-spore", default=None,
                         help="payload file to serve for spore pulls")
+    parser.add_argument("--playbook", default=None,
+                        help="playbook TOML to load and serve")
     args = parser.parse_args()
+    from .common import bypass_proxy_for_lan
+    bypass_proxy_for_lan()
     spore_files = None
     if args.serve_spore:
         from pathlib import Path as _P
         spore_files = {"payload.onnx": _P(args.serve_spore)}
     root = Root(port=args.port, spore_files=spore_files)
+    if args.playbook:
+        from .playbook import load_playbook
+        root.playbook = load_playbook(Path(args.playbook))
+        print(f"playbook loaded: {root.playbook.name} v{root.playbook.version} "
+              f"hash={root.playbook.hash()[:16]}", flush=True)
     root.start()
     print(f"rootd listening on {root.url()}")
     try:

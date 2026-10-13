@@ -21,6 +21,7 @@ import time
 import urllib.request
 from pathlib import Path
 
+from .common import bypass_proxy_for_lan
 from .graft import assign_role, capability, enumerate_execution_units
 
 SERVICE_TYPE = "_pandosi._tcp.local."
@@ -28,20 +29,6 @@ ARTIFACT_CANDIDATES = [
     Path("artifacts/laya-en.int8.onnx"),
     Path("artifacts/laya-en.onnx"),
 ]
-
-
-def _bypass_proxy_for_lan() -> None:
-    """All PandoSI traffic is LAN-local; a system proxy must never route it.
-
-    urllib on Windows honours registry/system proxies, which black-hole
-    loopback and LAN addresses (observed: register POSTs silently retrying
-    forever when HTTP_PROXY was set in the environment).
-    """
-    bypass = {"localhost", "127.0.0.1", lan_ip(), "*"}
-    for var in ("NO_PROXY", "no_proxy"):
-        current = os.environ.get(var, "")
-        merged = ",".join(sorted(set(filter(None, current.split(","))) | bypass))
-        os.environ[var] = merged
 
 
 def lan_ip() -> str:
@@ -126,7 +113,7 @@ def main() -> None:
     parser.add_argument("--onnx-path", default=None,
                         help="use this ONNX file as the decision backend")
     args = parser.parse_args()
-    _bypass_proxy_for_lan()
+    bypass_proxy_for_lan()
 
     if (args.spore_url or args.spore) and not args.sandbox_confirmed:
         raise SystemExit("spore pull requires --sandbox-confirmed "

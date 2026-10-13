@@ -88,3 +88,24 @@ def aggregate(votes: list[Vote], min_quorum: int = 3) -> DecisionResult:
         tier = "verify"
     return DecisionResult(best_choice, agreement, mean_probability, tier,
                           [v.to_json() for v in votes])
+
+
+def bypass_proxy_for_lan() -> None:
+    """All PandoSI traffic is LAN-local; a system/env proxy must never route
+    it. urllib on Windows honours registry proxies, which black-hole
+    loopback/LAN addresses (observed: register POSTs retrying forever)."""
+    import os
+    import socket
+
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        lan_ip = s.getsockname()[0]
+        s.close()
+    except OSError:
+        lan_ip = "127.0.0.1"
+    bypass = {"localhost", "127.0.0.1", lan_ip}
+    for var in ("NO_PROXY", "no_proxy"):
+        current = os.environ.get(var, "")
+        merged = ",".join(sorted(set(filter(None, current.split(","))) | bypass))
+        os.environ[var] = merged
