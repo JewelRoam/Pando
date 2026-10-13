@@ -14,3 +14,6 @@ docs/dashboard.html
 reg_join_log.txt
 spore_join_log.txt
 spore-cache/
+chain_log*.txt
+assets/playbook-history.jsonl
+assets/playbook.bad.toml
