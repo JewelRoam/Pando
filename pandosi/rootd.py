@@ -247,6 +247,9 @@ def main() -> None:
                         help="payload file to serve for spore pulls")
     parser.add_argument("--playbook", default=None,
                         help="playbook TOML to load and serve")
+    parser.add_argument("--history", default=None,
+                        help="playbook history chain to verify against")
+    parser.add_argument("--allow-non-head", action="store_true")
     args = parser.parse_args()
     from .common import bypass_proxy_for_lan
     bypass_proxy_for_lan()
@@ -258,11 +261,34 @@ def main() -> None:
             spore_files["playbook.toml"] = _P(args.playbook)
     root = Root(port=args.port, spore_files=spore_files)
     if args.playbook:
+        from .pb_history import verify_chain
         from .playbook import load_playbook
         root.playbook = load_playbook(Path(args.playbook))
+        pb_hash = root.playbook.hash()
+        if args.history:
+            ok, problems = verify_chain(Path(args.history))
+            if not ok:
+                raise SystemExit(
+                    f"SECURITY: playbook history chain FAILED verification: {problems}")
+            chain = [json.loads(l) for l in
+                     Path(args.history).read_text(encoding="utf-8")
+                     .splitlines() if l.strip()]
+            heads = [chain[-1]["playbook_hash"]] if chain else []
+            if args.allow_non_head:
+                known = {e["playbook_hash"] for e in chain}
+                if pb_hash not in known:
+                    raise SystemExit(
+                        f"SECURITY: playbook hash {pb_hash[:16]} is not in the history chain - refusing (audited forks must be appended "
+                        "to the chain first)")
+            elif heads and pb_hash != heads[0]:
+                raise SystemExit(
+                    f"SECURITY: playbook hash {pb_hash[:16]} is not the chain head ({heads[0][:16]}) - refusing. Use --allow-non-head only "
+                    "for audited forks.")
+            print(f"playbook hash verified against history chain "
+                  f"({len(chain)} entries)", flush=True)
         root.coordinator.gating = root.playbook.gating
         print(f"playbook loaded: {root.playbook.name} v{root.playbook.version} "
-              f"hash={root.playbook.hash()[:16]} "
+              f"hash={pb_hash[:16]} "
               f"gating={root.playbook.gating}", flush=True)
     root.start()
     print(f"rootd listening on {root.url()}")

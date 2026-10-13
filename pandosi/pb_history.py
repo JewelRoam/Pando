@@ -31,6 +31,11 @@ def append_entry(history_path: Path, playbook_hash: str,
     """
     history_path.parent.mkdir(parents=True, exist_ok=True)
     entries = load_entries(history_path)
+    # Idempotent append: identical playbook content at the head is a no-op
+    # (re-serving the same playbook must not advance the chain).
+    if entries and parent is None \
+            and entries[-1]["playbook_hash"] == playbook_hash:
+        return entries[-1]
     seq = (entries[-1]["seq"] + 1) if entries else 0
     head = entries[-1]["hash"] if entries else GENESIS_PARENT
     if parent is None:

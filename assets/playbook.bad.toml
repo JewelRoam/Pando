@@ -1,0 +1,39 @@
+# PandoSI playbook example - the strategy layer (blueprint section 1).
+# Authored once by a human or a System-2 LLM; versioned; signed via
+# the spore manifest mechanism (playbook_hash in the manifest).
+
+[meta]
+name = "refund-triage"
+version = 2
+created = 2026-10-14
+author = "operator"
+lineage = "en-v1"
+
+[gating]
+# Confidence tiers (blueprint 3.2): auto executes, verify re-asks,
+# escalate routes to the offline advisor / human.
+auto_min_agreement = 0.6
+auto_min_probability = 0.6
+escalate_above_disagreement = 0.5
+
+[[questions]]
+id = "intent"
+type = "choice"
+instructions = "Classify the intent of the message."
+criteria = ["refund", "complaint", "greeting"]
+
+[[questions]]
+id = "urgent"
+type = "noul"
+instructions = "Is this message urgent?"
+
+[[questions]]
+id = "risk"
+type = "score"
+informational = true  # score heads are not decision-grade (round 24)
+instructions = "Rate the risk of this ticket."
+criteria = ["negligible", "low", "moderate", "high", "critical"]
+
+[[actions]]
+when = "intent == refund"
+do = "start_refund_flow"
