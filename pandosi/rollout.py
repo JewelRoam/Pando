@@ -61,10 +61,18 @@ def export_training_rows(rollout_path: Path, out_path: Path,
                 continue  # unanimous: no contrast pair (still usable for SFT)
             sorted_c = sorted(counts.items(), key=lambda kv: -kv[1])
             preferred, rejected = sorted_c[0][0], sorted_c[1][0]
+            # Nested format accepted by laya.train.items_from_rows:
+            qid = e.get("question") or "decision"
             out.write(json.dumps({
-                "state": e["state"], "question": e["question"],
-                "candidates": e.get("candidates") or sorted(counts),
-                "preferred": preferred, "rejected": rejected,
+                "state": e["state"],
+                "questions": {
+                    qid: {"type": "choice",
+                          "instructions": f"Classify: {qid}.",
+                          "criteria": e.get("candidates")
+                          or sorted(counts)},
+                },
+                "expected": {qid: preferred},
+                "rejected": {qid: rejected},
                 "playbook_hash": e.get("playbook_hash"),
                 "votes": {v.get("checkpoint", v.get("node_id", "?")):
                           v.get("choice") for v in votes},
