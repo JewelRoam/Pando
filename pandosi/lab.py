@@ -20,6 +20,8 @@ def detect_sandbox() -> dict:
     evidence: list[str] = []
     if Path("/.dockerenv").exists():
         evidence.append("/.dockerenv present")
+    if Path("/run/.containerenv").exists():
+        evidence.append("/run/.containerenv present")
     import os
     if os.environ.get("PANDOSI_CONTAINER") == "1":
         evidence.append("PANDOSI_CONTAINER=1 (operator attestation)")

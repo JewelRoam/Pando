@@ -94,6 +94,7 @@ then `python -m pandosi.join --backend onnx --onnx-path artifacts/laya-en.int8.o
 
 - [Blueprint (zh-CN)](docs/BLUEPRINT.zh-CN.md) — architecture v0.7
 - [ADOPTION](docs/ADOPTION.md) — three-ring capability model, survival metrics
+- [Onboarding (zh-CN)](docs/ONBOARDING.zh-CN.md) — consent tiers, sandbox policy, product UX
 - [THREAT-MODEL](THREAT-MODEL.md) — defensive-research framing, hard guarantees
 - [METRICS](docs/METRICS.md) — dashboard design
 - [ROADMAP](docs/ROADMAP.md) — phases with measurable gates
