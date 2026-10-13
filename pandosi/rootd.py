@@ -21,6 +21,7 @@ class _PandoHTTPServer(ThreadingHTTPServer):
 
 from .common import DecisionRequest, Vote, aggregate
 from .spore import build_manifest, generate_signing_key
+from .rollout import RolloutRecorder
 
 HEARTBEAT_TTL = 15.0
 QUORUM_K = 5
@@ -42,6 +43,7 @@ class Coordinator:
         self._transport = transport
         self.quorum_k = quorum_k
         self.gating = gating or {}
+        self._recorder = RolloutRecorder()
 
     # -- registry -------------------------------------------------------
     def register(self, node_id: str, url: str, checkpoint: str,
@@ -119,6 +121,13 @@ class Coordinator:
             auto_min_agreement=self.gating.get("auto_min_agreement", 0.6),
             auto_min_probability=self.gating.get("auto_min_probability", 0.6))
         self._log_decision(req, result, len(quorum))
+        try:
+            self._recorder.record(req.request_id, req.state, req.question,
+                                  req.candidates,
+                                  [v.to_json() for v in votes],
+                                  result.choice, result.tier)
+        except OSError:
+            pass
         out = result.__dict__.copy()
         out["quorum_size"] = len(quorum)
         out["responded"] = len(votes)
