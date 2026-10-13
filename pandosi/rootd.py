@@ -44,6 +44,7 @@ class Coordinator:
         self.quorum_k = quorum_k
         self.gating = gating or {}
         self.playbook_hash: str | None = None
+        self.known_questions: set[str] | None = None  # None = accept any
         self._recorder = RolloutRecorder()
 
     # -- registry -------------------------------------------------------
@@ -104,6 +105,10 @@ class Coordinator:
 
 
     def decide(self, req: DecisionRequest) -> dict:
+        if self.known_questions and req.question not in self.known_questions:
+            return {"error": f"question {req.question!r} not in playbook; "
+                    f"known: {sorted(self.known_questions)}",
+                    "responded": 0, "quorum_size": 0}
         quorum = self.pick_quorum(self.quorum_k)
         payload = req.to_json()
         votes: list[Vote] = []
@@ -307,6 +312,8 @@ def main() -> None:
                   f"({len(chain)} entries)", flush=True)
         root.coordinator.gating = root.playbook.gating
         root.coordinator.playbook_hash = root.playbook.hash()
+        root.coordinator.known_questions = {
+            q["id"] for q in root.playbook.questions}
         print(f"playbook loaded: {root.playbook.name} v{root.playbook.version} "
               f"hash={pb_hash[:16]} "
               f"gating={root.playbook.gating}", flush=True)
