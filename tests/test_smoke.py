@@ -22,7 +22,7 @@ from pandosi.stemd import Stem
 from pandosi.onboard import build_plan
 from pandosi.grants import (audit_status, grant_status, require_grant,
                             save_grant)
-from pandosi.service import build_service_plan
+from pandosi.service import build_service_plan, detect_platform
 
 
 class TestSmoke(unittest.TestCase):
@@ -141,6 +141,9 @@ class TestSmoke(unittest.TestCase):
     def test_service_plan_is_explicit_and_keeps_token_out_of_argv(self):
         import datetime as dt
         import tempfile
+        platform = detect_platform("auto")
+        if platform not in ("windows", "linux", "termux"):
+            self.skipTest(f"no managed service adapter on {platform}")
         now = dt.datetime.now(dt.timezone.utc)
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -148,7 +151,7 @@ class TestSmoke(unittest.TestCase):
             token = root / "pairing.token"
             token.write_text("pairing-secret", encoding="utf-8")
             blocked = build_service_plan(
-                "root", platform="windows", lan=True, port=8090,
+                "root", platform=platform, lan=True, port=8090,
                 token_path=str(token), grants_path=grants, audit=False)
             self.assertFalse(blocked["install_allowed"])
             self.assertFalse(blocked["commands"])
@@ -162,17 +165,19 @@ class TestSmoke(unittest.TestCase):
             save_grant("lan_listen", "0.0.0.0:8090", "LAN", "test",
                        (now + dt.timedelta(hours=1)).isoformat(), path=grants)
             plan = build_service_plan(
-                "root", platform="windows", lan=True, port=8090,
+                "root", platform=platform, lan=True, port=8090,
                 token_path=str(token), grants_path=grants, audit=True)
             self.assertTrue(plan["install_allowed"])
-            self.assertEqual(plan["platform"], "windows")
+            self.assertEqual(plan["platform"], platform)
             self.assertNotIn("pairing-secret", plan["process_argv"])
             self.assertIn("--pairing-token-file", plan["process_argv"])
             self.assertEqual(set(plan["commands"]), {
                 "install", "start", "status", "stop", "uninstall"})
-            self.assertNotIn("schtasks", plan["commands"]["install"])
-            self.assertTrue(any("Startup" in item["path"]
-                                for item in plan["files"]))
+            self.assertTrue(plan["files"])
+            if platform == "windows":
+                self.assertNotIn("schtasks", plan["commands"]["install"])
+                self.assertTrue(any("Startup" in item["path"]
+                                    for item in plan["files"]))
             audit = audit_status(grants.with_name(
                 grants.name + ".audit.jsonl"))
             self.assertEqual(audit["status"], "valid")
