@@ -81,3 +81,9 @@ Goal: swarm self-trains its own checkpoints.
 - Commit messages: imperative, one-line summary + short body listing artifacts.
 - Never commit model weights, metrics/, or secrets (see .gitignore).
 - Initial commit: e25d141 (v0.5 blueprint + skeleton + release scaffolding).
+
+## Session-log backup policy (2026-10-14)
+
+- 	ools/backup_session.py extracts + sanitizes this session into
+  docs/session-logs/<timestamp>-session-backup.md; run at milestones and before
+  pushing. Agent appends a curated summary to the Summary section per run.
