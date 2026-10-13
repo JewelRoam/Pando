@@ -163,7 +163,15 @@ def check(platform: str, args: argparse.Namespace) -> tuple[dict, Path | None]:
             audit_grant(grants_path, "started",
                         f"temporary check service {task_name} started")
 
-            payload = wait_for_root(port)
+            try:
+                payload = wait_for_root(port)
+            except RuntimeError:
+                if platform == "linux":
+                    code, journal = run(["journalctl", "--user", "-u",
+                                         f"{task_name}.service", "--no-pager",
+                                         "-n", "80"])
+                    summary["service_journal"] = journal[-4000:]
+                raise
             summary["pairing"] = payload
             summary["steps"].append({"step": "verify", "code": 0})
             audit_grant(grants_path, "verified",
