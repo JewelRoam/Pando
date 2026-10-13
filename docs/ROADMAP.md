@@ -1,5 +1,19 @@
 # PandoSI Roadmap
 
+## Achievements (2026-10-14)
+
+| milestone | evidence |
+|---|---|
+| Triple-EU consensus (CPU+iGPU+NPU) | round 56, live smoke |
+| iGPU 4x speedup (GatherND surgery) | round 34, 42ms vs 106ms |
+| NPU unblocked (4-step enablement chain) | round 54, 95.7ms p50 |
+| Multi-hop spore chain (3 hops, 0 failures) | round 62 |
+| Evolution loop IMPROVES model | round 57e, confidence +0.25 |
+| Divergence quantified (35% split = RLCD fuel) | round 57 |
+| Adversarial robustness matrix | round 61 |
+| Calibration layer (temperature scaling) | round 60, 2 tier flips proven |
+
+
 ## Phase 0 — Blueprint (current)
 - [x] Vision, naming, protocols defined
 - [x] Evidence base collected (see RESEARCH-NOTES.md)
@@ -22,7 +36,7 @@ Goal: consensus decision service on heterogeneous devices, no replication yet.
       ARM/Termux path documented, needs hardware)
 - [x] `rootd`: coordinator — fan-out, k-replica voting, confidence gating,
       calibration layer (blueprint 3.2.1), playbook question enforcement
-- [ ] `graft`: capability probe + role assignment (< 60s onboarding)
+- [x] `graft`: capability probe + EU enumeration + role assignment
 - [x] Dashboard v2: static render with lineage votes, playbook attribution,
       disagreement log (live update mode queued)
 - [x] Root quorum diversity: >=2 distinct Laya checkpoints per vote
@@ -37,9 +51,9 @@ Goal: self-replication in a firewalled sandbox.
 > pandosi/lab.py with Dockerfile; SPROUT/VERIFY/LIVE chain verified with
 > real 571MB weights; TOFU pinning + persistent root keypair live.
 
-- [ ] Spore payload builder + signature verification
-- [ ] SCAN/GRAFT/SPROUT/VERIFY state machine
-- [ ] Failure taxonomy + retry policies
+- [x] Spore payload builder + Ed25519 signature + per-chunk Merkle
+- [x] SCAN/GRAFT/SPROUT/VERIFY state machine (multi-hop chain verified)
+- [x] Selective re-fetch (3 attempts) + failure taxonomy
 - **Gate**: >90% replication success rate on heterogeneous sandbox fleet, quantified timeline
 
 ## Phase 3 — Topology-Aware Scheduling (target: +2 weeks)
@@ -57,7 +71,12 @@ Goal: offline LLM advisor loop.
 - [ ] Signed playbook rollout + rollback
 - **Gate**: measurable improvement on playbook blind-spot tasks across 3 iterations
 
-## Phase 5 (data layer verified: trainer accepts exported rows) — Distributed RLCD (research)
+## Phase 5 — RLCD Evolution (data layer VERIFIED: trainer accepts rows)
+
+> Progress: export_training_rows emits nested format;
+> laya.train.items_from_rows accepts it (1 item, 0 skipped);
+> first real fine-tune completed (loss=0.1663, confidence +0.25 universal).
+> A/B attribution via playbook_hash in every rollout entry. — Distributed RLCD (research)
 Goal: swarm self-trains its own checkpoints.
 
 - [ ] Decision rollout collection at scale
