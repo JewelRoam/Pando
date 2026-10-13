@@ -91,7 +91,7 @@ class Coordinator:
             except Exception:
                 continue  # dead node: shrink quorum, never block the vote
 
-        result = aggregate(votes)
+        result = aggregate(votes, min_quorum=min(3, len(quorum)))
         out = result.__dict__.copy()
         out["quorum_size"] = len(quorum)
         out["responded"] = len(votes)
