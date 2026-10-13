@@ -71,6 +71,12 @@ def load_playbook(path: Path) -> Playbook:
                 f"question {qid!r}: type must be one of {sorted(VALID_QTYPES)}")
         if q["type"] in ("choice", "score") and not q.get("criteria"):
             raise ValueError(f"question {qid!r}: {q['type']} needs criteria")
+        if q["type"] == "score" and not q.get("informational"):
+            raise ValueError(
+                f"question {qid!r}: score heads are not decision-grade "
+                "(round-24 finding); a score question must set "
+                "'informational = true' and MUST NOT be referenced by any "
+                "gating or auto-execution action")
 
     actions = raw.get("actions") or []
     for a in actions:

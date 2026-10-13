@@ -30,6 +30,7 @@ instructions = "Is this message urgent?"
 [[questions]]
 id = "risk"
 type = "score"
+informational = true  # score heads are not decision-grade (round 24)
 instructions = "Rate the risk of this ticket."
 criteria = ["negligible", "low", "moderate", "high", "critical"]
 
