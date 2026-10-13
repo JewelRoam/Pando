@@ -46,6 +46,29 @@
    （实测证据：协调器就近摆放，环延迟 174→102ms，白赚 40%，leyten/shard）。
 5. 决策请求 → fan-out 到 k 个副本 → 校准概率多数投票/贝叶斯融合 → 共识输出。
 
+## 2.5 单设备内异构拼装：ExecutionUnit 抽象（v0.6 新增）
+
+原子资源单位从“设备”升级为“算力单元 EU”：一台 AI PC
+（CPU+iGPU+NPU+外接 dGPU）最多可贡献 4 个 EU。
+
+三种拼装形态：
+- A 单 worker + HETERO 后端：按层切分给不同 EU（OpenVINO
+  `HETERO:GPU,CPU`，贪心优先级），切分点必须实测优化；
+- B 多虚拟 stem：每 EU 跑一份 Laya 副本，各自参与 quorum——
+  直接满足共识对异构副本的数量需求；
+- C 混合：NPU 跑高频低延迟判定（Laya 定长 encoder 天然适配
+  NPU 静态 shape，batch 需 pad），CPU 跑校准/管理，GPU 跑 draft。
+
+硬件拓扑事实：iGPU/NPU 与 CPU 共享系统内存与同一带宽
+（近零拷贝但会争抢带宽）；dGPU/外接 GPU 独立显存走 PCIe。
+ONNX Runtime 单 session 单 EP 实例限制 → 双 GPU 用 OpenVINO
+（GPU.0/GPU.1 原生枚举）或双 session。
+
+弹性语义升级：外接 GPU 插上 = 新 EU 上线 = 一次 Graft 事件。
+Stem/Root/Graft 协议贯穿 EU → 设备 → 集群三个层级。
+Graft 能力探测必须枚举 EU（OpenVINO `core.available_devices`
+或 L0/DXVA），不再假设单加速器。
+
 ## 3. 核心协议
 
 ### 3.1 Spore（自复制）
