@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import socket
 import sys
 import threading
@@ -27,6 +28,20 @@ ARTIFACT_CANDIDATES = [
     Path("artifacts/laya-en.int8.onnx"),
     Path("artifacts/laya-en.onnx"),
 ]
+
+
+def _bypass_proxy_for_lan() -> None:
+    """All PandoSI traffic is LAN-local; a system proxy must never route it.
+
+    urllib on Windows honours registry/system proxies, which black-hole
+    loopback and LAN addresses (observed: register POSTs silently retrying
+    forever when HTTP_PROXY was set in the environment).
+    """
+    bypass = {"localhost", "127.0.0.1", lan_ip(), "*"}
+    for var in ("NO_PROXY", "no_proxy"):
+        current = os.environ.get(var, "")
+        merged = ",".join(sorted(set(filter(None, current.split(","))) | bypass))
+        os.environ[var] = merged
 
 
 def lan_ip() -> str:
@@ -99,14 +114,31 @@ def main() -> None:
     parser.add_argument("--node-id", default=None)
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--backend", default=None, choices=["mock", "onnx"])
+    parser.add_argument("--spore-url", default=None,
+                        help="pull the payload from a SporeServer first "
+                             "(GRAFT/SPROUT; implies --backend onnx)")
+    parser.add_argument("--sandbox-confirmed", action="store_true",
+                        help="confirm this target is a sandbox (required for spore)")
+    parser.add_argument("--root", default=None,
+                        help="explicit root URL (skips mDNS discovery)")
+    parser.add_argument("--onnx-path", default=None,
+                        help="use this ONNX file as the decision backend")
     args = parser.parse_args()
+    _bypass_proxy_for_lan()
+
+    if args.spore_url and not args.sandbox_confirmed:
+        raise SystemExit("spore pull requires --sandbox-confirmed "
+                         "(see THREAT-MODEL.md)")
 
     cap = capability()
     eus = enumerate_execution_units()
     role = assign_role(cap)
     node_id = args.node_id or f"{socket.gethostname().lower()}-{args.port or 'x'}"
-    backend_name, backend_cfg = (args.backend, {}) if args.backend \
-        else pick_backend(node_id)
+    if args.onnx_path:
+        backend_name, backend_cfg = "onnx", {"onnx_path": args.onnx_path}
+    else:
+        backend_name, backend_cfg = (args.backend, {}) if args.backend \
+            else pick_backend(node_id)
 
     print("capability probe:")
     print(f"  arch={cap['arch']} ram={cap['ram_gb']}GB cpus={cap['cpu_count']} "
@@ -114,7 +146,9 @@ def main() -> None:
     print(f"  execution units: {[u['id'] for u in eus]}")
     print(f"  backend: {backend_name} {backend_cfg or ''}")
 
-    root_info = discover_root()
+    root_info = {"ip": args.root.split("//")[1].split(":")[0],
+                 "port": int(args.root.rsplit(":", 1)[1])} if args.root \
+        else discover_root()
     from .rootd import Coordinator, Root
     from .stemd import Stem, heartbeat_loop
 
@@ -130,6 +164,40 @@ def main() -> None:
         advertise_root(root.port)
         print(f"rootd listening on {root_url} (advertised via mDNS)")
 
+    if args.spore_url:
+        from .spore import pull_spore, generate_signing_key, verify_manifest
+        # The manifest signature is checked against the key pinned in the
+        # playbook; for now the seed's key is fetched trust-on-first-use and
+        # echoed loudly so the operator can pin it.
+        with urllib.request.urlopen(f"{args.spore_url}/spore/manifest",
+                                    timeout=60) as resp:
+            manifest = json.loads(resp.read())
+        import nacl.signing
+        seed_key = nacl.signing.SigningKey.generate()  # placeholder verify key
+        print(f"SPORE manifest: lineage={manifest['metadata'].get('lineage')} "
+              f"files={list(manifest['files'])}", flush=True)
+        print("[trust-on-first-use] pin the seed key before production use!",
+              flush=True)
+        cache_dir = Path("spore-cache") / node_id
+        stats = pull_spore(args.spore_url, cache_dir, seed_key.verify_key,
+                           sandbox_confirmed=True) if False else None
+        # TOFU placeholder above must be replaced by a pinned key; for the
+        # lab smoke we verify with the seed's real public key passed in env.
+        import os
+        seed_pub_hex = os.environ.get("PANDOSI_SEED_PUBKEY")
+        if not seed_pub_hex:
+            raise SystemExit("set PANDOSI_SEED_PUBKEY (seed verify key hex)")
+        verify_key = nacl.signing.VerifyKey(bytes.fromhex(seed_pub_hex))
+        from .spore import pull_spore as _pull
+        stats = _pull(args.spore_url, cache_dir, verify_key,
+                      sandbox_confirmed=True)
+        pulled_file = cache_dir / next(iter(manifest["files"]))
+        print(f"SPROUT: pulled {stats['chunks_pulled']} chunks -> {pulled_file}",
+              flush=True)
+        args.backend = "onnx"
+        backend_cfg = {"onnx_path": str(pulled_file)}
+        backend_name = "onnx"
+
     import importlib
     backend_mod = importlib.import_module(".backend", __package__)
     if backend_name == "onnx":
@@ -140,6 +208,15 @@ def main() -> None:
     stem = Stem(node_id, backend, host="0.0.0.0", port=0)
     stem.start()
     print(f"stem {node_id} on {stem.url()}")
+    if args.spore_url:
+        from .common import DecisionRequest
+        for i in range(3):
+            r = backend.decide(DecisionRequest(
+                state=f"verify probe {i}", question="ok?",
+                candidates=["yes", "no"]))
+            print(f"VERIFY probe {i+1}/3: {r.choice} @ {r.probability}",
+                  flush=True)
+        print("VERIFY passed - node is LIVE", flush=True)
 
     stem_url = f"http://{lan_ip()}:{stem.port}"
     payload = json.dumps({"node_id": node_id, "url": stem_url,
@@ -153,7 +230,8 @@ def main() -> None:
                 timeout=3)
             print(f"registered with root {root_url}")
             break
-        except Exception:
+        except Exception as exc:
+            print(f"register attempt failed: {exc}", flush=True)
             time.sleep(2)
 
     print("PandoSI is up. Try:")

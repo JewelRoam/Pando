@@ -1,0 +1,2 @@
+D:\PandoSI\pandosi\backend.py:81: RuntimeWarning: laya ONNX: this checkpoint ships temperatures outside [0.5, 5] which would distort confidence; clamping choice:11+=0.10058280825614929 -> 0.5. Treat confidence from the affected buckets as uncalibrated.
+  self._agent = ONNXAgent(repo, onnx_path=onnx_path)
