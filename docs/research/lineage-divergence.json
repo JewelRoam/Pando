@@ -1,0 +1,10 @@
+{
+  "tasks": 40,
+  "pairwise": {
+    "en-ml": {"agree": 27, "total": 40, "divergence_rate": 0.325},
+    "en-td": {"agree": 36, "total": 40, "divergence_rate": 0.10},
+    "ml-td": {"agree": 29, "total": 40, "divergence_rate": 0.275}
+  },
+  "quorum": {"unanimous": 26, "split": 14, "split_rate": 0.35},
+  "note": "14 training-ready contrast pairs available (round 38 export)"
+}
