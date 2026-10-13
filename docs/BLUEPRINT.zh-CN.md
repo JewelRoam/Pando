@@ -66,6 +66,11 @@ ONNX Runtime 单 session 单 EP 实例限制 → 双 GPU 用 OpenVINO
 
 弹性语义升级：外接 GPU 插上 = 新 EU 上线 = 一次 Graft 事件。
 Stem/Root/Graft 协议贯穿 EU → 设备 → 集群三个层级。
+真机基准（v0.7，2026-10-14）：Laya fp32 在 CPU EU 上 106ms/51ms p50
+（int8 动态量化反而更慢 127ms，已弃用）；GPU/NPU 编译失败，根因
+确认为决策头的 GatherND 算子无 GPU 内核且 NPU 编译器不识别
+（四条修复路径见 research round 8）。当前 Intel 平台 EU 现实：
+CPU 是唯一可用 EU，106ms 对决策群完全可用。
 Graft 能力探测必须枚举 EU（OpenVINO `core.available_devices`
 或 L0/DXVA），不再假设单加速器。
 已实现：`graft.enumerate_execution_units()`（OpenVINO 优先，排除虚拟设备，CPU/nvidia-smi/Metal 回退）。注意：OpenVINO AUTO 自动选择默认把 NPU 排除在优先级外，让 NPU 参与必须显式指定优先级。

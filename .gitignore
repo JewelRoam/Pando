@@ -8,3 +8,5 @@ metrics/
 secrets/
 playbook.private.toml
 .hf-cache/
+artifacts/
+*.onnx.data
