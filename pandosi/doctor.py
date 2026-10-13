@@ -81,6 +81,21 @@ def main() -> None:
                  "python tools/postprocess_onnx.py --in artifacts/laya-en-static-fixed.onnx "
                  "--out artifacts/laya-en-static-nonisnan.onnx"))
 
+    # Calibration data
+    cal_dir = Path("assets/calibration")
+    cal_files = list(cal_dir.glob("*.json")) if cal_dir.exists() else []
+    rows.append(("ok" if cal_files else "miss",
+                 f"calibration data ({len(cal_files)} checkpoints)",
+                 "" if cal_files else
+                 "python tools/generate_calibration.py"))
+
+    # Playbook history chain
+    pb_hist = Path("assets/playbook-history.jsonl")
+    rows.append(("ok" if pb_hist.exists() else "miss",
+                 "playbook history chain",
+                 "" if pb_hist.exists() else
+                 "auto-created on first rootd --playbook start"))
+
     cap = capability()
     role = assign_role(cap)
     rows.append(("ok", f"role: {role} (ram {cap['ram_gb']}GB, cpus {cap['cpu_count']})", ""))
