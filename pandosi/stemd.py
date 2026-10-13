@@ -111,11 +111,12 @@ def main() -> None:
     parser.add_argument("--root", default=None, help="rootd URL to register with")
     parser.add_argument("--backend", default="mock", choices=["mock", "onnx"])
     parser.add_argument("--onnx-path", default="artifacts/laya-en.int8.onnx")
+    parser.add_argument("--repo", default="convaiinnovations/laya")
     args = parser.parse_args()
 
     if args.backend == "onnx":
         print(f"loading ONNX Laya from {args.onnx_path} ...", flush=True)
-        backend = OnnxLayaBackend(args.node_id, args.onnx_path)
+        backend = OnnxLayaBackend(args.node_id, args.onnx_path, repo=args.repo)
         print("model loaded", flush=True)
     else:
         backend = MockBackend(args.node_id, args.checkpoint)
