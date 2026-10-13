@@ -140,8 +140,8 @@ class _OVLazySession:
         dim 1 = sequence length for input_ids/attention_mask (bucket 128),
         option-marker count for marker inputs (bucket 8).
         """
-        if self._pad_to is None or dim == 0:
-            return dim
+        if self._pad_to is None or axis == 0:
+            return dim  # axis 0 = question rows: exact, no padding
         if name in ("input_ids", "attention_mask"):
             return self._bucket(dim, self._pad_to)
         return self._bucket(dim, min(self._pad_to, 8))
@@ -176,12 +176,15 @@ class _OVLazySession:
 
         core = ov.Core()
         model = core.read_model(self._onnx_path)
-        reshape_map = {}
-        for inp in model.inputs:
-            shape = list(input_feed[inp.any_name].shape)
-            reshape_map[inp.any_name] = ov.PartialShape(
-                [ov.Dimension(d) for d in shape])
-        model.reshape(reshape_map)
+        needs_reshape = any(
+            not inp.get_partial_shape().is_static for inp in model.inputs)
+        if needs_reshape:
+            reshape_map = {}
+            for inp in model.inputs:
+                shape = list(input_feed[inp.any_name].shape)
+                reshape_map[inp.any_name] = ov.PartialShape(
+                    [ov.Dimension(d) for d in shape])
+            model.reshape(reshape_map)
         compiled = core.compile_model(model, self._device)
         out_order = [o.any_name for o in compiled.outputs]
         self._cache[key] = (compiled.create_infer_request(), out_order)
@@ -210,6 +213,9 @@ class _OVLazySession:
             arr = np.asarray(res[name])
             if true_batch and arr.shape and arr.shape[0] > true_batch:
                 arr = arr[:true_batch]
+            # Padded-marker lanes can produce NaN in the act head on GPU;
+            # consumers sanitize to 0 (act_probability absent -> no action).
+            arr = np.nan_to_num(arr, nan=0.0)
             outs.append(arr)
         return outs
 
