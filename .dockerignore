@@ -1,0 +1,11 @@
+.git
+.gitignore
+__pycache__
+*.pyc
+.hf-cache/
+metrics/
+spore-cache/
+artifacts/
+docs/session-logs/
+reg_join_log.txt
+spore_join_log.txt

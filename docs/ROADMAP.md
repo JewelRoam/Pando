@@ -3,7 +3,7 @@
 ## Phase 0 — Blueprint (current)
 - [x] Vision, naming, protocols defined
 - [x] Evidence base collected (see RESEARCH-NOTES.md)
-- [ ] Repo scaffolding, LICENSE, threat-model statement
+- [x] Repo scaffolding, LICENSE, threat-model statement
 
 ## Phase 1 ' + chr(8212) + ' Standstill Prototype (target: 2-3 weeks)
 
@@ -28,6 +28,11 @@ Goal: consensus decision service on heterogeneous devices, no replication yet.
 
 ## Phase 2 — Spore Replication (target: +3 weeks, sandbox only)
 Goal: self-replication in a firewalled sandbox.
+
+> Progress 2026-10-14: transfer + integrity + selective re-fetch implemented
+> (spore.py, tools/fix_gathernd.py separate); sandbox gate shipped as
+> pandosi/lab.py with Dockerfile; SPROUT/VERIFY/LIVE chain verified with
+> real 571MB weights; TOFU pinning + persistent root keypair live.
 
 - [ ] Spore payload builder + signature verification
 - [ ] SCAN/GRAFT/SPROUT/VERIFY state machine

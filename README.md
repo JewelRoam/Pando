@@ -28,6 +28,17 @@ runtime with zero external model dependency.
 > Research status: blueprint phase. All replication experiments are designed for
 > **closed, firewalled sandboxes** and published strictly as defensive (blue-team) research.
 
+## Lab in Docker (Ring 2)
+
+Replication experiments are gated to disposable sandboxes. With Docker:
+
+\\ash
+docker build -t pandosi-lab .
+docker run --rm pandosi-lab
+\
+The container auto-detects its sandbox (/.dockerenv) and runs the gated
+seed->pull->verify lab demo. See THREAT-MODEL.md for the security model.
+
 ## Docs
 
 - [Blueprint (zh-CN)](docs/BLUEPRINT.zh-CN.md) — full architecture and method.
