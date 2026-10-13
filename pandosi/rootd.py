@@ -206,6 +206,16 @@ def build_handler(coordinator: Coordinator, root=None):
                     self._send(200, coordinator.decide(req))
                 except Exception as exc:
                     self._send(503, {"error": f"decide failed: {exc}"})
+            elif self.path == "/shutdown":
+                data = json.loads(raw)
+                if root and root._auth_token and \
+                        data.get("token") == root._auth_token:
+                    print("SHUTDOWN requested via /shutdown (token valid)",
+                          flush=True)
+                    self._send(200, {"ok": True, "message": "shutting down"})
+                    threading.Thread(target=root.stop, daemon=True).start()
+                else:
+                    self._send(403, {"error": "invalid or missing token"})
             else:
                 self._send(404, {"error": "not found"})
 
@@ -248,10 +258,15 @@ class Root:
                 for i in range(0, len(data), 64 * 1024):
                     self.spore_chunks[(name, i // (64 * 1024))] = \
                         data[i:i + 64 * 1024]
+        self.shutdown_event = threading.Event()
+        self._auth_token = None
         self._httpd = _PandoHTTPServer(
             (host, port), build_handler(self.coordinator, root=self))
         self.port = self._httpd.server_address[1]
         self._thread: threading.Thread | None = None
+
+    def set_auth_token(self, token: str) -> None:
+        self._auth_token = token
 
     def url(self) -> str:
         return f"http://127.0.0.1:{self.port}"
