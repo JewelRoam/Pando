@@ -73,15 +73,21 @@ class OnnxLayaBackend:
     """
 
     def __init__(self, node_id: str, onnx_path: str,
-                 repo: str = "convaiinnovations/laya", device: str = "CPU"):
+                 repo: str = "convaiinnovations/laya", device: str = "CPU",
+                 pad_to: int | None = None):
         from laya.onnx_agent import ONNXAgent  # type: ignore
 
         self.node_id = node_id
         self.checkpoint = "onnx" if device == "CPU" else f"onnx-{device.lower()}"
         self._agent = ONNXAgent(repo, onnx_path=onnx_path)
         if device != "CPU":
+            pad_id = 0
+            tok = getattr(self._agent, "tok", None)
+            if tok is not None and getattr(tok, "pad_token_id", None) is not None:
+                pad_id = int(tok.pad_token_id)
             self._agent.session = _make_openvino_session(
-                onnx_path, device, self._agent.session)
+                onnx_path, device, self._agent.session,
+                pad_to=pad_to, pad_token_id=pad_id)
             # Warmup: trigger lazy compilation now, not on the first vote.
             warm = DecisionRequest(state="warmup", question="warmup",
                                    candidates=["a", "b"])
@@ -103,18 +109,55 @@ class OnnxLayaBackend:
 
 
 class _OVLazySession:
-    """Duck-types ort.InferenceSession with OpenVINO, compiled lazily per shape.
+    """Duck-types ort.InferenceSession with OpenVINO.
 
-    The Laya graph has dynamic batch/seq/option dims that OV cannot infer
-    correctly (round-8/13 findings). We compile per concrete input-shape tuple
-    on first sight and cache; later identical shapes reuse the compiled model.
+    Two modes:
+    - pad_to=None: compile per exact shape (round-13 behaviour; ~8s compile
+      per new shape - a cliff for varied-length workloads, round 30).
+    - pad_to=N: bucket every dynamic dim up to the next multiple of N,
+      padding inputs (input_ids with pad_token_id, others with 0) and
+      slicing outputs back to the true batch. One compile per bucket.
     """
 
-    def __init__(self, onnx_path: str, device: str, ort_session):
+    def __init__(self, onnx_path: str, device: str, ort_session,
+                 pad_to: int | None = None, pad_token_id: int = 0):
         self._onnx_path = onnx_path
         self._device = device
-        self._ort = ort_session  # used only to source output names/order
+        self._ort = ort_session
+        self._pad_to = pad_to
+        self._pad_token_id = pad_token_id
         self._cache: dict[tuple, tuple] = {}
+
+    @staticmethod
+    def _bucket(dim: int, pad_to: int) -> int:
+        return ((dim + pad_to - 1) // pad_to) * pad_to
+
+    def _pad_feed(self, input_feed: dict) -> tuple[dict, int]:
+        padded = {}
+        true_batch = 0
+        for name, arr in input_feed.items():
+            a = np.asarray(arr)
+            if a.ndim == 0:
+                padded[name] = a
+                continue
+            true_batch = a.shape[0]
+            target = list(a.shape)
+            changed = False
+            for i, d in enumerate(a.shape):
+                if d == 0:
+                    continue
+                bucketed = self._bucket(d, self._pad_to)
+                if bucketed != d:
+                    target[i] = bucketed
+                    changed = True
+            if not changed:
+                padded[name] = a
+                continue
+            fill = self._pad_token_id if name == "input_ids" else 0
+            out = np.full(target, fill, dtype=a.dtype)
+            out[tuple(slice(0, d) for d in a.shape)] = a
+            padded[name] = out
+        return padded, true_batch
 
     def _compile(self, key, input_feed):
         import openvino as ov  # type: ignore
@@ -132,17 +175,35 @@ class _OVLazySession:
         self._cache[key] = (compiled.create_infer_request(), out_order)
 
     def run(self, output_names, input_feed, *args, **kwargs):
-        key = tuple(sorted((n, tuple(input_feed[n].shape))
-                           for n in input_feed))
+        if self._pad_to:
+            padded_feed, true_batch = self._pad_feed(input_feed)
+            key = tuple(sorted((n, tuple(padded_feed[n].shape))
+                               for n in padded_feed))
+        else:
+            padded_feed = input_feed
+            true_batch = max(
+                (np.asarray(v).shape[0] for v in input_feed.values()
+                 if np.asarray(v).ndim > 0), default=1)
+            key = tuple(sorted((n, tuple(padded_feed[n].shape))
+                               for n in padded_feed))
         if key not in self._cache:
             print(f"[ov-lazy] compiling {self._device} for shapes {key}...",
                   flush=True)
-            self._compile(key, input_feed)
+            self._compile(key, padded_feed)
         infer, out_order = self._cache[key]
-        res = infer.infer(input_feed)
+        res = infer.infer(padded_feed)
         names = output_names or out_order
-        return [np.asarray(res[name]) for name in names]
+        outs = []
+        for name in names:
+            arr = np.asarray(res[name])
+            if true_batch and arr.shape and arr.shape[0] > true_batch:
+                arr = arr[:true_batch]
+            outs.append(arr)
+        return outs
 
 
-def _make_openvino_session(onnx_path: str, device: str, ort_session):
-    return _OVLazySession(onnx_path, device, ort_session)
+def _make_openvino_session(onnx_path: str, device: str, ort_session,
+                           pad_to: int | None = None,
+                           pad_token_id: int = 0):
+    return _OVLazySession(onnx_path, device, ort_session,
+                          pad_to=pad_to, pad_token_id=pad_token_id)
