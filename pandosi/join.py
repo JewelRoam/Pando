@@ -230,14 +230,18 @@ def main() -> None:
 
     stems = [Stem(node_id, backend, host="0.0.0.0", port=0)]
     if args.multi_eu and backend_name == "onnx":
-        gpu_file = Path("artifacts/laya-en-static-fixed.onnx")
-        if gpu_file.exists() and any(u["kind"] == "GPU" for u in eus):
+        # Auto-discover static surgery-graph buckets (any seq size).
+        bucket_files = sorted(
+            Path("artifacts").glob("laya-en-static*-fixed.onnx"))
+        if bucket_files and any(u["kind"] == "GPU" for u in eus):
             gpu_backend = backend_mod.OnnxLayaBackend(
-                node_id + "-gpu", str(gpu_file),
-                repo="convaiinnovations/laya", device="GPU", pad_to=256)
+                node_id + "-gpu", str(bucket_files[-1]),
+                repo="convaiinnovations/laya", device="GPU",
+                onnx_buckets=[str(b) for b in bucket_files])
             stems.append(Stem(node_id + "-gpu", gpu_backend,
                               host="0.0.0.0", port=0))
-            print("multi-EU: iGPU stem added (static surgery graph)", flush=True)
+            print(f"multi-EU: iGPU stem added "
+                  f"({len(bucket_files)} bucket(s))", flush=True)
     for s in stems:
         s.start()
         print(f"stem {s.node_id} on {s.url()}", flush=True)
