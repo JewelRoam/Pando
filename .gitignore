@@ -7,3 +7,4 @@ metrics/
 *.safetensors
 secrets/
 playbook.private.toml
+.hf-cache/
