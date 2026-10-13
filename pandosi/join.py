@@ -102,7 +102,7 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--backend", default=None, choices=["mock", "onnx"])
     parser.add_argument("--multi-eu", action="store_true",
-                        help="start one stem per execution unit (iGPU + CPU on an AI PC)")
+                        help="start one stem per execution unit (iGPU + CPU on an AI PC); the main --onnx-path must be a DYNAMIC onnx (CPU stem); the GPU stem auto-uses artifacts/laya-en-static-fixed.onnx")
     parser.add_argument("--spore-url", default=None,
                         help="pull the payload from a SporeServer first "
                              "(GRAFT/SPROUT; implies --backend onnx)")
@@ -131,11 +131,11 @@ def main() -> None:
         backend_name, backend_cfg = (args.backend, {}) if args.backend \
             else pick_backend(node_id)
 
-    print("capability probe:")
+    print("capability probe:", flush=True)
     print(f"  arch={cap['arch']} ram={cap['ram_gb']}GB cpus={cap['cpu_count']} "
-          f"-> role={role}")
-    print(f"  execution units: {[u['id'] for u in eus]}")
-    print(f"  backend: {backend_name} {backend_cfg or ''}")
+          f"-> role={role}", flush=True)
+    print(f"  execution units: {[u['id'] for u in eus]}", flush=True)
+    print(f"  backend: {backend_name} {backend_cfg or ''}", flush=True)
 
     root_info = {"ip": args.root.split("//")[1].split(":")[0],
                  "port": int(args.root.rsplit(":", 1)[1])} if args.root \
@@ -145,15 +145,15 @@ def main() -> None:
 
     if root_info:
         root_url = f"http://{root_info['ip']}:{root_info['port']}"
-        print(f"found existing root at {root_url} - joining as stem")
+        print(f"found existing root at {root_url} - joining as stem", flush=True)
         root = None
     else:
-        print("no root on this LAN - becoming root + stem")
+        print("no root on this LAN - becoming root + stem", flush=True)
         root = Root(host="0.0.0.0", port=args.port or 8080)
         root.start()
         root_url = root.url()
         advertise_root(root.port)
-        print(f"rootd listening on {root_url} (advertised via mDNS)")
+        print(f"rootd listening on {root_url} (advertised via mDNS)", flush=True)
 
     from .spore import pull_spore, generate_signing_key, verify_manifest
     if args.spore and not args.spore_url and root_info:
@@ -240,7 +240,7 @@ def main() -> None:
             print("multi-EU: iGPU stem added (static surgery graph)", flush=True)
     for s in stems:
         s.start()
-        print(f"stem {s.node_id} on {s.url()}")
+        print(f"stem {s.node_id} on {s.url()}", flush=True)
     if args.spore_url:
         from .common import DecisionRequest
         for i in range(3):
@@ -265,14 +265,32 @@ def main() -> None:
                                                     "application/json"}),
                     timeout=3)
             print(f"registered {len(registrations)} stem(s) with root "
-                  f"{root_url}")
+                  f"{root_url}", flush=True)
             break
         except Exception as exc:
             print(f"register attempt failed: {exc}", flush=True)
             time.sleep(2)
 
-    print("PandoSI is up. Try:")
-    print(f'  curl -X POST {root_url}/decide -d "{{\\"state\\":\\"test\\",\\"question\\":\\"ok?\\",\\"candidates\\":[\\"yes\\",\\"no\\"]}}"')
+    # Registration IS the heartbeat: rootd expires stems after 15s without
+    # a /register refresh, so keep re-registering for the process lifetime.
+    def heartbeat():
+        while True:
+            time.sleep(5)
+            try:
+                for reg in registrations:
+                    payload = json.dumps({**reg, "capability": cap}).encode()
+                    urllib.request.urlopen(
+                        urllib.request.Request(
+                            f"{root_url}/register", data=payload,
+                            headers={"Content-Type": "application/json"}),
+                        timeout=3)
+            except Exception:
+                pass
+
+    threading.Thread(target=heartbeat, daemon=True).start()
+
+    print("PandoSI is up. Try:", flush=True)
+    print(f'  curl -X POST {root_url}/decide -d "{{\\"state\\":\\"test\\",\\"question\\":\\"ok?\\",\\"candidates\\":[\\"yes\\",\\"no\\"]}}"', flush=True)
     try:
         while True:
             time.sleep(3600)
