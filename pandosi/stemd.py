@@ -18,7 +18,7 @@ class _PandoHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-from .backend import MockBackend
+from .backend import MockBackend, OnnxLayaBackend
 from .common import DecisionRequest
 from .graft import assign_role, capability
 
@@ -109,9 +109,16 @@ def main() -> None:
     parser.add_argument("--checkpoint", default="mock")
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--root", default=None, help="rootd URL to register with")
+    parser.add_argument("--backend", default="mock", choices=["mock", "onnx"])
+    parser.add_argument("--onnx-path", default="artifacts/laya-en.int8.onnx")
     args = parser.parse_args()
 
-    backend = MockBackend(args.node_id, args.checkpoint)
+    if args.backend == "onnx":
+        print(f"loading ONNX Laya from {args.onnx_path} ...", flush=True)
+        backend = OnnxLayaBackend(args.node_id, args.onnx_path)
+        print("model loaded", flush=True)
+    else:
+        backend = MockBackend(args.node_id, args.checkpoint)
     stem = Stem(args.node_id, backend, port=args.port)
     stem.start()
     print(f"stemd {args.node_id} listening on {stem.url()} "

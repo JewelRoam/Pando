@@ -60,3 +60,34 @@ class LayaBackend:
         result = self._model.decide(req.state, req.question, req.candidates)
         return Vote(self.node_id, self.checkpoint,
                     result.choice, float(result.probability))
+
+
+class OnnxLayaBackend:
+    """Real Laya decisions via the official ONNXAgent (onnxruntime CPU).
+
+    Maps a DecisionRequest to a single choice question. Probabilities come
+    from the checkpoint's answer_confidence - see blueprint calibration note:
+    treat as uncalibrated until the per-checkpoint temperature layer exists.
+    """
+
+    def __init__(self, node_id: str, onnx_path: str,
+                 repo: str = "convaiinnovations/laya"):
+        from laya.onnx_agent import ONNXAgent  # type: ignore
+
+        self.node_id = node_id
+        self.checkpoint = "onnx"
+        self._agent = ONNXAgent(repo, onnx_path=onnx_path)
+
+    def decide(self, req: DecisionRequest) -> Vote:
+        if not req.candidates:
+            raise ValueError("candidates must be non-empty")
+        qid = req.question or "decision"
+        questions = {qid: {"type": "choice",
+                           "instructions": qid,
+                           "criteria": req.candidates}}
+        result = self._agent.predict(req.state, questions)
+        answer = result["answers"][qid]
+        choice = answer.get("choice")
+        probability = float(answer.get("answer_confidence")
+                            or answer.get("confidence") or 0.5)
+        return Vote(self.node_id, self.checkpoint, choice, round(probability, 4))
