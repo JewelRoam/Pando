@@ -1,0 +1,8 @@
+{
+  "checkpoint": "english",
+  "temperature": 3.2,
+  "raw_ece": 0.391,
+  "calibrated_ece": 0.2456,
+  "n_tasks": 14,
+  "accuracy": 0.5
+}

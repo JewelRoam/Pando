@@ -1,0 +1,8 @@
+{
+  "checkpoint": "typed-decisions",
+  "temperature": 5.0,
+  "raw_ece": 0.169,
+  "calibrated_ece": 0.0881,
+  "n_tasks": 12,
+  "accuracy": 0.4167
+}
