@@ -95,6 +95,22 @@ def aggregate(votes: list[Vote], min_quorum: int = 3,
                           [v.to_json() for v in votes])
 
 
+def read_secret_file(path: str | Path) -> str:
+    """Read a small newline-terminated secret from a user-owned file."""
+    from pathlib import Path as SecretPath
+
+    secret_path = SecretPath(path).expanduser()
+    try:
+        value = secret_path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise ValueError(f"cannot read secret file {secret_path}: {exc}") from exc
+    if not value:
+        raise ValueError(f"secret file is empty: {secret_path}")
+    if len(value) > 4096 or any(ord(ch) < 32 for ch in value):
+        raise ValueError(f"secret file has invalid content: {secret_path}")
+    return value
+
+
 def bypass_proxy_for_lan() -> None:
     """All PandoSI traffic is LAN-local; a system/env proxy must never route
     it. urllib on Windows honours registry proxies, which black-hole

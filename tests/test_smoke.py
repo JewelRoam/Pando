@@ -22,6 +22,7 @@ from pandosi.stemd import Stem
 from pandosi.onboard import build_plan
 from pandosi.grants import (audit_status, grant_status, require_grant,
                             save_grant)
+from pandosi.service import build_service_plan
 
 
 class TestSmoke(unittest.TestCase):
@@ -136,6 +137,42 @@ class TestSmoke(unittest.TestCase):
                 encoding="utf-8")
             with self.assertRaises(PermissionError):
                 require_grant("lan_listen", path, now)
+
+    def test_service_plan_is_explicit_and_keeps_token_out_of_argv(self):
+        import datetime as dt
+        import tempfile
+        now = dt.datetime.now(dt.timezone.utc)
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            grants = root / "grants.toml"
+            token = root / "pairing.token"
+            token.write_text("pairing-secret", encoding="utf-8")
+            blocked = build_service_plan(
+                "root", platform="windows", lan=True, port=8090,
+                token_path=str(token), grants_path=grants, audit=False)
+            self.assertFalse(blocked["install_allowed"])
+            self.assertFalse(blocked["commands"])
+            self.assertTrue(any(r["name"] == "service_autostart"
+                                and r["status"] != "active"
+                                for r in blocked["requirements"]))
+
+            save_grant("service_autostart", "user-agent/pandosi",
+                       "operator-host", "test",
+                       (now + dt.timedelta(hours=1)).isoformat(), path=grants)
+            save_grant("lan_listen", "0.0.0.0:8090", "LAN", "test",
+                       (now + dt.timedelta(hours=1)).isoformat(), path=grants)
+            plan = build_service_plan(
+                "root", platform="windows", lan=True, port=8090,
+                token_path=str(token), grants_path=grants, audit=True)
+            self.assertTrue(plan["install_allowed"])
+            self.assertEqual(plan["platform"], "windows")
+            self.assertNotIn("pairing-secret", plan["process_argv"])
+            self.assertIn("--pairing-token-file", plan["process_argv"])
+            self.assertEqual(set(plan["commands"]), {
+                "install", "start", "status", "stop", "uninstall"})
+            audit = audit_status(grants.with_name(
+                grants.name + ".audit.jsonl"))
+            self.assertEqual(audit["status"], "valid")
 
     def test_end_to_end_http_vote(self):
         """Real root + real HTTP stems; dead node shrinks quorum gracefully."""

@@ -27,8 +27,8 @@ Step 4  沙箱实验室     Docker/Podman/WSL 中运行 Spore 复制实验
 Step 5  常驻服务       systemd --user / Windows 计划任务 / Termux sv，显式开启
 ```
 
-当前仓库已有 Step 0/1/3/4 的最小实现。Step 3 已使用 HTTP pairing token；
-Step 5 仍应先补授权过期和平台服务适配，再追求常驻。
+当前仓库已有 Step 0/1/3/4 的最小实现；Step 5 已有 Windows/Linux/Termux
+的 service plan 生成器，但安装仍由用户手动执行。
 
 ## 授权记录
 
@@ -62,11 +62,11 @@ pandosi onboard --dry-run
 pandosi onboard --apply-nonprivileged
   -> 只 pip/pipx 安装纯 Python 依赖、建缓存目录、写本地计划
 
-pandosi onboard --grant lan_listen
-  -> 展示将监听的地址和防火墙影响，等待 yes
+python -m pandosi.grants grant lan_listen ... --yes
+  -> 先审阅 scope/resource/过期时间，再写入本地账本
 
-pandosi onboard --grant npu_driver
-  -> 打开厂商页面或打印 sudo/UAC 命令；由用户执行
+python -m pandosi.service --role root --json
+  -> 生成可审阅的 service plan；不自动安装
 ```
 
 平台差异用“适配器输出命令”，不追求大而全的静默安装：
@@ -107,6 +107,8 @@ observer，但禁止繁殖/执行载荷。
 
 1. [x] `doctor --json` 已包含 `plan`；另有只读的 `doctor --plan`。
 2. [x] `pandosi/onboard.py --dry-run` 已实现；明确拒绝安装/提权/改授权。
-3. join 协议加 root pairing token：root 启动生成短码，stem 必须携带。
-4. `grants.toml` 读写与过期检查，接入 join/lab 的启动前置条件。
-5. 发布前先补 `pip install pandosi`/PyPI 或 `pipx install git+...` 验收。
+3. [x] root pairing token 已覆盖注册、节点、决策、playbook 和 root Spore 面。
+4. [x] `grants.toml` 读写、过期检查、hash-chain 审计已接入 join/rootd/lab。
+5. [x] `pandosi.service plan` 已生成 Windows/Linux/Termux 方案；安装保持手动。
+6. 在真实 Windows/Linux/Termux 目标主机上验收 service plan 的启动/停止/卸载。
+7. 发布前先补 `pip install pandosi`/PyPI 或 `pipx install git+...` 验收。

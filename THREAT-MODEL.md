@@ -28,6 +28,9 @@ software on third-party machines.
 8. **Tamper-evident grant audit**: creation, revocation, allowed uses, and
    denials append to a local hash chain; an invalid audit chain blocks
    authorization instead of silently continuing.
+9. **Review-only service planning**: service adapters output platform plans
+   and require a separate expiring autostart grant; they do not install
+   services and refuse cross-host generation to avoid embedding wrong paths.
 
 ## What this project does NOT do
 

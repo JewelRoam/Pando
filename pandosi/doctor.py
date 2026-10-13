@@ -97,7 +97,8 @@ def checks() -> list[dict]:
 
     from .grants import grant_status
     for action, item in [("lan_listen", "LAN listen grant"),
-                         ("lab_replication", "lab replication grant")]:
+                         ("lab_replication", "lab replication grant"),
+                         ("service_autostart", "service autostart grant")]:
         status = grant_status(action)
         add("ok" if status["status"] == "active" else "locked", item,
             "" if status["status"] == "active" else status["next_command"],

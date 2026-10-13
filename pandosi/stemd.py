@@ -118,6 +118,8 @@ def main() -> None:
     parser.add_argument("--root", default=None, help="rootd URL to register with")
     parser.add_argument("--pairing-token", default=None,
                         help="secret required by a pairing-enabled root")
+    parser.add_argument("--pairing-token-file", default=None,
+                        help="read the pairing token from a user-owned file")
     parser.add_argument("--backend", default="mock", choices=["mock", "onnx"])
     parser.add_argument("--onnx-path", default="artifacts/laya-en.int8.onnx")
     parser.add_argument("--repo", default="convaiinnovations/laya")
@@ -125,6 +127,14 @@ def main() -> None:
     parser.add_argument("--pad-to", type=int, default=None,
                         help="static-shape bucket for non-CPU EUs (default 256 on GPU/NPU)")
     args = parser.parse_args()
+    if args.pairing_token and args.pairing_token_file:
+        raise SystemExit("--pairing-token and --pairing-token-file are mutually exclusive")
+    if args.pairing_token_file:
+        from .common import read_secret_file
+        try:
+            args.pairing_token = read_secret_file(args.pairing_token_file)
+        except ValueError as exc:
+            raise SystemExit(str(exc))
 
     if args.backend == "onnx":
         print(f"loading ONNX Laya from {args.onnx_path} ...", flush=True)

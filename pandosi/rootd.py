@@ -361,9 +361,19 @@ def main() -> None:
                         help="enable /shutdown with this token")
     parser.add_argument("--pairing-token", default=None,
                         help="fixed stem admission token; generated when omitted")
+    parser.add_argument("--pairing-token-file", default=None,
+                        help="read the fixed admission token from a user-owned file")
     parser.add_argument("--lan", action="store_true",
                         help="bind 0.0.0.0; requires an active lan_listen grant")
     args = parser.parse_args()
+    if args.pairing_token and args.pairing_token_file:
+        raise SystemExit("--pairing-token and --pairing-token-file are mutually exclusive")
+    if args.pairing_token_file:
+        from .common import read_secret_file
+        try:
+            args.pairing_token = read_secret_file(args.pairing_token_file)
+        except ValueError as exc:
+            raise SystemExit(str(exc))
     from .common import bypass_proxy_for_lan
     bypass_proxy_for_lan()
     spore_files = None

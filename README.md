@@ -101,6 +101,18 @@ python -m pandosi.join --lan
 Grant creation, revocation, allowed use, and denial are recorded in a local
 hash chain; `python -m pandosi.grants audit` verifies it.
 
+Persistent services are plan-only and require a separate autostart grant:
+
+```bash
+python -m pandosi.grants grant service_autostart   --resource user-agent/pandosi --hours 24 --yes
+python -m pandosi.service --role root --json
+python -m pandosi.service --role root
+```
+
+Adapters cover Windows scheduled tasks, Linux `systemd --user`, and Termux
+`sv`. Tokens are read from a file, never embedded in argv; the planner does
+not install, start, or uninstall anything.
+
 Real-model mode: install `laya`, export ONNX (tools/vendor/export_onnx.py),
 then `python -m pandosi.join --backend onnx --onnx-path artifacts/laya-en.int8.onnx`.
 

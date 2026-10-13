@@ -16,7 +16,7 @@ import sys
 import tomllib
 from pathlib import Path
 
-GRANT_ACTIONS = ("lan_listen", "lab_replication")
+GRANT_ACTIONS = ("lan_listen", "lab_replication", "service_autostart")
 
 
 def default_path() -> Path:
@@ -82,9 +82,14 @@ def grant_status(action: str, path: Path | str | None = None,
                 result = {"action": action, "status": "active",
                           "grant": grant, "expires_at": expires_text,
                           "reason": f"expires at {expires_text}"}
-    resource = (str(grant.get("resource", "sandbox/lab"))
-                if isinstance(grant, dict) and action == "lab_replication"
-                else ("0.0.0.0:8080" if action == "lan_listen" else "sandbox/lab"))
+    if isinstance(grant, dict) and action == "lab_replication":
+        resource = str(grant.get("resource", "sandbox/lab"))
+    elif action == "lan_listen":
+        resource = "0.0.0.0:8080"
+    elif action == "service_autostart":
+        resource = "user-agent/pandosi"
+    else:
+        resource = "sandbox/lab"
     result["grants_path"] = str(grant_path)
     result["next_command"] = (
         f"python -m pandosi.grants grant {action} --resource {resource} "
