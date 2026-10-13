@@ -200,7 +200,21 @@ class Root:
         self.coordinator = coordinator or Coordinator()
         self.spore = None
         if spore_files:
-            key = generate_signing_key()
+            # Persist the spore keypair: an ephemeral key would trip the
+            # joiners' TOFU pinning on every root restart (round 16).
+            import nacl.signing
+            from pathlib import Path as _P
+            key_file = _P("spore-cache") / "root-spore-key.hex"
+            key_file.parent.mkdir(parents=True, exist_ok=True)
+            if key_file.exists():
+                key = nacl.signing.SigningKey(
+                    bytes.fromhex(key_file.read_text(encoding="utf-8").strip()))
+                print("spore key loaded from", key_file, flush=True)
+            else:
+                key = generate_signing_key()
+                key_file.write_text(key.encode().hex(), encoding="utf-8")
+                print("spore key generated and saved to", key_file, flush=True)
+            self.spore = {"key": key}
             self.spore_pubkey = key.verify_key.encode().hex()
             self.spore_manifest = build_manifest(spore_files, key,
                                                  metadata={"role": "root"})
@@ -240,6 +254,8 @@ def main() -> None:
     if args.serve_spore:
         from pathlib import Path as _P
         spore_files = {"payload.onnx": _P(args.serve_spore)}
+        if args.playbook:
+            spore_files["playbook.toml"] = _P(args.playbook)
     root = Root(port=args.port, spore_files=spore_files)
     if args.playbook:
         from .playbook import load_playbook

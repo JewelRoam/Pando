@@ -153,6 +153,7 @@ def main() -> None:
         advertise_root(root.port)
         print(f"rootd listening on {root_url} (advertised via mDNS)")
 
+    from .spore import pull_spore, generate_signing_key, verify_manifest
     if args.spore and not args.spore_url and root_info:
         args.spore_url = f"http://{root_info['ip']}:{root_info['port']}"
         print(f"spore: pulling from root at {args.spore_url}", flush=True)
@@ -204,6 +205,16 @@ def main() -> None:
         pulled_file = cache_dir / next(iter(manifest["files"]))
         print(f"SPROUT: pulled {stats['chunks_pulled']} chunks -> {pulled_file}",
               flush=True)
+        # Strategy layer travels with the payload: a pulled playbook is
+        # validated and its hash reported (it governs this node IF it later
+        # becomes a root - reproduction carries strategy, not just weights).
+        pulled_pb = cache_dir / "playbook.toml"
+        if pulled_pb.exists():
+            from .playbook import load_playbook
+            pulled_playbook = load_playbook(pulled_pb)
+            print(f"SPROUT: playbook {pulled_playbook.name} "
+                  f"v{pulled_playbook.version} "
+                  f"hash={pulled_playbook.hash()[:16]}", flush=True)
         args.backend = "onnx"
         backend_cfg = {"onnx_path": str(pulled_file)}
         backend_name = "onnx"
