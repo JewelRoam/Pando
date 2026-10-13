@@ -1,0 +1,32 @@
+name: CI
+on: [push, pull_request]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install pynacl zeroconf onnxruntime onnx
+      - name: Static analysis
+        run: python -m py_compile pandosi/*.py
+      - name: Smoke tests
+        run: python -m unittest discover -s tests -v
+      - name: Doctor
+        run: python -m pandosi.doctor --json
+
+  demo:
+    runs-on: ubuntu-latest
+    needs: smoke
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install pynacl zeroconf
+      - name: End-to-end demo
+        run: python tools/demo.py
