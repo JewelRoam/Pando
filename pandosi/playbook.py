@@ -78,10 +78,19 @@ def load_playbook(path: Path) -> Playbook:
                 "'informational = true' and MUST NOT be referenced by any "
                 "gating or auto-execution action")
 
+    # Informational questions (e.g. score heads) must not gate actions -
+    # structural enforcement of the round-24 finding.
+    informational = {q["id"] for q in questions if q.get("informational")}
     actions = raw.get("actions") or []
     for a in actions:
         if not a.get("when") or not a.get("do"):
             raise ValueError("action missing 'when' or 'do'")
+        for qid in informational:
+            if qid in (a.get("when") or ""):
+                raise ValueError(
+                    f"action {a.get('do')!r}: 'when' references informational "
+                    f"question {qid!r} - informational outputs must not gate "
+                    "auto-execution (round-24 finding)")
 
     return Playbook(
         name=meta["name"],
