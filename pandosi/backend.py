@@ -74,12 +74,28 @@ class OnnxLayaBackend:
 
     def __init__(self, node_id: str, onnx_path: str,
                  repo: str = "convaiinnovations/laya", device: str = "CPU",
-                 pad_to: int | None = None):
+                 pad_to: int | None = None,
+                 onnx_buckets: list[str] | None = None):
         from laya.onnx_agent import ONNXAgent  # type: ignore
 
         self.node_id = node_id
         self.checkpoint = "onnx" if device == "CPU" else f"onnx-{device.lower()}"
         self._agent = ONNXAgent(repo, onnx_path=onnx_path)
+        if device != "CPU" and onnx_buckets:
+            def _seq_of(path: str) -> tuple[int, int, str]:
+                import onnx  # type: ignore
+
+                m = onnx.load(path, load_external_data=False)
+                shapes = {}
+                for inp in m.graph.input:
+                    dims = [d.dim_value for d in
+                            inp.type.tensor_type.shape.dim]
+                    shapes[inp.name] = dims
+                return shapes["input_ids"][1], shapes["marker_pos"][1], path
+            buckets = [_seq_of(b) for b in onnx_buckets]
+            self._agent.session = _make_openvino_session(
+                onnx_path, device, self._agent.session, buckets=buckets)
+            return
         if device != "CPU":
             pad_id = 0
             tok = getattr(self._agent, "tok", None)
@@ -220,8 +236,70 @@ class _OVLazySession:
         return outs
 
 
+class _MultiBucketSession:
+    """Serves variable-length inputs from several static-shape OV models.
+
+    Buckets are (seq, markers) static exports sorted ascending; run() picks
+    the smallest bucket that fits the input, pads, and delegates.
+    """
+
+    def __init__(self, buckets: list[tuple[int, int, str]], device: str):
+        import openvino as ov  # type: ignore
+
+        self._device = device
+        self._buckets = sorted(buckets)  # (seq, markers, path)
+        self._compiled: dict[tuple, tuple] = {}
+        core = ov.Core()
+        self._models = []
+        for seq, markers, path in self._buckets:
+            model = core.read_model(path)
+            compiled = core.compile_model(model, device)
+            out_order = [o.any_name for o in compiled.outputs]
+            self._models.append((seq, markers, compiled.create_infer_request(),
+                                 out_order))
+
+    @staticmethod
+    def _pad(arr, pad_val, shape):
+        import numpy as np
+        out = np.full(shape, pad_val, dtype=arr.dtype)
+        slices = tuple(slice(0, d) for d in arr.shape)
+        out[slices] = arr
+        return out
+
+    def run(self, output_names, input_feed, *args, **kwargs):
+        import numpy as np
+
+        seq_needed = int(input_feed["input_ids"].shape[1])
+        markers_needed = int(input_feed["marker_pos"].shape[1])
+        for seq, markers, infer, out_order in self._models:
+            if seq >= seq_needed and markers >= markers_needed:
+                break
+        else:
+            raise ValueError(
+                f"input (seq={seq_needed}, markers={markers_needed}) exceeds "
+                f"largest bucket {self._buckets[-1][:2]}")
+
+        padded = {}
+        for name, arr in input_feed.items():
+            a = np.asarray(arr)
+            if name == "input_ids":
+                padded[name] = self._pad(a, 1, (a.shape[0], seq))
+            elif name == "attention_mask":
+                padded[name] = self._pad(a, 0, (a.shape[0], seq))
+            elif name in ("marker_pos", "marker_mask"):
+                padded[name] = self._pad(a, 0, (a.shape[0], markers))
+            else:
+                padded[name] = a
+        res = infer.infer(padded)
+        names = output_names or out_order
+        return [np.asarray(res[name]) for name in names]
+
+
 def _make_openvino_session(onnx_path: str, device: str, ort_session,
                            pad_to: int | None = None,
-                           pad_token_id: int = 0):
+                           pad_token_id: int = 0,
+                           buckets: list[tuple[int, int, str]] | None = None):
+    if buckets:
+        return _MultiBucketSession(buckets, device)
     return _OVLazySession(onnx_path, device, ort_session,
                           pad_to=pad_to, pad_token_id=pad_token_id)
