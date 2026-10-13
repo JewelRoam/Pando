@@ -72,3 +72,12 @@ Goal: swarm self-trains its own checkpoints.
   real localhost sockets.
 - Real-device validation replaces mocks whenever hardware is attached; benchmark
   results land in docs/research with the Graft acceptance protocol.
+
+## Git workflow (project decision 2026-10-13)
+
+- Remote: https://github.com/JewelRoam/PandoSI.git (main branch).
+- Commit + push at every milestone: after each research round that changes the
+  blueprint, after each new module, and before/after any smoke-test milestone.
+- Commit messages: imperative, one-line summary + short body listing artifacts.
+- Never commit model weights, metrics/, or secrets (see .gitignore).
+- Initial commit: e25d141 (v0.5 blueprint + skeleton + release scaffolding).
