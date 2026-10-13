@@ -289,6 +289,8 @@ def main() -> None:
     parser.add_argument("--history", default=None,
                         help="playbook history chain to verify against")
     parser.add_argument("--allow-non-head", action="store_true")
+    parser.add_argument("--auth-token", default=None,
+                        help="enable /shutdown with this token")
     args = parser.parse_args()
     from .common import bypass_proxy_for_lan
     bypass_proxy_for_lan()
@@ -299,6 +301,9 @@ def main() -> None:
         if args.playbook:
             spore_files["playbook.toml"] = _P(args.playbook)
     root = Root(port=args.port, spore_files=spore_files)
+    if args.auth_token:
+        root.set_auth_token(args.auth_token)
+        print(f"kill-switch enabled (token set)", flush=True)
     if args.playbook:
         from .pb_history import verify_chain
         from .playbook import load_playbook
