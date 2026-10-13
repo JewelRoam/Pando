@@ -1,0 +1,8 @@
+{
+  "tasks": 40,
+  "divergent_decisions": [],
+  "divergence_rate": 0.0,
+  "mean_abs_confidence_diff": 0.0005,
+  "cpu_p50_ms": 58.1,
+  "gpu_p50_ms": 7883.6
+}
