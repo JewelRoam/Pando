@@ -1,15 +1,15 @@
 {
-  "generated": "2026-10-14 01:11:49",
+  "generated": "2026-10-14 02:31:17",
   "suites": {
     "english": {
-      "accuracy": 0.6667,
-      "ece": 0.3572,
-      "latency_p50_ms": 54.9,
-      "latency_p95_ms": 75.5,
+      "accuracy": 0.7143,
+      "ece": 0.1548,
+      "latency_p50_ms": 52.4,
+      "latency_p95_ms": 71.3,
       "per_type": {
-        "choice": "2/3",
-        "noul": "1/2",
-        "score": "1/1"
+        "choice": "5/6",
+        "noul": "4/5",
+        "score": "1/3"
       },
       "details": [
         {
@@ -18,7 +18,7 @@
           "expected": "refund",
           "ok": true,
           "confidence": 0.979,
-          "latency_ms": 75.5
+          "latency_ms": 49.2
         },
         {
           "task_id": "en02",
@@ -26,7 +26,7 @@
           "expected": "block",
           "ok": false,
           "confidence": 0.6821,
-          "latency_ms": 40.5
+          "latency_ms": 46.4
         },
         {
           "task_id": "en03",
@@ -34,7 +34,7 @@
           "expected": "true",
           "ok": true,
           "confidence": 0.8698,
-          "latency_ms": 50.4
+          "latency_ms": 66.2
         },
         {
           "task_id": "en04",
@@ -42,7 +42,7 @@
           "expected": "low",
           "ok": true,
           "confidence": 0.4832,
-          "latency_ms": 56.0
+          "latency_ms": 87.1
         },
         {
           "task_id": "en05",
@@ -50,7 +50,7 @@
           "expected": "spam",
           "ok": true,
           "confidence": 0.9973,
-          "latency_ms": 53.8
+          "latency_ms": 50.8
         },
         {
           "task_id": "en06",
@@ -58,19 +58,83 @@
           "expected": "true",
           "ok": false,
           "confidence": 0.7907,
-          "latency_ms": 87.6
+          "latency_ms": 57.5
+        },
+        {
+          "task_id": "en07",
+          "pred": "true",
+          "expected": "true",
+          "ok": true,
+          "confidence": 0.9386,
+          "latency_ms": 53.7
+        },
+        {
+          "task_id": "en08",
+          "pred": "false",
+          "expected": "false",
+          "ok": true,
+          "confidence": 0.948,
+          "latency_ms": 49.5
+        },
+        {
+          "task_id": "en09",
+          "pred": "complaint",
+          "expected": "complaint",
+          "ok": true,
+          "confidence": 0.9507,
+          "latency_ms": 43.3
+        },
+        {
+          "task_id": "en10",
+          "pred": "greeting",
+          "expected": "greeting",
+          "ok": true,
+          "confidence": 0.6635,
+          "latency_ms": 48.3
+        },
+        {
+          "task_id": "en11",
+          "pred": "low",
+          "expected": "critical",
+          "ok": false,
+          "confidence": 0.4885,
+          "latency_ms": 65.0
+        },
+        {
+          "task_id": "en12",
+          "pred": "moderate",
+          "expected": "negligible",
+          "ok": false,
+          "confidence": 0.5744,
+          "latency_ms": 71.3
+        },
+        {
+          "task_id": "en13",
+          "pred": "true",
+          "expected": "true",
+          "ok": true,
+          "confidence": 0.9021,
+          "latency_ms": 60.9
+        },
+        {
+          "task_id": "en14",
+          "pred": "refund",
+          "expected": "refund",
+          "ok": true,
+          "confidence": 0.9869,
+          "latency_ms": 51.0
         }
       ]
     },
     "multilingual": {
-      "accuracy": 0.8333,
-      "ece": 0.1667,
-      "latency_p50_ms": 24.3,
-      "latency_p95_ms": 29.2,
+      "accuracy": 0.7857,
+      "ece": 0.1439,
+      "latency_p50_ms": 24.7,
+      "latency_p95_ms": 33.1,
       "per_type": {
-        "choice": "3/3",
-        "noul": "2/2",
-        "score": "0/1"
+        "choice": "6/6",
+        "noul": "5/5",
+        "score": "0/3"
       },
       "details": [
         {
@@ -79,7 +143,7 @@
           "expected": "refund",
           "ok": true,
           "confidence": 0.9347,
-          "latency_ms": 34.2
+          "latency_ms": 29.8
         },
         {
           "task_id": "ml02",
@@ -87,7 +151,7 @@
           "expected": "true",
           "ok": true,
           "confidence": 0.7034,
-          "latency_ms": 23.3
+          "latency_ms": 25.7
         },
         {
           "task_id": "ml03",
@@ -95,7 +159,7 @@
           "expected": "login_issue",
           "ok": true,
           "confidence": 0.9999,
-          "latency_ms": 22.5
+          "latency_ms": 20.2
         },
         {
           "task_id": "ml04",
@@ -103,7 +167,7 @@
           "expected": "high",
           "ok": false,
           "confidence": 0.5975,
-          "latency_ms": 29.2
+          "latency_ms": 33.1
         },
         {
           "task_id": "ml05",
@@ -111,7 +175,7 @@
           "expected": "true",
           "ok": true,
           "confidence": 0.9959,
-          "latency_ms": 22.2
+          "latency_ms": 22.1
         },
         {
           "task_id": "ml06",
@@ -119,19 +183,83 @@
           "expected": "invoice",
           "ok": true,
           "confidence": 0.9632,
-          "latency_ms": 25.3
+          "latency_ms": 21.6
+        },
+        {
+          "task_id": "ml05b",
+          "pred": "true",
+          "expected": "true",
+          "ok": true,
+          "confidence": 0.8274,
+          "latency_ms": 26.9
+        },
+        {
+          "task_id": "ml06b",
+          "pred": "false",
+          "expected": "false",
+          "ok": true,
+          "confidence": 0.9988,
+          "latency_ms": 23.6
+        },
+        {
+          "task_id": "ml07b",
+          "pred": "refund",
+          "expected": "refund",
+          "ok": true,
+          "confidence": 0.5588,
+          "latency_ms": 25.6
+        },
+        {
+          "task_id": "ml08b",
+          "pred": "greeting",
+          "expected": "greeting",
+          "ok": true,
+          "confidence": 0.9978,
+          "latency_ms": 20.7
+        },
+        {
+          "task_id": "ml09b",
+          "pred": "low",
+          "expected": "critical",
+          "ok": false,
+          "confidence": 0.5572,
+          "latency_ms": 33.3
+        },
+        {
+          "task_id": "ml10b",
+          "pred": "moderate",
+          "expected": "negligible",
+          "ok": false,
+          "confidence": 0.5664,
+          "latency_ms": 30.3
+        },
+        {
+          "task_id": "ml11b",
+          "pred": "true",
+          "expected": "true",
+          "ok": true,
+          "confidence": 0.994,
+          "latency_ms": 23.9
+        },
+        {
+          "task_id": "ml12b",
+          "pred": "complaint",
+          "expected": "complaint",
+          "ok": true,
+          "confidence": 0.8507,
+          "latency_ms": 23.8
         }
       ]
     },
     "typed-decisions": {
-      "accuracy": 1.0,
-      "ece": 0.4298,
-      "latency_p50_ms": 59.6,
-      "latency_p95_ms": 60.4,
+      "accuracy": 0.5833,
+      "ece": 0.2133,
+      "latency_p50_ms": 58.3,
+      "latency_p95_ms": 67.2,
       "per_type": {
-        "choice": "2/2",
-        "score": "1/1",
-        "noul": "1/1"
+        "choice": "4/6",
+        "score": "1/3",
+        "noul": "2/3"
       },
       "details": [
         {
@@ -140,7 +268,7 @@
           "expected": "retry_payment",
           "ok": true,
           "confidence": 0.6696,
-          "latency_ms": 60.4
+          "latency_ms": 61.3
         },
         {
           "task_id": "td02",
@@ -148,7 +276,7 @@
           "expected": "high",
           "ok": true,
           "confidence": 0.4147,
-          "latency_ms": 82.5
+          "latency_ms": 62.9
         },
         {
           "task_id": "td03",
@@ -156,7 +284,7 @@
           "expected": "true",
           "ok": true,
           "confidence": 0.6044,
-          "latency_ms": 58.7
+          "latency_ms": 57.2
         },
         {
           "task_id": "td04",
@@ -164,7 +292,71 @@
           "expected": "scale_up",
           "ok": true,
           "confidence": 0.5922,
-          "latency_ms": 52.7
+          "latency_ms": 52.0
+        },
+        {
+          "task_id": "td05",
+          "pred": "emergency_stop",
+          "expected": "emergency_stop",
+          "ok": true,
+          "confidence": 0.4671,
+          "latency_ms": 60.1
+        },
+        {
+          "task_id": "td06",
+          "pred": "faq_reply",
+          "expected": "faq_reply",
+          "ok": true,
+          "confidence": 0.6369,
+          "latency_ms": 48.3
+        },
+        {
+          "task_id": "td07",
+          "pred": "false",
+          "expected": "true",
+          "ok": false,
+          "confidence": 0.598,
+          "latency_ms": 57.6
+        },
+        {
+          "task_id": "td08",
+          "pred": "false",
+          "expected": "false",
+          "ok": true,
+          "confidence": 0.7594,
+          "latency_ms": 58.9
+        },
+        {
+          "task_id": "td09",
+          "pred": "high",
+          "expected": "critical",
+          "ok": false,
+          "confidence": 0.4426,
+          "latency_ms": 76.6
+        },
+        {
+          "task_id": "td10",
+          "pred": "low",
+          "expected": "negligible",
+          "ok": false,
+          "confidence": 0.3901,
+          "latency_ms": 67.2
+        },
+        {
+          "task_id": "td11",
+          "pred": "bank_transfer",
+          "expected": "original_payment",
+          "ok": false,
+          "confidence": 0.3793,
+          "latency_ms": 53.5
+        },
+        {
+          "task_id": "td12",
+          "pred": "standard_reply",
+          "expected": "compensation",
+          "ok": false,
+          "confidence": 0.4057,
+          "latency_ms": 48.0
         }
       ]
     }
