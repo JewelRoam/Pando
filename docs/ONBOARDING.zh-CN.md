@@ -6,8 +6,8 @@
 ## 产品原则
 
 1. **一个入口产出计划，而不是直接改系统。**
-   `python -m pandosi.doctor` 只读探测能力；`onboard` 后续只执行
-   非特权步骤，敏感步骤打印精确命令。
+   `python -m pandosi.doctor` 只读探测能力；`onboard --dry-run` 只输出
+   计划；`pandosi.grants` 负责记录用户显式批准的敏感能力。
 2. **失败信息必须带下一步。**
    不说“NPU 不可用”，要说“缺哪个包/驱动、用户需要在哪个入口授权”。
 3. **敏感操作是授权，不是安装器副作用。**
@@ -22,7 +22,7 @@
 Step 0  只读体检       pandosi doctor --json
 Step 1  单机价值       tools/demo.py：本机 root + 多 stem/多 EU 共识
 Step 2  本机加速       用户选择安装 onnxruntime/openvino；仍无需管理员
-Step 3  显式入群       用户粘贴 root 地址 + 配对码，stem 只服务该 root
+Step 3  显式入群       LAN 授权 + root 地址 + pairing token，stem 只服务该 root
 Step 4  沙箱实验室     Docker/Podman/WSL 中运行 Spore 复制实验
 Step 5  常驻服务       systemd --user / Windows 计划任务 / Termux sv，显式开启
 ```
@@ -34,19 +34,14 @@ Step 5 仍应先补授权过期和平台服务适配，再追求常驻。
 
 使用本地可审计的 `grants.toml`，不要用全局“已信任”开关：
 
-```toml
-[grants.lan_listen]
-scope = "192.168.1.0/24"
-resource = "0.0.0.0:8080"
-approved_by = "interactive"
-expires_at = "2026-10-21T00:00:00Z"
-evidence = "doctor plan #<hash>"
-
-[grants.npu_driver]
-action = "open-vendor-installer"
-approved_by = "interactive"
-command = "vendor-specific-command-from-doctor"
+```bash
+python -m pandosi.grants grant lan_listen \
+  --resource 0.0.0.0:8080 --scope 192.168.1.0/24 --hours 24 --yes
+python -m pandosi.grants show
+python -m pandosi.grants revoke lan_listen
 ```
+
+账本默认写入 `~/.pandosi/grants.toml`；缺失或过期授权一律拒绝。
 
 规则：
 

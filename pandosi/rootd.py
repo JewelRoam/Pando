@@ -361,6 +361,8 @@ def main() -> None:
                         help="enable /shutdown with this token")
     parser.add_argument("--pairing-token", default=None,
                         help="fixed stem admission token; generated when omitted")
+    parser.add_argument("--lan", action="store_true",
+                        help="bind 0.0.0.0; requires an active lan_listen grant")
     args = parser.parse_args()
     from .common import bypass_proxy_for_lan
     bypass_proxy_for_lan()
@@ -370,7 +372,15 @@ def main() -> None:
         spore_files = {"payload.onnx": _P(args.serve_spore)}
         if args.playbook:
             spore_files["playbook.toml"] = _P(args.playbook)
-    root = Root(port=args.port, spore_files=spore_files)
+    listen_host = "127.0.0.1"
+    if args.lan:
+        from .grants import require_grant
+        try:
+            require_grant("lan_listen")
+        except PermissionError as exc:
+            raise SystemExit(f"[locked] {exc}")
+        listen_host = "0.0.0.0"
+    root = Root(host=listen_host, port=args.port, spore_files=spore_files)
     import secrets
     root.set_pairing_token(args.pairing_token or secrets.token_urlsafe(18))
     print(f"stem pairing token: {root.pairing_token}", flush=True)

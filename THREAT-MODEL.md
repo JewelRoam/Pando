@@ -22,6 +22,9 @@ software on third-party machines.
 6. **Tokenized root surface**: CLI roots generate a pairing token;
    `/register`, `/nodes`, `/decide`, playbook reads, and root-served
    Spore endpoints fail closed unless it is presented.
+7. **Expiring capability grants**: LAN listeners and lab replication require
+   an operator-created, expiring `~/.pandosi/grants.toml` entry; missing or
+   expired grants fail closed.
 
 ## What this project does NOT do
 

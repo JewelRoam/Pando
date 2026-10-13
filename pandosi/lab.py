@@ -49,8 +49,10 @@ def require_sandbox() -> dict:
 
 
 def run_lab() -> dict:
-    """Sandbox-gated replication demo: seed -> pull -> verify round trip."""
+    """Sandbox- and consent-gated replication verification round trip."""
     info = require_sandbox()
+    from .grants import require_grant
+    require_grant("lab_replication")
     import secrets
     import tempfile
 
@@ -64,11 +66,13 @@ def run_lab() -> dict:
 
     manifest = build_manifest({"payload.bin": payload}, key,
                               metadata={"lab": info["kind"]})
-    server = SporeServer(manifest, {"payload.bin": payload})
+    server = SporeServer(manifest, {"payload.bin": payload},
+                         auth_token="local-lab")
     server.start()
     try:
         stats = pull_spore(server.url(), tmp / "pulled", key.verify_key,
-                           sandbox_confirmed=True)
+                           sandbox_confirmed=True,
+                           auth_token="local-lab")
         ok = all(stats["files"].values())
     finally:
         server.stop()

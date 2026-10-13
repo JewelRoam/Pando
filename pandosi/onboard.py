@@ -14,7 +14,7 @@ import re
 PLAN_FIELDS = ("ready", "nonprivileged", "consent_required", "sandbox_required")
 CONSENT_RE = re.compile(
     r"driver|admin|administrator|sudo|uac|firewall|autostart|service|"
-    r"network permission|device permission", re.I)
+    r"network permission|device permission|grant", re.I)
 
 
 def normalize_rows(rows: list[dict] | list[tuple[str, str, str]]) -> list[dict]:

@@ -20,6 +20,7 @@ from pandosi.common import DecisionRequest, Vote, aggregate
 from pandosi.rootd import Coordinator, Root
 from pandosi.stemd import Stem
 from pandosi.onboard import build_plan
+from pandosi.grants import grant_status, require_grant, save_grant
 
 
 class TestSmoke(unittest.TestCase):
@@ -101,6 +102,29 @@ class TestSmoke(unittest.TestCase):
             self.assertEqual(caught.exception.code, 403)
         finally:
             root.stop()
+
+    def test_grant_ledger_expires_and_fails_closed(self):
+        import datetime as dt
+        import tempfile
+        now = dt.datetime.now(dt.timezone.utc)
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "grants.toml"
+            with self.assertRaises(PermissionError):
+                require_grant("lan_listen", path, now)
+
+            save_grant(
+                "lan_listen", "0.0.0.0:8080", "LAN", "test",
+                (now - dt.timedelta(minutes=1)).isoformat(), path=path)
+            self.assertEqual(grant_status("lan_listen", path, now)["status"],
+                             "expired")
+            with self.assertRaises(PermissionError):
+                require_grant("lan_listen", path, now)
+
+            save_grant(
+                "lan_listen", "0.0.0.0:8080", "LAN", "test",
+                (now + dt.timedelta(hours=1)).isoformat(), path=path)
+            grant = require_grant("lan_listen", path, now)
+            self.assertEqual(grant["resource"], "0.0.0.0:8080")
 
     def test_end_to_end_http_vote(self):
         """Real root + real HTTP stems; dead node shrinks quorum gracefully."""

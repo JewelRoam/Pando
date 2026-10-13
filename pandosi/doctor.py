@@ -90,6 +90,16 @@ def checks() -> list[dict]:
     cap = capability()
     role = assign_role(cap)
     add("ok", f"role: {role} (ram {cap['ram_gb']}GB, cpus {cap['cpu_count']})")
+
+    from .grants import grant_status
+    for action, item in [("lan_listen", "LAN listen grant"),
+                         ("lab_replication", "lab replication grant")]:
+        status = grant_status(action)
+        add("ok" if status["status"] == "active" else "locked", item,
+            "" if status["status"] == "active" else
+            f"python -m pandosi.grants grant {action} "
+            f"--resource {'0.0.0.0:8080' if action == 'lan_listen' else 'sandbox/lab'} "
+            "--hours 24 --yes")
     return rows
 
 

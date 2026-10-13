@@ -27,8 +27,9 @@ devices, one mind.
 - **Playbook governance**: TOML strategy layer (authored offline) drives
   consensus gating; hash-chained version history; structural policy
   enforcement (score heads are informational-only — enforced).
-- **One-command onboarding**: `python -m pandosi.join` discovers a LAN
-  swarm via mDNS or becomes root+stem. Zero privilege.
+- **Local-first onboarding**: `python -m pandosi.join` starts a loopback
+  root+stem with zero privilege; LAN discovery/listening requires an
+  explicit, expiring grant.
 
 
 ## Architecture
@@ -84,9 +85,17 @@ graph TB
 pip install pynacl zeroconf                  # deps
 python -m pandosi.doctor --plan              # safe onboarding plan
 python -m pandosi.onboard --dry-run          # no install/elevation
-python -m pandosi.join                       # join or start a swarm
+python -m pandosi.join                       # local root + stem (loopback)
 python -m pandosi.doctor                     # capability report
 python tools/dashboard.py                    # render local metrics
+```
+
+LAN is a separate explicit grant:
+
+```bash
+python -m pandosi.grants grant lan_listen \
+  --resource 0.0.0.0:8080 --hours 24 --yes
+python -m pandosi.join --lan
 ```
 
 Real-model mode: install `laya`, export ONNX (tools/vendor/export_onnx.py),

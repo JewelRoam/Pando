@@ -24,6 +24,7 @@ from pathlib import Path
 
 from .common import bypass_proxy_for_lan
 from .graft import assign_role, capability, enumerate_execution_units
+from .grants import require_grant
 
 SERVICE_TYPE = "_pandosi._tcp.local."
 ARTIFACT_CANDIDATES = [
@@ -134,9 +135,17 @@ def main() -> None:
                              "(default: PANDOSI_PAIRING_TOKEN)")
     parser.add_argument("--onnx-path", default=None,
                         help="use this ONNX file as the decision backend")
+    parser.add_argument("--lan", action="store_true",
+                        help="bind/advertise beyond loopback; requires an "
+                             "active lan_listen grant")
     args = parser.parse_args()
     bypass_proxy_for_lan()
 
+    if args.lan:
+        try:
+            require_grant("lan_listen")
+        except PermissionError as exc:
+            raise SystemExit(f"[locked] {exc}")
     if (args.spore_url or args.spore) and not args.sandbox_confirmed:
         raise SystemExit("spore pull requires --sandbox-confirmed "
                          "(see THREAT-MODEL.md)")
@@ -159,7 +168,7 @@ def main() -> None:
 
     root_info = {"ip": args.root.split("//")[1].split(":")[0],
                  "port": int(args.root.rsplit(":", 1)[1])} if args.root \
-        else discover_root()
+        else (discover_root() if args.lan else None)
     from .rootd import Coordinator, Root
     from .stemd import Stem, heartbeat_loop
 
@@ -172,14 +181,20 @@ def main() -> None:
                 f"root {root_url} requires --pairing-token "
                 "(or PANDOSI_PAIRING_TOKEN); refusing automatic join")
     else:
-        print("no root on this LAN - becoming root + stem", flush=True)
+        listen_host = "0.0.0.0" if args.lan else "127.0.0.1"
+        scope = "LAN" if args.lan else "loopback"
+        print(f"no existing root - becoming root + stem ({scope})", flush=True)
         args.pairing_token = args.pairing_token or secrets.token_urlsafe(18)
-        root = Root(host="0.0.0.0", port=args.port or 8080)
+        root = Root(host=listen_host, port=args.port or 8080)
         root.set_pairing_token(args.pairing_token)
         root.start()
         root_url = root.url()
-        advertise_root(root.port)
-        print(f"rootd listening on {root_url} (advertised via mDNS)", flush=True)
+        if args.lan:
+            advertise_root(root.port)
+            print(f"rootd listening on {root_url} "
+                  "(advertised via mDNS)", flush=True)
+        else:
+            print(f"rootd listening on {root_url} (loopback only)", flush=True)
         print(f"stem pairing token: {args.pairing_token}", flush=True)
         print("other stems must pass the same --pairing-token", flush=True)
 
@@ -269,7 +284,8 @@ def main() -> None:
     else:
         backend = backend_mod.MockBackend(node_id, **backend_cfg)
 
-    stems = [Stem(node_id, backend, host="0.0.0.0", port=0)]
+    stem_host = "0.0.0.0" if args.lan else "127.0.0.1"
+    stems = [Stem(node_id, backend, host=stem_host, port=0)]
     if args.multi_eu and backend_name == "onnx":
         # Auto-discover static surgery-graph buckets (any seq size).
         bucket_files = sorted(
@@ -280,7 +296,7 @@ def main() -> None:
                 repo="convaiinnovations/laya", device="GPU",
                 onnx_buckets=[str(b) for b in bucket_files])
             stems.append(Stem(node_id + "-gpu", gpu_backend,
-                              host="0.0.0.0", port=0))
+                              host=stem_host, port=0))
             print(f"multi-EU: iGPU stem added "
                   f"({len(bucket_files)} bucket(s))", flush=True)
         # NPU stem: needs the IsNaN-free static graph
@@ -291,7 +307,7 @@ def main() -> None:
                 repo="convaiinnovations/laya", device="NPU",
                 pad_to=256)
             stems.append(Stem(node_id + "-npu", npu_backend,
-                              host="0.0.0.0", port=0))
+                              host=stem_host, port=0))
             print("multi-EU: NPU stem added (IsNaN-free static graph)",
                   flush=True)
     for s in stems:
@@ -308,7 +324,9 @@ def main() -> None:
                       f"{r.choice} @ {r.probability}", flush=True)
         print("VERIFY passed - node is LIVE", flush=True)
 
-    registrations = [{"node_id": s.node_id, "url": f"http://{lan_ip()}:{s.port}",
+    advertised_ip = lan_ip() if args.lan else "127.0.0.1"
+    registrations = [{"node_id": s.node_id,
+                      "url": f"http://{advertised_ip}:{s.port}",
                       "checkpoint": s.backend.checkpoint} for s in stems]
     if args.pairing_token:
         for reg in registrations:
