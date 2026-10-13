@@ -22,3 +22,4 @@ fi_*_log.txt
 mu_join_log.txt
 *_log.txt
 rollouts/
+_crossprobe.py
