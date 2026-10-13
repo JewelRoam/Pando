@@ -255,7 +255,8 @@ def main() -> None:
         if npu_file.exists() and any(u["kind"] == "NPU" for u in eus):
             npu_backend = backend_mod.OnnxLayaBackend(
                 node_id + "-npu", str(npu_file),
-                repo="convaiinnovations/laya", device="NPU")
+                repo="convaiinnovations/laya", device="NPU",
+                pad_to=256)
             stems.append(Stem(node_id + "-npu", npu_backend,
                               host="0.0.0.0", port=0))
             print("multi-EU: NPU stem added (IsNaN-free static graph)",
