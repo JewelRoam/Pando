@@ -25,3 +25,6 @@ rollouts/
 _crossprobe.py
 _sd_e2e.py
 sd_*_log.txt
+tri*_log.txt
+root_*_log.txt
+join_*_log.txt
