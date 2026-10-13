@@ -1,6 +1,6 @@
-# PandoSI 技术蓝图（v0.1）
+# PandoSI 技术蓝图（v0.8）
 
-状态：蓝图阶段。目标：形成一套能跑通、可开源、可量化的“弹性异构自复制统一智能”完整方法。
+状态：v0.8。研究预览版已发布（见 RELEASE-NOTES.md）。目标：形成一套能跑通、可开源、可量化的“弹性异构自复制统一智能”完整方法。
 
 ## 0. 目标与非目标
 
@@ -33,7 +33,7 @@
 
 ```
 全局（WAN，高延迟）：数据并行 — 每组是完整副本，加组=加吞吐，零重分片
-组内（LAN，低延迟）：流水线并行 — 仅当模型 > 单机内存时启用
+组内（LAN / 多桶静态服务 (v0.8: iGPU 多桶 25-40ms 变长负载已实测)，低延迟）：流水线并行 — 仅当模型 > 单机内存时启用
 决策模型（<1GB）：  单机独立运行 — 永不切分，副本即弹性
 ```
 
@@ -91,7 +91,8 @@ Payload = { 权重(~800MB), playbook(签名), harness(二进制/脚本) }。
 - VERIFY：向 Root 注册，通过 3 次探测决策即视为 LIVE。
 - 失败任意步 → 记录原因到 playbook 诊断日志，下个周期重试或放弃。
 
-- 安全门（v0.3）：借鉴 laya-guard 两层结构——确定性规则
+- 安全门（v0.3）
+- 密钥管理 (v0.8): rootd 密钥持久化; join --spore TOFU 钉扎 + 变更硬拒绝：借鉴 laya-guard 两层结构——确定性规则
   先行（白名单/黑名单/资源限制），灰区问题才进决策
   模型共识，仍灰则拒绝并上报。guard 服务不可用时
   fail-closed（拒绝而非放行）。
@@ -149,6 +150,8 @@ WAN 加入仍用 heartbeat/URL 注册。
 ## 4. 决策模型群
 
 - 首选模型：Laya（convaiinnovations/laya 421M 英文 / 322M 多语言，Apache-2.0）。
+
+**score 政策 (v0.8)**: score 头三血统均不具备决策级可靠性 (27 次测量)。结构性强制: score 问题必须声明 informational=true。风险评分使用 choice 格式 (18/27=67%)。
 - 运行时：首选 ONNX Runtime / OpenVINO（CPU int8 已有社区验证），备选 PyTorch。
 - 服务形态：每设备一个 FastAPI `/decide` 端点（或合并进 harness 单二进制）。
 - Router：多语言场景由 Laya 自带 router 按语言分发 checkpoint。
@@ -170,12 +173,16 @@ decode 门槛不适用，换成**单决策延迟预算**
 | 设备档位 | 判定 | PandoSI 角色 |
 |---|---|---|
 | Pi 5 / x86 桌面（≥4GB） | 确定可跑 Laya | worker |
+| **AI PC (Core Ultra 7 255H)** | **已实测**: CPU 106ms + iGPU 25.6ms(多桶) | **双 EU 异构共识 ✅** |
 | 4GB 电视盒 | RK3588 已有首个真机数据点：Laya 多语言版 RKNN **509ms**/决策；Amlogic S905 仍未实测 | Phase 1 首个验证目标 |
 | 2GB 以下盒子 | 存疑（ONNX int8 后 Laya 权重约 200-400MB） | 观察者模式 |
 
 **Graft 验收集（v0.5 定案）**：16 个固定决策任务（覆盖 choice/score/noul 三类问题 × 三个 checkpoint），验收标准 16/16 正确 + p50/p95 延迟 + ECE 报告，按设备公开发布。原有基准项保留：cold load 时间、峰值 RSS、
 单决策延迟、30 分钟持续热测降频曲线、标准任务集准确率。
 任何设备的实测数据都是开源贡献。
+
+**开发机实测结果 (v0.8)**：Core Ultra 7 255H + Arc 140T iGPU + AI Boost NPU
+— CPU 106ms + iGPU 25.6ms（多桶）。NPU 阻塞于算子支持（4 条路径归档）。
 
 ## 5. 演进路线（从繁殖到进化）
 
@@ -196,6 +203,10 @@ decode 门槛不适用，换成**单决策延迟预算**
 | 需自建 | Spore/Root/Graft 协议、调度器、仪表盘 | 无现成引擎覆盖（空白即贡献点） |
 
 ## 7. 安全与伦理
+
+## 代理免疫 (v0.8)
+
+join/rootd/stemd 均自动设置 NO_PROXY={localhost,127.0.0.1,LAN_IP} - Windows urllib 遵循系统代理会黑洼回环/LAN 地址（实战发现，round 36）。
 
 - 所有自复制实验仅在封闭沙箱（防火墙 VPC / 独立物理网段）进行。
 - 开源发布以防御研究（blue-team）框架呈现，附检测特征说明。
