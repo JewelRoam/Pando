@@ -50,6 +50,15 @@ def main() -> None:
     rows.append(("ok" if have_laya else "miss", "laya package (real decisions)",
                  "" if have_laya else "pip install laya"))
 
+    # Ring 2: sandbox detection for the lab
+    from .lab import detect_sandbox
+    sand = detect_sandbox()
+    rows.append(("ok" if sand["sandboxed"] else "locked",
+                 f"lab sandbox: {sand['kind']}",
+                 "" if sand["sandboxed"] else
+                 "run inside Docker/WSL for spore experiments "
+                 "(see THREAT-MODEL.md)"))
+
     from pathlib import Path
     weights = [p for p in [Path("artifacts/laya-en.int8.onnx"),
                            Path("artifacts/laya-en.onnx")] if p.exists()]
