@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pandosi"
+version = "0.0.1"
+description = "Elastically scalable, heterogeneous, self-replicating unified intelligence (defensive research)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "Apache-2.0"}
+dependencies = ["PyNaCl>=1.5"]
+
+[project.optional-dependencies]
+model = ["transformers>=4.40", "torch>=2.1"]
+serve = ["fastapi", "uvicorn"]
+
+[tool.setuptools]
+packages = ["pandosi"]

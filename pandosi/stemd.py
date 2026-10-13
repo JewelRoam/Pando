@@ -1,0 +1,131 @@
+"""stemd: a PandoSI decision worker node.
+
+Runs an HTTP service exposing /decide, /health, /graft. Registers with a
+rootd coordinator and heartbeats periodically.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import threading
+import time
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+class _PandoHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+from .backend import MockBackend
+from .common import DecisionRequest
+from .graft import assign_role, capability
+
+
+def build_handler(backend, node_id: str):
+    class StemHandler(BaseHTTPRequestHandler):
+        def log_message(self, fmt, *args):  # quiet by default
+            pass
+
+        def _send(self, code: int, payload: dict) -> None:
+            body = json.dumps(payload).encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):  # noqa: N802
+            if self.path == "/health":
+                self._send(200, {"ok": True, "node_id": node_id,
+                                 "checkpoint": backend.checkpoint})
+            elif self.path == "/graft":
+                cap = capability()
+                self._send(200, {"node_id": node_id, "capability": cap,
+                                 "role": assign_role(cap)})
+            else:
+                self._send(404, {"error": "not found"})
+
+        def do_POST(self):  # noqa: N802
+            if self.path != "/decide":
+                self._send(404, {"error": "not found"})
+                return
+            length = int(self.headers.get("Content-Length", 0))
+            req = DecisionRequest.from_json(self.rfile.read(length))
+            try:
+                vote = backend.decide(req)
+                self._send(200, {"vote": vote.to_json()})
+            except Exception as exc:  # surface backend errors to root
+                self._send(500, {"error": str(exc)})
+
+    return StemHandler
+
+
+class Stem:
+    """One worker node bound to a decision backend."""
+
+    def __init__(self, node_id: str, backend, host: str = "127.0.0.1", port: int = 0):
+        self.node_id = node_id
+        self.backend = backend
+        self.host = host
+        self.port = port
+        self._httpd = _PandoHTTPServer((host, port), build_handler(backend, node_id))
+        self.port = self._httpd.server_address[1]
+        self._thread: threading.Thread | None = None
+
+    def url(self) -> str:
+        return f"http://{self.host}:{self.port}"
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._httpd.shutdown()
+
+
+def heartbeat_loop(stem: Stem, root_url: str, interval: float = 5.0) -> None:
+    """Register with root and heartbeat until the process exits."""
+    cap = capability()
+    payload = json.dumps({"node_id": stem.node_id, "url": stem.url(),
+                          "checkpoint": stem.backend.checkpoint,
+                          "capability": cap}).encode("utf-8")
+    while True:
+        try:
+            with urllib.request.urlopen(
+                urllib.request.Request(f"{root_url}/register", data=payload,
+                                       headers={"Content-Type": "application/json"}),
+                timeout=3) as resp:
+                resp.read()
+        except Exception:
+            pass  # root may be down; retry next interval
+        time.sleep(interval)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="PandoSI stem worker")
+    parser.add_argument("--node-id", required=True)
+    parser.add_argument("--checkpoint", default="mock")
+    parser.add_argument("--port", type=int, default=0)
+    parser.add_argument("--root", default=None, help="rootd URL to register with")
+    args = parser.parse_args()
+
+    backend = MockBackend(args.node_id, args.checkpoint)
+    stem = Stem(args.node_id, backend, port=args.port)
+    stem.start()
+    print(f"stemd {args.node_id} listening on {stem.url()} "
+          f"(checkpoint={args.checkpoint})")
+    if args.root:
+        threading.Thread(target=heartbeat_loop, args=(stem, args.root),
+                         daemon=True).start()
+        print(f"registering with root at {args.root}")
+    try:
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        stem.stop()
+
+
+if __name__ == "__main__":
+    main()

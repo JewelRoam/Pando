@@ -1,0 +1,419 @@
+ 
+多设备弹性推理调研 
+DEEP RESEARCH · 2026.10.13 
+不只拼模型：七条路线拼出一个智能 
+你是对的： Laya 与 JEV 是决策模型 ，不是转写错误。把它们纳入后，答案从“切一个大模型”变成了更广的系统设计；这次再把 
+Google Gemma 等小模型的单 CPU 真机数据 补齐，明确区分“能加载”与“可交互”。 
+范围：CPU / 机顶盒 / 手机 / Mac / GPU 
+前提：暂不考虑设备间网络延迟 
+核验：live + search index 
+UPDATED VERDICT 
+一个 CPU 能跑；真正的分界在 ≤1B 与 2–4B。 
+Pi 5 上 270M–1B 已可交互，2B+ 多数只有 2–8 tok/s；旗舰手机或桌面 x86 才能把更大模型推到约 10 tok/s。4GB 电视盒目前没有公开实测。 
+01 更正 
+02 System One 
+03 引擎 
+04 CPU 实测 
+05 七条路线 
+06 可用度 
+07 投入建议 
+08 未知项 
+来源 
+01 / CORRECTION 
+Laya、JEV 没拼错：它们改变了“拼智能”的基本单位 
+上一版把二者误判为语音转写错误，这是错误的。Laya 是可本地部署的开源 System One 决策模型；JEV 是 TypeSafe AI 的闭源 API。它们都不是逐 token 生成文本，而是针对给定 state，一次前向输出类型化决策与置信度。 
+上一版错误前提 
+把“小设备拼智能”等同于“把一个 LLM 切到很多设备”，因此只比较了 pipeline、tensor parallel 与多 Agent。 
+更新后的问题 
+把智能拆成 
+state 表征 → typed decision → planning → tool use → expression 。其中高频判断可交给 421M 级决策模型并行处理；LLM 只承担开放式推理与表达。 
+证据边界： Laya 官方仓库为本轮直接读取；JEV、Ollama/llama.cpp 生态及大部分 2026 项目数据来自搜索索引抓取。页面将这两类证据分开，不把 index 结果写成实测。 
+02 / SYSTEM ONE 
+决策模型不是“小一点的聊天模型” 
+它不生成一段推理文本，而是对 Choice / Score / Noul 等 typed question 给出答案与经过标定的概率。对多设备系统而言，这意味着最合理的扩展方式是 复制、分工、集成 ，而不是切分 843MB 权重。 
+421M 
+Laya 主 checkpoint；另有 322M multilingual。Apache-2.0。 Laya ↗ 
+33 ms 
+T4 单问题单次 forward；batch 为 7.2ms / question。不是 ARM 盒子实测。 live ↗ 
+≈843 MB 
+报告记录的 checkpoint 文件量级；dtype 未确认，不能据此称作 FP32。CPU 峰值 <1.5GB 来自 macOS / Intel 说明。 
+70–500 ms 
+JEV vendor 延迟范围；闭源、仅 API，2026-09-15 发布。 index ↗ 
+CHOICE 
+从最多 255 个候选中选择；适合 route、policy、tool。宽选项集仍是 Laya 的弱项。 
+SCORE 
+对风险、质量、相关性等给出数值；可跨节点并行评分，再按置信度聚合。 
+NOUL 
+输出自然语言理解标签；同一 state 可一次提交多个问题并行回答。 
+推荐形态：决策与表达分离 
+STATE 
+代码 / 感知模型 / 小 LLM 构建状态 
+→ 
+SYSTEM ONE 
+Laya worker 群并行做 typed decisions 
+→ 
+POLICY 
+高置信执行；中置信复核；低置信升级 
+→ 
+SYSTEM TWO 
+LLM 规划、解释与表达 
+关键限制： RLCD 校准只保证分布内概率更可信；schema 之外的开放问题、state 应包含什么、应该提出什么问题，仍需代码或 LLM。没有找到名为 J2LM 的独立项目，本页只把“决策与表达分离”作为架构模式描述。 
+03 / ENGINES 
+引擎横向比较：弹性发生在哪一层 
+“支持分布式”并不等于“节点可随时加入退出”。下表把异构设备、发现、热扩缩、重分片与故障恢复拆开看；没有一个现成引擎同时覆盖所有能力。 
+引擎 
+设备 / 并行 
+发现与热扩缩 
+恢复、重分片与边界 
+Petals 
+研究型、公共 swarm 已死 
+Python / PyTorch 节点；按 Transformer blocks 做 pipeline。 
+DHT 寻址、广播 block 区间、client reroute；设计上支持 join / leave 与定期 rebalance。 
+最完整的真弹性机制，但上游最后 commit 为 2024-09；2026-09 公共 swarm 报 MissingBlocksError，私有部署未实测。 
+证据 ↗ 
+Exo 
+实验性、Apple 中心 
+Mac / Apple 设备为主，支持 pipeline / tensor；报告未找到 Android 或 Raspberry Pi 支持。 
+LAN P2P 自动发现；可按拓扑与内存重新分区，但不是推理中的无缝热加入。 
+项目仍活跃（约 47k stars），但评测仍称 experimental；不能据此承诺机顶盒可用。 
+评测 ↗ 
+llama.cpp RPC 
+最务实的手动组网 
+ggml 后端混搭；main host + RPC workers，按层 / 内存比例卸载。 
+--rpc 
+使用静态地址列表；无自动发现，掉线后通常要重启与重载。 
+官方明确标注 proof-of-concept、fragile、insecure；仅适合可信 LAN。 
+README ↗ 
+Rookery / ArcFlare 
+llama.cpp 外部编排 
+前者用 K8s，后者用 UDP broadcast，为 RPC workers 补发现层。 
+能补节点发现，不等于补齐推理内热迁移、共享 KV 恢复与安全。 
+Rookery 223 天未更新；两者均属 hobby 级，不能视作生产弹性层。 
+Rookery ↗ 
+ArcFlare ↗ 
+distributed-llama 
+Pi 集群性能参照 
+Linux / ARM / Raspberry Pi；按 attention heads 做 tensor parallel。 
+静态 LAN 配置，无动态扩缩与自动再均衡。 
+项目停滞 774 天，但提供 4×Pi 5 的可复现实测；优势来自并行和内存带宽，不是弹性。 
+项目 ↗ 
+SwarmLLM 
+浏览器端极早期 
+WebGPU + WebRTC；报告称 Qwen3.8 27B 跨 MacBook + iPhone 达 10.7 tok/s。 
+浏览器设备可拼接并用 speculative chains 降低 hop 成本；v0.2.0，尚非 turnkey。 
+MIT 开源、每 token 报告约 10KB；早期 demo 不能等同于通用容错系统。 
+说明 ↗ 
+vLLM Elastic EP 
+数据中心 GPU 弹性 
+CUDA / HIP workers；TP / EP / DP，依赖 NCCL / NIXL。 
+POST /scale_elastic_ep 
+可增删 worker 并重分布 experts；NIXL EP 提供故障检测。 
+生产级能力，但 CPU / 手机 / 机顶盒没有 EP 后端；不能下沉到本题场景。 
+官方博客 ↗ 
+SGLang 
+服务副本弹性 
+GPU 服务器栈；TP / EP / DP / CP / PP 与 prefill-decode 分离。 
+同一模型分片内部不支持运行时增减设备；依赖外部 load balancer 扩缩副本。 
+适合数据中心服务，不支持手机与 CPU 机顶盒混搭；弹性发生在 replica 层。 
+引擎层结论： Petals 的机制最接近“任意节点动态加入”，但公共 swarm 已不可依赖；Exo 最接近异构局域网体验，却不是机顶盒栈；llama.cpp RPC 最容易自己动手，但发现、安全和恢复都要外补；vLLM / SGLang 的弹性属于数据中心。 
+04 / CPU BENCHMARKS 
+一个 CPU 能跑，但“跑起来”与“可交互”差一整个档位 
+以下均是单机 CPU 路径；NPU、Metal 与 WebGPU 数据只在注明时作为对照。速度统一看 autoregressive decode，而不是通常快 5–30 倍的 prefill。这里把 
+≥10 tok/s 
+作为可交互参考线，不把低速出 token 误写成体验可用。 
+LOADABLE · 能加载 
+先过内存门槛 
+经验下限是内存至少为 Q4 权重体积的 
+1.5 倍 。Pi 5 8GB 可把 8–9B Q4 跑到约 1–2 tok/s，但这只是“能出 token”。 Pi 5 汇总 ↗ 
+INTERACTIVE · ≥10 tok/s 
+再过解码门槛 
+Pi 5 的现实上限约在 ≤1B；1.7B–4B 通常要旗舰手机 SoC 或桌面 x86。4GB Amlogic S905 盒子只有“≤1.5B Q4 可能装得下、约 4–8 tok/s”的带宽推算， 没有公开整机实测 。 
+模型 
+树莓派 5 
+手机 CPU / 桌面 x86 
+判断与证据边界 
+Gemma 3 270M 
+int8 
+23.7 / 17.7 / 11.8 tok/s 
+上下文 1280 / 2048 / 4096。 
+Pixel 8a：66.9 / 55.2 / 40.2；Galaxy S26：139.9 / 117.0 / 80.2 tok/s，同一组 context sweep。 
+弱 CPU 也能交互 
+上下文变长会显著拖慢 decode。 
+edge-llm-bench ↗ 
+Gemma 3 1B 
+Q4_K_M / Q8_0 
+8–20 tok/s 
+Q4_K_M，约 1GB。 
+Q8_0：Ryzen 9 3900X 24.8；Ryzen 9 7945HX 49.5 tok/s。 
+Pi 5 压线；x86 轻松 
+Pi 5 ↗ 
+ferrox ↗ 
+Gemma 3n E2B 
+5B 权重，约 2B 有效参数 
+无公开实测 
+不能把手机结果外推成 Pi 数字。 
+Pixel 8 Pro（Ollama CPU）约 9 tok/s；iPhone 16 Pro Max（XNNPACK）10.1 NEON / 11.0 SME2，TTFT 5.02s / 2.96s，峰值约 1.85GB。 
+旗舰手机 CPU 恰好压线 
+Pixel 用户报告 ↗ 
+iPhone 实测 ↗ 
+Gemma 4 E2B / E4B 
+QAT Q4 
+E2B 约 7 tok/s，server 实测 6.36 tok/s、约 3GB；E4B 约 2–5 tok/s。 
+E2B：iPhone Air 36.99 tok/s，TTFT 0.38s；Pixel 10 Pro Fold 10.42 tok/s，TTFT 1.65s。 
+Pi 5 能跑但不够快 
+thinking 模式还会增加隐藏 token 与墙钟时间。 
+Pi 5 ↗ 
+E4B ↗ 
+手机 ↗ 
+Llama 3.2 1B / 3B 
+Q4 / SpinQuant 4-bit 
+1B：10–15 tok/s；3B：4–6 tok/s。 
+OnePlus 12 ExecuTorch CPU：1B 50.2 tok/s、TTFT 0.3s、RSS 1921MiB；3B 19.7 tok/s、TTFT 0.7s、RSS 3726MiB。 
+1B 是 Pi 5 甜点位 
+Pi 1B ↗ 
+Pi 3B ↗ 
+ExecuTorch ↗ 
+Qwen3 0.6B / 1.7B / 4B 
+int4 / Q4 
+0.6B、1.7B 无公开实测；4B 约 5–7 tok/s。 
+Galaxy S25 0.6B：12.90 tok/s、TTFT 0.520s、峰值 2895MB；Galaxy S26 1.7B：8.0–8.3 tok/s、TTFT 2.8–4.3s、峰值 2523MB。 
+1.7B 已到手机 CPU 边缘 
+0.6B ↗ 
+1.7B ↗ 
+Pi 4B ↗ 
+SmolLM2 360M / Phi-4-mini 3.8B 
+SmolLM2 360M Q8_0：30+ tok/s、约 0.5GB；Phi-4-mini Q4：5–8 tok/s。 
+Phi-4-mini Q4_K_M 在 Ryzen 9 3900X 为 10.9 tok/s；手机 CPU 无可靠公开实测。 
+360M 很轻；3.8B 需桌面级 CPU 
+SmolLM2 ↗ 
+Pi Phi ↗ 
+x86 Phi ↗ 
+持续性能不是首轮跑分： 无散热 Pi 5 约 85°C 会降频，持续吞吐可掉约三分之一；手机连续跑分也会升温掉速。相对地，M1 Pro 的一份 3 小时 batch 记录保持 
+thermal_pressure = Nominal 。 Pi 热测试 ↗ 
+M1 Pro ↗ 
+回到电视盒： Amlogic S905 / 4GB RAM 的完整“模型 × 后端”公开实测仍为零。基于约 8–10GB/s 内存带宽和 Android TV 约占 1.5GB 的推算，1B Q4 理论天花板约 10–12 tok/s、实际可能 4–8 tok/s，3B+ 大概率 OOM 或严重 swap；这些数字都是 推算，不是实测 。最小验证应记录 cold load、峰值 RSS、TTFT、decode、30 分钟热降频与实际任务质量。 
+05 / ALL ROUTES 
+七条路线：从已可用到仍在纸面 
+点击状态筛选。每张卡都给出正确的“拼法”、现实证据，以及在忽略网络延迟后仍然存在的头号瓶颈。 
+全部 7 条 
+已可用 
+可原型 
+纸面 / 无路径 
+A / DECISION SWARM 
+决策模型群 
+软件可用 · 盒群待测 
+目标形态是每台设备完整运行 Laya，按 schema、问题集或 checkpoint 分工；用 calibrated confidence 做加权集成与升级门控。同模型复制投票的误差高度相关，异构 checkpoint / 温度 / schema 才更可能有收益。 
+拼法 
+复制 + 分工，不切分；coordinator 调多个 
+/v1/systemone 
+服务。 
+独特价值 
+高频、多问题并行判断；agent 每个工具调用前都可增加毫秒级风险判定。 
+头号瓶颈 
+state 构建质量与分布外 calibration 退化。 
+Laya ↗ 
+RLCD ↗ 
+Ollama ↗ 
+B / MODEL SHARDING 
+大模型分片 
+已可用* 
+Anthropic 基线是 15 台 $55 盒子 pipeline 跑 Gemma4-26B-A4B，0.39 tok/s。llama.cpp RPC 可手动组网；distributed-llama 则证明 tensor parallel 在 Pi 5 LAN 上可行。星号代表“能跑”，不是“自动弹性成熟”。 
+实证 
+4×Pi 5：Llama 3 8B 从 1.77→3.01 t/s；另一份 2026 报告的 Qwen3-30B-A3B 为 15.143 tok/s。 
+弹性 
+llama.cpp RPC 无自动发现，Rookery / ArcFlare 只是 hobby 级补丁；Petals public swarm 2026-09 实测无节点。 
+头号瓶颈 
+单节点掉线使整链停止，自动重分片没有可用实现。 
+RPC caveat ↗ 
+distributed-llama ↗ 
+Pi 5 报告 ↗ 
+C / HIERARCHICAL AGENTS 
+分层智能体 
+协议已可用 
+较强 coordinator 规划，盒子 worker 运行小 LLM 或决策服务；A2A 做发现和委派，MCP 暴露工具。它是最自然的任务级弹性：worker 失联只需重派任务。 
+现成部件 
+A2A v1.0 与 MCP 已就绪，但没有“机顶盒多智能体”的 turnkey 框架。 
+成本 
+研究索引报告 multi-agent 约 15× token 成本，不能把并行误写成免费。 
+头号瓶颈 
+coordinator 上下文、坏计划级联、跨设备任务状态机。 
+A2A ↗ 
+MCP / A2A ↗ 
+D / SPECULATION & CASCADE 
+推测解码与级联 
+跨设备可原型 
+端侧小模型起草、较强模型验证；或小模型先答、低置信时升级。单机推测解码已成熟，但跨设备还需要处理拒绝后的 KV 回滚与重同步。 
+证据 
+AceSpec 讨论 50 Kbps WAN edge-cloud；SwarmLLM 用 speculative chains 摊销 per-hop 成本。 
+关闭条件 
+索引中的生产规则建议 acceptance <45% 自动关闭；不是普适定律。 
+头号瓶颈 
+acceptance 不可预测，以及 rejection 后分布式状态修复。 
+AceSpec 综述 ↗ 
+SwarmLLM ↗ 
+E / EXPERT PARALLEL 
+MoE 专家并行 
+跨弱设备无路径 
+vLLM Elastic EP 可运行时增删 worker、重分布 experts，但 worker 是 CUDA / HIP GPU 进程，依赖 NCCL / NIXL。它解决数据中心 GPU，不等于能下沉到机顶盒。 
+现实替代 
+弱设备今天更适合单机 expert offload，或用 TP 切每个 expert，而不是 per-token 跨机 all-to-all。 
+证据边界 
+EdgeMoE / Edge0 / BigMoMo 支撑的是端侧 offload；没有公开跨弱设备 EP 实现。 
+头号瓶颈 
+每层两次 all-to-all、EPLB 与异构 straggler；缺 CPU/弱设备通信后端。 
+vLLM Elastic EP ↗ 
+EdgeMoE ↗ 
+F / TRAINING 
+分布式训练与 RLCD 
+RLCD 可原型 
+LLM 级 RL 在 0.39 tok/s 盒子上不现实；但 Laya 类非自回归决策模型每次 rollout 只需一次前向，因此“弱设备收集 rollout + 中心更新”值得验证。 
+部件 
+laya-rs 已有 RLCD 循环；Flower 支持 Android / Pi / Jetson 真机客户端；没有端到端整机方案。 
+参照 
+INTELLECT-2 证明全球分布式 32B RL 可行，但 rollout worker 门槛是 4×RTX 3090 级。 
+头号瓶颈 
+奖励与决策日志设计、RL 稳定性及梯度同步，而非仅网络。 
+laya-rs ↗ 
+INTELLECT-2 ↗ 
+Flower semi-async ↗ 
+G / WORLD MODELS 
+JEPA / 世界模型 + 决策头 
+组合可原型 
+JEPA 与 JEV 名字相近但无关。JEPA 负责状态表征与未来预测；System One 负责给定 state 的 typed judgment；LLM 负责开放推理、规划与表达。三者互补，不是替代关系。 
+公开近似 
+V-JEPA encoder → 融合 → 轻量 action head → OOD / confidence gate → ONNX / CoreML。 
+边界 
+公开旁证主要是视觉 / 机器人与 MacBook demo，不是文本 agent 或机顶盒实测。 
+头号瓶颈 
+缺少“预测—决策”闭环现成栈，需要自行训练 encoder 与 typed head 的对齐。 
+JEV ≠ JEPA ↗ 
+V-JEPA 路线 ↗ 
+06 / READINESS 
+今天可用度：别把“论文可行”当成“工程可用” 
+状态按报告证据排序。这里把单机能力、跨设备能力和弹性能力分开，避免用同一个“支持”混过去。 
+路线 
+状态 
+能拼什么 
+主要缺口 
+A1 Laya 群 + C 分层 Agent 
+组件已可用 / 盒群可原型 
+任务与判断能力 
+需自写 coordinator、状态机与置信度聚合；ARM 盒性能未实测。 
+B1 pipeline / TP 
+已可用* 
+单机装不下的大模型 
+吞吐低；掉线恢复与自动重分片不成熟。 
+D 跨设备推测解码 
+可原型 
+draft 与 verify 
+acceptance 与 rollback 让收益不稳定。 
+F2 分布式 RLCD 
+可原型 
+决策 rollout 
+无端到端实现；奖励与训练稳定性未证。 
+G JEPA + 决策头 
+可原型 
+感知表征与动作 
+缺标准栈；机顶盒证据不足。 
+E vLLM Elastic EP 下沉 
+无路径 
+数据中心 GPU experts 
+弱设备无 CUDA / NCCL / NIXL EP 后端。 
+Petals public swarm / 盒群 LLM RL 
+不建议 
+曾经的公共分片 / 慢 rollout 
+公共 swarm 实测无节点；0.39 tok/s 使 LLM rollout 物理不可行。 
+07 / INVEST 
+2026 年底，工程资源只押两条 
+目标是“一堆机顶盒拼出有用的智能体”，不是证明分布式计算存在。排序因此以交互价值、容错边界和可迭代性为先。 
+#1 · PRIMARY 
+A + C：决策模型群 + 分层智能体 
+先在 x86 / Mac 复现 Laya 服务，再选一台目标盒验证；通过后才扩成每盒一个 
+laya-serve 
+或 Ollama 
+/v1/systemone 
+worker。较强 coordinator 负责 state、规划、MCP 工具和表达。 
+按问题集、checkpoint 或场景分工，不切权重。 
+置信度三档门控：自动执行 / 二次验证 / 升级 LLM 或人工。 
+设备掉线只损失一个 worker，任务可重派，不迁移共享 KV。 
+最先验证： ARM 盒子实测、分布外 calibration、state 构建质量。 
+#2 · BACKGROUND 
+B：pipeline / TP 大模型 
+只服务于必须保留“一个大模型”且允许低速的后台任务。复刻 Anthropic 15 盒 pipeline，或以 distributed-llama 的 Pi 5 tensor parallel 为性能参照。 
+先固定同构硬件与模型分片，不从任意异构设备热加入开始。 
+用外部 coordinator 做发现、健康检查、整链重启；不要把 llama.cpp RPC 当安全生产服务。 
+Petals 可研究其 DHT 思路，但不依赖公共 swarm。 
+最先验证： 掉线恢复时间、KV 重建成本、持续吞吐与功耗。 
+暂不投：vLLM EP 下沉 
+缺弱设备后端，不是工程量堆出来就能补齐。 
+暂不投：盒群 LLM RL 
+rollout 吞吐不成立；把实验转向 RLCD 决策模型。 
+暂不依赖：Petals 公共 swarm 
+2026-09 死亡实测，私有 swarm 也未在本轮验证。 
+08 / OPEN QUESTIONS 
+明确保留的未知项 
+这些不是脚注，而是会改变架构判断的验证任务。 
+纯 ARM 盒上的 Laya 
+官方 33ms 是 T4 数据；<1.5GB RAM 来自 macOS / Intel 说明。Android TV 的延迟、热降频与 ONNX 后端尚无实测。 
+llama.cpp System One 端点 
+/v1/systemone 
+仅由单篇 dev.to 索引提及，未在本轮从官方 release notes 交叉验证。 
+Petals 私有 swarm 
+公共 swarm 仅有 2026-09-19 的死亡实测；DRIFT-LLM fork 存在，但私有部署可用性未实测。 
+J2LM / JOLs 
+未找到同名独立项目；JOL 通常指 Judgment of Learning。本页没有把它们写成已经存在的框架。 
+JEPA + Laya head 
+这是基于公开分层实现的综合架构判断，不是已有标准栈；需要自行做表示对齐与决策训练。 
+自动弹性编排 
+Rookery 223 天未更新，ArcFlare 为 hobby 级；没有同时覆盖自动发现、热加入、重分片与安全边界的轻量实现。 
+SOURCES 
+主要来源 
+Laya 仓库为 2026-10-13 直接读取；以下其余来源多数来自搜索索引抓取，数字均保留原报告中的限定条件。 
+SYSTEM ONE 
+Laya official repository 
+— 架构、checkpoints、33ms、服务与 RLCD notebook。 
+laya-rs 
+— Rust / candle 与 RLCD 训练循环。 
+OpenJev-RLCD 
+— 独立 RLCD 论文。 
+JEV API index 
+— API、typed primitives、价格与延迟。 
+Jev Decision Index 
+— 社区模型索引。 
+DISTRIBUTED INFERENCE 
+Anthropic experiment coverage 
+— 15 盒、0.39 tok/s 与分层结论。 
+llama.cpp RPC README 
+— PoC、fragile、insecure。 
+distributed-llama 
+— Raspberry Pi tensor-parallel 数据。 
+SwarmLLM 
+— WebGPU / WebRTC 与 speculative chains。 
+vLLM Elastic EP 
+— 数据中心 GPU 动态 worker。 
+AGENTS, TRAINING, WORLD MODEL 
+A2A protocol 
+INTELLECT-2 
+— 全球分布式 RL 与硬件门槛。 
+Hivemind 
+— 去中心化训练库。 
+JEV application design 
+— JEV 与 JEPA 无关。 
+V-JEPA → action head 
+— 端侧分层旁证。 
+SINGLE-CPU BENCHMARKS 
+edge-llm-bench 
+— Gemma 3 270M 在 Pi 5 与手机 CPU 的 context sweep。 
+ExecuTorch Llama benchmarks 
+— OnePlus 12 的 CPU、TTFT 与 RSS。 
+Qwen3-0.6B LiteRT-LM 
+与 
+Qwen3-1.7B 
+— 手机 CPU 的 decode、TTFT 与峰值内存。 
+ferrox CPU results 
+— Ryzen 9 3900X / 7945HX 的 llama.cpp 对照。 
+Pi 5 local inference guide 
+— 模型体积与吞吐汇总。 
+结论基于 2026-10-13 的资料快照。 
+“verified live”仅适用于 Laya 官方仓库；其他标注为 index。 
+

@@ -1,0 +1,81 @@
+"""PandoSI smoke tests.
+
+Policy (project decision): minimal mocks, minimal test count. Static analysis
+and research are the default; this file runs only at milestones or on demand.
+Two cases cover the contract: quorum gating semantics, and one real-HTTP
+end-to-end vote including node death and checkpoint-diverse quorum picking.
+"""
+
+import json
+import sys
+import unittest
+import urllib.request
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from pandosi.backend import MockBackend
+from pandosi.common import DecisionRequest, Vote, aggregate
+from pandosi.rootd import Coordinator, Root
+from pandosi.stemd import Stem
+
+
+class TestSmoke(unittest.TestCase):
+    def test_quorum_gating_semantics(self):
+        """auto on strong majority, verify on tie, escalate below quorum."""
+        strong = [Vote(f"n{i}", "en", "yes", 0.9) for i in range(3)]
+        strong.append(Vote("n3", "ml", "no", 0.4))
+        strong.append(Vote("n4", "td", "yes", 0.85))
+        self.assertEqual(aggregate(strong).tier, "auto")
+
+        tie = [Vote("a", "en", "yes", 0.9), Vote("b", "ml", "no", 0.9),
+               Vote("c", "en", "yes", 0.9), Vote("d", "ml", "no", 0.9)]
+        result = aggregate(tie)
+        self.assertIsNone(result.choice)
+        self.assertEqual(result.tier, "verify")
+
+        self.assertEqual(aggregate(strong[:2]).tier, "escalate")
+
+    def test_end_to_end_http_vote(self):
+        """Real root + real HTTP stems; dead node shrinks quorum gracefully."""
+        root = Root()
+        root.start()
+        coord = root.coordinator
+        stems = []
+        checkpoints = ["english", "multilingual", "english",
+                       "typed-decisions", "english"]
+        try:
+            for i, ckpt in enumerate(checkpoints):
+                stem = Stem(f"n{i}", MockBackend(f"n{i}", ckpt,
+                                                 correct_choice="approve",
+                                                 agree_rate=0.9))
+                stem.start()
+                stems.append(stem)
+                coord.register(stem.node_id, stem.url(), ckpt)
+            # one registered-but-dead node to prove graceful shrink
+            coord.register("dead", "http://127.0.0.1:1", "english")
+
+            picked = coord.pick_quorum(5)
+            ckpts = {info["checkpoint"] for _, info in picked}
+            self.assertGreaterEqual(len(ckpts), 2,  "quorum must be checkpoint-diverse")
+
+            req = DecisionRequest(state="smoke", question="approve?",
+                                  candidates=["approve", "reject"])
+            with urllib.request.urlopen(
+                urllib.request.Request(f"{root.url()}/decide",
+                                       data=req.to_json(),
+                                       headers={"Content-Type": "application/json"}),
+                timeout=10) as resp:
+                result = json.loads(resp.read())
+
+            self.assertEqual(result["choice"], "approve")
+            self.assertGreaterEqual(result["responded"], 4)  # 5 picked incl. 1 dead -> graceful shrink
+            self.assertIn(result["tier"], ("auto", "verify"))
+        finally:
+            for stem in stems:
+                stem.stop()
+            root.stop()
+
+
+if __name__ == "__main__":
+    unittest.main()
