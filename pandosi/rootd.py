@@ -11,6 +11,7 @@ import json
 import threading
 import time
 import urllib.request
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
@@ -77,6 +78,25 @@ class Coordinator:
         return picked[:k]
 
     # -- decision -------------------------------------------------------
+    def _log_decision(self, req, result, quorum_size: int) -> None:
+        """Append one JSON line per decision (local metrics only)."""
+        try:
+            metrics_dir = Path("metrics")
+            metrics_dir.mkdir(exist_ok=True)
+            entry = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                     "request_id": req.request_id,
+                     "choice": result.choice,
+                     "tier": result.tier,
+                     "agreement": result.agreement,
+                     "mean_probability": result.mean_probability,
+                     "responded": result.responded if hasattr(result, "responded") else len(result.votes),
+                     "quorum_size": quorum_size}
+            with (metrics_dir / "decisions.jsonl").open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(entry) + "\n")
+        except OSError:
+            pass  # metrics must never break decisions
+
+
     def decide(self, req: DecisionRequest) -> dict:
         quorum = self.pick_quorum(self.quorum_k)
         payload = req.to_json()
@@ -92,6 +112,7 @@ class Coordinator:
                 continue  # dead node: shrink quorum, never block the vote
 
         result = aggregate(votes, min_quorum=min(3, len(quorum)))
+        self._log_decision(req, result, len(quorum))
         out = result.__dict__.copy()
         out["quorum_size"] = len(quorum)
         out["responded"] = len(votes)
