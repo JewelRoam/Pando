@@ -41,6 +41,27 @@ def load_calibration(checkpoint_path: str) -> dict:
             except (json.JSONDecodeError, KeyError, TypeError):
                 pass
 
+    # Try the project's calibration directory
+    cal_dir = Path(__file__).resolve().parents[1] / "assets" / "calibration"
+    cal_file = cal_dir / f"{cp.stem if cp.suffix else cp.name}.json"
+    if not cal_file.exists():
+        # try by checkpoint name (e.g. "english", "multilingual")
+        for f in cal_dir.glob("*.json"):
+            data = json.loads(f.read_text(encoding="utf-8"))
+            if data.get("checkpoint") == cp.stem or data.get("checkpoint") == cp.name:
+                cal_file = f
+                break
+
+    if cal_file.exists():
+        try:
+            data = json.loads(cal_file.read_text(encoding="utf-8"))
+            t = float(data.get("temperature", 1.0))
+            if 0.1 <= t <= 10.0:
+                return {"temperature": t, "calibrated": True,
+                        "source": f"assets/calibration/{cal_file.name}"}
+        except (json.JSONDecodeError, KeyError, TypeError):
+            pass
+
     # No calibration found
     return {"temperature": 1.0, "calibrated": False, "source": "none"}
 
