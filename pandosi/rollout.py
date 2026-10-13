@@ -21,11 +21,13 @@ class RolloutRecorder:
 
     def record(self, request_id: str, state: str, question: str,
                candidates: list[str], votes: list[dict],
-               choice: str | None, tier: str) -> dict:
+               choice: str | None, tier: str,
+               playbook_hash: str | None = None) -> dict:
         entry = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
                  "request_id": request_id, "state": state,
                  "question": question, "candidates": candidates,
                  "consensus": choice, "tier": tier,
+                 "playbook_hash": playbook_hash,
                  "votes": votes}
         with self.path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
@@ -63,6 +65,7 @@ def export_training_rows(rollout_path: Path, out_path: Path,
                 "state": e["state"], "question": e["question"],
                 "candidates": e.get("candidates") or sorted(counts),
                 "preferred": preferred, "rejected": rejected,
+                "playbook_hash": e.get("playbook_hash"),
                 "votes": {v.get("checkpoint", v.get("node_id", "?")):
                           v.get("choice") for v in votes},
             }, ensure_ascii=False) + "\n")

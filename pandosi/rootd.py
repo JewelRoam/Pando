@@ -43,6 +43,7 @@ class Coordinator:
         self._transport = transport
         self.quorum_k = quorum_k
         self.gating = gating or {}
+        self.playbook_hash: str | None = None
         self._recorder = RolloutRecorder()
 
     # -- registry -------------------------------------------------------
@@ -125,7 +126,8 @@ class Coordinator:
             self._recorder.record(req.request_id, req.state, req.question,
                                   req.candidates,
                                   [v.to_json() for v in votes],
-                                  result.choice, result.tier)
+                                  result.choice, result.tier,
+                                  playbook_hash=self.playbook_hash)
         except OSError:
             pass
         out = result.__dict__.copy()
@@ -299,6 +301,7 @@ def main() -> None:
             print(f"playbook hash verified against history chain "
                   f"({len(chain)} entries)", flush=True)
         root.coordinator.gating = root.playbook.gating
+        root.coordinator.playbook_hash = root.playbook.hash()
         print(f"playbook loaded: {root.playbook.name} v{root.playbook.version} "
               f"hash={pb_hash[:16]} "
               f"gating={root.playbook.gating}", flush=True)
