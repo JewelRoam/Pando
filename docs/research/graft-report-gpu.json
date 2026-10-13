@@ -1,0 +1,21 @@
+{
+  "device": "GPU (Arc 140T, static surgery graph, pad_to=256)",
+  "tasks": 40,
+  "overall_accuracy": 0.65,
+  "gpu_p50_ms": 41.0,
+  "cpu_divergence": 0,
+  "per_checkpoint": {
+    "english": {
+      "acc": 0.7857,
+      "n": 14
+    },
+    "multilingual": {
+      "acc": 0.6429,
+      "n": 14
+    },
+    "typed-decisions": {
+      "acc": 0.5,
+      "n": 12
+    }
+  }
+}
