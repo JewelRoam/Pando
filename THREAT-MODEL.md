@@ -33,6 +33,9 @@ software on third-party machines.
    services and refuse cross-host generation to avoid embedding wrong paths.
    Windows uses user Startup files rather than an administrator-only logon
    task, and an explicit checker removes its temporary lifecycle artifacts.
+10. **Secret-aware logging**: redirected rootd logs print only a pairing
+    token fingerprint; the full token appears on an interactive TTY or with
+    an explicit reveal flag.
 
 ## What this project does NOT do
 

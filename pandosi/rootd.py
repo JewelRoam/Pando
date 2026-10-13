@@ -7,6 +7,7 @@ checkpoint-diverse quorum, and aggregates votes via common.aggregate.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import hmac
 import json
 import threading
@@ -365,6 +366,8 @@ def main() -> None:
                         help="read the fixed admission token from a user-owned file")
     parser.add_argument("--lan", action="store_true",
                         help="bind 0.0.0.0; requires an active lan_listen grant")
+    parser.add_argument("--reveal-pairing-token", action="store_true",
+                        help="print the full token even when stdout is not a TTY")
     args = parser.parse_args()
     if args.pairing_token and args.pairing_token_file:
         raise SystemExit("--pairing-token and --pairing-token-file are mutually exclusive")
@@ -393,7 +396,13 @@ def main() -> None:
     root = Root(host=listen_host, port=args.port, spore_files=spore_files)
     import secrets
     root.set_pairing_token(args.pairing_token or secrets.token_urlsafe(18))
-    print(f"stem pairing token: {root.pairing_token}", flush=True)
+    token_digest = hashlib.sha256(
+        root.pairing_token.encode("utf-8")).hexdigest()[:16]
+    if args.reveal_pairing_token or sys.stdout.isatty():
+        print(f"stem pairing token: {root.pairing_token}", flush=True)
+    else:
+        print(f"stem pairing token fingerprint: sha256:{token_digest}",
+              flush=True)
     if args.auth_token:
         root.set_auth_token(args.auth_token)
         print(f"kill-switch enabled (token set)", flush=True)
