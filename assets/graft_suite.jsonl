@@ -1,16 +1,16 @@
 {"task_id": "en01", "checkpoint": "english", "qtype": "choice", "state": "User says: refund my card now", "question": "intent", "candidates": ["refund", "complaint", "greeting"], "expected": "refund"}
 {"task_id": "en02", "checkpoint": "english", "qtype": "choice", "state": "Email from unknown sender asks for password", "question": "action", "candidates": ["block", "open", "forward"], "expected": "block"}
 {"task_id": "en03", "checkpoint": "english", "qtype": "noul", "state": "The server is down and customers are complaining", "question": "urgent", "candidates": ["true", "false"], "expected": "true"}
-{"task_id": "en04", "checkpoint": "english", "qtype": "score", "state": "Ticket: printer blinking since morning", "question": "risk", "candidates": null, "expected": "low"}
+{"task_id": "en04", "checkpoint": "english", "qtype": "score", "state": "Ticket: printer blinking since morning", "question": "risk", "candidates": null, "expected": "low", "criteria": ["negligible", "low", "moderate", "high", "critical"]}
 {"task_id": "en05", "checkpoint": "english", "qtype": "choice", "state": "Post: buy cheap followers now!!!", "question": "moderation", "candidates": ["spam", "ok"], "expected": "spam"}
 {"task_id": "en06", "checkpoint": "english", "qtype": "noul", "state": "Meeting moved to Friday 3pm, please confirm", "question": "question", "candidates": ["true", "false"], "expected": "true"}
 {"task_id": "ml01", "checkpoint": "multilingual", "qtype": "choice", "state": "用户要求退款：订单错了", "question": "intent", "candidates": ["refund", "complaint", "greeting"], "expected": "refund"}
 {"task_id": "ml02", "checkpoint": "multilingual", "qtype": "noul", "state": "Der Server ist ausgefallen", "question": "down", "candidates": ["true", "false"], "expected": "true"}
 {"task_id": "ml03", "checkpoint": "multilingual", "qtype": "choice", "state": "Correo: no puedo entrar a mi cuenta", "question": "intent", "candidates": ["login_issue", "refund", "praise"], "expected": "login_issue"}
-{"task_id": "ml04", "checkpoint": "multilingual", "qtype": "score", "state": "직원가 폭발했습니다", "question": "risk", "candidates": null, "expected": "high"}
+{"task_id": "ml04", "checkpoint": "multilingual", "qtype": "score", "state": "직원가 폭발했습니다", "question": "risk", "candidates": null, "expected": "high", "criteria": ["negligible", "low", "moderate", "high", "critical"]}
 {"task_id": "ml05", "checkpoint": "multilingual", "qtype": "noul", "state": "Le colis est arrivé endommagé", "question": "damaged", "candidates": ["true", "false"], "expected": "true"}
 {"task_id": "ml06", "checkpoint": "multilingual", "qtype": "choice", "state": "مرحبا، هل يمكنني الحصول على فاتورة؟", "question": "intent", "candidates": ["invoice", "greeting", "refund"], "expected": "invoice"}
 {"task_id": "td01", "checkpoint": "typed-decisions", "qtype": "choice", "state": "State: cart has 3 items, user stuck on payment", "question": "route", "candidates": ["retry_payment", "human_agent", "discount"], "expected": "retry_payment"}
-{"task_id": "td02", "checkpoint": "typed-decisions", "qtype": "score", "state": "State: 5 failed logins in one minute", "question": "risk", "candidates": null, "expected": "high"}
+{"task_id": "td02", "checkpoint": "typed-decisions", "qtype": "score", "state": "State: 5 failed logins in one minute", "question": "risk", "candidates": null, "expected": "high", "criteria": ["negligible", "low", "moderate", "high", "critical"]}
 {"task_id": "td03", "checkpoint": "typed-decisions", "qtype": "noul", "state": "State: user accepted the refund policy", "question": "confirmed", "candidates": ["true", "false"], "expected": "true"}
 {"task_id": "td04", "checkpoint": "typed-decisions", "qtype": "choice", "state": "State: latency p95 above SLO for 10 min", "question": "action", "candidates": ["scale_up", "ignore", "rollback"], "expected": "scale_up"}

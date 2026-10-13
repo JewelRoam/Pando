@@ -1,0 +1,172 @@
+{
+  "generated": "2026-10-14 01:11:49",
+  "suites": {
+    "english": {
+      "accuracy": 0.6667,
+      "ece": 0.3572,
+      "latency_p50_ms": 54.9,
+      "latency_p95_ms": 75.5,
+      "per_type": {
+        "choice": "2/3",
+        "noul": "1/2",
+        "score": "1/1"
+      },
+      "details": [
+        {
+          "task_id": "en01",
+          "pred": "refund",
+          "expected": "refund",
+          "ok": true,
+          "confidence": 0.979,
+          "latency_ms": 75.5
+        },
+        {
+          "task_id": "en02",
+          "pred": "open",
+          "expected": "block",
+          "ok": false,
+          "confidence": 0.6821,
+          "latency_ms": 40.5
+        },
+        {
+          "task_id": "en03",
+          "pred": "true",
+          "expected": "true",
+          "ok": true,
+          "confidence": 0.8698,
+          "latency_ms": 50.4
+        },
+        {
+          "task_id": "en04",
+          "pred": "low",
+          "expected": "low",
+          "ok": true,
+          "confidence": 0.4832,
+          "latency_ms": 56.0
+        },
+        {
+          "task_id": "en05",
+          "pred": "spam",
+          "expected": "spam",
+          "ok": true,
+          "confidence": 0.9973,
+          "latency_ms": 53.8
+        },
+        {
+          "task_id": "en06",
+          "pred": "false",
+          "expected": "true",
+          "ok": false,
+          "confidence": 0.7907,
+          "latency_ms": 87.6
+        }
+      ]
+    },
+    "multilingual": {
+      "accuracy": 0.8333,
+      "ece": 0.1667,
+      "latency_p50_ms": 24.3,
+      "latency_p95_ms": 29.2,
+      "per_type": {
+        "choice": "3/3",
+        "noul": "2/2",
+        "score": "0/1"
+      },
+      "details": [
+        {
+          "task_id": "ml01",
+          "pred": "refund",
+          "expected": "refund",
+          "ok": true,
+          "confidence": 0.9347,
+          "latency_ms": 34.2
+        },
+        {
+          "task_id": "ml02",
+          "pred": "true",
+          "expected": "true",
+          "ok": true,
+          "confidence": 0.7034,
+          "latency_ms": 23.3
+        },
+        {
+          "task_id": "ml03",
+          "pred": "login_issue",
+          "expected": "login_issue",
+          "ok": true,
+          "confidence": 0.9999,
+          "latency_ms": 22.5
+        },
+        {
+          "task_id": "ml04",
+          "pred": "low",
+          "expected": "high",
+          "ok": false,
+          "confidence": 0.5975,
+          "latency_ms": 29.2
+        },
+        {
+          "task_id": "ml05",
+          "pred": "true",
+          "expected": "true",
+          "ok": true,
+          "confidence": 0.9959,
+          "latency_ms": 22.2
+        },
+        {
+          "task_id": "ml06",
+          "pred": "invoice",
+          "expected": "invoice",
+          "ok": true,
+          "confidence": 0.9632,
+          "latency_ms": 25.3
+        }
+      ]
+    },
+    "typed-decisions": {
+      "accuracy": 1.0,
+      "ece": 0.4298,
+      "latency_p50_ms": 59.6,
+      "latency_p95_ms": 60.4,
+      "per_type": {
+        "choice": "2/2",
+        "score": "1/1",
+        "noul": "1/1"
+      },
+      "details": [
+        {
+          "task_id": "td01",
+          "pred": "retry_payment",
+          "expected": "retry_payment",
+          "ok": true,
+          "confidence": 0.6696,
+          "latency_ms": 60.4
+        },
+        {
+          "task_id": "td02",
+          "pred": "high",
+          "expected": "high",
+          "ok": true,
+          "confidence": 0.4147,
+          "latency_ms": 82.5
+        },
+        {
+          "task_id": "td03",
+          "pred": "true",
+          "expected": "true",
+          "ok": true,
+          "confidence": 0.6044,
+          "latency_ms": 58.7
+        },
+        {
+          "task_id": "td04",
+          "pred": "scale_up",
+          "expected": "scale_up",
+          "ok": true,
+          "confidence": 0.5922,
+          "latency_ms": 52.7
+        }
+      ]
+    }
+  }
+}
