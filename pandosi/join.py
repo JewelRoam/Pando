@@ -250,6 +250,16 @@ def main() -> None:
                               host="0.0.0.0", port=0))
             print(f"multi-EU: iGPU stem added "
                   f"({len(bucket_files)} bucket(s))", flush=True)
+        # NPU stem: needs the IsNaN-free static graph
+        npu_file = Path("artifacts/laya-en-static-nonisnan.onnx")
+        if npu_file.exists() and any(u["kind"] == "NPU" for u in eus):
+            npu_backend = backend_mod.OnnxLayaBackend(
+                node_id + "-npu", str(npu_file),
+                repo="convaiinnovations/laya", device="NPU")
+            stems.append(Stem(node_id + "-npu", npu_backend,
+                              host="0.0.0.0", port=0))
+            print("multi-EU: NPU stem added (IsNaN-free static graph)",
+                  flush=True)
     for s in stems:
         s.start()
         print(f"stem {s.node_id} on {s.url()}", flush=True)
