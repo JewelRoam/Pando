@@ -186,7 +186,10 @@ def build_handler(coordinator: Coordinator, root=None):
                 self._send(200, {"ok": True})
             elif self.path == "/decide":
                 req = DecisionRequest.from_json(raw)
-                self._send(200, coordinator.decide(req))
+                try:
+                    self._send(200, coordinator.decide(req))
+                except Exception as exc:
+                    self._send(503, {"error": f"decide failed: {exc}"})
             else:
                 self._send(404, {"error": "not found"})
 

@@ -64,6 +64,8 @@ def aggregate(votes: list[Vote], min_quorum: int = 3,
       verify   - majority but weak confidence, or tie
       escalate - quorum not met
     """
+    if not votes:
+        return DecisionResult(None, 0.0, 0.0, "escalate", [])
     if len(votes) < min_quorum:
         return DecisionResult(None, 0.0, 0.0, "escalate", [v.to_json() for v in votes])
 

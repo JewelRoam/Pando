@@ -101,6 +101,8 @@ def main() -> None:
     parser.add_argument("--node-id", default=None)
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--backend", default=None, choices=["mock", "onnx"])
+    parser.add_argument("--multi-eu", action="store_true",
+                        help="start one stem per execution unit (iGPU + CPU on an AI PC)")
     parser.add_argument("--spore-url", default=None,
                         help="pull the payload from a SporeServer first "
                              "(GRAFT/SPROUT; implies --backend onnx)")
@@ -226,30 +228,44 @@ def main() -> None:
     else:
         backend = backend_mod.MockBackend(node_id, **backend_cfg)
 
-    stem = Stem(node_id, backend, host="0.0.0.0", port=0)
-    stem.start()
-    print(f"stem {node_id} on {stem.url()}")
+    stems = [Stem(node_id, backend, host="0.0.0.0", port=0)]
+    if args.multi_eu and backend_name == "onnx":
+        gpu_file = Path("artifacts/laya-en-static-fixed.onnx")
+        if gpu_file.exists() and any(u["kind"] == "GPU" for u in eus):
+            gpu_backend = backend_mod.OnnxLayaBackend(
+                node_id + "-gpu", str(gpu_file),
+                repo="convaiinnovations/laya", device="GPU", pad_to=256)
+            stems.append(Stem(node_id + "-gpu", gpu_backend,
+                              host="0.0.0.0", port=0))
+            print("multi-EU: iGPU stem added (static surgery graph)", flush=True)
+    for s in stems:
+        s.start()
+        print(f"stem {s.node_id} on {s.url()}")
     if args.spore_url:
         from .common import DecisionRequest
         for i in range(3):
-            r = backend.decide(DecisionRequest(
-                state=f"verify probe {i}", question="ok?",
-                candidates=["yes", "no"]))
-            print(f"VERIFY probe {i+1}/3: {r.choice} @ {r.probability}",
-                  flush=True)
+            for s in stems:
+                r = s.backend.decide(DecisionRequest(
+                    state=f"verify probe {i}", question="ok?",
+                    candidates=["yes", "no"]))
+                print(f"VERIFY {s.node_id} probe {i+1}/3: "
+                      f"{r.choice} @ {r.probability}", flush=True)
         print("VERIFY passed - node is LIVE", flush=True)
 
-    stem_url = f"http://{lan_ip()}:{stem.port}"
-    payload = json.dumps({"node_id": node_id, "url": stem_url,
-                          "checkpoint": backend.checkpoint,
-                          "capability": cap}).encode()
+    registrations = [{"node_id": s.node_id, "url": f"http://{lan_ip()}:{s.port}",
+                      "checkpoint": s.backend.checkpoint} for s in stems]
     while True:
         try:
-            urllib.request.urlopen(
-                urllib.request.Request(f"{root_url}/register", data=payload,
-                                       headers={"Content-Type": "application/json"}),
-                timeout=3)
-            print(f"registered with root {root_url}")
+            for reg in registrations:
+                payload = json.dumps({**reg, "capability": cap}).encode()
+                urllib.request.urlopen(
+                    urllib.request.Request(f"{root_url}/register",
+                                           data=payload,
+                                           headers={"Content-Type":
+                                                    "application/json"}),
+                    timeout=3)
+            print(f"registered {len(registrations)} stem(s) with root "
+                  f"{root_url}")
             break
         except Exception as exc:
             print(f"register attempt failed: {exc}", flush=True)
