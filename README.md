@@ -2,54 +2,58 @@
 
 **The forest that is one tree.**
 
-PandoSI is a research project building an elastically scalable, fully heterogeneous,
-self-replicating **unified intelligence** — many cheap devices, one mind.
+PandoSI is a research project building an elastically scalable, fully
+heterogeneous, self-replicating **unified intelligence** — many cheap
+devices, one mind.
 
-- **Pando** — the largest single organism on Earth: a quaking aspen colony of ~47,000 stems
-  that looks like a forest but shares one root system. Latin: *I spread*.
+- **Pando** — the largest single organism on Earth: an aspen colony of
+  ~47,000 stems that looks like a forest but shares one root system.
+  Latin: *I spread*.
 - **SI** — Super Intelligence.
 
-It runs a swarm of small, non-autoregressive **decision models** (System 1, e.g. Laya, 321-421M params,
-single forward pass, calibrated probabilities) on arbitrary commodity hardware —
-CPUs, TV boxes, phones, single-board computers — coordinated by lightweight protocols:
+## What works today (all verified on real hardware/software)
 
-| Protocol | Role |
-|---|---|
-| **Stem** | A device joins by running a decision-model worker. No shard, no special hardware. |
-| **Root** | Consensus layer: k replicas vote on calibrated probabilities (quorum). |
-| **Spore** | Self-replication payload: weights + playbook + harness. Scan -> graft -> sprout -> verify. |
-| **Graft** | Heterogeneous onboarding: capability probe, role assignment, zero reconfiguration. |
+- **Decision-model swarm**: 3 Laya lineages (421M/322M, Apache-2.0,
+  non-autoregressive, single forward pass) vote with calibrated
+  probabilities; quorum requires checkpoint diversity.
+- **Heterogeneous execution**: one Intel AI PC = multiple ExecutionUnits.
+  Live-verified: CPU (106 ms) + iGPU via GatherND graph surgery (25.6 ms,
+  4x CPU). NPU blocked on op support (documented, 4 repair paths).
+- **Signed self-replication (sandboxed)**: Spore payload = weights +
+  playbook + harness. Ed25519 manifest, 64KiB chunk Merkle tree,
+  per-chunk hash-on-arrival, selective re-fetch, TOFU key pinning,
+  sandbox hard gate. Full SPROUT/VERIFY/LIVE chain run with real 571MB
+  weights.
+- **Playbook governance**: TOML strategy layer (authored offline) drives
+  consensus gating; hash-chained version history; structural policy
+  enforcement (score heads are informational-only — enforced).
+- **One-command onboarding**: `python -m pandosi.join` discovers a LAN
+  swarm via mDNS or becomes root+stem. Zero privilege.
 
-Topology-aware scheduling: **data parallel across groups (WAN), pipeline parallel within
-groups (LAN)** — pipeline for capability, data-parallel for elasticity. A playbook
-(written once by a human or a System-2 LLM) defines goals; the swarm executes it at
-runtime with zero external model dependency.
+## Quickstart
 
-> Research status: blueprint phase. All replication experiments are designed for
-> **closed, firewalled sandboxes** and published strictly as defensive (blue-team) research.
+```bash
+pip install pynacl zeroconf                  # deps
+python -m pandosi.join                       # join or start a swarm
+python -m pandosi.doctor                     # capability report
+python tools/dashboard.py                    # render local metrics
+```
 
-## Lab in Docker (Ring 2)
-
-Replication experiments are gated to disposable sandboxes. With Docker:
-
-\\ash
-docker build -t pandosi-lab .
-docker run --rm pandosi-lab
-\
-The container auto-detects its sandbox (/.dockerenv) and runs the gated
-seed->pull->verify lab demo. See THREAT-MODEL.md for the security model.
+Real-model mode: install `laya`, export ONNX (tools/vendor/export_onnx.py),
+then `python -m pandosi.join --backend onnx --onnx-path artifacts/laya-en.int8.onnx`.
 
 ## Docs
 
-- [Blueprint (zh-CN)](docs/BLUEPRINT.zh-CN.md) — full architecture and method.
-- [Roadmap](docs/ROADMAP.md) — phases, milestones, measurable targets.
-- [Research Notes](docs/RESEARCH-NOTES.md) — evidence base with citations.
+- [Blueprint (zh-CN)](docs/BLUEPRINT.zh-CN.md) — architecture v0.7
+- [ADOPTION](docs/ADOPTION.md) — three-ring capability model, survival metrics
+- [THREAT-MODEL](THREAT-MODEL.md) — defensive-research framing, hard guarantees
+- [METRICS](docs/METRICS.md) — dashboard design
+- [ROADMAP](docs/ROADMAP.md) — phases with measurable gates
+- [Research notes](docs/research/) — 28 rounds of evidence-backed findings
+- [TERMUX.md](TERMUX.md) — Android TV box onboarding guide
 
-## Quickstart (Ring 0 - zero privilege)
+## Status
 
-```bash
-pip install pynacl zeroconf          # deps (onnxruntime optional for real Laya)
-python -m pandosi.join               # becomes root+stem if no swarm on LAN,
-                                     # otherwise discovers and joins via mDNS
-```
-
+Research preview. Defensive framing (see THREAT-MODEL). Replication
+experiments run only in sandboxes. 40-task acceptance suite measured; score
+heads documented as informational-only (round 24).
