@@ -1,0 +1,6 @@
+loading ONNX Laya from artifacts\laya-en-static-fixed.onnx ...
+Fetching 4 files:   0%|          | 0/4 [00:00<?, ?it/s]Fetching 4 files: 100%|██████████| 4/4 [00:00<00:00, 1396.59it/s]
+D:\PandoSI\pandosi\backend.py:82: RuntimeWarning: laya ONNX: this checkpoint ships temperatures outside [0.5, 5] which would distort confidence; clamping choice:11+=0.10058280825614929 -> 0.5. Treat confidence from the affected buckets as uncalibrated.
+  self._agent = ONNXAgent(repo, onnx_path=onnx_path)
+[ov-lazy] compiling GPU for shapes (('attention_mask', (1, 256)), ('input_ids', (1, 256)), ('marker_mask', (1, 8)), ('marker_pos', (1, 8)), ('qtype', (1,)))...
+model loaded

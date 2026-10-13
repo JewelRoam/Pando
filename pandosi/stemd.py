@@ -113,12 +113,17 @@ def main() -> None:
     parser.add_argument("--onnx-path", default="artifacts/laya-en.int8.onnx")
     parser.add_argument("--repo", default="convaiinnovations/laya")
     parser.add_argument("--device", default="CPU")
+    parser.add_argument("--pad-to", type=int, default=None,
+                        help="static-shape bucket for non-CPU EUs (default 256 on GPU/NPU)")
     args = parser.parse_args()
 
     if args.backend == "onnx":
         print(f"loading ONNX Laya from {args.onnx_path} ...", flush=True)
+        pad_to = args.pad_to if args.pad_to is not None \
+            else (256 if args.device != "CPU" else None)
         backend = OnnxLayaBackend(args.node_id, args.onnx_path,
-                                  repo=args.repo, device=args.device)
+                                  repo=args.repo, device=args.device,
+                                  pad_to=pad_to)
         print("model loaded", flush=True)
     else:
         backend = MockBackend(args.node_id, args.checkpoint)
