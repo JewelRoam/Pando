@@ -17,3 +17,4 @@ spore-cache/
 chain_log*.txt
 assets/playbook-history.jsonl
 assets/playbook.bad.toml
+_final_verify.py
