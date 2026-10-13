@@ -22,8 +22,12 @@ def checks() -> list[dict]:
     """Return the canonical doctor report without printing anything."""
     rows: list[dict] = []
 
-    def add(status: str, item: str, fix: str = "") -> None:
-        rows.append({"status": status, "item": item, "fix": fix})
+    def add(status: str, item: str, fix: str = "",
+            details: dict | None = None) -> None:
+        row = {"status": status, "item": item, "fix": fix}
+        if details is not None:
+            row["details"] = details
+        rows.append(row)
 
     ok = sys.version_info >= (3, 11)
     add("ok" if ok else "miss", "python >= 3.11",
@@ -96,10 +100,11 @@ def checks() -> list[dict]:
                          ("lab_replication", "lab replication grant")]:
         status = grant_status(action)
         add("ok" if status["status"] == "active" else "locked", item,
-            "" if status["status"] == "active" else
-            f"python -m pandosi.grants grant {action} "
-            f"--resource {'0.0.0.0:8080' if action == 'lan_listen' else 'sandbox/lab'} "
-            "--hours 24 --yes")
+            "" if status["status"] == "active" else status["next_command"],
+            {"action": action, "grant_status": status["status"],
+             "expires_at": status["expires_at"],
+             "audit": status["audit"],
+             "next_command": status["next_command"]})
     return rows
 
 

@@ -41,7 +41,9 @@ python -m pandosi.grants show
 python -m pandosi.grants revoke lan_listen
 ```
 
-账本默认写入 `~/.pandosi/grants.toml`；缺失或过期授权一律拒绝。
+账本默认写入 `~/.pandosi/grants.toml`；对应审计链是
+`~/.pandosi/grants.toml.audit.jsonl`。缺失或过期授权一律拒绝，
+审计链损坏后敏感授权也会 fail-closed。
 
 规则：
 

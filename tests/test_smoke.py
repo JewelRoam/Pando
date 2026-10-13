@@ -20,7 +20,8 @@ from pandosi.common import DecisionRequest, Vote, aggregate
 from pandosi.rootd import Coordinator, Root
 from pandosi.stemd import Stem
 from pandosi.onboard import build_plan
-from pandosi.grants import grant_status, require_grant, save_grant
+from pandosi.grants import (audit_status, grant_status, require_grant,
+                            save_grant)
 
 
 class TestSmoke(unittest.TestCase):
@@ -125,6 +126,16 @@ class TestSmoke(unittest.TestCase):
                 (now + dt.timedelta(hours=1)).isoformat(), path=path)
             grant = require_grant("lan_listen", path, now)
             self.assertEqual(grant["resource"], "0.0.0.0:8080")
+
+            audit = audit_status(path.with_name(path.name + ".audit.jsonl"))
+            self.assertEqual(audit["status"], "valid")
+            self.assertEqual(audit["entries"], 5)
+            audit_file = path.with_name(path.name + ".audit.jsonl")
+            audit_file.write_text(
+                audit_file.read_text(encoding="utf-8") + '{"tampered":true}\n',
+                encoding="utf-8")
+            with self.assertRaises(PermissionError):
+                require_grant("lan_listen", path, now)
 
     def test_end_to_end_http_vote(self):
         """Real root + real HTTP stems; dead node shrinks quorum gracefully."""

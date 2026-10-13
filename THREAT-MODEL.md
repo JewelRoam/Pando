@@ -25,6 +25,9 @@ software on third-party machines.
 7. **Expiring capability grants**: LAN listeners and lab replication require
    an operator-created, expiring `~/.pandosi/grants.toml` entry; missing or
    expired grants fail closed.
+8. **Tamper-evident grant audit**: creation, revocation, allowed uses, and
+   denials append to a local hash chain; an invalid audit chain blocks
+   authorization instead of silently continuing.
 
 ## What this project does NOT do
 

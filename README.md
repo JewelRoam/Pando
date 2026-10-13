@@ -98,6 +98,9 @@ python -m pandosi.grants grant lan_listen \
 python -m pandosi.join --lan
 ```
 
+Grant creation, revocation, allowed use, and denial are recorded in a local
+hash chain; `python -m pandosi.grants audit` verifies it.
+
 Real-model mode: install `laya`, export ONNX (tools/vendor/export_onnx.py),
 then `python -m pandosi.join --backend onnx --onnx-path artifacts/laya-en.int8.onnx`.
 
