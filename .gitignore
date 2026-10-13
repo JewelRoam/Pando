@@ -23,3 +23,5 @@ mu_join_log.txt
 *_log.txt
 rollouts/
 _crossprobe.py
+_sd_e2e.py
+sd_*_log.txt
