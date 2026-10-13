@@ -53,7 +53,7 @@
 
 三种拼装形态：
 - A 单 worker + HETERO 后端：按层切分给不同 EU（OpenVINO
-  `HETERO:GPU,CPU`，贪心优先级），切分点必须实测优化；
+  `HETERO:GPU,CPU`，贪心优先级），切分点必须实测优化；；吞吐型拼装用 OpenVINO MULTI 模式按请求并行（`MULTI:GPU.1,GPU.0`，投票 fan-out 天然多并发）
 - B 多虚拟 stem：每 EU 跑一份 Laya 副本，各自参与 quorum——
   直接满足共识对异构副本的数量需求；
 - C 混合：NPU 跑高频低延迟判定（Laya 定长 encoder 天然适配
