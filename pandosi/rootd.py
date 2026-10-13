@@ -35,11 +35,13 @@ def http_transport(url: str, payload: bytes, timeout: float) -> bytes:
 
 
 class Coordinator:
-    def __init__(self, transport=http_transport, quorum_k: int = QUORUM_K):
+    def __init__(self, transport=http_transport, quorum_k: int = QUORUM_K,
+                 gating: dict | None = None):
         self.nodes: dict[str, dict] = {}
         self._lock = threading.Lock()
         self._transport = transport
         self.quorum_k = quorum_k
+        self.gating = gating or {}
 
     # -- registry -------------------------------------------------------
     def register(self, node_id: str, url: str, checkpoint: str,
@@ -112,7 +114,10 @@ class Coordinator:
             except Exception:
                 continue  # dead node: shrink quorum, never block the vote
 
-        result = aggregate(votes, min_quorum=min(3, len(quorum)))
+        result = aggregate(
+            votes, min_quorum=min(3, len(quorum)),
+            auto_min_agreement=self.gating.get("auto_min_agreement", 0.6),
+            auto_min_probability=self.gating.get("auto_min_probability", 0.6))
         self._log_decision(req, result, len(quorum))
         out = result.__dict__.copy()
         out["quorum_size"] = len(quorum)
@@ -239,8 +244,10 @@ def main() -> None:
     if args.playbook:
         from .playbook import load_playbook
         root.playbook = load_playbook(Path(args.playbook))
+        root.coordinator.gating = root.playbook.gating
         print(f"playbook loaded: {root.playbook.name} v{root.playbook.version} "
-              f"hash={root.playbook.hash()[:16]}", flush=True)
+              f"hash={root.playbook.hash()[:16]} "
+              f"gating={root.playbook.gating}", flush=True)
     root.start()
     print(f"rootd listening on {root.url()}")
     try:

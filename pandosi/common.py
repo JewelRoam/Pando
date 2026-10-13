@@ -54,7 +54,9 @@ class DecisionResult:
     votes: list[dict] = field(default_factory=list)
 
 
-def aggregate(votes: list[Vote], min_quorum: int = 3) -> DecisionResult:
+def aggregate(votes: list[Vote], min_quorum: int = 3,
+              auto_min_agreement: float = 0.6,
+              auto_min_probability: float = 0.6) -> DecisionResult:
     """Aggregate votes into a gated decision.
 
     Tiers:
@@ -82,7 +84,8 @@ def aggregate(votes: list[Vote], min_quorum: int = 3) -> DecisionResult:
         return DecisionResult(None, agreement, mean_probability, "verify",
                               [v.to_json() for v in votes])
 
-    if agreement >= 0.6 and mean_probability >= 0.6:
+    if (agreement >= auto_min_agreement
+            and mean_probability >= auto_min_probability):
         tier = "auto"
     else:
         tier = "verify"

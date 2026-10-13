@@ -56,8 +56,8 @@ def load_playbook(path: Path) -> Playbook:
         raise ValueError("playbook meta.version must be an integer")
 
     questions = raw.get("questions") or []
-    if not questions:
-        raise ValueError("playbook needs at least one question")
+    # A gating-only playbook (no questions) is valid: it overrides thresholds
+    # for a question set defined elsewhere.
     seen_ids = set()
     for q in questions:
         qid = q.get("id")
