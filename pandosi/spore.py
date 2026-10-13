@@ -53,6 +53,7 @@ def build_manifest(files: dict[str, Path], signer_key: nacl.signing.SigningKey,
         entries[name] = {
             "size": path.stat().st_size,
             "chunks": len(hashes),
+            "chunk_hashes": [h.hex() for h in hashes],
             "merkle": hashes and merkle_root(hashes).hex() or "",
         }
     manifest = {
@@ -91,3 +92,121 @@ def verify_file(path: Path, manifest: dict, name: str) -> bool:
 
 def generate_signing_key() -> nacl.signing.SigningKey:
     return nacl.signing.SigningKey.generate()
+
+
+# ---------------------------------------------------------------------------
+# Spore transfer (Phase 2): serve + pull with verify-on-arrival.
+#
+# Sandbox gate (THREAT-MODEL.md): pull_spore refuses to run unless the caller
+# passes sandbox_confirmed=True - which pandosi-lab sets only after detecting
+# a container runtime. The protocol itself has no exploit surface: it only
+# serves files the operator explicitly registered.
+# ---------------------------------------------------------------------------
+
+import http.server  # noqa: E402
+import threading  # noqa: E402
+import urllib.request  # noqa: E402
+
+
+def split_chunks(data: bytes, chunk_size: int = CHUNK_SIZE) -> list[bytes]:
+    return [data[i:i + chunk_size] for i in range(0, len(data), chunk_size)]
+
+
+class SporeServer:
+    """Serves a signed manifest and file chunks over HTTP (LAN, trusted).
+
+    files: {name: Path} - exactly the files listed in the manifest.
+    """
+
+    def __init__(self, manifest: dict, files: dict[str, Path],
+                 host: str = "0.0.0.0", port: int = 0):
+        self.manifest = manifest
+        self._chunks: dict[tuple[str, int], bytes] = {}
+        for name, path in files.items():
+            for i, chunk in enumerate(chunk_file(path)):
+                self._chunks[(name, i)] = chunk
+        server = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, fmt, *args):
+                pass
+
+            def _send(self, code, body: bytes, ctype="application/json"):
+                self.send_response(code)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_GET(self):  # noqa: N802
+                if self.path == "/spore/manifest":
+                    self._send(200, json.dumps(manifest).encode())
+                elif self.path.startswith("/spore/chunk/"):
+                    parts = self.path.split("/")
+                    name = "/".join(parts[3:-1])
+                    index = int(parts[-1])
+                    chunk = server._chunks.get((name, index))
+                    if chunk is None:
+                        self._send(404, b"{}")
+                    else:
+                        self._send(200, chunk, "application/octet-stream")
+                else:
+                    self._send(404, b"{}")
+
+        self._httpd = http.server.ThreadingHTTPServer((host, port), Handler)
+        self.port = self._httpd.server_address[1]
+        self._thread = threading.Thread(target=self._httpd.serve_forever,
+                                        daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def stop(self):
+        self._httpd.shutdown()
+
+    def url(self) -> str:
+        return f"http://127.0.0.1:{self.port}"
+
+
+def pull_spore(manifest_url: str, out_dir: Path, verify_key,
+               sandbox_confirmed: bool = False) -> dict:
+    """Pull a spore payload with verify-on-arrival for every chunk.
+
+    Refuses without sandbox_confirmed=True (see THREAT-MODEL.md). Verifies:
+    signature over the manifest, per-file Merkle roots, then on-disk files.
+    """
+    if not sandbox_confirmed:
+        raise PermissionError(
+            "spore pull requires sandbox_confirmed=True (container/VM target); "
+            "see THREAT-MODEL.md")
+
+    import urllib.request  # local import keeps module import light
+
+    with urllib.request.urlopen(f"{manifest_url}/spore/manifest",
+                                timeout=30) as resp:
+        manifest = json.loads(resp.read())
+    if not verify_manifest(manifest, verify_key):
+        raise ValueError("manifest signature verification FAILED")
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stats = {"files": {}, "chunks_pulled": 0, "chunks_rejected": 0}
+
+    for name, entry in manifest["files"].items():
+        target = out_dir / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("wb") as fh:
+            for i in range(entry["chunks"]):
+                url = f"{manifest_url}/spore/chunk/{name}/{i}"
+                with urllib.request.urlopen(url, timeout=30) as resp:
+                    chunk = resp.read()
+                expected = bytes.fromhex(entry["chunk_hashes"][i])
+                if hashlib.sha256(chunk).digest() != expected:
+                    raise ValueError(
+                        f"chunk {name}#{i} failed hash check (tampered/corrupt)")
+                fh.write(chunk)
+                stats["chunks_pulled"] += 1
+        stats["files"][name] = verify_file(target, manifest, name)
+    return stats
+
+
