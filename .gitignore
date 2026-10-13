@@ -11,3 +11,5 @@ playbook.private.toml
 artifacts/
 *.onnx.data
 docs/dashboard.html
+reg_join_log.txt
+spore_join_log.txt
