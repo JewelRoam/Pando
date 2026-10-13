@@ -68,6 +68,19 @@ def main() -> None:
                  "python tools/vendor/export_onnx.py --model convaiinnovations/laya "
                  "--output artifacts/laya-en.onnx"))
 
+    # playbook + history
+    pb_exists = Path("assets/playbook.example.toml").exists()
+    rows.append(("ok" if pb_exists else "miss", "playbook (assets/)",
+                 "" if pb_exists else "create assets/playbook.example.toml"))
+
+    # NPU-compatible graph
+    npu_graph = Path("artifacts/laya-en-static-nonisnan.onnx")
+    rows.append(("ok" if npu_graph.exists() else "miss",
+                 "NPU-compatible graph (IsNaN-free)",
+                 "" if npu_graph.exists() else
+                 "python tools/postprocess_onnx.py --in artifacts/laya-en-static-fixed.onnx "
+                 "--out artifacts/laya-en-static-nonisnan.onnx"))
+
     cap = capability()
     role = assign_role(cap)
     rows.append(("ok", f"role: {role} (ram {cap['ram_gb']}GB, cpus {cap['cpu_count']})", ""))
