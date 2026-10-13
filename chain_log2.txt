@@ -1,2 +1,0 @@
-playbook hash verified against history chain (2 entries)
-playbook loaded: refund-triage v1 hash=b8e25dd0af209d49 gating={'auto_min_agreement': 0.6, 'auto_min_probability': 0.6, 'escalate_above_disagreement': 0.5}
