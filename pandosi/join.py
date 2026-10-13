@@ -208,15 +208,23 @@ def main() -> None:
         print(f"SPROUT: pulled {stats['chunks_pulled']} chunks -> {pulled_file}",
               flush=True)
         # Strategy layer travels with the payload: a pulled playbook is
-        # validated and its hash reported (it governs this node IF it later
-        # becomes a root - reproduction carries strategy, not just weights).
+        # validated, its hash reported, and appended to this node's local
+        # lineage chain (reproduction carries strategy, auditable).
         pulled_pb = cache_dir / "playbook.toml"
         if pulled_pb.exists():
             from .playbook import load_playbook
+            from .pb_history import append_entry
             pulled_playbook = load_playbook(pulled_pb)
+            pb_hash = pulled_playbook.hash()
+            carried_parent = (manifest.get("metadata") or {}).get(
+                "playbook_parent")
+            entry = append_entry(Path("spore-cache") / node_id /
+                                 "pb-history.jsonl",
+                                 pb_hash, parent=carried_parent)
             print(f"SPROUT: playbook {pulled_playbook.name} "
-                  f"v{pulled_playbook.version} "
-                  f"hash={pulled_playbook.hash()[:16]}", flush=True)
+                  f"v{pulled_playbook.version} hash={pb_hash[:16]} "
+                  f"-> lineage entry {entry['hash'][:12]} "
+                  f"(parent {entry['parent'][:12]})", flush=True)
         args.backend = "onnx"
         backend_cfg = {"onnx_path": str(pulled_file)}
         backend_name = "onnx"

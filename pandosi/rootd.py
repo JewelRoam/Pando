@@ -230,8 +230,13 @@ class Root:
                 print("spore key generated and saved to", key_file, flush=True)
             self.spore = {"key": key}
             self.spore_pubkey = key.verify_key.encode().hex()
+            pb_meta = {"role": "root"}
+            if getattr(self, "playbook", None) is not None:
+                pb_meta["playbook_hash"] = self.playbook.hash()
+                pb_meta["playbook_name"] = self.playbook.name
+                pb_meta["playbook_version"] = self.playbook.version
             self.spore_manifest = build_manifest(spore_files, key,
-                                                 metadata={"role": "root"})
+                                                 metadata=pb_meta)
             self.spore_chunks = {}
             for name, path in spore_files.items():
                 data = path.read_bytes()
