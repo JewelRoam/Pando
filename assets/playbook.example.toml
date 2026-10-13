@@ -34,6 +34,21 @@ informational = true  # score heads are not decision-grade (round 24)
 instructions = "Rate the risk of this ticket."
 criteria = ["low", "moderate", "high"]  # 3-level: adjacent-level errors dominate at 5 levels (round 44)
 
+[gating.security]
+# Security questions get LOWER thresholds (stricter = safer)
+# A 2/3 majority with 0.4 probability is enough for security actions
+# because the cost of a false negative (missing a threat) is higher
+# than a false positive (unnecessary verification)
+auto_min_agreement = 0.5
+auto_min_probability = 0.4
+
+[[questions]]
+id = "security_check"
+type = "choice"
+informational = false  # security questions CAN gate actions
+instructions = "Is this login or message a security threat?"
+criteria = ["suspicious", "normal"]
+
 [[actions]]
 when = "intent == refund"
 do = "start_refund_flow"

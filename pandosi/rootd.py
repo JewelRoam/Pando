@@ -129,10 +129,22 @@ class Coordinator:
         for v in votes:
             cp, _ = self._calibrator.calibrate(v.checkpoint, v.probability)
             calibrated_votes.append(Vote(v.node_id, v.checkpoint, v.choice, cp))
+
+        # Security questions get stricter gating (lower thresholds)
+        is_security = any(
+            kw in req.question.lower()
+            for kw in ("security", "suspicious", "phishing", "threat"))
+        eff_gating = dict(self.gating)
+        if is_security and self.gating.get("security"):
+            sec = self.gating["security"]
+            eff_gating["auto_min_agreement"] = sec.get(
+                "auto_min_agreement", 0.5)
+            eff_gating["auto_min_probability"] = sec.get(
+                "auto_min_probability", 0.4)
         result = aggregate(
             calibrated_votes, min_quorum=min(3, len(quorum)),
-            auto_min_agreement=self.gating.get("auto_min_agreement", 0.6),
-            auto_min_probability=self.gating.get("auto_min_probability", 0.6))
+            auto_min_agreement=eff_gating.get("auto_min_agreement", 0.6),
+            auto_min_probability=eff_gating.get("auto_min_probability", 0.6))
         self._log_decision(req, result, len(quorum))
         try:
             self._recorder.record(req.request_id, req.state, req.question,
