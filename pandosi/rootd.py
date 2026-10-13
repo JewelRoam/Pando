@@ -22,7 +22,7 @@ from .common import DecisionRequest, Vote, aggregate
 
 HEARTBEAT_TTL = 15.0
 QUORUM_K = 5
-CALL_TIMEOUT = 5.0
+CALL_TIMEOUT = 30.0
 
 
 def http_transport(url: str, payload: bytes, timeout: float) -> bytes:

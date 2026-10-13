@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 
+import numpy as np
+
 from .common import DecisionRequest, Vote
 
 
@@ -71,12 +73,19 @@ class OnnxLayaBackend:
     """
 
     def __init__(self, node_id: str, onnx_path: str,
-                 repo: str = "convaiinnovations/laya"):
+                 repo: str = "convaiinnovations/laya", device: str = "CPU"):
         from laya.onnx_agent import ONNXAgent  # type: ignore
 
         self.node_id = node_id
-        self.checkpoint = "onnx"
+        self.checkpoint = "onnx" if device == "CPU" else f"onnx-{device.lower()}"
         self._agent = ONNXAgent(repo, onnx_path=onnx_path)
+        if device != "CPU":
+            self._agent.session = _make_openvino_session(
+                onnx_path, device, self._agent.session)
+            # Warmup: trigger lazy compilation now, not on the first vote.
+            warm = DecisionRequest(state="warmup", question="warmup",
+                                   candidates=["a", "b"])
+            self.decide(warm)
 
     def decide(self, req: DecisionRequest) -> Vote:
         if not req.candidates:
@@ -91,3 +100,49 @@ class OnnxLayaBackend:
         probability = float(answer.get("answer_confidence")
                             or answer.get("confidence") or 0.5)
         return Vote(self.node_id, self.checkpoint, choice, round(probability, 4))
+
+
+class _OVLazySession:
+    """Duck-types ort.InferenceSession with OpenVINO, compiled lazily per shape.
+
+    The Laya graph has dynamic batch/seq/option dims that OV cannot infer
+    correctly (round-8/13 findings). We compile per concrete input-shape tuple
+    on first sight and cache; later identical shapes reuse the compiled model.
+    """
+
+    def __init__(self, onnx_path: str, device: str, ort_session):
+        self._onnx_path = onnx_path
+        self._device = device
+        self._ort = ort_session  # used only to source output names/order
+        self._cache: dict[tuple, tuple] = {}
+
+    def _compile(self, key, input_feed):
+        import openvino as ov  # type: ignore
+
+        core = ov.Core()
+        model = core.read_model(self._onnx_path)
+        reshape_map = {}
+        for inp in model.inputs:
+            shape = list(input_feed[inp.any_name].shape)
+            reshape_map[inp.any_name] = ov.PartialShape(
+                [ov.Dimension(d) for d in shape])
+        model.reshape(reshape_map)
+        compiled = core.compile_model(model, self._device)
+        out_order = [o.any_name for o in compiled.outputs]
+        self._cache[key] = (compiled.create_infer_request(), out_order)
+
+    def run(self, output_names, input_feed, *args, **kwargs):
+        key = tuple(sorted((n, tuple(input_feed[n].shape))
+                           for n in input_feed))
+        if key not in self._cache:
+            print(f"[ov-lazy] compiling {self._device} for shapes {key}...",
+                  flush=True)
+            self._compile(key, input_feed)
+        infer, out_order = self._cache[key]
+        res = infer.infer(input_feed)
+        names = output_names or out_order
+        return [np.asarray(res[name]) for name in names]
+
+
+def _make_openvino_session(onnx_path: str, device: str, ort_session):
+    return _OVLazySession(onnx_path, device, ort_session)
