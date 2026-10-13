@@ -117,6 +117,8 @@ def main() -> None:
     parser.add_argument("--spore-url", default=None,
                         help="pull the payload from a SporeServer first "
                              "(GRAFT/SPROUT; implies --backend onnx)")
+    parser.add_argument("--spore", action="store_true",
+                        help="pull from the root's own spore endpoints")
     parser.add_argument("--sandbox-confirmed", action="store_true",
                         help="confirm this target is a sandbox (required for spore)")
     parser.add_argument("--root", default=None,
@@ -126,7 +128,7 @@ def main() -> None:
     args = parser.parse_args()
     _bypass_proxy_for_lan()
 
-    if args.spore_url and not args.sandbox_confirmed:
+    if (args.spore_url or args.spore) and not args.sandbox_confirmed:
         raise SystemExit("spore pull requires --sandbox-confirmed "
                          "(see THREAT-MODEL.md)")
 
@@ -164,6 +166,9 @@ def main() -> None:
         advertise_root(root.port)
         print(f"rootd listening on {root_url} (advertised via mDNS)")
 
+    if args.spore and not args.spore_url and root_info:
+        args.spore_url = f"http://{root_info['ip']}:{root_info['port']}"
+        print(f"spore: pulling from root at {args.spore_url}", flush=True)
     if args.spore_url:
         from .spore import pull_spore, generate_signing_key, verify_manifest
         # The manifest signature is checked against the key pinned in the
@@ -183,10 +188,17 @@ def main() -> None:
                            sandbox_confirmed=True) if False else None
         # TOFU placeholder above must be replaced by a pinned key; for the
         # lab smoke we verify with the seed's real public key passed in env.
-        import os
-        seed_pub_hex = os.environ.get("PANDOSI_SEED_PUBKEY")
-        if not seed_pub_hex:
-            raise SystemExit("set PANDOSI_SEED_PUBKEY (seed verify key hex)")
+        if args.spore:
+            with urllib.request.urlopen(
+                    f"{args.spore_url}/spore/pubkey", timeout=10) as resp:
+                seed_pub_hex = json.loads(resp.read())["pubkey"]
+            print("[TOFU] root pubkey:", seed_pub_hex, flush=True)
+        else:
+            import os
+            seed_pub_hex = os.environ.get("PANDOSI_SEED_PUBKEY")
+            if not seed_pub_hex:
+                raise SystemExit(
+                    "set PANDOSI_SEED_PUBKEY (seed verify key hex)")
         verify_key = nacl.signing.VerifyKey(bytes.fromhex(seed_pub_hex))
         from .spore import pull_spore as _pull
         stats = _pull(args.spore_url, cache_dir, verify_key,

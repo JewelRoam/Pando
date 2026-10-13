@@ -20,6 +20,7 @@ class _PandoHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = True
 
 from .common import DecisionRequest, Vote, aggregate
+from .spore import build_manifest, generate_signing_key
 
 HEARTBEAT_TTL = 15.0
 QUORUM_K = 5
@@ -119,7 +120,7 @@ class Coordinator:
         return out
 
 
-def build_handler(coordinator: Coordinator):
+def build_handler(coordinator: Coordinator, root=None):
     class RootHandler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
             pass
@@ -135,6 +136,30 @@ def build_handler(coordinator: Coordinator):
         def do_GET(self):  # noqa: N802
             if self.path == "/nodes":
                 self._send(200, {"nodes": coordinator.live_nodes()})
+            elif (self.path == "/spore/pubkey"
+                    and root is not None
+                    and getattr(root, chr(115)+chr(112)+chr(111)+chr(114)+chr(101)+chr(95)+chr(109)+chr(97)+chr(110)+chr(105)+chr(102)+chr(101)+chr(115)+chr(116), None) is not None):
+                self._send(200, {"pubkey": root.spore_pubkey})
+            elif (self.path == "/spore/manifest"
+                    and root is not None
+                    and getattr(root, chr(115)+chr(112)+chr(111)+chr(114)+chr(101)+chr(95)+chr(109)+chr(97)+chr(110)+chr(105)+chr(102)+chr(101)+chr(115)+chr(116), None) is not None):
+                self._send(200, root.spore_manifest)
+            elif (self.path.startswith("/spore/chunk/")
+                    and root is not None
+                    and getattr(root, chr(115)+chr(112)+chr(111)+chr(114)+chr(101)+chr(95)+chr(109)+chr(97)+chr(110)+chr(105)+chr(102)+chr(101)+chr(115)+chr(116), None) is not None):
+                parts = self.path.split("/")
+                name = "/".join(parts[3:-1])
+                index = int(parts[-1])
+                chunk = root.spore_chunks.get((name, index))
+                if chunk is None:
+                    self._send(404, b"{}")
+                else:
+                    self.send_response(200)
+                    self.send_header("Content-Type",
+                                     "application/octet-stream")
+                    self.send_header("Content-Length", str(len(chunk)))
+                    self.end_headers()
+                    self.wfile.write(chunk)
             else:
                 self._send(404, {"error": "not found"})
 
@@ -157,9 +182,23 @@ def build_handler(coordinator: Coordinator):
 
 class Root:
     def __init__(self, coordinator: Coordinator | None = None,
-                 host: str = "127.0.0.1", port: int = 0):
+                 host: str = "127.0.0.1", port: int = 0,
+                 spore_files: dict | None = None):
         self.coordinator = coordinator or Coordinator()
-        self._httpd = _PandoHTTPServer((host, port), build_handler(self.coordinator))
+        self.spore = None
+        if spore_files:
+            key = generate_signing_key()
+            self.spore_pubkey = key.verify_key.encode().hex()
+            self.spore_manifest = build_manifest(spore_files, key,
+                                                 metadata={"role": "root"})
+            self.spore_chunks = {}
+            for name, path in spore_files.items():
+                data = path.read_bytes()
+                for i in range(0, len(data), 64 * 1024):
+                    self.spore_chunks[(name, i // (64 * 1024))] = \
+                        data[i:i + 64 * 1024]
+        self._httpd = _PandoHTTPServer(
+            (host, port), build_handler(self.coordinator, root=self))
         self.port = self._httpd.server_address[1]
         self._thread: threading.Thread | None = None
 
@@ -177,8 +216,14 @@ class Root:
 def main() -> None:
     parser = argparse.ArgumentParser(description="PandoSI root coordinator")
     parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--serve-spore", default=None,
+                        help="payload file to serve for spore pulls")
     args = parser.parse_args()
-    root = Root(port=args.port)
+    spore_files = None
+    if args.serve_spore:
+        from pathlib import Path as _P
+        spore_files = {"payload.onnx": _P(args.serve_spore)}
+    root = Root(port=args.port, spore_files=spore_files)
     root.start()
     print(f"rootd listening on {root.url()}")
     try:
