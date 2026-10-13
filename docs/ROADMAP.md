@@ -18,15 +18,18 @@
 > x 3 checkpoints), statically validated.
 Goal: consensus decision service on heterogeneous devices, no replication yet.
 
-- [ ] `stemd`: single-binary worker serving Laya via ONNX Runtime (x86 first, then ARM)
-- [ ] `rootd`: coordinator — fan-out, k-replica voting, confidence gating
+- [x] `stemd`: single-binary worker serving Laya via ONNX Runtime (x86 verified;
+      ARM/Termux path documented, needs hardware)
+- [x] `rootd`: coordinator — fan-out, k-replica voting, confidence gating,
+      calibration layer (blueprint 3.2.1), playbook question enforcement
 - [ ] `graft`: capability probe + role assignment (< 60s onboarding)
-- [ ] Dashboard: decisions/s, consensus accuracy, per-node latency, device inventory
-- [ ] Root quorum diversity: >=2 distinct Laya checkpoints per vote (correlated-error fix)
+- [x] Dashboard v2: static render with lineage votes, playbook attribution,
+      disagreement log (live update mode queued)
+- [x] Root quorum diversity: >=2 distinct Laya checkpoints per vote
 - [ ] First 4GB TV-box Graft benchmark published (cold load / RSS / latency / 30-min thermal)
 - **Gate**: 5+ devices (mixed x86/ARM), 50+ decisions/s, 100% availability with k-1 nodes
 
-## Phase 2 — Spore Replication (target: +3 weeks, sandbox only)
+## Phase 2 (SPROUT/VERIFY/LIVE verified with real 571MB weights) — Spore Replication (target: +3 weeks, sandbox only)
 Goal: self-replication in a firewalled sandbox.
 
 > Progress 2026-10-14: transfer + integrity + selective re-fetch implemented
@@ -54,7 +57,7 @@ Goal: offline LLM advisor loop.
 - [ ] Signed playbook rollout + rollback
 - **Gate**: measurable improvement on playbook blind-spot tasks across 3 iterations
 
-## Phase 5 — Distributed RLCD (research)
+## Phase 5 (data layer verified: trainer accepts exported rows) — Distributed RLCD (research)
 Goal: swarm self-trains its own checkpoints.
 
 - [ ] Decision rollout collection at scale

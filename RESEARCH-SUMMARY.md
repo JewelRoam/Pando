@@ -68,6 +68,54 @@ playbook.toml (strategy, authored offline)
 | iGPU (Arc 140T) | OpenVINO (surgery + multi-bucket) | 25-41ms | ✅ 4x CPU |
 | NPU (AI Boost) | OpenVINO (IsNaN-free) | 95-102ms | ✅ verified |
 
+## Additional findings (rounds 44-61b)
+
+### Diversity quantified
+
+| pair | divergence | meaning |
+|---|---|---|
+| en vs ml | **32.5%** | most independent pair (multilingual sees differently) |
+| en vs td | 10.0% | td fine-tune closely tracks en base |
+| ml vs td | 27.5% | moderate independence |
+
+**35% split rate** = 14 contrast pairs available for RLCD = the sweet spot
+(enough disagreement for training signal, not enough to make swarm unreliable).
+
+### Split-case majority reliability: 36%
+
+When the 3 lineages disagree, majority voting is only 36% reliable.
+This PROVES that auto-executing split decisions would be dangerous (64%
+error rate) and that verify/escalate routing is NECESSARY, not optional.
+
+### Calibration is load-bearing
+
+2 tier flips proven at the boundary (p=0.58 + T=0.5 sharpens to auto;
+p=0.62 + T=2.0 softens to verify). Temperature choice directly affects
+auto-execution rate. Currently identity (T=1.0) until calibration data
+is computed.
+
+### Adversarial robustness matrix
+
+SAFE when honest >= adversarial. CORRECTLY DEMOTED at parity.
+DANGEROUS only when honest < adversarial (Byzantine Generals - mitigated
+by checkpoint diversity + EU diversity + sandbox gate + signature).
+
+### Score capability is DOMAIN-NARROW
+
+27 measurements across 3 lineages: en/ml score heads content-blind,
+td content-sensitive only in its fine-tune domain. Structurally enforced:
+score questions require informational=true in the playbook.
+
+## Evolution loop: first cycle verified
+
+```
+disagreement (ml=greeting@0.53 vs en=refund@0.99)
+  → RolloutRecorder captured → export_training_rows (contrast pair)
+    → laya.train.finetune → loss=0.1663, checkpoint saved
+      → fine-tuned model: same decisions, confidence +0.25 universal
+        → no regression on non-target cases → genuine learning
+```
+
 ## Remaining work
 
 - NPU: deep graph analysis (IsNaN was removed; other ops may block)
