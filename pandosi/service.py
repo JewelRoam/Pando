@@ -168,8 +168,11 @@ def _posix_commands(name: str, platform: str) -> dict[str, list[str]]:
     unit_path = Path.home() / ".config/systemd/user" / f"{name}.service"
     unit = f"{name}.service"
     remove = shlex.quote(str(unit_path))
+    enable = shlex.quote(unit)
     return {
-        "install": ["systemctl", "--user", "enable", "--now", unit],
+        "install": ["sh", "-c",
+                    "systemctl --user daemon-reload && "
+                    f"systemctl --user enable --now {enable}"],
         "start": ["systemctl", "--user", "start", unit],
         "status": ["systemctl", "--user", "status", unit],
         "stop": ["systemctl", "--user", "stop", unit],
@@ -313,9 +316,6 @@ def build_service_plan(role: str = "root", *, platform: str = "auto",
             result["files"] = [{"path": str(unit_path),
                                 "content": _unit_content(
                                     detected, argv, working)}]
-            result["commands"]["install"] = [
-                "systemctl", "--user", "daemon-reload",
-                *result["commands"]["install"]]
         else:
             prefix = Path(sys.prefix)
             service_dir = prefix / "var/service" / service_name
