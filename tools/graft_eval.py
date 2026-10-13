@@ -38,6 +38,13 @@ def predicted_answer(task: dict, answer: dict) -> str:
     if task["qtype"] == "noul":
         return "true" if float(answer.get("noul", 0.0)) > 0.5 else "false"
     if task["qtype"] == "score":
+        # The float "score" is an expected value between levels; the bucket
+        # distribution is the actual decision. Use its argmax + legend.
+        probs = answer.get("probabilities") or {}
+        if probs:
+            top = max(probs, key=lambda k: probs[k])
+            legend = answer.get("legend") or {}
+            return str(legend.get(top, top))
         crit = task["criteria"]
         idx = int(round(float(answer.get("score", -1))))
         return crit[idx] if 0 <= idx < len(crit) else ""
