@@ -197,13 +197,20 @@ def pull_spore(manifest_url: str, out_dir: Path, verify_key,
         target.parent.mkdir(parents=True, exist_ok=True)
         with target.open("wb") as fh:
             for i in range(entry["chunks"]):
-                url = f"{manifest_url}/spore/chunk/{name}/{i}"
-                with urllib.request.urlopen(url, timeout=30) as resp:
-                    chunk = resp.read()
                 expected = bytes.fromhex(entry["chunk_hashes"][i])
-                if hashlib.sha256(chunk).digest() != expected:
+                chunk = None
+                # Selective re-fetch: a corrupt chunk is re-requested up to
+                # 3 times (transient corruption vs persistent tampering).
+                for attempt in range(3):
+                    url = f"{manifest_url}/spore/chunk/{name}/{i}"
+                    with urllib.request.urlopen(url, timeout=30) as resp:
+                        chunk = resp.read()
+                    if hashlib.sha256(chunk).digest() == expected:
+                        break
+                else:
                     raise ValueError(
-                        f"chunk {name}#{i} failed hash check (tampered/corrupt)")
+                        f"chunk {name}#{i} failed hash check after 3 attempts "
+                        "(tampered or persistently corrupt)")
                 fh.write(chunk)
                 stats["chunks_pulled"] += 1
         stats["files"][name] = verify_file(target, manifest, name)

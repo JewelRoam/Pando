@@ -170,39 +170,50 @@ def main() -> None:
         args.spore_url = f"http://{root_info['ip']}:{root_info['port']}"
         print(f"spore: pulling from root at {args.spore_url}", flush=True)
     if args.spore_url:
-        from .spore import pull_spore, generate_signing_key, verify_manifest
-        # The manifest signature is checked against the key pinned in the
-        # playbook; for now the seed's key is fetched trust-on-first-use and
-        # echoed loudly so the operator can pin it.
-        with urllib.request.urlopen(f"{args.spore_url}/spore/manifest",
-                                    timeout=60) as resp:
-            manifest = json.loads(resp.read())
         import nacl.signing
-        seed_key = nacl.signing.SigningKey.generate()  # placeholder verify key
-        print(f"SPORE manifest: lineage={manifest['metadata'].get('lineage')} "
-              f"files={list(manifest['files'])}", flush=True)
-        print("[trust-on-first-use] pin the seed key before production use!",
-              flush=True)
-        cache_dir = Path("spore-cache") / node_id
-        stats = pull_spore(args.spore_url, cache_dir, seed_key.verify_key,
-                           sandbox_confirmed=True) if False else None
-        # TOFU placeholder above must be replaced by a pinned key; for the
-        # lab smoke we verify with the seed's real public key passed in env.
+
+        # 1) Obtain the seed's verify key.
+        #    --spore (root mode): fetch from the root, pin on first use.
+        #    --spore-url (explicit seed): must come from PANDOSI_SEED_PUBKEY.
         if args.spore:
-            with urllib.request.urlopen(
-                    f"{args.spore_url}/spore/pubkey", timeout=10) as resp:
+            with urllib.request.urlopen(f"{args.spore_url}/spore/pubkey",
+                                        timeout=15) as resp:
                 seed_pub_hex = json.loads(resp.read())["pubkey"]
-            print("[TOFU] root pubkey:", seed_pub_hex, flush=True)
+            pin_file = Path("spore-cache") / "pinned-pubkey.txt"
+            pin_file.parent.mkdir(parents=True, exist_ok=True)
+            if pin_file.exists():
+                pinned = pin_file.read_text(encoding="utf-8").strip()
+                if pinned and pinned != seed_pub_hex:
+                    raise SystemExit(
+                        "SECURITY: root spore pubkey CHANGED vs pinned key "
+                        f"({pin_file}) - possible seed compromise; refusing. "
+                        "Delete the pin file only if you verified the new key.")
+                print("[TOFU] pubkey matches pin", flush=True)
+            else:
+                pin_file.write_text(seed_pub_hex, encoding="utf-8")
+                print("[TOFU] root pubkey pinned:", seed_pub_hex, flush=True)
         else:
             import os
             seed_pub_hex = os.environ.get("PANDOSI_SEED_PUBKEY")
             if not seed_pub_hex:
                 raise SystemExit(
                     "set PANDOSI_SEED_PUBKEY (seed verify key hex)")
+
         verify_key = nacl.signing.VerifyKey(bytes.fromhex(seed_pub_hex))
-        from .spore import pull_spore as _pull
-        stats = _pull(args.spore_url, cache_dir, verify_key,
-                      sandbox_confirmed=True)
+
+        # 2) Fetch and verify the manifest, then pull with per-chunk checks.
+        with urllib.request.urlopen(f"{args.spore_url}/spore/manifest",
+                                    timeout=60) as resp:
+            manifest = json.loads(resp.read())
+        if not verify_manifest(manifest, verify_key):
+            raise SystemExit("SECURITY: manifest signature verification FAILED")
+        print(f"SPORE manifest: lineage="
+              f"{manifest['metadata'].get('lineage')} "
+              f"files={list(manifest['files'])}", flush=True)
+
+        cache_dir = Path("spore-cache") / node_id
+        stats = pull_spore(args.spore_url, cache_dir, verify_key,
+                           sandbox_confirmed=True)
         pulled_file = cache_dir / next(iter(manifest["files"]))
         print(f"SPROUT: pulled {stats['chunks_pulled']} chunks -> {pulled_file}",
               flush=True)
