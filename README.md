@@ -159,6 +159,8 @@ pandosi doctor --plan
 
 The wheel includes playbook examples, small graft suites, and calibration
 JSON files. Model weights and generated ONNX graphs remain separate.
+CI builds and inspects the wheel archive so packaged entry points and
+runtime assets cannot silently disappear.
 
 LAN is a separate explicit grant:
 
