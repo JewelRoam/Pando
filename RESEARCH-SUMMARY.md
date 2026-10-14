@@ -176,6 +176,12 @@ updates and kept all six held-out labels stable while reducing confidence
 drift versus the four-epoch small-data run. It did not improve held-out
 accuracy and is retained as a candidate, not promoted.
 
+Round 80 exports v7 to ONNX and places it beside the baseline as a live HTTP
+stem. The two lineages agreed on 6/6 holdout tasks, both at 0.5 accuracy.
+v7 raised confidence substantially, including 0.9996 on an incorrect
+answer, so the promotion gate rejected it. The live A/B mechanism itself is
+verified and ready for future candidates.
+
 ## Remaining work
 
 - NPU: deep graph analysis (IsNaN was removed; other ops may block)

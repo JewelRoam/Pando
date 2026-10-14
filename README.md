@@ -65,6 +65,10 @@ devices, one mind.
 - **Expanded RLCD pool**: 78 new multi-lingual prompts yielded 45 contrast
   rows and a 41-update CUDA candidate. Held-out accuracy stayed unchanged,
   but confidence drift fell versus the over-trained small-data run.
+- **Live A/B promotion gate**: the v7 candidate was exported to ONNX and
+  placed beside the baseline in the real root. It agreed 6/6 on holdout but
+  produced no accuracy gain and became 0.9996 confident on a wrong answer,
+  so it was not promoted.
 - **Real lineage identity over HTTP**: en/ml/td ONNX stems now register as
   distinct checkpoints; twelve shared choice tasks produced 11 cross-lineage
   splits, making model diversity visible to the live quorum.
