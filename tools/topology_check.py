@@ -35,20 +35,14 @@ def main() -> int:
     assert plan.voters == ["rtx3070"], plan.voters
     assert plan.rejected, "staging rejection should be recorded"
 
-    # Requiring a quorum the fast device cannot supply pulls the slow one in.
-    # Replicating then wastes the fast device (it waits for the slow voter),
-    # so the planner gives each device a slice proportional to its speed
-    # instead. This is the fix for round 94's 50/50 node split, which gave
-    # the slow device far more work than its speed justified.
+    # Asking for a bigger quorum does not force the slow device in: with the
+    # same checkpoint it adds latency and no information (round 95), so the
+    # planner prefers a smaller quorum on the fast device and says so.
     plan = plan_topology([fast, slow], [loopback], model_gb=2.0,
                          activation_mb=0.4, quorum=2)
-    show("fast GPU + slow CPU, quorum 2 (speed-proportional split)",
-         plan, "stage")
-    shares = {stage["device"]: stage["share"] for stage in plan.stages}
-    assert shares["rtx3070"] > 0.8 > shares["intel-cpu"], shares
-    stage_times = {stage["stage_ms"] for stage in plan.stages}
-    assert len(stage_times) == 1, plan.stages  # both stages finish together
-    assert plan.latency_ms == round(2 * stage_times.pop() + 1.2, 3), plan
+    show("fast GPU + slow CPU, quorum of 2 requested", plan, "replicate")
+    assert plan.voters == ["rtx3070"], plan.voters
+    assert "left out" in plan.reason, plan.reason
 
     # Two comparable, disjoint GPUs: a 50/50 split halves the critical path,
     # so staging doubles quorum throughput. (Predicted, not yet measured on
@@ -59,7 +53,8 @@ def main() -> int:
     plan = plan_topology([twin_a, twin_b], [twin_link], model_gb=2.0,
                          activation_mb=0.4)
     show("two equal disjoint GPUs", plan, "stage")
-    assert plan.throughput_rps == 100.0, plan.throughput_rps
+    # 10 ms per stage plus the hop on the second stage, so ~1000/11 ms.
+    assert 89.0 < plan.throughput_rps < 91.0, plan.throughput_rps
 
     # Model does not fit on one device: the pipeline becomes the only option,
     # and its shares follow measured device speed. 6 GB of model, 4 GB + 3 GB
@@ -92,7 +87,18 @@ def main() -> int:
     show("model too big, slow link", plan, "infeasible")
     assert plan.rejected
 
-    print(json.dumps({"scenarios": 6, "status": "OK"}))
+    # Round 97, measured on this host: the model fits everywhere and the
+    # balanced split would have been profitable on paper, but the loopback
+    # hop costs 11 ms under load - so the pipeline period is bounded by the
+    # hop, not by the stage, and replication wins.
+    measured_hop = Link("rtx3070", "intel-cpu", rtt_ms=1.2, hop_ms=11.1)
+    plan = plan_topology([fast, slow], [measured_hop], model_gb=2.0,
+                         activation_mb=0.4, quorum=2)
+    show("balanced split, hop measured under load (round 97)",
+         plan, "replicate")
+    assert any("req/s" in problem for problem in plan.rejected), plan.rejected
+
+    print(json.dumps({"scenarios": 7, "status": "OK"}))
     print("TOPOLOGY PLANNER OK")
     return 0
 

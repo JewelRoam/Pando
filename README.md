@@ -109,6 +109,13 @@ devices, one mind.
   synchronous quorum 8.7x where a 50/50 node split lost 0.47x — a
   model-based prediction, flagged as such
   (`docs/research/2026-10-14-round96.md`).
+- **Staging tested, and it loses**: the speed-proportional split measured
+  **0.66x / 0.74x** against quorum-1 replication on the 3070 — the round-96
+  prediction is falsified and its 8.7x figure retracted (it compared against
+  a forced quorum of 2). The ceiling is only 1.17x for a 5.9x-slower partner,
+  and the loopback hop is 1.9–11.1 ms under load, not the 1.2 ms measured
+  idle. The planner now prices the loaded hop and evaluates smaller quorums
+  as the replication baseline (`docs/research/2026-10-14-round97.md`).
 - **Real lineage identity over HTTP**: en/ml/td ONNX stems now register as
   distinct checkpoints; twelve shared choice tasks produced 11 cross-lineage
   splits, making model diversity visible to the live quorum.

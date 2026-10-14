@@ -33,12 +33,24 @@ class Device:
 
 @dataclass
 class Link:
-    """One measured transport between two devices."""
+    """One measured transport between two devices.
+
+    ``hop_ms`` is the per-request cost of moving one activation across the
+    link and back, and it must be measured **under load**: round 97 measured
+    a loopback hop at 1.2 ms idle and 11 ms with four requests in flight.
+    The idle number is what makes a pipeline look profitable on paper.
+    """
 
     a: str
     b: str
     rtt_ms: float
     mbps: float = 1000.0
+    hop_ms: float | None = None
+
+    def hop(self, activation_mb: float) -> float:
+        transfer_ms = activation_mb * 8.0 / max(self.mbps, 0.001)
+        base = self.rtt_ms if self.hop_ms is None else self.hop_ms
+        return base + transfer_ms
 
     def connects(self, first: str, second: str) -> bool:
         return {self.a, self.b} == {first, second}
@@ -64,17 +76,35 @@ def _rtt(links: list[Link], first: str, second: str) -> float:
     return float("inf")            # unknown link: assume it cannot be used
 
 
+def _hop(links: list[Link], first: str, second: str,
+         activation_mb: float) -> float:
+    if first == second:
+        return 0.0
+    for link in links:
+        if link.connects(first, second):
+            return link.hop(activation_mb)
+    return float("inf")
+
+
 def _replicate_plan(devices: list[Device], links: list[Link],
-                    quorum: int) -> Plan:
+                    quorum: int, available: int | None = None) -> Plan:
     """Each voter runs the whole model; the slowest voter bounds the round."""
     usable = sorted(devices, key=lambda d: d.full_model_ms)
     voters = usable[:max(1, quorum)]
     slowest = max(voters, key=lambda d: d.full_model_ms)
+    note = ""
+    if available is not None and len(voters) < available:
+        # A slower device that answers the same question with the same
+        # checkpoint adds no information (round 95) but does add its latency
+        # to every round, so the planner is willing to run a smaller quorum.
+        note = (f"; {available - len(voters)} slower device(s) left out "
+                f"because the same checkpoint adds latency, not information "
+                f"(round 95)")
     return Plan(
         mode="replicate",
-        reason=(f"{len(voters)} devices run the whole model; the slowest "
+        reason=(f"quorum of {len(voters)} runs the whole model; the slowest "
                 f"({slowest.node_id}) bounds the round. Runtime differences "
-                f"do not change votes (round 95)"),
+                f"do not change votes (round 95){note}"),
         voters=[device.node_id for device in voters],
         latency_ms=round(slowest.full_model_ms, 3),
         throughput_rps=round(1000.0 / slowest.full_model_ms, 3),
@@ -112,16 +142,12 @@ def _stage_plan(devices: list[Device], links: list[Link],
                 f"{device.memory_gb} GB")
     for index in range(len(stages) - 1):
         first, second = stages[index], stages[index + 1]
-        rtt = _rtt(links, first["device"], second["device"])
-        transfer_ms = 0.0
-        for link in links:
-            if link.connects(first["device"], second["device"]):
-                transfer_ms = activation_mb * 8.0 / max(link.mbps, 0.001)
+        hop = _hop(links, first["device"], second["device"], activation_mb)
         budget = min(first["stage_ms"], second["stage_ms"])
-        if rtt + transfer_ms >= budget:
+        if hop >= budget:
             problems.append(
                 f"link {first['device']}->{second['device']} costs "
-                f"{rtt + transfer_ms:.2f} ms >= the {budget:.2f} ms stage "
+                f"{hop:.2f} ms >= the {budget:.2f} ms stage "
                 f"budget (L < T fails)")
     if problems:
         return Plan(mode="infeasible",
@@ -135,12 +161,20 @@ def _stage_plan(devices: list[Device], links: list[Link],
     latency = sum(stage["stage_ms"] for stage in stages) + sum(
         _rtt(links, stages[index]["device"], stages[index + 1]["device"])
         for index in range(len(stages) - 1))
+    # Pipeline period: a stage's output has to cross its hop before the next
+    # stage can start, so every stage after the first pays the hop too.
+    period = stages[0]["stage_ms"]
+    for index, stage in enumerate(stages[1:], start=1):
+        hop = _hop(links, stages[index - 1]["device"], stage["device"],
+                   activation_mb)
+        period = max(period, stage["stage_ms"] + hop)
     return Plan(mode="stage",
                 reason=("split in proportion to device speed; balance "
-                        f"{min(s['stage_ms'] for s in stages) / bottleneck:.2f}"),
+                        f"{min(s['stage_ms'] for s in stages) / bottleneck:.2f}"
+                        f"; period {period:.2f} ms incl. hops"),
                 stages=stages,
                 latency_ms=round(latency, 3),
-                throughput_rps=round(1000.0 / bottleneck, 3))
+                throughput_rps=round(1000.0 / period, 3))
 
 
 def plan_topology(devices: list[Device], links: list[Link],
@@ -159,7 +193,14 @@ def plan_topology(devices: list[Device], links: list[Link],
 
     holds_model = [device for device in devices
                    if device.memory_gb >= model_gb]
-    replicate = _replicate_plan(holds_model or devices, links, quorum)
+    candidates = holds_model or devices
+    # The best replication is not always the biggest quorum: a slow voter
+    # bounds every round, so evaluate smaller quorums on the faster devices
+    # and keep the one with the highest throughput.
+    replicate = max(
+        (_replicate_plan(candidates, links, size, available=len(candidates))
+         for size in range(1, min(quorum, len(candidates)) + 1)),
+        key=lambda plan: plan.throughput_rps)
     if not holds_model:
         staged = _stage_plan(devices, links, activation_mb, max_stages, model_gb)
         if staged.mode == "stage":
