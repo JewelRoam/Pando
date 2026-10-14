@@ -139,6 +139,14 @@ devices, one mind.
   checkpoint *name* (a misnamed stem silently changes the gate), and a naive
   sweep would have shipped a threshold that acts on a minority vote
   (`docs/research/2026-10-14-round100.md`).
+- **Delta replication**: content-defined chunking plus a content-addressed
+  chunk store, so a replica fetches only the chunks it lacks. Replicating a
+  fine-tune that shares 93.5% of its weights with its parent moved **105 MB
+  instead of 1610 MB (15.3x)** and spent **0.37 s transferring instead of
+  5.56 s**, with the reconstruction verified byte-identical. The wall clock
+  is held back by the on-disk chunk store (4,870 small reads), which is
+  recorded as the next fix (`tools/spore_delta_check.py`,
+  `docs/research/2026-10-14-round107.md`).
 - **Batched replication**: spore chunks transfer 64 at a time over one
   keep-alive connection (`/spore/chunks/<name>/<start>/<count>`) while every
   chunk is still hash-verified, with a per-chunk fallback for a bad chunk.

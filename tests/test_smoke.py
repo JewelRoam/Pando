@@ -289,6 +289,71 @@ class TestSmoke(unittest.TestCase):
                 grants.name + ".audit.jsonl"))
             self.assertEqual(audit["status"], "valid")
 
+    def test_content_defined_delta_transfer(self):
+        """A replica that holds the parent should receive only the diff.
+
+        Round 107: content-defined boundaries make a same-length edit local,
+        so a lineage that shares most of its bytes with its parent ships a
+        fraction of the artifact. Verified so a smaller number cannot be a
+        different file.
+        """
+        import hashlib
+
+        from pandosi.spore import (ChunkStore, SporeServer, artifact_digest,
+                                   build_manifest_cdc, chunk_spans,
+                                   generate_signing_key, pull_spore)
+
+        tmp = Path(tempfile.mkdtemp(prefix="pandosi-delta-"))
+        base = tmp / "parent"
+        child_dir = tmp / "child"
+        base.mkdir()
+        child_dir.mkdir()
+        body = bytearray(b"".join(
+            hashlib.sha256(str(i).encode()).digest()
+            for i in range(2 * 1024 * 1024 // 32)))
+        (base / "model.bin").write_bytes(body)
+        edited = bytearray(body)
+        edited[600_000:604_096] = b"\x00" * 4_096
+        (child_dir / "model.bin").write_bytes(edited)
+
+        # Boundaries depend on content, so a same-length edit is local.
+        parent_spans = {hashlib.sha256(body[a:b]).hexdigest()
+                        for a, b in chunk_spans(bytes(body), 64 * 1024)}
+        child_spans = {hashlib.sha256(bytes(edited)[a:b]).hexdigest()
+                       for a, b in chunk_spans(bytes(edited), 64 * 1024)}
+        shared = len(parent_spans & child_spans)
+        self.assertGreater(shared, len(child_spans) * 0.5,
+                           f"only {shared}/{len(child_spans)} chunks survived "
+                           "a 4 KiB edit")
+
+        key = generate_signing_key()
+        parent_manifest = build_manifest_cdc(
+            {"model.bin": base / "model.bin"}, key, avg_size=64 * 1024)
+        child_manifest = build_manifest_cdc(
+            {"model.bin": child_dir / "model.bin"}, key,
+            parent_manifest=parent_manifest, avg_size=64 * 1024)
+        expected = artifact_digest(child_dir / "model.bin")
+        server = SporeServer(child_manifest, {"model.bin": child_dir / "model.bin"})
+        server.start()
+        try:
+            cold = pull_spore(server.url(), tmp / "cold", key.verify_key,
+                              sandbox_confirmed=True, batch_chunks=8)
+            store = ChunkStore(tmp / "store")
+            store.store_manifest(parent_manifest, {"model.bin": base / "model.bin"})
+            warm = pull_spore(server.url(), tmp / "warm", key.verify_key,
+                              sandbox_confirmed=True, batch_chunks=8,
+                              chunk_store=store)
+        finally:
+            server.stop()
+
+        self.assertEqual(artifact_digest(tmp / "cold" / "model.bin"), expected)
+        self.assertEqual(artifact_digest(tmp / "warm" / "model.bin"), expected)
+        self.assertEqual(warm["chunks_reused"], shared)
+        self.assertLess(warm["bytes_transferred"],
+                        cold["bytes_transferred"] * 0.5,
+                        "the delta sent more than half the artifact")
+        self.assertTrue(all(warm["files"].values()))
+
     def test_batched_spore_transfer(self):
         """Batches arrive verified per chunk, with a per-chunk fallback.
 

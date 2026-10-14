@@ -15,6 +15,7 @@ import hashlib
 import hmac
 import json
 import os
+import time
 from pathlib import Path
 
 import nacl.signing
@@ -25,6 +26,218 @@ CHUNK_SIZE = 64 * 1024
 def chunk_file(path: Path, chunk_size: int = CHUNK_SIZE) -> list[bytes]:
     data = path.read_bytes()
     return [data[i:i + chunk_size] for i in range(0, len(data), chunk_size)]
+
+
+CDC_AVG_SIZE = 256 * 1024
+CDC_MIN_SIZE = 64 * 1024
+CDC_MAX_SIZE = 1024 * 1024
+CDC_BLOCK = 64
+
+
+def _cut_bits(avg_size: int) -> int:
+    blocks = max(avg_size, CDC_BLOCK) // CDC_BLOCK
+    return max(1, blocks.bit_length() - 1)
+
+
+def chunk_spans(data: bytes, avg_size: int = CDC_AVG_SIZE,
+                min_size: int = CDC_MIN_SIZE,
+                max_size: int = CDC_MAX_SIZE) -> list[tuple[int, int]]:
+    """Content-defined chunk boundaries as (start, end) offsets.
+
+    Boundaries are chosen by hashing each 64-byte block and cutting where the
+    low bits are zero, so a *substitution* changes only the blocks it
+    overlaps and everything after it re-synchronises. Boundaries land on
+    64-byte multiples, which is what makes this vectorisable: the pure-Python
+    per-byte rolling hash needed 339 s for one 1.7 GB pass, while this needs
+    a couple of seconds (round 107).
+
+    Note the 64-byte granularity: an *insertion* shifts alignment like
+    fixed-size chunking until the next cut point, whereas a same-length edit
+    is confined to the chunks that overlap it. Weight blobs are fixed-size
+    arrays, so that is the case that matters here.
+    """
+    total = len(data)
+    if total == 0:
+        return []
+    try:
+        import numpy as np
+    except ImportError:
+        return _chunk_spans_python(data, avg_size, min_size, max_size)
+
+    blocks = total // CDC_BLOCK
+    if blocks == 0:
+        return [(0, total)]
+    view = np.frombuffer(data, dtype=np.uint8,
+                         count=blocks * CDC_BLOCK)
+    view = view.reshape(blocks, CDC_BLOCK).view(np.uint64)
+    hashed = view[:, 0].copy()
+    for column in range(1, 8):
+        rotated = (np.left_shift(hashed, np.uint64(7))
+                   | np.right_shift(hashed, np.uint64(57)))
+        hashed = np.bitwise_xor(rotated, view[:, column])
+    mask = np.uint64((1 << _cut_bits(avg_size)) - 1)
+    hits = np.nonzero(np.bitwise_and(hashed, mask) == 0)[0]
+
+    spans: list[tuple[int, int]] = []
+    cursor = 0
+    for block_index in hits:
+        position = int(block_index) * CDC_BLOCK + CDC_BLOCK
+        if position - cursor < min_size:
+            continue
+        while position - cursor > max_size:
+            spans.append((cursor, cursor + max_size))
+            cursor += max_size
+        spans.append((cursor, position))
+        cursor = position
+    while total - cursor > max_size:
+        spans.append((cursor, cursor + max_size))
+        cursor += max_size
+    if total > cursor:
+        spans.append((cursor, total))
+    return spans
+
+
+def _chunk_spans_python(data: bytes, avg_size: int, min_size: int,
+                        max_size: int) -> list[tuple[int, int]]:
+    """Fallback for environments without numpy; correct but far slower."""
+    mask = (1 << _cut_bits(avg_size)) - 1
+    spans: list[tuple[int, int]] = []
+    start = 0
+    rolling = 0
+    for index, byte in enumerate(data):
+        rolling = ((rolling << 1) + byte) & 0xFFFFFFFFFFFFFFFF
+        size = index - start + 1
+        if size < min_size:
+            continue
+        if size >= max_size or (rolling & mask) == 0:
+            spans.append((start, index + 1))
+            start = index + 1
+            rolling = 0
+    if start < len(data):
+        spans.append((start, len(data)))
+    return spans
+
+
+def chunk_bytes_cdc(data: bytes, avg_size: int = CDC_AVG_SIZE,
+                    min_size: int = CDC_MIN_SIZE,
+                    max_size: int = CDC_MAX_SIZE) -> list[bytes]:
+    return [data[start:end] for start, end in
+            chunk_spans(data, avg_size, min_size, max_size)]
+
+
+def chunk_file_cdc(path: Path, avg_size: int = CDC_AVG_SIZE) -> list[bytes]:
+    return chunk_bytes_cdc(Path(path).read_bytes(), avg_size)
+
+
+def build_manifest_cdc(files: dict, signer_key: nacl.signing.SigningKey,
+                       metadata: dict | None = None,
+                       parent_manifest: dict | None = None,
+                       avg_size: int = CDC_AVG_SIZE) -> dict:
+    """Manifest v2: content-defined chunks, addressed by content hash.
+
+    Same shape as v1 (signed canonical JSON over per-file Merkle roots) plus
+    ``chunking`` and per-chunk sizes, so a client can tell which chunks it
+    already holds and fetch only the rest.
+    """
+    metadata = dict(metadata or {})
+    if parent_manifest is not None:
+        parent_generation = int(
+            parent_manifest.get("metadata", {}).get("generation", 0))
+        metadata["generation"] = parent_generation + 1
+        metadata["parent_manifest_hash"] = manifest_hash(parent_manifest)
+    else:
+        metadata.setdefault("generation", 0)
+    entries = {}
+    all_chunk_hashes: list[bytes] = []
+    for name, path in files.items():
+        path = Path(path)
+        data = path.read_bytes()
+        spans = chunk_spans(data, avg_size)
+        hashes = [hashlib.sha256(data[start:end]).digest()
+                  for start, end in spans]
+        all_chunk_hashes.extend(hashes)
+        entries[name] = {
+            "size": path.stat().st_size,
+            "chunks": len(spans),
+            "chunk_sizes": [end - start for start, end in spans],
+            "chunk_hashes": [h.hex() for h in hashes],
+            "merkle": hashes and merkle_root(hashes).hex() or "",
+        }
+    manifest = {
+        "version": 2,
+        "chunking": {"algorithm": "gear", "avg_size": avg_size},
+        "metadata": metadata,
+        "files": entries,
+        "chunk_merkle_root": merkle_root(all_chunk_hashes).hex(),
+    }
+    payload = json.dumps(manifest, sort_keys=True,
+                         separators=(",", ":")).encode()
+    manifest["signature"] = signer_key.sign(payload).signature.hex()
+    return manifest
+
+
+def is_cdc_manifest(manifest: dict) -> bool:
+    return (manifest.get("version", 1) >= 2
+            and (manifest.get("chunking") or {}).get("algorithm") == "gear")
+
+
+def verify_file_cdc(path: Path, manifest: dict, name: str) -> bool:
+    """Recompute content-defined chunks and check the stored plan."""
+    entry = manifest["files"].get(name)
+    if entry is None:
+        return False
+    avg_size = int((manifest.get("chunking") or {}).get(
+        "avg_size", CDC_AVG_SIZE))
+    data = Path(path).read_bytes()
+    spans = chunk_spans(data, avg_size)
+    if len(spans) != entry["chunks"] or \
+            path.stat().st_size != entry["size"]:
+        return False
+    hashes = [hashlib.sha256(data[start:end]).digest()
+              for start, end in spans]
+    if [h.hex() for h in hashes] != entry["chunk_hashes"]:
+        return False
+    return merkle_root(hashes).hex() == entry["merkle"]
+
+
+class ChunkStore:
+    """Content-addressed local chunk cache.
+
+    A replica that already holds a parent lineage reuses every chunk the
+    child still uses, so only genuinely new chunks are transferred.
+    """
+
+    def __init__(self, root: Path):
+        self.root = Path(root)
+
+    def _path(self, digest: str) -> Path:
+        return self.root / digest[:2] / digest
+
+    def has(self, digest: str) -> bool:
+        return self._path(digest).exists()
+
+    def get(self, digest: str) -> bytes:
+        return self._path(digest).read_bytes()
+
+    def put(self, digest: str, chunk: bytes) -> None:
+        path = self._path(digest)
+        if path.exists():
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(chunk)
+
+    def store_manifest(self, manifest: dict, files: dict) -> int:
+        """Seed the store from a local artifact, reusing its chunking."""
+        avg_size = int((manifest.get("chunking") or {}).get(
+            "avg_size", CDC_AVG_SIZE))
+        stored = 0
+        for name, path in files.items():
+            for chunk in chunk_file_cdc(Path(path), avg_size):
+                digest = hashlib.sha256(chunk).hexdigest()
+                if not self.has(digest):
+                    self.put(digest, chunk)
+                    stored += 1
+        return stored
 
 
 def artifact_files(path: Path) -> list[Path]:
@@ -342,6 +555,14 @@ class SporeServer:
                  history: dict[str, dict] | None = None):
         self.manifest = manifest
         self.auth_token = auth_token
+        self._blobs: dict[str, bytes] = {}
+        if is_cdc_manifest(manifest):
+            # Content-addressed table for delta pulls: a client asks for
+            # exactly the chunk hashes it does not already hold.
+            for path in files.values():
+                for chunk in chunk_file_cdc(
+                        Path(path), int(manifest["chunking"]["avg_size"])):
+                    self._blobs[hashlib.sha256(chunk).hexdigest()] = chunk
         # Signed manifests this node can serve by content hash. A peer that
         # holds only a descendant can fetch a missing parent from here.
         self._manifests: dict[str, dict] = dict(history or {})
@@ -364,15 +585,7 @@ class SporeServer:
                 self.wfile.write(body)
 
             def do_GET(self):  # noqa: N802
-                expected = server.auth_token
-                supplied = self.headers.get("X-Pairing-Token", "")
-                authorization = self.headers.get("Authorization", "")
-                if authorization.startswith("Bearer "):
-                    supplied = authorization[7:]
-                if expected and not hmac.compare_digest(
-                        supplied.encode("utf-8"),
-                        expected.encode("utf-8")):
-                    self._send(403, b'{"error":"invalid or missing token"}')
+                if not self._authorized():
                     return
                 if self.path == "/spore/manifest":
                     self._send(200, json.dumps(manifest).encode())
@@ -412,6 +625,36 @@ class SporeServer:
                 else:
                     self._send(404, b"{}")
 
+            def do_POST(self):  # noqa: N802
+                if not self._authorized():
+                    return
+                if self.path != "/spore/blobs":
+                    self._send(404, b"{}")
+                    return
+                length = int(self.headers.get("Content-Length", 0))
+                wanted = json.loads(self.rfile.read(length)).get("hashes", [])
+                missing = [h for h in wanted if h not in server._blobs]
+                if missing:
+                    self._send(404, json.dumps(
+                        {"error": "unknown chunks", "missing": missing[:8]}
+                    ).encode())
+                    return
+                body = b"".join(server._blobs[h] for h in wanted)
+                self._send(200, body, "application/octet-stream")
+
+            def _authorized(self) -> bool:
+                expected = server.auth_token
+                supplied = self.headers.get("X-Pairing-Token", "")
+                authorization = self.headers.get("Authorization", "")
+                if authorization.startswith("Bearer "):
+                    supplied = authorization[7:]
+                if expected and not hmac.compare_digest(
+                        supplied.encode("utf-8"),
+                        expected.encode("utf-8")):
+                    self._send(403, b'{"error":"invalid or missing token"}')
+                    return False
+                return True
+
         self._httpd = http.server.ThreadingHTTPServer((host, port), Handler)
         self.port = self._httpd.server_address[1]
         self._thread = threading.Thread(target=self._httpd.serve_forever,
@@ -425,6 +668,77 @@ class SporeServer:
 
     def url(self) -> str:
         return f"http://127.0.0.1:{self.port}"
+
+
+def _pull_cdc(client: "SporeClient", manifest: dict, out_dir: Path,
+              store: "ChunkStore | None", batch_chunks: int,
+              stats: dict) -> dict:
+    """Delta pull for a content-defined manifest.
+
+    Every chunk the local store already holds is not requested at all, so a
+    lineage that differs from its parent by a few megabytes moves only the
+    chunks that overlap the difference (round 107).
+    """
+    for name, entry in manifest["files"].items():
+        hashes = entry["chunk_hashes"]
+        sizes = entry["chunk_sizes"]
+        missing = []
+        for index, digest in enumerate(hashes):
+            if store is not None and store.has(digest):
+                stats["chunks_reused"] += 1
+            else:
+                missing.append(index)
+
+        fetched: dict[int, bytes] = {}
+        transfer_started = time.perf_counter()
+        for start in range(0, len(missing), batch_chunks):
+            group = missing[start:start + batch_chunks]
+            body = client.post_json(
+                "/spore/blobs", {"hashes": [hashes[i] for i in group]})
+            offset = 0
+            for index in group:
+                size = sizes[index]
+                chunk = body[offset:offset + size]
+                offset += size
+                if hashlib.sha256(chunk).hexdigest() != hashes[index]:
+                    stats["chunks_rejected"] += 1
+                    chunk = None
+                    for _ in range(3):
+                        single = client.post_json(
+                            "/spore/blobs", {"hashes": [hashes[index]]})
+                        if hashlib.sha256(single).hexdigest() == \
+                                hashes[index]:
+                            chunk = single
+                            break
+                    if chunk is None:
+                        raise ValueError(
+                            f"chunk {name}#{index} failed hash check after "
+                            "3 attempts (tampered or persistently corrupt)")
+                fetched[index] = chunk
+                stats["chunks_pulled"] += 1
+                stats["bytes_transferred"] += len(chunk)
+        stats["seconds_transfer"] = round(
+            stats.get("seconds_transfer", 0.0)
+            + time.perf_counter() - transfer_started, 3)
+
+        assemble_started = time.perf_counter()
+        target = out_dir / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("wb") as handle:
+            for index, digest in enumerate(hashes):
+                chunk = fetched.get(index)
+                if chunk is None:
+                    if store is None:
+                        raise ValueError(f"chunk {digest[:16]} not available")
+                    chunk = store.get(digest)
+                handle.write(chunk)
+                if store is not None:
+                    store.put(digest, chunk)
+        stats["files"][name] = verify_file_cdc(target, manifest, name)
+        stats["seconds_assemble"] = round(
+            stats.get("seconds_assemble", 0.0)
+            + time.perf_counter() - assemble_started, 3)
+    return stats
 
 
 def _chunk_length(entry: dict, index: int) -> int:
@@ -451,15 +765,26 @@ class SporeClient:
             self._host, self._port, timeout=timeout)
 
     def get(self, path: str) -> bytes:
+        return self._request("GET", path)
+
+    def post_json(self, path: str, payload: dict) -> bytes:
+        body = json.dumps(payload).encode("utf-8")
+        headers = dict(self._headers)
+        headers["Content-Type"] = "application/json"
+        return self._request("POST", path, body, headers)
+
+    def _request(self, method: str, path: str, body: bytes | None = None,
+                 headers: dict | None = None) -> bytes:
         for attempt in range(2):
             try:
-                self._connection.request("GET", path, headers=self._headers)
+                self._connection.request(method, path, body=body,
+                                         headers=headers or self._headers)
                 response = self._connection.getresponse()
-                body = response.read()
+                data = response.read()
                 if response.status != 200:
                     raise ValueError(
-                        f"GET {path} -> {response.status}")
-                return body
+                        f"{method} {path} -> {response.status}")
+                return data
             except (OSError, self._http.HTTPException, ValueError):
                 if attempt:
                     raise
@@ -483,7 +808,8 @@ class SporeClient:
 def pull_spore(manifest_url: str, out_dir: Path, verify_key,
                sandbox_confirmed: bool = False,
                auth_token: str | None = None,
-               batch_chunks: int = 64) -> dict:
+               batch_chunks: int = 64,
+               chunk_store: "ChunkStore | None" = None) -> dict:
     """Pull a spore payload with verify-on-arrival for every chunk.
 
     Refuses without sandbox_confirmed=True (see THREAT-MODEL.md). Verifies:
@@ -508,7 +834,9 @@ def pull_spore(manifest_url: str, out_dir: Path, verify_key,
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    stats = {"files": {}, "chunks_pulled": 0, "chunks_rejected": 0}
+    stats = {"files": {}, "chunks_pulled": 0, "chunks_rejected": 0,
+             "chunks_reused": 0, "bytes_transferred": 0,
+             "seconds_transfer": 0.0, "seconds_assemble": 0.0}
 
     def fetch_chunk(name: str, entry: dict, index: int) -> bytes:
         """One chunk, with the selective re-fetch rule."""
@@ -523,6 +851,9 @@ def pull_spore(manifest_url: str, out_dir: Path, verify_key,
             "(tampered or persistently corrupt)")
 
     try:
+        if is_cdc_manifest(manifest):
+            return _pull_cdc(client, manifest, out_dir, chunk_store,
+                             batch_chunks, stats)
         for name, entry in manifest["files"].items():
             target = out_dir / name
             target.parent.mkdir(parents=True, exist_ok=True)
