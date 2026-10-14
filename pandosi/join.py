@@ -252,6 +252,14 @@ def main() -> None:
               f"files={list(manifest['files'])}", flush=True)
 
         cache_dir = Path("spore-cache") / node_id
+        from .spore import validate_cached_lineage
+        lineage_status, lineage_detail = validate_cached_lineage(
+            cache_dir / "manifests", manifest, verify_key)
+        if lineage_status == "invalid":
+            raise SystemExit(
+                f"SECURITY: cached Spore lineage invalid: {lineage_detail}")
+        print(f"SPORE lineage status: {lineage_status} ({lineage_detail})",
+              flush=True)
         stats = pull_spore(args.spore_url, cache_dir, verify_key,
                            sandbox_confirmed=True,
                            auth_token=args.pairing_token)

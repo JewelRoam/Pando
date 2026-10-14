@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from pandosi.spore import (SporeServer, append_lineage, build_manifest,
                            generate_signing_key, manifest_hash, pull_spore,
+                           store_manifest, validate_cached_lineage,
                            validate_reproduction, verify_file)
 
 
@@ -67,6 +68,11 @@ def main() -> None:
                                 parent_manifest=manifest_1)
     linked, detail = validate_reproduction(manifest_1, manifest_2)
     assert linked, f"Hop 1 -> 2 lineage failed: {detail}"
+    store_manifest(node_b_dir / "manifests", manifest_1)
+    store_manifest(node_b_dir / "manifests", manifest_2)
+    cached, cached_detail = validate_cached_lineage(
+        node_b_dir / "manifests", manifest_2, key.verify_key)
+    assert cached == "valid", f"cached lineage failed: {cached_detail}"
     append_lineage(tmp / "lineage.jsonl", manifest_2)
     print(f"  lineage: {detail}", flush=True)
     server_2 = SporeServer(manifest_2, {"model.bin": node_b_file})
@@ -92,6 +98,11 @@ def main() -> None:
                                 parent_manifest=manifest_2)
     linked, detail = validate_reproduction(manifest_2, manifest_3)
     assert linked, f"Hop 2 -> 3 lineage failed: {detail}"
+    store_manifest(node_c_dir / "manifests", manifest_2)
+    store_manifest(node_c_dir / "manifests", manifest_3)
+    cached, cached_detail = validate_cached_lineage(
+        node_c_dir / "manifests", manifest_3, key.verify_key)
+    assert cached == "valid", f"cached lineage failed: {cached_detail}"
     append_lineage(tmp / "lineage.jsonl", manifest_3)
     print(f"  lineage: {detail}", flush=True)
     server_3 = SporeServer(manifest_3, {"model.bin": node_c_file})

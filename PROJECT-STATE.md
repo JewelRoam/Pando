@@ -55,6 +55,7 @@ NPU) all voting in the same consensus quorum.
 | Spore 3-hop chain | 97 chunks, 0 integrity failures | round 62 |
 | Spore generation lineage | generation 0 -> 1 -> 2 + parent hash | round 82 |
 | Reproduction DAG | tools/spore_dag_check.py | branch validation + invalid links rejected |
+| Cached Spore lineage | pandosi/spore.py manifest cache | valid / parent-missing / invalid states |
 | Unified CLI | pandosi/cli.py + `python -m pandosi` | doctor/join/stem/grants/service/lab entry |
 | Installable wheel | tools/package_check.py + runtime extras | console script verified outside repo |
 | Packaged assets | pandosi/resources.py + setuptools data-files | playbook + calibration found outside repo |

@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 from pathlib import Path
 
 import nacl.signing
@@ -131,6 +132,48 @@ def load_lineage(path: Path) -> list[dict]:
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+
+
+def store_manifest(cache_dir: Path, manifest: dict) -> Path:
+    """Persist one signed manifest under its content hash."""
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    digest = manifest_hash(manifest)
+    path = cache_dir / f"{digest}.json"
+    if not path.exists():
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(
+            json.dumps(manifest, sort_keys=True, separators=(",", ":")),
+            encoding="utf-8")
+        os.replace(temporary, path)
+    return path
+
+
+def load_cached_manifest(cache_dir: Path, digest: str) -> dict | None:
+    path = cache_dir / f"{digest}.json"
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def validate_cached_lineage(cache_dir: Path, child: dict,
+                           verify_key: nacl.signing.VerifyKey | None = None
+                           ) -> tuple[str, str]:
+    """Return (valid|parent-missing|invalid, detail) using a local cache."""
+    store_manifest(cache_dir, child)
+    metadata = child.get("metadata", {})
+    generation = int(metadata.get("generation", 0))
+    parent_hash = metadata.get("parent_manifest_hash")
+    if generation == 0:
+        return "valid", "generation-0 root"
+    if not parent_hash:
+        return "invalid", "non-root manifest has no parent hash"
+    parent = load_cached_manifest(cache_dir, parent_hash)
+    if parent is None:
+        return "parent-missing", f"parent {parent_hash[:16]} not cached"
+    if verify_key is not None and not verify_manifest(parent, verify_key):
+        return "invalid", "cached parent signature verification failed"
+    valid, detail = validate_reproduction(parent, child)
+    return ("valid" if valid else "invalid"), detail
 
 
 def validate_lineage_graph(entries: list[dict],

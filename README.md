@@ -76,6 +76,8 @@ devices, one mind.
   generation and parent-manifest hashes; a forged lineage link is rejected.
 - **Spore reproduction DAG**: branching child lineages are validated for
   roots, missing parents, generation gaps, and optional single-chain mode.
+- **Cached parent lineage**: received manifests are stored by hash, and
+  `join` distinguishes verified lineage from missing-history evidence.
 - **Real lineage identity over HTTP**: en/ml/td ONNX stems now register as
   distinct checkpoints; twelve shared choice tasks produced 11 cross-lineage
   splits, making model diversity visible to the live quorum.

@@ -9,7 +9,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from pandosi.spore import (build_manifest, generate_signing_key,
-                           lineage_entry, validate_lineage_graph)
+                           lineage_entry, store_manifest,
+                           validate_cached_lineage, validate_lineage_graph)
 
 
 def main() -> int:
@@ -42,6 +43,29 @@ def main() -> int:
         assert summary == {"manifests": 5, "roots": 1,
                            "max_generation": 2, "forks": 1}, summary
         print(f"DAG valid: {summary}")
+
+        cache = root / "manifest-cache"
+        store_manifest(cache, origin)
+        store_manifest(cache, branch_b)
+        cached, cached_detail = validate_cached_lineage(cache, branch_b)
+        assert cached == "valid", cached_detail
+        print("cached parent lineage verified")
+
+        missing_cache = root / "missing-cache"
+        missing_status, missing_detail = validate_cached_lineage(
+            missing_cache, branch_b)
+        assert missing_status == "parent-missing", missing_detail
+        print("uncached parent reported as parent-missing")
+
+        bad_child = build_manifest({"model.bin": payload}, key,
+                                   metadata={"lineage": "origin",
+                                             "node": "bad"},
+                                   parent_manifest=origin)
+        bad_child["metadata"]["generation"] = 3
+        bad_status, bad_detail = validate_cached_lineage(
+            cache, bad_child)
+        assert bad_status == "invalid", bad_detail
+        print("cached generation mismatch rejected")
 
         fork_denied, fork_problems, _ = validate_lineage_graph(
             entries, allow_forks=False)
