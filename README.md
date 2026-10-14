@@ -69,6 +69,9 @@ devices, one mind.
   placed beside the baseline in the real root. It agreed 6/6 on holdout but
   produced no accuracy gain and became 0.9996 confident on a wrong answer,
   so it was not promoted.
+- **Post-training calibration**: a temperature fit on 22 labeled items
+  reduced v7's wrong-answer confidence from 0.9996 to 0.9316, but holdout
+  accuracy and calibration evidence remained insufficient for promotion.
 - **Real lineage identity over HTTP**: en/ml/td ONNX stems now register as
   distinct checkpoints; twelve shared choice tasks produced 11 cross-lineage
   splits, making model diversity visible to the live quorum.

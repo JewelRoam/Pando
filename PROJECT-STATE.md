@@ -38,6 +38,7 @@ NPU) all voting in the same consensus quorum.
 | Expanded prompt pool | tools/build_prompt_pool.py | 78 prompts, 45 contrast rows |
 | CUDA candidate v7 | artifacts/rlcd-cuda-v7 | 41 updates, stable holdout, not promoted |
 | Live lineage A/B | tools/lineage_ab_check.py | v7 6/6 agreement, no accuracy gain, rejected |
+| Post-training calibration | tools/calibrate_checkpoint.py | T=2.67, confidence reduced, not promoted |
 | Real lineage HTTP identity | backend/stemd checkpoint override + tools/real_lineage_http_check.py | en/ml/td distinct, 11/12 split |
 
 ## What is proven (key numbers)

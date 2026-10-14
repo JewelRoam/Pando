@@ -182,6 +182,12 @@ v7 raised confidence substantially, including 0.9996 on an incorrect
 answer, so the promotion gate rejected it. The live A/B mechanism itself is
 verified and ready for future candidates.
 
+Round 81 adds post-training temperature calibration. A fit on 22 labeled
+items reduced the wrong-answer confidence from 0.9996 to 0.9316 and lowered
+mean confidence, but did not change holdout accuracy and did not beat the
+baseline on the small held-out calibration slice. The calibrated candidate
+also remains rejected by the live A/B gate.
+
 ## Remaining work
 
 - NPU: deep graph analysis (IsNaN was removed; other ops may block)
