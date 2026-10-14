@@ -24,6 +24,8 @@ NPU) all voting in the same consensus quorum.
 | NPU-compatible graph | postprocess_onnx.py + IsNaN removal | GPU compile OK |
 | Multi-bucket iGPU serving | backend.py (_MultiBucketSession) | 25-40ms variable-length |
 | Dashboard v2 | tools/dashboard.py | lineage + attribution + disagreements |
+| CUDA worker | backend.py CUDA branch + tools/cuda_bench.py | RTX 3070 live |
+| Heterogeneous HTTP check | tools/hetero_http_check.py | CPU+iGPU+NPU+CUDA live |
 
 ## What is proven (key numbers)
 
@@ -37,6 +39,9 @@ NPU) all voting in the same consensus quorum.
 | Split-case majority reliability | 36% (verify routing is NECESSARY) | round 57b |
 | RLCD fine-tune confidence delta | +0.25 universal, no regression | round 57e/f |
 | Spore 3-hop chain | 97 chunks, 0 integrity failures | round 62 |
+| CUDA vs CPU p50 | 15.0 ms vs 125.6 ms (8.36x) | round 65 |
+| CUDA decision parity | 14/14 English tasks; max conf delta 0.0009 | round 65 |
+| Four-runtime HTTP p50 | 430.5 ms steady state | round 65 |
 
 ## What is NOT yet done
 

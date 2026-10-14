@@ -116,6 +116,23 @@ disagreement (ml=greeting@0.53 vs en=refund@0.99)
         → no regression on non-target cases → genuine learning
 ```
 
+## Cross-runtime accelerator proof (round 65)
+
+An RTX 3070 was added through ONNX Runtime CUDA while Intel CPU, iGPU,
+and NPU workers kept their original runtimes. On the same dynamic Laya
+graph and identical captured inputs:
+
+- CUDA p50: **15.0 ms**
+- CPU p50: **125.6 ms**
+- speedup: **8.36x**
+- English decision parity: **14/14**
+- max calibrated confidence delta: **0.0009**
+
+All four runtime-distinct workers then registered with one tokenized HTTP
+root and returned four votes per decision, with steady-state wire p50
+**430.5 ms**. The coordinator does not need a shared runtime or a shared
+accelerator API; OpenVINO and CUDA cooperate at the protocol boundary.
+
 ## Remaining work
 
 - NPU: deep graph analysis (IsNaN was removed; other ops may block)

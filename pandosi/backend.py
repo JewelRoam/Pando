@@ -68,11 +68,14 @@ class LayaBackend:
 
 
 class OnnxLayaBackend:
-    """Real Laya decisions via the official ONNXAgent (onnxruntime CPU).
+    """Real Laya decisions via the official ONNXAgent.
 
     Maps a DecisionRequest to a single choice question. Probabilities come
     from the checkpoint's answer_confidence - see blueprint calibration note:
     treat as uncalibrated until the per-checkpoint temperature layer exists.
+    ``device='CUDA'`` requires ``onnxruntime-gpu`` and fails closed unless
+    CUDA is the selected execution provider; OpenVINO devices are handled
+    separately below.
     """
 
     def __init__(self, node_id: str, onnx_path: str,
@@ -85,9 +88,24 @@ class OnnxLayaBackend:
         from laya.onnx_agent import ONNXAgent  # type: ignore
 
         self.node_id = node_id
-        self.checkpoint = "onnx" if device == "CPU" else f"onnx-{device.lower()}"
+        normalized_device = device.strip().upper()
+        if normalized_device == "CPU":
+            self.checkpoint = "onnx"
+        elif normalized_device == "CUDA":
+            self.checkpoint = "onnx-cuda"
+        else:
+            self.checkpoint = f"onnx-{normalized_device.lower()}"
         self._agent = ONNXAgent(repo, onnx_path=onnx_path)
-        if device != "CPU" and onnx_buckets:
+        if normalized_device == "CUDA":
+            providers = self._agent.session.get_providers()
+            if not providers or providers[0] != "CUDAExecutionProvider":
+                raise RuntimeError(
+                    "CUDA requested but ONNX Runtime selected "
+                    f"{providers or ['none']}; install onnxruntime-gpu and "
+                    "verify CUDA/cuDNN libraries before starting this stem")
+            self._device = "CUDA"
+            return
+        if normalized_device != "CPU" and onnx_buckets:
             def _seq_of(path: str) -> tuple[int, int, str]:
                 import onnx  # type: ignore
 
@@ -102,7 +120,7 @@ class OnnxLayaBackend:
             self._agent.session = _make_openvino_session(
                 onnx_path, device, self._agent.session, buckets=buckets)
             return
-        if device != "CPU":
+        if normalized_device != "CPU":
             pad_id = 0
             tok = getattr(self._agent, "tok", None)
             if tok is not None and getattr(tok, "pad_token_id", None) is not None:

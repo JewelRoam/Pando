@@ -19,6 +19,13 @@ devices, one mind.
 - **Heterogeneous execution**: one Intel AI PC = multiple ExecutionUnits.
   Live-verified: CPU (106 ms) + iGPU via GatherND graph surgery (25.6 ms,
   4x CPU). NPU blocked on op support (documented, 4 repair paths).
+- **Non-OpenVINO accelerator path**: an RTX 3070 joins as an independent
+  ONNX Runtime CUDA stem. Same graph/inputs: CUDA p50 15.0 ms vs CPU
+  125.6 ms (8.36x), with 14/14 decision parity and <=0.0009 confidence
+  delta across the English suite.
+- **Four-runtime HTTP consensus**: CPU ORT + RTX 3070 CUDA + Intel iGPU
+  OpenVINO + Intel NPU OpenVINO registered as four checkpoint-distinct
+  workers and returned four votes per decision (steady p50 430.5 ms).
 - **Signed self-replication (sandboxed)**: Spore payload = weights +
   playbook + harness. Ed25519 manifest, 64KiB chunk Merkle tree,
   per-chunk hash-on-arrival, selective re-fetch, TOFU key pinning,
@@ -144,6 +151,7 @@ python -m pandosi.stemd --node-id stem-2 --root http://ROOT_IP:8080 \
 - [Research notes](docs/research/) — 28 rounds of evidence-backed findings
 - [TERMUX.md](TERMUX.md) — Android TV box onboarding guide
 - [Swarm check](docs/SWARM-CHECK.md) — multi-process tokenized consensus and shrinkage
+- [RTX 3070 CUDA worker](docs/CUDA-3070.md) — non-OpenVINO HTTP integration
 - [Windows service check](docs/SERVICE-CHECK-WINDOWS.md) — real lifecycle validation record
 - [Linux CI service check](docs/SERVICE-CHECK-LINUX-CI.md) — user-systemd lifecycle validation record
 
