@@ -49,6 +49,10 @@ devices, one mind.
 - **CUDA RLCD training**: a real `laya.train.finetune` run on the RTX 3070
   used 1.74 GB peak memory, produced a reloadable CUDA checkpoint, and
   preserved 14/14 English decision labels while changing confidence.
+- **Multi-step CUDA evolution**: ten exported live-lineage contrast pairs
+  produced nine optimizer updates on the 3070; decision labels stayed
+  stable (14/14), while the data-schema conflict remains a documented
+  follow-up.
 - **Real lineage identity over HTTP**: en/ml/td ONNX stems now register as
   distinct checkpoints; twelve shared choice tasks produced 11 cross-lineage
   splits, making model diversity visible to the live quorum.

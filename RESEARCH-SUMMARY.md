@@ -146,6 +146,12 @@ This is a harsher, same-input comparison than the earlier lineage-specific
 32.5% figure and does not replace it; it does reinforce verify/escalate
 routing.
 
+Round 75 exports those live lineage disagreements into ten contrast pairs
+and performs nine CUDA optimizer updates on the RTX 3070. The resulting
+checkpoint preserves all 14 English decision labels while changing
+confidence by up to 0.182. A conflicting `intent` schema across rows is
+documented as a data-normalization requirement before generalization claims.
+
 ## Remaining work
 
 - NPU: deep graph analysis (IsNaN was removed; other ops may block)

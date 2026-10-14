@@ -212,7 +212,7 @@ def main() -> int:
         str(output_dir), suite_path, args.eval_checkpoint)
     report["comparison"] = compare(report["before"], report["after"])
 
-    report_path = ROOT / "artifacts" / "rlcd-cuda-report.json"
+    report_path = output_dir / "rlcd-cuda-report.json"
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     report["report"] = str(report_path)
     if args.json:
