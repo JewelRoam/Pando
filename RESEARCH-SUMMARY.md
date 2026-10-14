@@ -135,6 +135,10 @@ steady-state wire p50 of **430.5 ms**; parallel quorum fan-out reduced it to
 quorum semantics. The coordinator does not need a shared runtime or a shared
 accelerator API; OpenVINO and CUDA cooperate at the protocol boundary.
 
+Round 67 adds per-stem latency memory. After five real decisions, the
+learned failure budgets were 0.72-1.00 s per heterogeneous worker, replacing
+the previous 30 s global call timeout for unresponsive stems.
+
 ## Remaining work
 
 - NPU: deep graph analysis (IsNaN was removed; other ops may block)

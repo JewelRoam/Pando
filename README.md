@@ -26,7 +26,9 @@ devices, one mind.
 - **Four-runtime HTTP consensus**: CPU ORT + RTX 3070 CUDA + Intel iGPU
   OpenVINO + Intel NPU OpenVINO registered as four checkpoint-distinct
   workers and returned four votes per decision. Parallel quorum fan-out
-  reduced steady-state wire p50 from 430.5 ms to 237.8 ms.
+  reduced steady-state wire p50 from 430.5 ms to 237.8 ms, and per-stem
+  EWMA memory now gives unresponsive workers a 0.7-1.0 s learned budget
+  instead of the 30 s global timeout.
 - **Signed self-replication (sandboxed)**: Spore payload = weights +
   playbook + harness. Ed25519 manifest, 64KiB chunk Merkle tree,
   per-chunk hash-on-arrival, selective re-fetch, TOFU key pinning,

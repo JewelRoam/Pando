@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from pandosi.backend import MockBackend
 from pandosi.common import DecisionRequest, Vote, aggregate
-from pandosi.rootd import Coordinator, Root
+from pandosi.rootd import Coordinator, INITIAL_STEM_TIMEOUT, Root
 from pandosi.stemd import Stem
 from pandosi.onboard import build_plan
 from pandosi.grants import (audit_status, grant_status, require_grant,
@@ -75,6 +75,27 @@ class TestSmoke(unittest.TestCase):
         self.assertEqual(result["responded"], 3)
         self.assertEqual(peak, 3)
         self.assertLess(elapsed, delay_s * 2)
+
+    def test_stem_timeout_adapts_to_observed_latency(self):
+        timeouts: list[float] = []
+
+        def transport(url, payload, timeout):
+            timeouts.append(timeout)
+            time.sleep(0.05)
+            return json.dumps({
+                "vote": {"choice": "approve", "probability": 0.9}
+            }).encode()
+
+        coordinator = Coordinator(transport=transport, quorum_k=1)
+        coordinator.register("node-0", "http://node-0", "en")
+        request = DecisionRequest(state="timeout", question="approve?",
+                                  candidates=["approve", "reject"])
+        coordinator.decide(request)
+        coordinator.decide(request)
+
+        self.assertEqual(timeouts[0], INITIAL_STEM_TIMEOUT)
+        self.assertLess(timeouts[1], INITIAL_STEM_TIMEOUT)
+        self.assertGreaterEqual(timeouts[1], 0.5)
 
     def test_onboarding_plan_prioritizes_ring0_over_sandbox(self):
         rows = [

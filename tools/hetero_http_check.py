@@ -259,6 +259,13 @@ def main() -> int:
             summary["root_fanout_p50_ms"] = round(statistics.median(
                 decision["root_fanout_ms"] for decision in decisions
                 if decision["root_fanout_ms"] is not None), 1)
+            code, nodes_after = request(
+                f"{root_url}/nodes", token=token, timeout=3)
+            if code == 200:
+                summary["node_stats"] = {
+                    node_id: info.get("stats", {})
+                    for node_id, info in nodes_after.get("nodes", {}).items()
+                }
             summary["decisions"] = decisions
             summary["steps"].append({"step": "decide", "code": 0, "count": 5})
             expected_responded = len(workers)

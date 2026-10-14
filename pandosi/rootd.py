@@ -31,6 +31,21 @@ from .calibrate import Calibrator
 HEARTBEAT_TTL = 15.0
 QUORUM_K = 5
 CALL_TIMEOUT = 30.0
+INITIAL_STEM_TIMEOUT = 5.0
+MIN_STEM_TIMEOUT = 0.5
+STEM_TIMEOUT_MULTIPLIER = 4.0
+STEM_TIMEOUT_MARGIN = 0.25
+STEM_EWMA_ALPHA = 0.3
+
+
+def _empty_stem_stats() -> dict:
+    return {
+        "successes": 0,
+        "failures": 0,
+        "last_latency_ms": None,
+        "latency_ewma_ms": None,
+        "last_error": None,
+    }
 
 
 def http_transport(url: str, payload: bytes, timeout: float) -> bytes:
@@ -57,9 +72,14 @@ class Coordinator:
     def register(self, node_id: str, url: str, checkpoint: str,
                  cap: dict | None = None) -> None:
         with self._lock:
-            self.nodes[node_id] = {"url": url, "checkpoint": checkpoint,
-                                   "capability": cap or {},
-                                   "last_seen": time.monotonic()}
+            stats = self.nodes.get(node_id, {}).get("stats")
+            self.nodes[node_id] = {
+                "url": url,
+                "checkpoint": checkpoint,
+                "capability": cap or {},
+                "last_seen": time.monotonic(),
+                "stats": stats or _empty_stem_stats(),
+            }
 
     def live_nodes(self) -> dict[str, dict]:
         now = time.monotonic()
@@ -111,16 +131,56 @@ class Coordinator:
         except OSError:
             pass  # metrics must never break decisions
 
+    def _record_stem_call(self, node_id: str, ok: bool,
+                          latency_ms: float, error: str | None = None) -> None:
+        with self._lock:
+            info = self.nodes.get(node_id)
+            if info is None:
+                return
+            stats = info.setdefault("stats", _empty_stem_stats())
+            stats["last_latency_ms"] = round(latency_ms, 3)
+            if ok:
+                stats["successes"] += 1
+                previous = stats.get("latency_ewma_ms")
+                stats["latency_ewma_ms"] = round(
+                    latency_ms if previous is None else
+                    STEM_EWMA_ALPHA * latency_ms
+                    + (1 - STEM_EWMA_ALPHA) * previous,
+                    3)
+                stats["last_error"] = None
+            else:
+                stats["failures"] += 1
+                stats["last_error"] = error
+
+    def _timeout_for(self, node_id: str) -> float:
+        with self._lock:
+            info = self.nodes.get(node_id)
+            stats = info.get("stats", {}) if info else {}
+            ewma_ms = stats.get("latency_ewma_ms")
+        if ewma_ms is None:
+            return INITIAL_STEM_TIMEOUT
+        learned_s = (float(ewma_ms) / 1000.0) * STEM_TIMEOUT_MULTIPLIER \
+            + STEM_TIMEOUT_MARGIN
+        return min(CALL_TIMEOUT, max(MIN_STEM_TIMEOUT, learned_s))
+
     def _call_stem(self, node_id: str, info: dict,
                    payload: bytes) -> Vote | None:
+        timeout = self._timeout_for(node_id)
+        started = time.perf_counter()
         try:
             raw = self._transport(f"{info['url']}/decide", payload,
-                                  CALL_TIMEOUT)
+                                  timeout)
             data = json.loads(raw)
-            return Vote(node_id, info["checkpoint"],
+            vote = Vote(node_id, info["checkpoint"],
                         data["vote"]["choice"],
                         float(data["vote"]["probability"]))
-        except Exception:
+            self._record_stem_call(
+                node_id, True, (time.perf_counter() - started) * 1000)
+            return vote
+        except Exception as exc:
+            self._record_stem_call(
+                node_id, False, (time.perf_counter() - started) * 1000,
+                f"{type(exc).__name__}: {exc}")
             return None  # dead node: shrink quorum, never block the vote
 
 
