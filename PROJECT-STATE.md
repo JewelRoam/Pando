@@ -41,7 +41,7 @@ NPU) all voting in the same consensus quorum.
 | Spore 3-hop chain | 97 chunks, 0 integrity failures | round 62 |
 | CUDA vs CPU p50 | 15.0 ms vs 125.6 ms (8.36x) | round 65 |
 | CUDA decision parity | 14/14 English tasks; max conf delta 0.0009 | round 65 |
-| Four-runtime HTTP p50 | 430.5 ms steady state | round 65 |
+| Four-runtime HTTP p50 | 430.5 ms sequential -> 237.8 ms parallel | rounds 65/66 |
 
 ## What is NOT yet done
 

@@ -1,7 +1,7 @@
 """rootd: the PandoSI consensus coordinator.
 
-Maintains a registry of stems (lazy expiry), fans decisions out to a
-checkpoint-diverse quorum, and aggregates votes via common.aggregate.
+Maintains a registry of stems (lazy expiry), fans decisions out concurrently
+to a checkpoint-diverse quorum, and aggregates votes via common.aggregate.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ import sys
 import threading
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -90,7 +91,8 @@ class Coordinator:
         return picked[:k]
 
     # -- decision -------------------------------------------------------
-    def _log_decision(self, req, result, quorum_size: int) -> None:
+    def _log_decision(self, req, result, quorum_size: int,
+                      fanout_ms: float) -> None:
         """Append one JSON line per decision (local metrics only)."""
         try:
             metrics_dir = Path("metrics")
@@ -102,11 +104,24 @@ class Coordinator:
                      "agreement": result.agreement,
                      "mean_probability": result.mean_probability,
                      "responded": result.responded if hasattr(result, "responded") else len(result.votes),
-                     "quorum_size": quorum_size}
+                     "quorum_size": quorum_size,
+                     "fanout_ms": fanout_ms}
             with (metrics_dir / "decisions.jsonl").open("a", encoding="utf-8") as fh:
                 fh.write(json.dumps(entry) + "\n")
         except OSError:
             pass  # metrics must never break decisions
+
+    def _call_stem(self, node_id: str, info: dict,
+                   payload: bytes) -> Vote | None:
+        try:
+            raw = self._transport(f"{info['url']}/decide", payload,
+                                  CALL_TIMEOUT)
+            data = json.loads(raw)
+            return Vote(node_id, info["checkpoint"],
+                        data["vote"]["choice"],
+                        float(data["vote"]["probability"]))
+        except Exception:
+            return None  # dead node: shrink quorum, never block the vote
 
 
     def decide(self, req: DecisionRequest) -> dict:
@@ -116,16 +131,18 @@ class Coordinator:
                     "responded": 0, "quorum_size": 0}
         quorum = self.pick_quorum(self.quorum_k)
         payload = req.to_json()
-        votes: list[Vote] = []
-
-        for nid, info in quorum:
-            try:
-                raw = self._transport(f"{info['url']}/decide", payload, CALL_TIMEOUT)
-                data = json.loads(raw)
-                votes.append(Vote(nid, info["checkpoint"], data["vote"]["choice"],
-                                  float(data["vote"]["probability"])))
-            except Exception:
-                continue  # dead node: shrink quorum, never block the vote
+        fanout_started = time.perf_counter()
+        if quorum:
+            with ThreadPoolExecutor(
+                    max_workers=len(quorum),
+                    thread_name_prefix="pandosi-quorum") as pool:
+                results = list(pool.map(
+                    lambda item: self._call_stem(item[0], item[1], payload),
+                    quorum))
+            votes = [vote for vote in results if vote is not None]
+        else:
+            votes = []
+        fanout_ms = round((time.perf_counter() - fanout_started) * 1000, 3)
 
         # Calibrate probabilities before aggregation (blueprint 3.2.1)
         calibrated_votes = []
@@ -148,7 +165,7 @@ class Coordinator:
             calibrated_votes, min_quorum=min(3, len(quorum)),
             auto_min_agreement=eff_gating.get("auto_min_agreement", 0.6),
             auto_min_probability=eff_gating.get("auto_min_probability", 0.6))
-        self._log_decision(req, result, len(quorum))
+        self._log_decision(req, result, len(quorum), fanout_ms)
         try:
             self._recorder.record(req.request_id, req.state, req.question,
                                   req.candidates,
@@ -160,6 +177,7 @@ class Coordinator:
         out = result.__dict__.copy()
         out["quorum_size"] = len(quorum)
         out["responded"] = len(votes)
+        out["fanout_ms"] = fanout_ms
         return out
 
 

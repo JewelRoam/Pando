@@ -25,7 +25,8 @@ devices, one mind.
   delta across the English suite.
 - **Four-runtime HTTP consensus**: CPU ORT + RTX 3070 CUDA + Intel iGPU
   OpenVINO + Intel NPU OpenVINO registered as four checkpoint-distinct
-  workers and returned four votes per decision (steady p50 430.5 ms).
+  workers and returned four votes per decision. Parallel quorum fan-out
+  reduced steady-state wire p50 from 430.5 ms to 237.8 ms.
 - **Signed self-replication (sandboxed)**: Spore payload = weights +
   playbook + harness. Ed25519 manifest, 64KiB chunk Merkle tree,
   per-chunk hash-on-arrival, selective re-fetch, TOFU key pinning,

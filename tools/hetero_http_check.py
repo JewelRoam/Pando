@@ -249,12 +249,16 @@ def main() -> int:
                     "tier": result.get("tier"),
                     "responded": result.get("responded"),
                     "latency_ms": round(elapsed_ms, 1),
+                    "root_fanout_ms": result.get("fanout_ms"),
                     "checkpoints": sorted(
                         vote["checkpoint"] for vote in votes),
                 })
 
             summary["wire_latency_p50_ms"] = round(
                 statistics.median(latencies), 1)
+            summary["root_fanout_p50_ms"] = round(statistics.median(
+                decision["root_fanout_ms"] for decision in decisions
+                if decision["root_fanout_ms"] is not None), 1)
             summary["decisions"] = decisions
             summary["steps"].append({"step": "decide", "code": 0, "count": 5})
             expected_responded = len(workers)

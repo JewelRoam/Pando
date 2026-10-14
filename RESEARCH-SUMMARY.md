@@ -129,8 +129,10 @@ graph and identical captured inputs:
 - max calibrated confidence delta: **0.0009**
 
 All four runtime-distinct workers then registered with one tokenized HTTP
-root and returned four votes per decision, with steady-state wire p50
-**430.5 ms**. The coordinator does not need a shared runtime or a shared
+root and returned four votes per decision. Sequential dispatch produced a
+steady-state wire p50 of **430.5 ms**; parallel quorum fan-out reduced it to
+**237.8 ms** (root fan-out p50 **226.3 ms**) without changing the model or
+quorum semantics. The coordinator does not need a shared runtime or a shared
 accelerator API; OpenVINO and CUDA cooperate at the protocol boundary.
 
 ## Remaining work

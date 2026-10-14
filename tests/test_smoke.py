@@ -8,6 +8,8 @@ end-to-end vote including node death and checkpoint-diverse quorum picking.
 
 import json
 import sys
+import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -40,6 +42,39 @@ class TestSmoke(unittest.TestCase):
         self.assertEqual(result.tier, "verify")
 
         self.assertEqual(aggregate(strong[:2]).tier, "escalate")
+
+    def test_quorum_fanout_is_parallel(self):
+        delay_s = 0.25
+        active = 0
+        peak = 0
+        lock = threading.Lock()
+
+        def transport(url, payload, timeout):
+            nonlocal active, peak
+            with lock:
+                active += 1
+                peak = max(peak, active)
+            time.sleep(delay_s)
+            with lock:
+                active -= 1
+            return json.dumps({
+                "vote": {"choice": "approve", "probability": 0.9}
+            }).encode()
+
+        coordinator = Coordinator(transport=transport, quorum_k=3)
+        for index, checkpoint in enumerate(("en", "ml", "td")):
+            coordinator.register(
+                f"node-{index}", f"http://node-{index}", checkpoint)
+
+        started = time.perf_counter()
+        result = coordinator.decide(
+            DecisionRequest(state="parallel", question="approve?",
+                            candidates=["approve", "reject"]))
+        elapsed = time.perf_counter() - started
+
+        self.assertEqual(result["responded"], 3)
+        self.assertEqual(peak, 3)
+        self.assertLess(elapsed, delay_s * 2)
 
     def test_onboarding_plan_prioritizes_ring0_over_sandbox(self):
         rows = [
