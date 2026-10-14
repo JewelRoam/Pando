@@ -139,6 +139,15 @@ devices, one mind.
   checkpoint *name* (a misnamed stem silently changes the gate), and a naive
   sweep would have shipped a threshold that acts on a minority vote
   (`docs/research/2026-10-14-round100.md`).
+- **Delta replication, end to end**: `rootd --chunking cdc` serves
+  content-defined manifests and `join --chunk-store` reuses what a replica
+  already holds. Two real roots and two real joiners: the second device
+  replicated a different lineage for **105 MB instead of 1610 MB (15.3x)**,
+  measured from the receiving side. The chunk store is packed (one
+  append-only blob), which removed the wall-clock regression from the first
+  cut: the delta leg is now 5.84 s versus 10.49 s for a full transfer
+  (`tools/delta_replication_check.py`,
+  `docs/research/2026-10-14-round108.md`).
 - **Delta replication**: content-defined chunking plus a content-addressed
   chunk store, so a replica fetches only the chunks it lacks. Replicating a
   fine-tune that shares 93.5% of its weights with its parent moved **105 MB

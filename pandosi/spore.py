@@ -205,26 +205,72 @@ class ChunkStore:
 
     A replica that already holds a parent lineage reuses every chunk the
     child still uses, so only genuinely new chunks are transferred.
+
+    Chunks are packed into one append-only file with a text index. The first
+    implementation stored one file per chunk, which made the delta path
+    slower than a full transfer: assembling a file re-read thousands of
+    small files (round 107). Recently written chunks are also kept in memory,
+    because a pull reads back what it just wrote.
     """
+
+    MEMORY_CACHE_BYTES = 64 * 1024 * 1024
 
     def __init__(self, root: Path):
         self.root = Path(root)
+        self._blobs = self.root / "chunks.bin"
+        self._index_path = self.root / "chunks.index"
+        self._index: dict[str, tuple[int, int]] | None = None
+        self._cache: dict[str, bytes] = {}
+        self._cache_bytes = 0
+        self._reader = None
 
-    def _path(self, digest: str) -> Path:
-        return self.root / digest[:2] / digest
+    def _load(self) -> dict:
+        if self._index is not None:
+            return self._index
+        self.root.mkdir(parents=True, exist_ok=True)
+        index: dict[str, tuple[int, int]] = {}
+        if self._index_path.exists():
+            for line in self._index_path.read_text(
+                    encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                digest, offset, length = line.split("\t")
+                index[digest] = (int(offset), int(length))
+        self._index = index
+        return index
 
     def has(self, digest: str) -> bool:
-        return self._path(digest).exists()
+        return digest in self._load() or digest in self._cache
 
     def get(self, digest: str) -> bytes:
-        return self._path(digest).read_bytes()
+        cached = self._cache.get(digest)
+        if cached is not None:
+            return cached
+        entry = self._load().get(digest)
+        if entry is None:
+            raise KeyError(digest)
+        offset, length = entry
+        if self._reader is None:
+            self._reader = self._blobs.open("rb")
+        self._reader.seek(offset)
+        return self._reader.read(length)
 
     def put(self, digest: str, chunk: bytes) -> None:
-        path = self._path(digest)
-        if path.exists():
+        index = self._load()
+        if digest in index or digest in self._cache:
             return
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(chunk)
+        offset = self._blobs.stat().st_size if self._blobs.exists() else 0
+        with self._blobs.open("ab") as handle:
+            handle.write(chunk)
+        with self._index_path.open("a", encoding="utf-8") as handle:
+            handle.write(f"{digest}\t{offset}\t{len(chunk)}\n")
+        index[digest] = (offset, len(chunk))
+        if len(chunk) <= self.MEMORY_CACHE_BYTES // 4:
+            self._cache[digest] = chunk
+            self._cache_bytes += len(chunk)
+            while self._cache_bytes > self.MEMORY_CACHE_BYTES:
+                oldest = next(iter(self._cache))
+                self._cache_bytes -= len(self._cache.pop(oldest))
 
     def store_manifest(self, manifest: dict, files: dict) -> int:
         """Seed the store from a local artifact, reusing its chunking."""

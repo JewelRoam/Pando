@@ -137,6 +137,10 @@ def main() -> None:
                         help="use this ONNX file as the decision backend")
     parser.add_argument("--checkpoint", default=None,
                         help="explicit lineage/checkpoint identity for ONNX stems")
+    parser.add_argument("--chunk-store", default=None,
+                        help="content-addressed chunk cache for delta pulls "
+                             "(default: spore-cache/<node>/chunks); point two "
+                             "replicas at the same store to share a lineage")
     parser.add_argument("--lan", action="store_true",
                         help="bind/advertise beyond loopback; requires an "
                              "active lan_listen grant")
@@ -264,17 +268,27 @@ def main() -> None:
                 f"SECURITY: Spore lineage {lineage_status}: {lineage_detail}")
         print(f"SPORE lineage status: {lineage_status} ({lineage_detail})",
               flush=True)
+        from .spore import ChunkStore
+        store_path = Path(args.chunk_store) if args.chunk_store \
+            else cache_dir / "chunks"
         stats = pull_spore(args.spore_url, cache_dir, verify_key,
                            sandbox_confirmed=True,
-                           auth_token=args.pairing_token)
+                           auth_token=args.pairing_token,
+                           chunk_store=ChunkStore(store_path))
+        # Leave the numbers on disk: a caller supervising a reproduction
+        # needs to know what the delta actually cost (round 107).
+        (cache_dir / "pull-stats.json").write_text(
+            json.dumps(stats, indent=2), encoding="utf-8")
         # A spore payload can carry a graph plus its external weight blobs;
         # the ONNX session must be pointed at the graph, not at a .data file.
         graphs = [name for name in manifest["files"]
                   if name.endswith(".onnx")]
         pulled_file = cache_dir / (graphs[0] if graphs
                                    else next(iter(manifest["files"])))
-        print(f"SPROUT: pulled {stats['chunks_pulled']} chunks -> {pulled_file}",
-              flush=True)
+        print(f"SPROUT: pulled {stats['chunks_pulled']} chunks, reused "
+              f"{stats['chunks_reused']}, "
+              f"{stats['bytes_transferred'] / 1024 / 1024:.1f} MB over the "
+              f"wire -> {pulled_file}", flush=True)
         from .spore import append_lineage
         lineage_entry = append_lineage(cache_dir / "lineage.jsonl", manifest)
         print(f"SPROUT: lineage generation={lineage_entry['generation']} "

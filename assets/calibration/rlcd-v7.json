@@ -1,0 +1,10 @@
+{
+  "checkpoint": "rlcd-v7",
+  "temperature": 2.6704,
+  "source": "round 81 post-training fit on 22 labeled choice items",
+  "raw_ece": 0.376,
+  "calibrated_ece": 0.3884,
+  "n_tasks": 22,
+  "accuracy": 0.4,
+  "note": "The v7 candidate from the RTX 3070 RLCD run. Fitted by tools/calibrate_checkpoint.py while holding out six tasks; the holdout slice showed no calibration improvement, so this is the measured temperature, not a promoted one."
+}

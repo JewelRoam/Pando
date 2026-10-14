@@ -452,6 +452,23 @@ def build_handler(coordinator: Coordinator, root=None):
                 coordinator.register(data["node_id"], data["url"],
                                      data["checkpoint"], data.get("capability"))
                 self._send(200, {"ok": True})
+            elif self.path == "/spore/blobs":
+                # Delta pulls: return only the chunks a replica asked for and
+                # does not already hold (round 107).
+                wanted = json.loads(raw).get("hashes", [])
+                blobs = getattr(root, "spore_blobs", {}) if root else {}
+                missing = [digest for digest in wanted if digest not in blobs]
+                if missing:
+                    self._send(404, {"error": "unknown chunks",
+                                     "missing": missing[:8]})
+                    return
+                body = b"".join(blobs[digest] for digest in wanted)
+                self.send_response(200)
+                self.send_header("Content-Type",
+                                 "application/octet-stream")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
             elif self.path == "/decide":
                 req = DecisionRequest.from_json(raw)
                 try:
@@ -477,7 +494,8 @@ def build_handler(coordinator: Coordinator, root=None):
 class Root:
     def __init__(self, coordinator: Coordinator | None = None,
                  host: str = "127.0.0.1", port: int = 0,
-                 spore_files: dict | None = None):
+                 spore_files: dict | None = None,
+                 chunking: str = "fixed"):
         self.coordinator = coordinator or Coordinator()
         self.spore = None
         if spore_files:
@@ -502,19 +520,37 @@ class Root:
                 pb_meta["playbook_hash"] = self.playbook.hash()
                 pb_meta["playbook_name"] = self.playbook.name
                 pb_meta["playbook_version"] = self.playbook.version
-            self.spore_manifest = build_manifest(spore_files, key,
-                                                 metadata=pb_meta)
+            from .spore import build_manifest_cdc
+            if chunking == "cdc":
+                # Content-defined chunking lets a joiner that already holds a
+                # related lineage fetch only the chunks it lacks (round 107).
+                self.spore_manifest = build_manifest_cdc(
+                    spore_files, key, metadata=pb_meta)
+            else:
+                self.spore_manifest = build_manifest(spore_files, key,
+                                                     metadata=pb_meta)
             # Signed manifests this root can serve by content hash, so a
             # joiner that already holds a descendant can fetch its parent.
             from .spore import manifest_hash
             self.spore_history: dict[str, dict] = {
                 manifest_hash(self.spore_manifest): self.spore_manifest}
             self.spore_chunks = {}
-            for name, path in spore_files.items():
-                data = path.read_bytes()
-                for i in range(0, len(data), 64 * 1024):
-                    self.spore_chunks[(name, i // (64 * 1024))] = \
-                        data[i:i + 64 * 1024]
+            self.spore_blobs: dict[str, bytes] = {}
+            if chunking == "cdc":
+                from .spore import chunk_spans
+                avg = int(self.spore_manifest["chunking"]["avg_size"])
+                for name, path in spore_files.items():
+                    data = path.read_bytes()
+                    for start, end in chunk_spans(data, avg):
+                        chunk = data[start:end]
+                        self.spore_blobs[
+                            hashlib.sha256(chunk).hexdigest()] = chunk
+            else:
+                for name, path in spore_files.items():
+                    data = path.read_bytes()
+                    for i in range(0, len(data), 64 * 1024):
+                        self.spore_chunks[(name, i // (64 * 1024))] = \
+                            data[i:i + 64 * 1024]
         self.shutdown_event = threading.Event()
         self._auth_token = None
         self._pairing_token = None
@@ -552,6 +588,10 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--serve-spore", default=None,
                         help="payload file to serve for spore pulls")
+    parser.add_argument("--chunking", default="fixed",
+                        choices=["fixed", "cdc"],
+                        help="fixed = v1 manifests; cdc = content-defined "
+                             "chunking so an existing replica pulls a delta")
     parser.add_argument("--playbook", default=None,
                         help="playbook TOML to load and serve")
     parser.add_argument("--playbook-key", default=None,
@@ -617,7 +657,7 @@ def main() -> None:
         initial_stem_timeout=args.initial_stem_timeout,
         rollout_dir=args.rollout_dir)
     root = Root(coordinator=coordinator, host=listen_host, port=args.port,
-                spore_files=spore_files)
+                spore_files=spore_files, chunking=args.chunking)
     import secrets
     root.set_pairing_token(args.pairing_token or secrets.token_urlsafe(18))
     token_digest = hashlib.sha256(
