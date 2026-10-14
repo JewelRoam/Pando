@@ -33,6 +33,7 @@ NPU) all voting in the same consensus quorum.
 | Runtime elastic membership | tools/swarm_check.py | live 3 -> 5 -> 4 transitions |
 | CUDA hot-plug | tools/hetero_http_check.py --hotplug-cuda | Intel 3 -> +RTX 3070 |
 | Hierarchical groups | pandosi/bridge.py + tools/two_group_check.py | remote aggregate + partition fallback |
+| CUDA RLCD training | tools/rlcd_cuda_train.py + artifacts/rlcd-cuda-v1 | real GPU update, 14/14 label stable |
 
 ## What is proven (key numbers)
 
@@ -57,7 +58,7 @@ NPU) all voting in the same consensus quorum.
 | NPU deep op analysis | IsNaN removed but other ops may block | 1-2 days |
 | Termux/TV box real test | needs Android hardware | 0.5 day on device |
 | Docker image build test | needs Docker environment | 0.5 day |
-| RLCD actual training (not dry_run) | needs GPU + more contrast pairs | 1-2 days |
+| RLCD scale-up beyond one contrast pair | needs more accumulated pairs | 1-2 days |
 | Multi-hop with graph adaptation | origin -> B(NPU) -> C(CPU) format conversion | 1 day |
 | Dashboard live update mode | design done, not coded | 0.5 day |
 | Rootd calibration from held-out set | needs labeled eval data | 0.5 day |

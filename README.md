@@ -46,6 +46,9 @@ devices, one mind.
 - **Hierarchical two-group consensus**: a bridge represents one remote
   group as a single checkpoint; when that group was partitioned, the local
   three-worker quorum continued and skipped the bridge after cooldown.
+- **CUDA RLCD training**: a real `laya.train.finetune` run on the RTX 3070
+  used 1.74 GB peak memory, produced a reloadable CUDA checkpoint, and
+  preserved 14/14 English decision labels while changing confidence.
 - **Signed self-replication (sandboxed)**: Spore payload = weights +
   playbook + harness. Ed25519 manifest, 64KiB chunk Merkle tree,
   per-chunk hash-on-arrival, selective re-fetch, TOFU key pinning,
