@@ -319,10 +319,13 @@ class TestSmoke(unittest.TestCase):
             declared.start()
             stems.append(declared)
 
-            def register(node_id: str, checkpoint: str) -> tuple[int, dict]:
-                payload = json.dumps({"node_id": node_id,
-                                      "url": "http://127.0.0.1:1",
-                                      "checkpoint": checkpoint})
+            def register(node_id: str, checkpoint: str,
+                         artifact: str | None = None) -> tuple[int, dict]:
+                body = {"node_id": node_id, "url": "http://127.0.0.1:1",
+                        "checkpoint": checkpoint}
+                if artifact:
+                    body["artifact_sha256"] = artifact
+                payload = json.dumps(body)
                 request = urllib.request.Request(
                     f"{root.url()}/register", data=payload.encode("utf-8"),
                     headers={"Content-Type": "application/json"})
@@ -339,6 +342,22 @@ class TestSmoke(unittest.TestCase):
             self.assertEqual(status, 403)
             self.assertIn("not declared", payload["error"])
             self.assertEqual(payload["admitted"], ["english"])
+
+            # Declaring a lineage is a claim; requiring a digest makes it
+            # checkable. A stem that cannot attest the declared artifact is
+            # refused, and so is one that attests a different artifact.
+            expected = "a" * 64
+            root.lineage_artifacts = {"english": expected}
+            status, payload = register("unattested", "english")
+            self.assertEqual(status, 403)
+            self.assertIn("attestation", payload["error"])
+            self.assertEqual(payload["expected_sha256"], expected)
+
+            status, _ = register("liar", "english", "b" * 64)
+            self.assertEqual(status, 403)
+
+            status, _ = register("honest", "english", expected)
+            self.assertEqual(status, 200)
 
             # The refused node never joined.
             with urllib.request.urlopen(f"{root.url()}/nodes",

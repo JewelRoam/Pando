@@ -95,6 +95,12 @@ def heartbeat_loop(stem: Stem, root_url: str,
     registration = {"node_id": stem.node_id, "url": stem.url(),
                     "checkpoint": stem.backend.checkpoint,
                     "capability": cap}
+    # Attestation: report the artifact this worker actually loaded, so a
+    # root that declares an expected artifact can refuse a stem that claims a
+    # lineage it is not running (round 102).
+    digest = getattr(stem.backend, "artifact_digest", None)
+    if digest:
+        registration["artifact_sha256"] = digest
     headers = {"Content-Type": "application/json"}
     if pairing_token:
         registration["pairing_token"] = pairing_token
@@ -150,12 +156,20 @@ def main() -> None:
 
     if args.backend == "onnx":
         print(f"loading ONNX Laya from {args.onnx_path} ...", flush=True)
+        from .spore import artifact_digest
+        from pathlib import Path as _Path
+        digest = None
+        onnx_file = _Path(args.onnx_path)
+        if onnx_file.exists():
+            digest = artifact_digest(onnx_file)
+            print(f"artifact sha256 {digest}", flush=True)
         pad_to = args.pad_to if args.pad_to is not None \
             else (256 if args.device != "CPU" else None)
         backend = OnnxLayaBackend(args.node_id, args.onnx_path,
                                   repo=args.repo, device=args.device,
                                   pad_to=pad_to,
                                   checkpoint=args.checkpoint)
+        backend.artifact_digest = digest
         print("model loaded", flush=True)
     elif args.backend == "laya":
         print(f"loading torch Laya from {args.model} on {args.device} ...",

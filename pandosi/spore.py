@@ -27,6 +27,37 @@ def chunk_file(path: Path, chunk_size: int = CHUNK_SIZE) -> list[bytes]:
     return [data[i:i + chunk_size] for i in range(0, len(data), chunk_size)]
 
 
+def artifact_files(path: Path) -> list[Path]:
+    """Every file needed to reproduce an ONNX artifact.
+
+    An exported graph with external weights is a small ``.onnx`` protobuf
+    plus a multi-gigabyte ``.onnx.data`` blob. Attesting only the protobuf
+    would say nothing about the weights, so the sibling data file is part of
+    the artifact.
+    """
+    path = Path(path)
+    files = [path]
+    for sibling in sorted(path.parent.glob(path.name + ".data")):
+        files.append(sibling)
+    return files
+
+
+def artifact_digest(path: Path, block_size: int = 1024 * 1024) -> str:
+    """Streaming SHA-256 over an artifact and its external-data siblings.
+
+    Chunked so a multi-gigabyte graph can be attested without holding it in
+    memory. File names are mixed in, so swapping a weight blob for another
+    file of the same bytes under a different name changes the digest.
+    """
+    digest = hashlib.sha256()
+    for file in artifact_files(path):
+        digest.update(file.name.encode("utf-8"))
+        with file.open("rb") as handle:
+            for block in iter(lambda: handle.read(block_size), b""):
+                digest.update(block)
+    return digest.hexdigest()
+
+
 def _hash_pair(left: bytes, right: bytes) -> bytes:
     return hashlib.sha256(left + right).digest()
 

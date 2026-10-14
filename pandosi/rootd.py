@@ -419,6 +419,16 @@ def build_handler(coordinator: Coordinator, root=None):
                                  f"declared by this playbook",
                         "admitted": sorted(admitted)})
                     return
+                expected_artifact = getattr(
+                    root, "lineage_artifacts", {}).get(data.get("checkpoint"))
+                if expected_artifact and \
+                        data.get("artifact_sha256") != expected_artifact:
+                    self._send(403, {
+                        "error": f"lineage {data.get('checkpoint')!r} requires "
+                                 "artifact attestation",
+                        "expected_sha256": expected_artifact,
+                        "reported_sha256": data.get("artifact_sha256")})
+                    return
                 coordinator.register(data["node_id"], data["url"],
                                      data["checkpoint"], data.get("capability"))
                 self._send(200, {"ok": True})
@@ -599,10 +609,16 @@ def main() -> None:
                     f"{sorted(unusable)} have no calibration table, so no "
                     "stem could register")
             root.admitted_lineages = admitted
+            artifacts = root.playbook.lineages.get("artifacts") or {}
+            root.lineage_artifacts = artifacts
             for name in unusable:
                 print(f"[lineages] declared {name!r} has no calibration "
                       f"table and is NOT admitted", flush=True)
             print(f"[lineages] admitting {sorted(admitted)}", flush=True)
+            if artifacts:
+                attested = sorted(artifacts)
+                print(f"[lineages] requiring artifact attestation for "
+                      f"{attested}", flush=True)
         pb_hash = root.playbook.hash()
         if args.history:
             ok, problems = verify_chain(Path(args.history))

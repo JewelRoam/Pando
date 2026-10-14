@@ -113,7 +113,22 @@ def load_playbook(path: Path) -> Playbook:
             cleaned.append(name.strip())
         if len(set(cleaned)) != len(cleaned):
             raise ValueError("playbook [lineages].admit has duplicate ids")
-        lineages = {"admit": cleaned}
+        artifacts = lineages_raw.get("artifacts") or {}
+        if not isinstance(artifacts, dict):
+            raise ValueError(
+                "playbook [lineages.artifacts] must be a table of "
+                "lineage = sha256")
+        for name, digest in artifacts.items():
+            if name not in cleaned:
+                raise ValueError(
+                    f"[lineages.artifacts] names {name!r}, which is not in "
+                    "[lineages].admit")
+            if not isinstance(digest, str) or len(digest) != 64 or \
+                    any(ch not in "0123456789abcdef" for ch in digest):
+                raise ValueError(
+                    f"[lineages.artifacts] {name!r} must be a lowercase "
+                    "64-character sha256")
+        lineages = {"admit": cleaned, "artifacts": dict(artifacts)}
 
     return Playbook(
         name=meta["name"],

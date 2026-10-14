@@ -139,6 +139,12 @@ devices, one mind.
   checkpoint *name* (a misnamed stem silently changes the gate), and a naive
   sweep would have shipped a threshold that acts on a minority vote
   (`docs/research/2026-10-14-round100.md`).
+- **Artifact attestation**: a stem reports the SHA-256 of the artifact it
+  actually loaded — the graph *and* its external-data weight blob — and a
+  playbook that declares `[lineages.artifacts]` refuses any stem that cannot
+  match it. Verified end to end: the same honest stem registers when the
+  declared digest is right and is refused when it is not
+  (`tools/attestation_check.py`, `docs/research/2026-10-14-round103.md`).
 - **Declared lineage identity**: a playbook declares `[lineages].admit`,
   and the root refuses at registration any stem whose checkpoint is not
   declared — an id is admitted only if it is declared *and* ships a

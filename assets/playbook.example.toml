@@ -17,6 +17,15 @@ lineage = "en-v1"
 # vote on an unknown confidence scale cannot justify an autonomous action.
 admit = ["english", "multilingual", "typed-decisions"]
 
+# Optional attestation. Declaring a lineage is a claim; requiring an artifact
+# digest makes it checkable: a stem that registers as `english` must also
+# report the sha256 of the graph it loaded, or it is refused. Generate these
+# locally with `python tools/attest_graphs.py` - the artifacts themselves are
+# not in the repository, so the digests are host-specific.
+#
+# [lineages.artifacts]
+# english = "0000000000000000000000000000000000000000000000000000000000000000"
+
 [gating]
 # Confidence tiers (blueprint 3.2): auto executes, verify re-asks,
 # escalate routes to the offline advisor / human.
