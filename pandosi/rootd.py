@@ -105,6 +105,7 @@ class Coordinator:
         self._calibrator = Calibrator()
         self._uncalibrated_warned: set[str] = set()
         self.known_questions: set[str] | None = None  # None = accept any
+        self.question_categories: dict[str, str] = {}
         self._recorder = RolloutRecorder(rollout_dir)
 
     # -- registry -------------------------------------------------------
@@ -275,16 +276,42 @@ class Coordinator:
         give up", and a security question is where giving it up is least
         acceptable, so a playbook can set a higher floor for that category
         (round 111).
+
+        The category is *declared* by the playbook question (round 112): a
+        question named ``risk_check`` used to fall through to the ordinary
+        floor because the keyword scan did not match. Now a declared category
+        decides, the keywords remain only as a conservative cross-check, and
+        a question that a categorised playbook does not classify is treated
+        as the most demanding category rather than the least.
         """
         gating = self.gating or {}
-        is_security = any(
+        categories = self.question_categories or {}
+        declared = categories.get(question)
+        keyword_security = any(
             keyword in (question or "").lower()
             for keyword in ("security", "suspicious", "phishing", "threat"))
-        floor = self.quorum_floor
-        if "quorum_floor" in gating:
-            floor = max(1, int(gating["quorum_floor"]))
-        if is_security and (gating.get("security") or {}).get("quorum_floor"):
-            floor = max(floor, int(gating["security"]["quorum_floor"]))
+
+        def floor_for(category: str | None) -> int:
+            if category and (gating.get(category) or {}).get("quorum_floor"):
+                return int(gating[category]["quorum_floor"])
+            if category == "security":
+                return int(gating.get("quorum_floor", self.quorum_floor))
+            return int(gating.get("quorum_floor", self.quorum_floor))
+
+        if declared:
+            floor = floor_for(declared)
+        elif categories:
+            # The playbook categorises its questions, so an unclassified one
+            # is a playbook defect: take the most demanding declared floor
+            # rather than the default one.
+            floors = [int((gating.get(category) or {}).get("quorum_floor", 0))
+                      for category in set(categories.values())]
+            floors.append(int(gating.get("quorum_floor", self.quorum_floor)))
+            floor = max(floors)
+        else:
+            floor = floor_for("security" if keyword_security else None)
+        if keyword_security:
+            floor = max(floor, floor_for("security"))
         return max(1, floor)
 
     def _adapt_quorum(self, question: str) -> None:
@@ -886,6 +913,8 @@ def main() -> None:
         root.coordinator.playbook_hash = root.playbook.hash()
         root.coordinator.known_questions = {
             q["id"] for q in root.playbook.questions}
+        root.coordinator.question_categories = (
+            root.playbook.question_categories or {})
         print(f"playbook loaded: {root.playbook.name} v{root.playbook.version} "
               f"hash={pb_hash[:16]} "
               f"gating={root.playbook.gating}", flush=True)

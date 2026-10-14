@@ -139,6 +139,14 @@ devices, one mind.
   checkpoint *name* (a misnamed stem silently changes the gate), and a naive
   sweep would have shipped a threshold that acts on a minority vote
   (`docs/research/2026-10-14-round100.md`).
+- **Category by declaration**: a playbook question declares
+  `category = "security"`, so the quorum floor follows what the operator
+  wrote down rather than a keyword scan of the question text. `risk_check`
+  — whose name and instructions contain no security word — now holds k=4
+  under load where the keyword rule would have given it k=2, at a measured
+  cost of 28% throughput. An unclassified question in a categorised playbook
+  fails conservative, and keywords can still only raise the floor
+  (`docs/research/2026-10-14-round112.md`).
 - **Per-category quorum floors and retirement**: a playbook sets a
   `quorum_floor` per category, so under load an ordinary question gave up
   voters down to 2 while a security question stopped at 4 — twice the

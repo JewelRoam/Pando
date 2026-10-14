@@ -69,8 +69,16 @@ quorum_floor = 4
 id = "security_check"
 type = "choice"
 informational = false  # security questions CAN gate actions
+category = "security"  # declared, not guessed from the question text
 instructions = "Is this login or message a security threat?"
 criteria = ["suspicious", "normal"]
+
+[[questions]]
+id = "risk_check"
+type = "choice"
+category = "security"  # the text says nothing about security; the
+instructions = "Rate whether this account should be frozen."  # declaration does
+criteria = ["freeze", "allow"]
 
 [[actions]]
 when = "intent == refund"

@@ -35,6 +35,7 @@ class Playbook:
     questions: list[dict]
     actions: list[dict]
     lineages: dict | None = None
+    question_categories: dict | None = None
     source_path: str | None = None
 
     def canonical_json(self) -> str:
@@ -70,6 +71,11 @@ def load_playbook(path: Path) -> Playbook:
         if qid in seen_ids:
             raise ValueError(f"duplicate question id {qid!r}")
         seen_ids.add(qid)
+        category = q.get("category")
+        if category is not None and (not isinstance(category, str)
+                                     or not category.strip()):
+            raise ValueError(
+                f"question {qid!r}: category must be a non-empty string")
         if q.get("type") not in VALID_QTYPES:
             raise ValueError(
                 f"question {qid!r}: type must be one of {sorted(VALID_QTYPES)}")
@@ -141,6 +147,8 @@ def load_playbook(path: Path) -> Playbook:
         questions=questions,
         actions=actions,
         lineages=lineages,
+        question_categories={q["id"]: q["category"].strip()
+                             for q in questions if q.get("category")},
         source_path=str(path),
     )
 

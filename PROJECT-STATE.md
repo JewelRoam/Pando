@@ -107,6 +107,7 @@ NPU) all voting in the same consensus quorum.
 | Adaptive quorum size | --adaptive-quorum/--latency-target-ms | holds k=5 idle, k=3 under load |
 | Per-category quorum floors | playbook gating quorum_floor | security k=4 vs ordinary k=2 under load |
 | Retirement | pandosi/elastic.py + POST /retire + blocklist | slow member removed, stays removed |
+| Declared categories | playbook question category + conservative default | risk_check holds k=4, not k=2 |
 | Reproduce grant | grants.py action "reproduce" | operator-approved, expiring |
 
 ## What is NOT yet done

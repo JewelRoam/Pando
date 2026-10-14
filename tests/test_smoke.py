@@ -299,6 +299,8 @@ class TestSmoke(unittest.TestCase):
         """
         from pandosi.rootd import Coordinator
 
+        from pandosi.playbook import load_playbook
+
         coordinator = Coordinator(
             adaptive_quorum=True, quorum_floor=1, quorum_k=5,
             latency_target_ms=10.0)
@@ -328,6 +330,34 @@ class TestSmoke(unittest.TestCase):
         for _ in range(8):
             bare._adapt_quorum("approve?")
         self.assertEqual(bare.quorum_k, 3)
+
+        # A declared category decides, so a question whose *text* looks
+        # innocent still gets the demanding floor (round 112).
+        tmp = Path(tempfile.mkdtemp(prefix="pandosi-category-"))
+        path = tmp / "categorised.toml"
+        path.write_text(
+            '[meta]\nname = "categorised"\nversion = 1\n\n'
+            '[gating]\nquorum_floor = 2\n\n'
+            '[gating.security]\nquorum_floor = 4\n\n'
+            '[[questions]]\nid = "risk_check"\ntype = "choice"\n'
+            'category = "security"\ncriteria = ["freeze", "allow"]\n\n'
+            '[[questions]]\nid = "intent"\ntype = "choice"\n'
+            'category = "ordinary"\ncriteria = ["a", "b"]\n',
+            encoding="utf-8")
+        in_playbook = load_playbook(path)
+        self.assertEqual(in_playbook.question_categories,
+                         {"risk_check": "security", "intent": "ordinary"})
+        declared = Coordinator(adaptive_quorum=True, quorum_floor=1,
+                              latency_target_ms=10.0)
+        declared.gating = in_playbook.gating
+        declared.question_categories = in_playbook.question_categories
+        self.assertEqual(declared._category_floor("risk_check"), 4)
+        self.assertEqual(declared._category_floor("intent"), 2)
+        # Unclassified in a categorised playbook: fail conservative.
+        self.assertEqual(declared._category_floor("something_new"), 4)
+        # A keyword match still raises the floor even if declared ordinary.
+        self.assertEqual(declared._category_floor("intent"), 2)
+        self.assertEqual(declared._category_floor("phishing?"), 4)
 
     def test_content_defined_delta_transfer(self):
         """A replica that holds the parent should receive only the diff.
