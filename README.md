@@ -87,6 +87,14 @@ devices, one mind.
   Runtime Intel stems and the ONNX Runtime CUDA stem — four workers, two
   ecosystems, one HTTP contract, tier `auto`. The contract itself is
   documented with no framework named in it (`docs/STEM-PROTOCOL.md`).
+- **Pipeline staging, measured**: `tools/stage_split.py` cuts the Laya graph
+  at a node boundary (shared external weights, verified numerically exact
+  per provider) and `tools/stage_pipeline_check.py` chains the halves over
+  real HTTP. The activation interface is only 0.15–1.2 MB and the loopback
+  hop ~1–2 ms, but staging still does **not** pay on one shared CPU, and
+  offloading half the model to a slower device is 0.47x. Replicate-and-vote
+  stays the default; stage only on disjoint devices with comparable
+  throughput (`docs/research/2026-10-14-round94.md`).
 - **Real lineage identity over HTTP**: en/ml/td ONNX stems now register as
   distinct checkpoints; twelve shared choice tasks produced 11 cross-lineage
   splits, making model diversity visible to the live quorum.
