@@ -55,6 +55,9 @@ devices, one mind.
 - **Canonical decision schemas**: question identity now includes a hash of
   the option set, so en/ml/td rollouts with incompatible label spaces can
   no longer be silently merged during RLCD export.
+- **Held-out RLCD check**: after removing 9 training-overlap states, 31
+  held-out tasks kept 31/31 labels but showed no accuracy gain, which is
+  the honest current limit of ten contrast pairs and one epoch.
 - **Real lineage identity over HTTP**: en/ml/td ONNX stems now register as
   distinct checkpoints; twelve shared choice tasks produced 11 cross-lineage
   splits, making model diversity visible to the live quorum.

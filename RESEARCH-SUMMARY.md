@@ -157,6 +157,12 @@ prompt name to an option-set digest in both live inference and RLCD export.
 The v3 CUDA run removes the trainer's schema-conflict warning while keeping
 all 14 English labels stable.
 
+Round 77 removes training overlap from evaluation. Nine overlapping states
+were excluded, leaving 31 held-out tasks. The CUDA v4 checkpoint preserved
+all 31 labels but did not improve accuracy (0.6129 before and after), so the
+current ten-pair dataset is sufficient to prove pipeline stability, not
+generalization.
+
 ## Remaining work
 
 - NPU: deep graph analysis (IsNaN was removed; other ops may block)

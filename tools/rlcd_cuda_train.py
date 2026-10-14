@@ -80,7 +80,8 @@ def confidence_of(answer: dict) -> float:
 
 
 def evaluate_checkpoint(model_dir: str, suite_path: Path,
-                        checkpoint: str) -> dict:
+                        checkpoint: str,
+                        exclude_states: set[str] | None = None) -> dict:
     import laya
 
     tasks = [
@@ -88,7 +89,17 @@ def evaluate_checkpoint(model_dir: str, suite_path: Path,
         for line in suite_path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    tasks = [task for task in tasks if task["checkpoint"] == checkpoint]
+    candidates = [
+        task for task in tasks
+        if checkpoint == "all" or task["checkpoint"] == checkpoint
+    ]
+    excluded_states = exclude_states or set()
+    tasks = [
+        task for task in candidates
+        if task["state"] not in excluded_states
+    ]
+    if not tasks:
+        raise RuntimeError("held-out evaluation selected zero tasks")
     started = time.perf_counter()
     agent = laya.load(model_dir, device="cuda")
     load_s = time.perf_counter() - started
@@ -116,6 +127,9 @@ def evaluate_checkpoint(model_dir: str, suite_path: Path,
     torch.cuda.empty_cache()
     return {
         "load_s": round(load_s, 3),
+        "candidates": len(candidates),
+        "excluded_training_overlap": len(candidates) - len(tasks),
+        "evaluated": len(tasks),
         "accuracy": round(correct / len(tasks), 4) if tasks else 0.0,
         "p50_ms": round(statistics.median(latencies), 3) if latencies else 0.0,
         "details": details,
@@ -160,6 +174,8 @@ def main() -> int:
     parser.add_argument("--eval-suite",
                         default=str(ROOT / "assets" / "graft_suite.jsonl"))
     parser.add_argument("--eval-checkpoint", default="english")
+    parser.add_argument("--include-training-eval", action="store_true",
+                        help="allow training states in before/after evaluation")
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--micro-batch", type=int, default=1)
     parser.add_argument("--grad-accum", type=int, default=1)
@@ -206,10 +222,22 @@ def main() -> int:
         torch.cuda.empty_cache()
 
     suite_path = Path(args.eval_suite)
+    exclude_states: set[str] = set()
+    if not args.include_training_eval:
+        exclude_states = {
+            row["state"]
+            for row in (
+                json.loads(line)
+                for line in Path(args.data).read_text(
+                    encoding="utf-8").splitlines()
+                if line.strip()
+            )
+            if row.get("state")
+        }
     report["before"] = evaluate_checkpoint(
-        base_model, suite_path, args.eval_checkpoint)
+        base_model, suite_path, args.eval_checkpoint, exclude_states)
     report["after"] = evaluate_checkpoint(
-        str(output_dir), suite_path, args.eval_checkpoint)
+        str(output_dir), suite_path, args.eval_checkpoint, exclude_states)
     report["comparison"] = compare(report["before"], report["after"])
 
     report_path = output_dir / "rlcd-cuda-report.json"
