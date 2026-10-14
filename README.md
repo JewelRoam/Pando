@@ -143,19 +143,19 @@ graph TB
 
 ```bash
 pip install pynacl zeroconf                  # deps
-python -m pandosi.doctor --plan              # safe onboarding plan
-python -m pandosi.onboard --dry-run          # no install/elevation
-python -m pandosi.join                       # local root + stem (loopback)
-python -m pandosi.doctor                     # capability report
+python -m pandosi doctor --plan              # safe onboarding plan
+python -m pandosi onboard --dry-run          # no install/elevation
+python -m pandosi join                       # local root + stem (loopback)
+python -m pandosi doctor                     # capability report
 python tools/dashboard.py                    # render local metrics
 ```
 
 LAN is a separate explicit grant:
 
 ```bash
-python -m pandosi.grants grant lan_listen \
+python -m pandosi grants grant lan_listen \
   --resource 0.0.0.0:8080 --hours 24 --yes
-python -m pandosi.join --lan
+python -m pandosi join --lan
 ```
 
 Grant creation, revocation, allowed use, and denial are recorded in a local

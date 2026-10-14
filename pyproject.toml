@@ -16,5 +16,8 @@ model = ["transformers>=4.40", "torch>=2.1"]
 serve = ["fastapi", "uvicorn"]
 cuda = ["onnxruntime-gpu>=1.31"]
 
+[project.scripts]
+pandosi = "pandosi.cli:main"
+
 [tool.setuptools]
 packages = ["pandosi"]

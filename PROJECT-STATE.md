@@ -55,6 +55,7 @@ NPU) all voting in the same consensus quorum.
 | Spore 3-hop chain | 97 chunks, 0 integrity failures | round 62 |
 | Spore generation lineage | generation 0 -> 1 -> 2 + parent hash | round 82 |
 | Reproduction DAG | tools/spore_dag_check.py | branch validation + invalid links rejected |
+| Unified CLI | pandosi/cli.py + `python -m pandosi` | doctor/join/stem/grants/service/lab entry |
 | CUDA vs CPU p50 | 15.0 ms vs 125.6 ms (8.36x) | round 65 |
 | CUDA decision parity | 14/14 English tasks; max conf delta 0.0009 | round 65 |
 | Four-runtime HTTP p50 | 430.5 ms sequential -> 237.8 ms parallel | rounds 65/66 |
