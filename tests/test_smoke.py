@@ -288,6 +288,65 @@ class TestSmoke(unittest.TestCase):
                 grants.name + ".audit.jsonl"))
             self.assertEqual(audit["status"], "valid")
 
+    def test_playbook_signature_covers_declarations(self):
+        """A pinned playbook key makes the declaration chain checkable.
+
+        The admitted lineages and their artifact digests live inside the
+        signed canonical bytes, so tampering with what the swarm will accept
+        invalidates the signature (rounds 102-104).
+        """
+        import nacl.signing
+
+        from pandosi.playbook import (SIGNATURE_SUFFIX, load_playbook,
+                                      load_verified_playbook,
+                                      sign_playbook,
+                                      verify_playbook_signature)
+
+        tmp = Path(tempfile.mkdtemp(prefix="pandosi-signed-"))
+        path = tmp / "signed.toml"
+        path.write_text(
+            '[meta]\nname = "signed"\nversion = 1\n\n'
+            '[lineages]\nadmit = ["english"]\n\n'
+            '[lineages.artifacts]\nenglish = "' + "a" * 64 + '"\n',
+            encoding="utf-8")
+        key = nacl.signing.SigningKey.generate()
+        pubkey = key.verify_key.encode().hex()
+        playbook = load_playbook(path)
+
+        attestation = sign_playbook(playbook, key)
+        valid, detail = verify_playbook_signature(playbook, attestation,
+                                                  pubkey)
+        self.assertTrue(valid, detail)
+        (tmp / (path.name + SIGNATURE_SUFFIX)).write_text(
+            json.dumps(attestation), encoding="utf-8")
+
+        loaded, status = load_verified_playbook(path, pubkey)
+        self.assertEqual(loaded.hash(), playbook.hash())
+        self.assertIn("verified", status)
+
+        # An unpinned signature is self-consistency, not trust.
+        _, unpinned = load_verified_playbook(path)
+        self.assertIn("unpinned", unpinned)
+
+        # Widening what the swarm admits does not survive the signature.
+        path.write_text(
+            '[meta]\nname = "signed"\nversion = 1\n\n'
+            '[lineages]\nadmit = ["english", "rogue"]\n',
+            encoding="utf-8")
+        tampered = load_playbook(path)
+        valid, detail = verify_playbook_signature(tampered, attestation,
+                                                  pubkey)
+        self.assertFalse(valid)
+        with self.assertRaises(ValueError):
+            load_verified_playbook(path, pubkey)
+
+        # A pinned key with no signature at all is also refused.
+        (tmp / (path.name + SIGNATURE_SUFFIX)).unlink()
+        with self.assertRaises(ValueError):
+            load_verified_playbook(path, pubkey)
+        _, status = load_verified_playbook(path)
+        self.assertIn("unsigned", status)
+
     def test_declared_lineages_gate_registration(self):
         """A playbook that declares lineages admits only those lineages.
 

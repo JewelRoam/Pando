@@ -139,6 +139,14 @@ devices, one mind.
   checkpoint *name* (a misnamed stem silently changes the gate), and a naive
   sweep would have shipped a threshold that acts on a minority vote
   (`docs/research/2026-10-14-round100.md`).
+- **Signed playbooks**: a playbook's canonical bytes are covered by a
+  detached Ed25519 signature, which includes the admitted lineages and their
+  artifact digests — so the whole declaration chain is attributable.
+  `rootd --playbook-key <hex>` pins the signer, and a missing or invalid
+  signature is fatal at startup; without a pin the root logs that writing the
+  file is enough to change what it admits. Tampering with `admit` invalidates
+  the signature and the root refuses to start
+  (`tools/sign_playbook.py`, `docs/research/2026-10-14-round104.md`).
 - **Artifact attestation**: a stem reports the SHA-256 of the artifact it
   actually loaded — the graph *and* its external-data weight blob — and a
   playbook that declares `[lineages.artifacts]` refuses any stem that cannot

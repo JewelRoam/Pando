@@ -19,8 +19,11 @@ import json
 import tomllib
 from pathlib import Path
 
+import nacl.signing
+
 REQUIRED_META = {"name", "version"}
 VALID_QTYPES = {"choice", "score", "noul"}
+SIGNATURE_SUFFIX = ".sig"
 
 
 @dataclasses.dataclass
@@ -161,6 +164,93 @@ def resolve_admitted_lineages(pb: Playbook | None) -> tuple[set[str], list[str]]
         else:
             unusable.append(name)
     return admitted, unusable
+
+
+def _payload(pb: Playbook) -> bytes:
+    return pb.canonical_json().encode("utf-8")
+
+
+def sign_playbook(pb: Playbook,
+                  signing_key: nacl.signing.SigningKey) -> dict:
+    """Produce the detached attestation for a playbook.
+
+    Covers the canonical JSON, which includes ``lineages`` - so admitting a
+    lineage and pinning its artifact digest are both inside the signature
+    (round 103).
+    """
+    return {
+        "algorithm": "ed25519",
+        "pubkey": signing_key.verify_key.encode().hex(),
+        "playbook_hash": pb.hash(),
+        "signature": signing_key.sign(_payload(pb)).signature.hex(),
+    }
+
+
+def write_signature(pb: Playbook, signing_key: nacl.signing.SigningKey,
+                    path: Path | None = None) -> Path:
+    target = Path(path) if path else Path(pb.source_path + SIGNATURE_SUFFIX)
+    target.write_text(json.dumps(sign_playbook(pb, signing_key), indent=2,
+                                 sort_keys=True), encoding="utf-8")
+    return target
+
+
+def verify_playbook_signature(pb: Playbook, attestation: dict,
+                              pinned_key: str | None = None
+                              ) -> tuple[bool, str]:
+    """Check a detached playbook signature.
+
+    Without ``pinned_key`` the signature only proves that the file and the
+    signature agree - whoever wrote one wrote the other - so it is
+    self-consistency, not trust. A pinned key is what turns it into a check
+    against an authority.
+    """
+    if attestation.get("algorithm") != "ed25519":
+        return False, f"unsupported algorithm {attestation.get('algorithm')!r}"
+    pubkey = attestation.get("pubkey")
+    if not isinstance(pubkey, str) or len(pubkey) != 64:
+        return False, "attestation has no usable pubkey"
+    if pinned_key and pubkey.lower() != pinned_key.lower():
+        return False, (f"playbook signed by {pubkey[:16]}... but "
+                       f"{pinned_key[:16]}... is pinned")
+    signature = attestation.get("signature")
+    if not isinstance(signature, str):
+        return False, "attestation has no signature"
+    try:
+        verify_key = nacl.signing.VerifyKey(bytes.fromhex(pubkey))
+        verify_key.verify(_payload(pb), bytes.fromhex(signature))
+    except Exception as exc:  # bad hex, bad signature, wrong key
+        return False, f"signature verification failed: {exc}"
+    if attestation.get("playbook_hash") not in (None, pb.hash()):
+        return False, "attestation hash does not match the playbook"
+    return True, f"signature verified against {pubkey[:16]}..."
+
+
+def load_verified_playbook(path: Path, pinned_key: str | None = None,
+                           signature_path: Path | None = None
+                           ) -> tuple[Playbook, str]:
+    """Load a playbook and check its signature if one is pinned.
+
+    Returns (playbook, status). With a pinned key, a missing or invalid
+    attestation is an error: silently loading it would defeat the pin.
+    """
+    pb = load_playbook(path)
+    sig_path = Path(signature_path) if signature_path else Path(
+        str(path) + SIGNATURE_SUFFIX)
+    if not sig_path.exists():
+        if pinned_key:
+            raise ValueError(
+                f"a playbook key is pinned but {sig_path} does not exist")
+        return pb, "unsigned (no key pinned)"
+    attestation = json.loads(sig_path.read_text(encoding="utf-8"))
+    valid, detail = verify_playbook_signature(pb, attestation, pinned_key)
+    if not valid:
+        if pinned_key:
+            raise ValueError(f"playbook signature rejected: {detail}")
+        return pb, f"unpinned and invalid ({detail})"
+    if not pinned_key:
+        # Self-consistent only: the signer is whoever wrote the file.
+        return pb, f"unpinned (self-consistent, {detail})"
+    return pb, detail
 
 
 def question_specs(pb: Playbook) -> dict[str, dict]:

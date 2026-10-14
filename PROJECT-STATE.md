@@ -94,6 +94,7 @@ NPU) all voting in the same consensus quorum.
 | Calibration enforcement | report in rootd, enforce in AutonomyLoop | round 101 |
 | Declared lineage admission | playbook [lineages].admit + /register 403 | round 102 |
 | Artifact attestation | artifact_digest + [lineages.artifacts] + 403 | round 103 |
+| Signed playbooks | sign_playbook.py + --playbook-key pin | round 104 |
 
 ## What is NOT yet done
 

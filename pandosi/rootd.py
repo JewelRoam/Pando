@@ -534,6 +534,13 @@ def main() -> None:
                         help="payload file to serve for spore pulls")
     parser.add_argument("--playbook", default=None,
                         help="playbook TOML to load and serve")
+    parser.add_argument("--playbook-key", default=None,
+                        help="pinned Ed25519 pubkey (hex) for the playbook; "
+                             "with it, an unsigned or invalid playbook is "
+                             "refused")
+    parser.add_argument("--playbook-signature", default=None,
+                        help="detached signature path "
+                             "(default: <playbook>.sig)")
     parser.add_argument("--history", default=None,
                         help="playbook history chain to verify against")
     parser.add_argument("--allow-non-head", action="store_true")
@@ -599,8 +606,20 @@ def main() -> None:
         print(f"kill-switch enabled (token set)", flush=True)
     if args.playbook:
         from .pb_history import verify_chain
-        from .playbook import load_playbook, resolve_admitted_lineages
-        root.playbook = load_playbook(Path(args.playbook))
+        from .playbook import (load_verified_playbook,
+                               resolve_admitted_lineages)
+        try:
+            root.playbook, signature_status = load_verified_playbook(
+                Path(args.playbook), args.playbook_key,
+                args.playbook_signature)
+        except ValueError as exc:
+            raise SystemExit(f"[playbook] {exc}")
+        if not args.playbook_key:
+            print(f"[playbook] not pinned: {signature_status} - anyone who "
+                  f"can write this file chooses what this swarm admits",
+                  flush=True)
+        else:
+            print(f"[playbook] {signature_status}", flush=True)
         admitted, unusable = resolve_admitted_lineages(root.playbook)
         if root.playbook.lineages:
             if not admitted:
