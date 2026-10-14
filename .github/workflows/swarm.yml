@@ -17,6 +17,7 @@ on:
       - "tools/remote_latency_check.py"
       - "tools/two_group_check.py"
       - "tools/spore_chain.py"
+      - "tools/spore_dag_check.py"
   workflow_dispatch:
 
 jobs:
@@ -46,3 +47,5 @@ jobs:
         run: python tools/two_group_check.py --yes
       - name: Verify Spore generation and parent provenance
         run: python tools/spore_chain.py
+      - name: Verify branching Spore reproduction DAG
+        run: python tools/spore_dag_check.py

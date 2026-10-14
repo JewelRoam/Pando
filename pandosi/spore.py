@@ -103,19 +103,112 @@ def validate_reproduction(parent: dict, child: dict) -> tuple[bool, str]:
     return True, f"generation {child_generation} links to {expected_parent[:16]}"
 
 
-def append_lineage(path: Path, manifest: dict) -> dict:
-    """Append one local, auditable reproduction event."""
+def lineage_entry(manifest: dict) -> dict:
+    """Return the portable reproduction record for one manifest."""
     metadata = manifest.get("metadata", {})
-    entry = {
+    return {
         "manifest_hash": manifest_hash(manifest),
         "parent_manifest_hash": metadata.get("parent_manifest_hash"),
         "generation": int(metadata.get("generation", 0)),
         "lineage": metadata.get("lineage"),
     }
+
+
+def append_lineage(path: Path, manifest: dict) -> dict:
+    """Append one local, auditable reproduction event."""
+    entry = lineage_entry(manifest)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(entry, sort_keys=True) + "\n")
     return entry
+
+
+def load_lineage(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+def validate_lineage_graph(entries: list[dict],
+                           require_single_root: bool = True,
+                           allow_forks: bool = True,
+                           max_generation: int | None = None
+                           ) -> tuple[bool, list[str], dict]:
+    """Validate a single-parent, possibly branching reproduction DAG."""
+    problems: list[str] = []
+    by_hash: dict[str, dict] = {}
+    child_counts: dict[str, int] = {}
+    roots: list[str] = []
+
+    for index, entry in enumerate(entries):
+        manifest_hash_value = entry.get("manifest_hash")
+        if not manifest_hash_value:
+            problems.append(f"entry {index}: missing manifest_hash")
+            continue
+        if manifest_hash_value in by_hash:
+            problems.append(f"duplicate manifest hash {manifest_hash_value[:16]}")
+            continue
+        try:
+            generation = int(entry.get("generation", -1))
+        except (TypeError, ValueError):
+            problems.append(f"entry {index}: invalid generation")
+            continue
+        parent = entry.get("parent_manifest_hash")
+        if generation == 0:
+            if parent:
+                problems.append(
+                    f"root {manifest_hash_value[:16]} has a parent")
+            roots.append(manifest_hash_value)
+        elif not parent:
+            problems.append(
+                f"generation {generation} node {manifest_hash_value[:16]} "
+                "has no parent")
+        if max_generation is not None and generation > max_generation:
+            problems.append(
+                f"generation {generation} exceeds max {max_generation}")
+        normalized = dict(entry)
+        normalized["generation"] = generation
+        by_hash[manifest_hash_value] = normalized
+        child_counts.setdefault(manifest_hash_value, 0)
+
+    for manifest_hash_value, entry in by_hash.items():
+        generation = entry["generation"]
+        parent = entry.get("parent_manifest_hash")
+        if generation == 0:
+            continue
+        parent_entry = by_hash.get(parent)
+        if parent_entry is None:
+            problems.append(
+                f"node {manifest_hash_value[:16]} references missing parent "
+                f"{str(parent)[:16]}")
+            continue
+        if parent_entry["generation"] != generation - 1:
+            problems.append(
+                f"node {manifest_hash_value[:16]} generation {generation} "
+                f"does not follow parent generation "
+                f"{parent_entry['generation']}")
+        child_counts[parent] = child_counts.get(parent, 0) + 1
+
+    if require_single_root and len(roots) != 1:
+        problems.append(f"expected one root generation-0 manifest, got {len(roots)}")
+    if not allow_forks:
+        for parent, children in child_counts.items():
+            if children > 1:
+                problems.append(
+                    f"parent {parent[:16]} has {children} children")
+
+    summary = {
+        "manifests": len(by_hash),
+        "roots": len(roots),
+        "max_generation": max(
+            (entry["generation"] for entry in by_hash.values()), default=-1),
+        "forks": sum(1 for children in child_counts.values() if children > 1),
+    }
+    return not problems, problems, summary
 
 
 def verify_manifest(manifest: dict, verify_key: nacl.signing.VerifyKey) -> bool:
