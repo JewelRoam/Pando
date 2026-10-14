@@ -124,6 +124,12 @@ devices, one mind.
   `min(3, len(selected))` quorum lets a lone survivor report `auto` with
   agreement 1.0. `tools/autonomy_check.py` proves both behaviours end to end
   (`docs/research/2026-10-14-round98.md`).
+- **The gate is worth having**: on the 27 labeled choice tasks the three
+  lineages agree that well — `tier=auto` covers **51.8% of the work at 92.9%
+  accuracy** against 51.8% undifferentiated, while cross-lineage splits are
+  right only 16.7% of the time. Confidence separates cleanly (0.825 correct
+  vs 0.427 wrong). The swarm knows when it is guessing, at no extra cost
+  (`tools/gating_check.py`, `docs/research/2026-10-14-round99.md`).
 - **Real lineage identity over HTTP**: en/ml/td ONNX stems now register as
   distinct checkpoints; twelve shared choice tasks produced 11 cross-lineage
   splits, making model diversity visible to the live quorum.
