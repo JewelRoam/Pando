@@ -116,6 +116,14 @@ devices, one mind.
   and the loopback hop is 1.9–11.1 ms under load, not the 1.2 ms measured
   idle. The planner now prices the loaded hop and evaluates smaller quorums
   as the replication baseline (`docs/research/2026-10-14-round97.md`).
+- **Autonomy, honestly bounded**: Laya's built-in act head returns 1.0 for
+  every state through *both* ecosystems, so the model cannot decide whether
+  to engage — the observation and the question must come from outside.
+  `pandosi/autonomy.py` drives observe → decide → act with a two-part gate
+  (allowed tier **and** a minimum responder count), because the coordinator's
+  `min(3, len(selected))` quorum lets a lone survivor report `auto` with
+  agreement 1.0. `tools/autonomy_check.py` proves both behaviours end to end
+  (`docs/research/2026-10-14-round98.md`).
 - **Real lineage identity over HTTP**: en/ml/td ONNX stems now register as
   distinct checkpoints; twelve shared choice tasks produced 11 cross-lineage
   splits, making model diversity visible to the live quorum.

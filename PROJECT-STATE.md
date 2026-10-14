@@ -32,6 +32,7 @@ NPU) all voting in the same consensus quorum.
 | Pipeline measurement | tools/stage_pipeline_check.py | real HTTP 2-stage chain, latency + throughput |
 | Cross-ecosystem votes | tools/cross_ecosystem_check.py | ONNX vs PyTorch, 27/27 agreement |
 | Topology planner | pandosi/topology.py + tools/topology_check.py | replicate/stage/infeasible from measured numbers |
+| Autonomy loop | pandosi/autonomy.py + tools/autonomy_check.py | observe-decide-act, two-part gate |
 | Adaptive stem timeouts | rootd.py per-stem EWMA | 5s cold -> 0.7-1.0s learned |
 | Slow-node isolation | tools/slow_stem_check.py | 4->3 quorum, 24ms cooldown skip |
 | LAN-interface HTTP | tools/lan_http_check.py + stemd advertise host | same-host protocol path verified |
@@ -81,6 +82,8 @@ NPU) all voting in the same consensus quorum.
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |
+| Laya act head | saturated at 1.0 on 8 states, both ecosystems | round 98 |
+| Lone-survivor quorum | tier=auto with 1 responder; needs a responder policy | round 98 |
 
 ## What is NOT yet done
 
