@@ -1,0 +1,31 @@
+name: Multi-process swarm
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/swarm.yml"
+      - "pandosi/rootd.py"
+      - "pandosi/stemd.py"
+      - "pandosi/backend.py"
+      - "pandosi/common.py"
+      - "tools/swarm_check.py"
+  workflow_dispatch:
+
+jobs:
+  linux-token-swarm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Ring 0 dependencies
+        run: python -m pip install PyNaCl
+      - name: Verify mock swarm has no numpy dependency
+        run: |
+          set -euxo pipefail
+          python -S -c "import numpy" 2>/dev/null && exit 1 || true
+          python -S -c "from pandosi.backend import MockBackend; print('mock backend import without site-packages: ok')"
+      - name: Run isolated tokenized swarm lifecycle
+        run: python tools/swarm_check.py --yes

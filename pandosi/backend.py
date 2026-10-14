@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import hashlib
 
-import numpy as np
+try:
+    import numpy as np
+except ImportError:  # MockBackend is a dependency-free Ring 0 path.
+    np = None
 
 from .common import DecisionRequest, Vote
 
@@ -76,6 +79,9 @@ class OnnxLayaBackend:
                  repo: str = "convaiinnovations/laya", device: str = "CPU",
                  pad_to: int | None = None,
                  onnx_buckets: list[str] | None = None):
+        if np is None:
+            raise RuntimeError(
+                "ONNX backend requires numpy; install numpy and onnxruntime")
         from laya.onnx_agent import ONNXAgent  # type: ignore
 
         self.node_id = node_id

@@ -143,6 +143,7 @@ python -m pandosi.stemd --node-id stem-2 --root http://ROOT_IP:8080 \
 - [ROADMAP](docs/ROADMAP.md) — phases with measurable gates
 - [Research notes](docs/research/) — 28 rounds of evidence-backed findings
 - [TERMUX.md](TERMUX.md) — Android TV box onboarding guide
+- [Swarm check](docs/SWARM-CHECK.md) — multi-process tokenized consensus and shrinkage
 - [Windows service check](docs/SERVICE-CHECK-WINDOWS.md) — real lifecycle validation record
 - [Linux CI service check](docs/SERVICE-CHECK-LINUX-CI.md) — user-systemd lifecycle validation record
 
