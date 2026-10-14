@@ -16,7 +16,8 @@ import sys
 import tomllib
 from pathlib import Path
 
-GRANT_ACTIONS = ("lan_listen", "lab_replication", "service_autostart")
+GRANT_ACTIONS = ("lan_listen", "lab_replication", "service_autostart",
+                 "reproduce")
 
 
 def default_path() -> Path:
@@ -84,6 +85,8 @@ def grant_status(action: str, path: Path | str | None = None,
                           "reason": f"expires at {expires_text}"}
     if isinstance(grant, dict) and action == "lab_replication":
         resource = str(grant.get("resource", "sandbox/lab"))
+    elif isinstance(grant, dict) and action == "reproduce":
+        resource = str(grant.get("resource", "localhost"))
     elif action == "lan_listen":
         resource = "0.0.0.0:8080"
     elif action == "service_autostart":
@@ -121,6 +124,9 @@ def require_grant(action: str, path: Path | str | None = None,
     if action == "lab_replication":
         example = (f"python -m pandosi.grants grant {action} "
                    "--resource sandbox/lab --hours 4 --yes")
+    elif action == "reproduce":
+        example = (f"python -m pandosi.grants grant {action} "
+                   "--resource <target-host-or-device> --hours 1 --yes")
     message = (f"{action} refused: {status['status']} ({status['reason']}). "
                f"Approve explicitly with: {example}")
     if audit:

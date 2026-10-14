@@ -200,7 +200,8 @@ def main() -> None:
         print(f"stem pairing token: {args.pairing_token}", flush=True)
         print("other stems must pass the same --pairing-token", flush=True)
 
-    from .spore import pull_spore, generate_signing_key, verify_manifest
+    from .spore import (artifact_digest, generate_signing_key, pull_spore,
+                        verify_manifest)
     if args.spore and not args.spore_url and root_info:
         args.spore_url = f"http://{root_info['ip']}:{root_info['port']}"
         print(f"spore: pulling from root at {args.spore_url}", flush=True)
@@ -230,7 +231,6 @@ def main() -> None:
                 pin_file.write_text(seed_pub_hex, encoding="utf-8")
                 print("[TOFU] root pubkey pinned:", seed_pub_hex, flush=True)
         else:
-            import os
             seed_pub_hex = os.environ.get("PANDOSI_SEED_PUBKEY")
             if not seed_pub_hex:
                 raise SystemExit(
@@ -267,7 +267,12 @@ def main() -> None:
         stats = pull_spore(args.spore_url, cache_dir, verify_key,
                            sandbox_confirmed=True,
                            auth_token=args.pairing_token)
-        pulled_file = cache_dir / next(iter(manifest["files"]))
+        # A spore payload can carry a graph plus its external weight blobs;
+        # the ONNX session must be pointed at the graph, not at a .data file.
+        graphs = [name for name in manifest["files"]
+                  if name.endswith(".onnx")]
+        pulled_file = cache_dir / (graphs[0] if graphs
+                                   else next(iter(manifest["files"])))
         print(f"SPROUT: pulled {stats['chunks_pulled']} chunks -> {pulled_file}",
               flush=True)
         from .spore import append_lineage
@@ -301,6 +306,11 @@ def main() -> None:
     if backend_name == "onnx":
         backend = backend_mod.OnnxLayaBackend(
             node_id, checkpoint=args.checkpoint, **backend_cfg)
+        # Attest what this node is actually running, or a root that declares
+        # artifact digests will refuse it (round 103).
+        backend.artifact_digest = artifact_digest(
+            Path(backend_cfg["onnx_path"]))
+        print(f"artifact sha256 {backend.artifact_digest}", flush=True)
     else:
         backend = backend_mod.MockBackend(node_id, **backend_cfg)
 
@@ -316,6 +326,7 @@ def main() -> None:
                 repo="convaiinnovations/laya", device="GPU",
                 onnx_buckets=[str(b) for b in bucket_files],
                 checkpoint=f"{args.checkpoint}-gpu" if args.checkpoint else None)
+            gpu_backend.artifact_digest = artifact_digest(bucket_files[-1])
             stems.append(Stem(node_id + "-gpu", gpu_backend,
                               host=stem_host, port=0))
             print(f"multi-EU: iGPU stem added "
@@ -328,6 +339,7 @@ def main() -> None:
                 repo="convaiinnovations/laya", device="NPU",
                 pad_to=256,
                 checkpoint=f"{args.checkpoint}-npu" if args.checkpoint else None)
+            npu_backend.artifact_digest = artifact_digest(npu_file)
             stems.append(Stem(node_id + "-npu", npu_backend,
                               host=stem_host, port=0))
             print("multi-EU: NPU stem added (IsNaN-free static graph)",
@@ -350,6 +362,10 @@ def main() -> None:
     registrations = [{"node_id": s.node_id,
                       "url": f"http://{advertised_ip}:{s.port}",
                       "checkpoint": s.backend.checkpoint} for s in stems]
+    for reg, stem in zip(registrations, stems):
+        digest = getattr(stem.backend, "artifact_digest", None)
+        if digest:
+            reg["artifact_sha256"] = digest
     if args.pairing_token:
         for reg in registrations:
             reg["pairing_token"] = args.pairing_token

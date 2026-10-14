@@ -8,6 +8,7 @@ end-to-end vote including node death and checkpoint-diverse quorum picking.
 
 import json
 import sys
+import subprocess
 import tempfile
 import threading
 import time
@@ -287,6 +288,81 @@ class TestSmoke(unittest.TestCase):
             audit = audit_status(grants.with_name(
                 grants.name + ".audit.jsonl"))
             self.assertEqual(audit["status"], "valid")
+
+    def test_reproduction_policy_fails_closed(self):
+        """Every reason to refuse is checked before anything transfers.
+
+        Round 105: the parent decides, and the cheapest failure is the one
+        that never moves a payload.
+        """
+        import datetime as dt
+
+        from pandosi.grants import save_grant
+        from pandosi.reproduce import Target, plan_reproduction
+        from pandosi.spore import artifact_digest
+
+        tmp = Path(tempfile.mkdtemp(prefix="pandosi-reproduce-"))
+        payload = tmp / "model.onnx"
+        payload.write_bytes(b"pandosi-reproduction-policy" * 512)
+        digest = artifact_digest(payload)
+        grants = tmp / "grants.toml"
+        target = Target(node_id="child", command=["true"])
+
+        plan = plan_reproduction(payload, "english", target,
+                                 declared_lineages=["english"],
+                                 declared_artifacts={"english": digest},
+                                 grants_path=grants,
+                                 sandbox_confirmed=True)
+        self.assertFalse(plan.approved)
+        self.assertTrue(any("reproduce" in r for r in plan.refusals),
+                        plan.refusals)
+
+        expires = (dt.datetime.now(dt.timezone.utc)
+                   + dt.timedelta(hours=1)).isoformat()
+        save_grant("reproduce", "localhost", "operator-host", "test",
+                   expires, path=grants)
+
+        # Granted, but the receiving device has not confirmed a sandbox.
+        plan = plan_reproduction(payload, "english", target,
+                                 declared_lineages=["english"],
+                                 grants_path=grants, sandbox_confirmed=False)
+        self.assertFalse(plan.approved)
+        self.assertTrue(any("sandbox" in r for r in plan.refusals))
+
+        # Granted and sandboxed, but the lineage is not declared.
+        plan = plan_reproduction(payload, "rogue", target,
+                                 declared_lineages=["english"],
+                                 grants_path=grants, sandbox_confirmed=True)
+        self.assertFalse(plan.approved)
+        self.assertTrue(any("not declared" in r for r in plan.refusals))
+
+        # Declared, but this is not the artifact the swarm pinned.
+        plan = plan_reproduction(payload, "english", target,
+                                 declared_lineages=["english"],
+                                 declared_artifacts={"english": "0" * 64},
+                                 grants_path=grants, sandbox_confirmed=True)
+        self.assertFalse(plan.approved)
+        self.assertTrue(any("does not match" in r for r in plan.refusals))
+
+        plan = plan_reproduction(payload, "english", target,
+                                 declared_lineages=["english"],
+                                 declared_artifacts={"english": digest},
+                                 grants_path=grants, sandbox_confirmed=True)
+        self.assertTrue(plan.approved, plan.refusals)
+        self.assertEqual(plan.artifact_sha256, digest)
+
+    def test_join_cli_starts(self):
+        """`join` is the replication path; it must at least parse.
+
+        A local `import os` shadowed the module import and made every
+        `pandosi.join` invocation die with UnboundLocalError, which no check
+        covered until the reproduction loop ran it (round 105).
+        """
+        result = subprocess.run(
+            [sys.executable, "-m", "pandosi.join", "--help"],
+            capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--spore", result.stdout)
 
     def test_playbook_signature_covers_declarations(self):
         """A pinned playbook key makes the declaration chain checkable.

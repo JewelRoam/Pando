@@ -139,6 +139,14 @@ devices, one mind.
   checkpoint *name* (a misnamed stem silently changes the gate), and a naive
   sweep would have shipped a threshold that acts on a minority vote
   (`docs/research/2026-10-14-round100.md`).
+- **Self-replication loop**: `pandosi/reproduce.py` orders the existing
+  pieces — Spore transfer, artifact attestation, lineage admission, and an
+  operator-approved `reproduce` grant — and refuses before anything moves.
+  Verified end to end: the child pulled a 1.68 GB payload over the Spore
+  endpoints, attested it, passed admission, and grew the quorum 1 → 2 with a
+  signed lineage record. It also found four bugs that no check covered, the
+  worst being that `pandosi.join` could not start at all
+  (`tools/reproduce_check.py`, `docs/research/2026-10-14-round105.md`).
 - **Signed playbooks**: a playbook's canonical bytes are covered by a
   detached Ed25519 signature, which includes the admitted lineages and their
   artifact digests — so the whole declaration chain is attributable.

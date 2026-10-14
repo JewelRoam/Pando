@@ -95,6 +95,8 @@ NPU) all voting in the same consensus quorum.
 | Declared lineage admission | playbook [lineages].admit + /register 403 | round 102 |
 | Artifact attestation | artifact_digest + [lineages.artifacts] + 403 | round 103 |
 | Signed playbooks | sign_playbook.py + --playbook-key pin | round 104 |
+| Self-replication loop | pandosi/reproduce.py + tools/reproduce_check.py | quorum 1 -> 2, signed lineage record |
+| Reproduce grant | grants.py action "reproduce" | operator-approved, expiring |
 
 ## What is NOT yet done
 

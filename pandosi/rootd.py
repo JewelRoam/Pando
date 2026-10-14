@@ -575,7 +575,13 @@ def main() -> None:
     spore_files = None
     if args.serve_spore:
         from pathlib import Path as _P
-        spore_files = {"payload.onnx": _P(args.serve_spore)}
+        from .spore import artifact_files
+        payload = _P(args.serve_spore)
+        # An exported graph may be a small protobuf plus a multi-gigabyte
+        # external weight blob that the protobuf references *by name*, so
+        # every file is served under its original name or the replica cannot
+        # resolve its weights (round 105).
+        spore_files = {file.name: file for file in artifact_files(payload)}
         if args.playbook:
             spore_files["playbook.toml"] = _P(args.playbook)
     listen_host = "127.0.0.1"
