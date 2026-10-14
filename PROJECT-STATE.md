@@ -92,6 +92,7 @@ NPU) all voting in the same consensus quorum.
 | Live vs offline gate | identical to 4dp over real HTTP stems | round 100 |
 | Calibration keying defect | temperature selected by checkpoint name string | round 100 |
 | Calibration enforcement | report in rootd, enforce in AutonomyLoop | round 101 |
+| Declared lineage admission | playbook [lineages].admit + /register 403 | round 102 |
 
 ## What is NOT yet done
 

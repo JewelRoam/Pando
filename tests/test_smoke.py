@@ -8,6 +8,7 @@ end-to-end vote including node death and checkpoint-diverse quorum picking.
 
 import json
 import sys
+import tempfile
 import threading
 import time
 import unittest
@@ -286,6 +287,69 @@ class TestSmoke(unittest.TestCase):
             audit = audit_status(grants.with_name(
                 grants.name + ".audit.jsonl"))
             self.assertEqual(audit["status"], "valid")
+
+    def test_declared_lineages_gate_registration(self):
+        """A playbook that declares lineages admits only those lineages.
+
+        Identity must be declared rather than inferred from a free-form
+        checkpoint string: otherwise a misnamed device silently runs a
+        different gate (round 100). A root with no declared lineages stays
+        permissive so the synthetic harnesses keep working (round 101).
+        """
+        from pandosi.playbook import load_playbook, resolve_admitted_lineages
+
+        tmp = Path(tempfile.mkdtemp(prefix="pandosi-lineage-"))
+        playbook_path = tmp / "declared.toml"
+        playbook_path.write_text(
+            '[meta]\nname = "declared"\nversion = 1\n\n'
+            '[lineages]\nadmit = ["english", "not-a-real-lineage"]\n',
+            encoding="utf-8")
+        playbook = load_playbook(playbook_path)
+        admitted, unusable = resolve_admitted_lineages(playbook)
+        self.assertEqual(admitted, {"english"})
+        self.assertEqual(unusable, ["not-a-real-lineage"])
+
+        root = Root()
+        root.playbook = playbook
+        root.admitted_lineages = admitted
+        root.start()
+        stems = []
+        try:
+            declared = Stem("ok", MockBackend("ok", "english"))
+            declared.start()
+            stems.append(declared)
+
+            def register(node_id: str, checkpoint: str) -> tuple[int, dict]:
+                payload = json.dumps({"node_id": node_id,
+                                      "url": "http://127.0.0.1:1",
+                                      "checkpoint": checkpoint})
+                request = urllib.request.Request(
+                    f"{root.url()}/register", data=payload.encode("utf-8"),
+                    headers={"Content-Type": "application/json"})
+                try:
+                    with urllib.request.urlopen(request, timeout=10) as resp:
+                        return resp.status, json.loads(resp.read())
+                except urllib.error.HTTPError as exc:
+                    return exc.code, json.loads(exc.read())
+
+            status, payload = register("ok", "english")
+            self.assertEqual(status, 200)
+
+            status, payload = register("sneaky", "english-v2")
+            self.assertEqual(status, 403)
+            self.assertIn("not declared", payload["error"])
+            self.assertEqual(payload["admitted"], ["english"])
+
+            # The refused node never joined.
+            with urllib.request.urlopen(f"{root.url()}/nodes",
+                                        timeout=10) as resp:
+                nodes = json.loads(resp.read())["nodes"]
+            self.assertIn("ok", nodes)
+            self.assertNotIn("sneaky", nodes)
+        finally:
+            for stem in stems:
+                stem.stop()
+            root.stop()
 
     def test_uncalibrated_checkpoint_cannot_reach_auto(self):
         """The acting loop refuses votes whose confidence scale is unknown.

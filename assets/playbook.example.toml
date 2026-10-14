@@ -9,6 +9,14 @@ created = 2026-10-14
 author = "operator"
 lineage = "en-v1"
 
+[lineages]
+# Declared identities this swarm admits. A stem that registers under any other
+# checkpoint is refused, because identity is declared here rather than inferred
+# from whatever string a device happens to send. Each declared id must also
+# have a calibration table in assets/calibration/, or it is not admitted: a
+# vote on an unknown confidence scale cannot justify an autonomous action.
+admit = ["english", "multilingual", "typed-decisions"]
+
 [gating]
 # Confidence tiers (blueprint 3.2): auto executes, verify re-asks,
 # escalate routes to the offline advisor / human.

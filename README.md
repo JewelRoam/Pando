@@ -139,6 +139,14 @@ devices, one mind.
   checkpoint *name* (a misnamed stem silently changes the gate), and a naive
   sweep would have shipped a threshold that acts on a minority vote
   (`docs/research/2026-10-14-round100.md`).
+- **Declared lineage identity**: a playbook declares `[lineages].admit`,
+  and the root refuses at registration any stem whose checkpoint is not
+  declared — an id is admitted only if it is declared *and* ships a
+  calibration table. Identity, admission and calibration now come from one
+  declaration instead of three conventions, while a root with no
+  declaration stays permissive for synthetic harnesses. A declaration is a
+  claim, not proof: attestation against the Spore manifest is the next step
+  (`docs/research/2026-10-14-round102.md`).
 - **Calibration is enforced where the risk is**: `rootd` warns at
   registration and reports `uncalibrated_checkpoints` in every decision;
   `AutonomyLoop(require_calibration=True)` refuses to act on them. Placing

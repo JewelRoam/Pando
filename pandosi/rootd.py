@@ -412,6 +412,13 @@ def build_handler(coordinator: Coordinator, root=None):
                         str(expected).encode("utf-8")):
                     self._send(403, {"error": "invalid or missing pairing token"})
                     return
+                admitted = getattr(root, "admitted_lineages", None)
+                if admitted is not None and data.get("checkpoint") not in admitted:
+                    self._send(403, {
+                        "error": f"lineage {data.get('checkpoint')!r} is not "
+                                 f"declared by this playbook",
+                        "admitted": sorted(admitted)})
+                    return
                 coordinator.register(data["node_id"], data["url"],
                                      data["checkpoint"], data.get("capability"))
                 self._send(200, {"ok": True})
@@ -582,8 +589,20 @@ def main() -> None:
         print(f"kill-switch enabled (token set)", flush=True)
     if args.playbook:
         from .pb_history import verify_chain
-        from .playbook import load_playbook
+        from .playbook import load_playbook, resolve_admitted_lineages
         root.playbook = load_playbook(Path(args.playbook))
+        admitted, unusable = resolve_admitted_lineages(root.playbook)
+        if root.playbook.lineages:
+            if not admitted:
+                raise SystemExit(
+                    "playbook declares no usable lineage: "
+                    f"{sorted(unusable)} have no calibration table, so no "
+                    "stem could register")
+            root.admitted_lineages = admitted
+            for name in unusable:
+                print(f"[lineages] declared {name!r} has no calibration "
+                      f"table and is NOT admitted", flush=True)
+            print(f"[lineages] admitting {sorted(admitted)}", flush=True)
         pb_hash = root.playbook.hash()
         if args.history:
             ok, problems = verify_chain(Path(args.history))

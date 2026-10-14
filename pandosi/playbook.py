@@ -31,6 +31,7 @@ class Playbook:
     gating: dict
     questions: list[dict]
     actions: list[dict]
+    lineages: dict | None = None
     source_path: str | None = None
 
     def canonical_json(self) -> str:
@@ -92,6 +93,28 @@ def load_playbook(path: Path) -> Playbook:
                     f"question {qid!r} - informational outputs must not gate "
                     "auto-execution (round-24 finding)")
 
+    # Identity is declared, not inferred from whatever string a stem sends.
+    # A declared id must also have a calibration table, so an operator cannot
+    # admit a lineage whose confidence scale is unknown (round 101).
+    lineages = None
+    lineages_raw = raw.get("lineages")
+    if lineages_raw is not None:
+        admit = lineages_raw.get("admit")
+        if not isinstance(admit, list) or not admit:
+            raise ValueError(
+                "playbook [lineages].admit must be a non-empty list of "
+                "lineage ids")
+        cleaned = []
+        for name in admit:
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError(
+                    "playbook [lineages].admit entries must be non-empty "
+                    "strings")
+            cleaned.append(name.strip())
+        if len(set(cleaned)) != len(cleaned):
+            raise ValueError("playbook [lineages].admit has duplicate ids")
+        lineages = {"admit": cleaned}
+
     return Playbook(
         name=meta["name"],
         version=meta["version"],
@@ -99,8 +122,30 @@ def load_playbook(path: Path) -> Playbook:
         gating=raw.get("gating") or {},
         questions=questions,
         actions=actions,
+        lineages=lineages,
         source_path=str(path),
     )
+
+
+def resolve_admitted_lineages(pb: Playbook | None) -> tuple[set[str], list[str]]:
+    """Return (admitted ids, unusable declared ids).
+
+    An id is admitted only if it is declared *and* a calibration table
+    exists for it. Declaring a lineage without shipping its temperature is an
+    operator error, and admitting it would reintroduce exactly the silent
+    unknown-scale vote that round 100 found.
+    """
+    if pb is None or not pb.lineages:
+        return set(), []
+    from .calibrate import load_calibration
+
+    admitted, unusable = set(), []
+    for name in pb.lineages["admit"]:
+        if load_calibration(name)["calibrated"]:
+            admitted.add(name)
+        else:
+            unusable.append(name)
+    return admitted, unusable
 
 
 def question_specs(pb: Playbook) -> dict[str, dict]:
