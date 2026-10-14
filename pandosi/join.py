@@ -248,6 +248,7 @@ def main() -> None:
             raise SystemExit("SECURITY: manifest signature verification FAILED")
         print(f"SPORE manifest: lineage="
               f"{manifest['metadata'].get('lineage')} "
+              f"generation={manifest['metadata'].get('generation', 0)} "
               f"files={list(manifest['files'])}", flush=True)
 
         cache_dir = Path("spore-cache") / node_id
@@ -257,6 +258,10 @@ def main() -> None:
         pulled_file = cache_dir / next(iter(manifest["files"]))
         print(f"SPROUT: pulled {stats['chunks_pulled']} chunks -> {pulled_file}",
               flush=True)
+        from .spore import append_lineage
+        lineage_entry = append_lineage(cache_dir / "lineage.jsonl", manifest)
+        print(f"SPROUT: lineage generation={lineage_entry['generation']} "
+              f"manifest={lineage_entry['manifest_hash'][:16]}", flush=True)
         # Strategy layer travels with the payload: a pulled playbook is
         # validated, its hash reported, and appended to this node's local
         # lineage chain (reproduction carries strategy, auditable).

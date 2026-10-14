@@ -44,8 +44,17 @@ def merkle_root(chunk_hashes: list[bytes]) -> bytes:
 
 
 def build_manifest(files: dict[str, Path], signer_key: nacl.signing.SigningKey,
-                   metadata: dict | None = None) -> dict:
+                   metadata: dict | None = None,
+                   parent_manifest: dict | None = None) -> dict:
     """Chunk every file, build the Merkle root, sign the canonical manifest."""
+    metadata = dict(metadata or {})
+    if parent_manifest is not None:
+        parent_generation = int(
+            parent_manifest.get("metadata", {}).get("generation", 0))
+        metadata["generation"] = parent_generation + 1
+        metadata["parent_manifest_hash"] = manifest_hash(parent_manifest)
+    else:
+        metadata.setdefault("generation", 0)
     entries = {}
     all_chunk_hashes: list[bytes] = []
     for name, path in files.items():
@@ -59,13 +68,54 @@ def build_manifest(files: dict[str, Path], signer_key: nacl.signing.SigningKey,
         }
     manifest = {
         "version": 1,
-        "metadata": metadata or {},
+        "metadata": metadata,
         "files": entries,
         "chunk_merkle_root": merkle_root(all_chunk_hashes).hex(),
     }
     payload = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
     manifest["signature"] = signer_key.sign(payload).signature.hex()
     return manifest
+
+
+def manifest_hash(manifest: dict) -> str:
+    """Content hash of the signed manifest excluding its Ed25519 signature."""
+    unsigned = dict(manifest)
+    unsigned.pop("signature", None)
+    payload = json.dumps(
+        unsigned, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def validate_reproduction(parent: dict, child: dict) -> tuple[bool, str]:
+    """Verify monotonic generation and direct parent linkage."""
+    parent_generation = int(parent.get("metadata", {}).get("generation", 0))
+    child_metadata = child.get("metadata", {})
+    child_generation = int(child_metadata.get("generation", -1))
+    if child_generation != parent_generation + 1:
+        return False, (
+            f"generation {child_generation} != parent {parent_generation} + 1")
+    expected_parent = manifest_hash(parent)
+    actual_parent = child_metadata.get("parent_manifest_hash")
+    if actual_parent != expected_parent:
+        return False, (
+            f"parent manifest hash mismatch: {actual_parent} != "
+            f"{expected_parent}")
+    return True, f"generation {child_generation} links to {expected_parent[:16]}"
+
+
+def append_lineage(path: Path, manifest: dict) -> dict:
+    """Append one local, auditable reproduction event."""
+    metadata = manifest.get("metadata", {})
+    entry = {
+        "manifest_hash": manifest_hash(manifest),
+        "parent_manifest_hash": metadata.get("parent_manifest_hash"),
+        "generation": int(metadata.get("generation", 0)),
+        "lineage": metadata.get("lineage"),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, sort_keys=True) + "\n")
+    return entry
 
 
 def verify_manifest(manifest: dict, verify_key: nacl.signing.VerifyKey) -> bool:

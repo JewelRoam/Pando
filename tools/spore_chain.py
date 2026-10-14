@@ -18,8 +18,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from pandosi.spore import (SporeServer, build_manifest, generate_signing_key,
-                           pull_spore, verify_file)
+from pandosi.spore import (SporeServer, append_lineage, build_manifest,
+                           generate_signing_key, manifest_hash, pull_spore,
+                           validate_reproduction, verify_file)
 
 
 def main() -> None:
@@ -40,7 +41,9 @@ def main() -> None:
     # 3. Hop 1: origin -> nodeB
     print("\n--- Hop 1: origin -> nodeB ---", flush=True)
     manifest_1 = build_manifest({"model.bin": payload}, key,
-                                metadata={"hop": 1, "origin": original_hash[:16]})
+                                metadata={"hop": 1,
+                                          "origin": original_hash[:16],
+                                          "lineage": "origin"})
     server_1 = SporeServer(manifest_1, {"model.bin": payload})
     server_1.start()
 
@@ -58,7 +61,14 @@ def main() -> None:
     # 4. Hop 2: nodeB -> nodeC (nodeB becomes the seed)
     print("\n--- Hop 2: nodeB -> nodeC ---", flush=True)
     manifest_2 = build_manifest({"model.bin": node_b_file}, key,
-                                metadata={"hop": 2, "origin": original_hash[:16]})
+                                metadata={"hop": 2,
+                                          "origin": original_hash[:16],
+                                          "lineage": "origin"},
+                                parent_manifest=manifest_1)
+    linked, detail = validate_reproduction(manifest_1, manifest_2)
+    assert linked, f"Hop 1 -> 2 lineage failed: {detail}"
+    append_lineage(tmp / "lineage.jsonl", manifest_2)
+    print(f"  lineage: {detail}", flush=True)
     server_2 = SporeServer(manifest_2, {"model.bin": node_b_file})
     server_2.start()
 
@@ -76,7 +86,14 @@ def main() -> None:
     # 5. Hop 3: nodeC -> nodeD (nodeC becomes the seed)
     print("\n--- Hop 3: nodeC -> nodeD ---", flush=True)
     manifest_3 = build_manifest({"model.bin": node_c_file}, key,
-                                metadata={"hop": 3, "origin": original_hash[:16]})
+                                metadata={"hop": 3,
+                                          "origin": original_hash[:16],
+                                          "lineage": "origin"},
+                                parent_manifest=manifest_2)
+    linked, detail = validate_reproduction(manifest_2, manifest_3)
+    assert linked, f"Hop 2 -> 3 lineage failed: {detail}"
+    append_lineage(tmp / "lineage.jsonl", manifest_3)
+    print(f"  lineage: {detail}", flush=True)
     server_3 = SporeServer(manifest_3, {"model.bin": node_c_file})
     server_3.start()
 
@@ -93,6 +110,16 @@ def main() -> None:
 
     # 6. Summary
     print(f"\n=== MULTI-HOP CHAIN COMPLETE ===", flush=True)
+    forged = dict(manifest_3)
+    forged_metadata = dict(forged.get("metadata", {}))
+    forged_metadata["parent_manifest_hash"] = "0" * 64
+    forged["metadata"] = forged_metadata
+    rejected, reason = validate_reproduction(manifest_2, forged)
+    assert not rejected, "forged lineage was accepted"
+    print("  forged parent hash rejected", flush=True)
+    print(f"  generations: {manifest_1['metadata']['generation']} -> "
+          f"{manifest_2['metadata']['generation']} -> "
+          f"{manifest_3['metadata']['generation']}", flush=True)
     print(f"  origin -> B -> C -> D: all byte-identical to original", flush=True)
     print(f"  3 hops, {1 + stats_b['chunks_pulled'] + stats_c['chunks_pulled'] + stats_d['chunks_pulled']} total chunks, "
           f"0 integrity failures", flush=True)

@@ -9,11 +9,14 @@ on:
       - "pandosi/stemd.py"
       - "pandosi/backend.py"
       - "pandosi/common.py"
+      - "pandosi/spore.py"
+      - "pandosi/join.py"
       - "tools/swarm_check.py"
       - "tools/slow_stem_check.py"
       - "tools/lan_http_check.py"
       - "tools/remote_latency_check.py"
       - "tools/two_group_check.py"
+      - "tools/spore_chain.py"
   workflow_dispatch:
 
 jobs:
@@ -41,3 +44,5 @@ jobs:
         run: python tools/remote_latency_check.py --yes
       - name: Verify hierarchical two-group consensus and partition fallback
         run: python tools/two_group_check.py --yes
+      - name: Verify Spore generation and parent provenance
+        run: python tools/spore_chain.py

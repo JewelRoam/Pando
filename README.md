@@ -72,6 +72,8 @@ devices, one mind.
 - **Post-training calibration**: a temperature fit on 22 labeled items
   reduced v7's wrong-answer confidence from 0.9996 to 0.9316, but holdout
   accuracy and calibration evidence remained insufficient for promotion.
+- **Spore parent provenance**: three-hop reproduction now carries monotonic
+  generation and parent-manifest hashes; a forged lineage link is rejected.
 - **Real lineage identity over HTTP**: en/ml/td ONNX stems now register as
   distinct checkpoints; twelve shared choice tasks produced 11 cross-lineage
   splits, making model diversity visible to the live quorum.
