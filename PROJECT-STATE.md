@@ -112,6 +112,8 @@ NPU) all voting in the same consensus quorum.
 | Elastic supervisor | GET /status + ElasticSupervisor | grew 2 -> 3 members, p50 92.8 -> 61 ms |
 | Growth via real reproduction | grow wired to reproduce() + cooldown | 1st growth 449.7 -> 119.3 ms, 2nd 138.7 -> 981 ms |
 | Cooldown/executor rule | executed actions only | an unexecuted decision starts no cooldown |
+| Host-aware growth | Member.host + max_per_host | 1 reproduction (363->126.5 ms) vs 2 (->791.8 ms) |
+| Growth rollback | bet tracked, undone under the reproduce grant | 882 -> 124 ms in two rounds |
 | Reproduce grant | grants.py action "reproduce" | operator-approved, expiring |
 
 ## What is NOT yet done

@@ -38,6 +38,23 @@ class Member:
     checkpoint: str
     latency_ewma_ms: float | None
     decisions: int = 0
+    host: str = "?"
+
+
+def co_located(members: list[Member], host: str | None,
+               checkpoint: str | None) -> list[Member]:
+    """Members that would share a machine *and* a lineage with a candidate.
+
+    A replica of the same checkpoint on the same host adds compute
+    contention and no information: round 95 measured that the runtime and
+    replica do not change a vote, and round 114 measured that a second
+    same-lineage worker on one host took p50 from 138.7 ms to 981 ms. So this
+    is the signal growth has to consult before it acts.
+    """
+    if not host or not checkpoint:
+        return []
+    return [member for member in members
+            if member.host == host and member.checkpoint == checkpoint]
 
 
 def choose_retirement(members: list[Member], keep: int,
@@ -100,16 +117,28 @@ class Retirer:
             payload = json.loads(resp.read())
         return [Member(node_id, info.get("checkpoint", "?"),
                        info.get("stats", {}).get("latency_ewma_ms"),
-                       int(info.get("stats", {}).get("successes", 0)))
+                       int(info.get("stats", {}).get("successes", 0)),
+                       info.get("host", "?"))
                 for node_id, info in payload.get("nodes", {}).items()]
 
     def retire(self, node_id: str, reason: str) -> Outcome:
+        return self.retire_with_grant(node_id, reason, "retire")
+
+    def retire_with_grant(self, node_id: str, reason: str,
+                          grant_action: str = "retire") -> Outcome:
+        """Retire a node under a named grant.
+
+        A rollback passes ``reproduce``: the grant that let the swarm grow is
+        the grant that lets it undo that same growth, so the ledger entry
+        names the authority instead of a fresh approval being invented
+        (round 115).
+        """
         outcome = Outcome(observation_id=node_id, tier="retire",
                           acted=False, choice=None, agreement=0.0,
                           mean_probability=0.0, responded=0, quorum_size=0,
                           reason=reason)
         try:
-            require_grant("retire", path=self.grants_path)
+            require_grant(grant_action, path=self.grants_path)
         except PermissionError as exc:
             outcome.reason = str(exc)
             if self.journal is not None:
@@ -173,13 +202,16 @@ class ElasticSupervisor:
     def __init__(self, root_url: str, pairing_token: str | None = None,
                  max_members: int = 5, keep: int = 2,
                  max_member_latency_ms: float = 250.0,
+                 max_per_host: int = 1,
                  pressure_factor: float = 1.1, cooldown_s: float = 30.0,
+                 rollback: bool = True, rollback_factor: float = 1.2,
                  clock=None, timeout: float = 30):
         self.root_url = root_url.rstrip("/")
         self.pairing_token = pairing_token
         self.max_members = max_members
         self.keep = keep
         self.max_member_latency_ms = max_member_latency_ms
+        self.max_per_host = max(1, int(max_per_host))
         self.pressure_factor = pressure_factor
         self.timeout = timeout
         # A change takes time to have an effect - a reproduced node has to
@@ -191,6 +223,11 @@ class ElasticSupervisor:
         self.last_action: Supervision | None = None
         self.last_action_at: float | None = None
         self.actions: list[tuple[float, str, str | None]] = []
+        # A growth is a bet. If it loses, the loop should undo its own change
+        # rather than wait for an operator to notice (round 115).
+        self.rollback = rollback
+        self.rollback_factor = rollback_factor
+        self._growth_bet: dict | None = None
 
     def cooling_down(self) -> float:
         """Seconds left before the last change is allowed to have landed."""
@@ -213,7 +250,9 @@ class ElasticSupervisor:
         return self._get("/status")
 
     def decide(self, status: dict | None = None,
-               retired: list[str] | None = None) -> Supervision:
+               retired: list[str] | None = None,
+               co_located_members: int = 0,
+               candidate: str | None = None) -> Supervision:
         """One decision. ``status`` is injectable so the policy is testable."""
         status = status or self.status()
         members = int(status.get("members", 0))
@@ -251,6 +290,14 @@ class ElasticSupervisor:
                 f"({members}/{self.max_members}); this is a "
                 "per-decision-cost problem, not a capacity one",
                 latency_ms=latency, quorum_k=quorum_k, members=members)
+        if co_located_members >= self.max_per_host:
+            return Supervision(
+                "hold",
+                f"{latency:.0f} ms is slow, but {candidate or 'the candidate'} "
+                f"already carries {co_located_members} member(s) of this "
+                "lineage: another would share its compute and add no "
+                "information (rounds 95, 114)",
+                latency_ms=latency, quorum_k=quorum_k, members=members)
         return Supervision(
             "grow",
             f"{latency:.0f} ms > {target * self.pressure_factor:.0f} ms and "
@@ -259,9 +306,41 @@ class ElasticSupervisor:
             latency_ms=latency, quorum_k=quorum_k, members=members)
 
     def step(self, grow=None, retire=None,
-             journal: Journal | None = None) -> Supervision:
+             journal: Journal | None = None,
+             candidate_host: str | None = None,
+             candidate_checkpoint: str | None = None) -> Supervision:
         """Decide, then execute. ``grow``/``retire`` are caller callbacks."""
         remaining = self.cooling_down()
+        if (remaining <= 0 and self._growth_bet is not None
+                and self._clock() >= self._growth_bet["due"]):
+            bet, self._growth_bet = self._growth_bet, None
+            try:
+                now = self.status().get("decision_ewma_ms")
+            except (urllib.error.URLError, urllib.error.HTTPError):
+                now = None
+            before = bet.get("latency_before")
+            if now and before and now > before * self.rollback_factor \
+                    and retire is not None:
+                reason = (f"rollback: {now:.0f} ms after growing "
+                          f"{bet['node_id']} against {before:.0f} ms before "
+                          f"it; authorised by the reproduce grant")
+                outcome = retire(bet["node_id"], reason, "reproduce")
+                supervision = Supervision(
+                    "retire", outcome.reason, target=bet["node_id"],
+                    latency_ms=now, members=self.last_action.members
+                    if self.last_action else 0)
+                if journal is not None:
+                    journal.append(Outcome(
+                        observation_id=bet["node_id"], tier="rollback",
+                        acted=bool(outcome.acted), choice=None, agreement=0.0,
+                        mean_probability=0.0, responded=supervision.members,
+                        quorum_size=0, reason=supervision.reason))
+                if outcome.acted:
+                    self.last_action = supervision
+                    self.last_action_at = self._clock()
+                    self.actions.append((self.last_action_at, "rollback",
+                                         bet["node_id"]))
+                return supervision
         if remaining > 0 and self.last_action is not None:
             supervision = Supervision(
                 "hold",
@@ -295,7 +374,11 @@ class ElasticSupervisor:
                 target=slowest.node_id,
                 latency_ms=slowest.latency_ewma_ms, members=len(members))
         else:
-            supervision = self.decide()
+            supervision = self.decide(
+                co_located_members=len(co_located(
+                    members, candidate_host, candidate_checkpoint)),
+                candidate=(f"{candidate_host}/{candidate_checkpoint}"
+                           if candidate_host else None))
         # A decision nobody executed must not start a cooldown or be recorded
         # as an action: a supervisor with no retire executor would otherwise
         # report the same retirement every cooldown cycle, having never
@@ -303,8 +386,15 @@ class ElasticSupervisor:
         executed = False
         if supervision.action == "grow":
             if grow is not None:
-                supervision.reason += f"; grow -> {grow()}"
+                result = grow()
+                supervision.reason += f"; grow -> {result}"
                 executed = True
+                if self.rollback:
+                    self._growth_bet = {
+                        "node_id": str(result).split()[0],
+                        "latency_before": supervision.latency_ms,
+                        "due": self._clock() + self.cooldown_s,
+                    }
             else:
                 supervision.reason += "; no grow executor configured"
         elif supervision.action == "retire":

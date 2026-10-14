@@ -35,7 +35,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from pandosi.autonomy import Journal  # noqa: E402
-from pandosi.elastic import ElasticSupervisor  # noqa: E402
+from pandosi.elastic import ElasticSupervisor, Retirer  # noqa: E402
 from pandosi.playbook import load_playbook, resolve_admitted_lineages, \
     sign_playbook  # noqa: E402
 from pandosi.reproduce import Target, reproduce  # noqa: E402
@@ -117,6 +117,9 @@ def main() -> int:
     parser.add_argument("--interval-s", type=float, default=10.0,
                         help="gap between rounds, so a cooldown is meaningful")
     parser.add_argument("--cooldown-s", type=float, default=20.0)
+    parser.add_argument("--max-per-host", type=int, default=1,
+                        help="same-lineage members allowed per host; raise it "
+                             "to let growth make the mistake rollback is for")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
     if not args.yes:
@@ -150,6 +153,10 @@ def main() -> int:
 
     port = free_port()
     url = f"http://127.0.0.1:{port}"
+    # Everything in this check lives on one machine, which is the point: the
+    # supervisor has to notice that before it adds a second same-lineage
+    # member there.
+    target_host = "127.0.0.1"
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) \
         if sys.platform == "win32" else 0
     procs: list[subprocess.Popen] = []
@@ -185,7 +192,8 @@ def main() -> int:
         # here and the trajectory shows one mechanism at a time.
         supervisor = ElasticSupervisor(
             url, token, max_members=4, keep=2,
-            max_member_latency_ms=10 ** 9, cooldown_s=args.cooldown_s)
+            max_member_latency_ms=10 ** 9, cooldown_s=args.cooldown_s,
+            max_per_host=args.max_per_host)
         journal = Journal(work / "supervision.jsonl")
         grown = 0
 
@@ -214,10 +222,18 @@ def main() -> int:
                 print("join log tail:", *tail, sep="\n  ")
             return f"{node_id} registered={outcome.registered}"
 
+        retirer = Retirer(url, token, grants_path=grants, journal=journal)
+
+        def retire(node_id: str, reason: str, grant_action: str = "retire"):
+            return retirer.retire_with_grant(node_id, reason, grant_action)
+
         for round_index in range(args.rounds):
             stats = measure(url, token, args.concurrency, args.tasks)
             status = supervisor.status()
-            supervision = supervisor.step(grow=grow, journal=journal)
+            supervision = supervisor.step(
+                grow=grow, journal=journal, retire=retire,
+                candidate_host=target_host,
+                candidate_checkpoint=LINEAGE)
             row = {"round": round_index, "members": status.get("members"),
                    "quorum_k": status.get("quorum_k"),
                    "decision_ewma_ms": status.get("decision_ewma_ms"),

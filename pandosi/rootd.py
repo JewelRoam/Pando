@@ -17,6 +17,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlparse
 
 
 class _PandoHTTPServer(ThreadingHTTPServer):
@@ -41,6 +42,14 @@ FAILURE_BACKOFF_MAX = 30.0
 # Voters whose latencies fall in the same band are treated as interchangeable
 # when a quorum is selected, so the rotation can spread load across them.
 LATENCY_BAND_MS = 25.0
+
+
+def _host_of(url: str) -> str:
+    """The machine a member reports itself on, best effort."""
+    try:
+        return urlparse(url).hostname or url
+    except ValueError:
+        return url
 
 
 def _empty_stem_stats() -> dict:
@@ -128,6 +137,10 @@ class Coordinator:
             stats = self.nodes.get(node_id, {}).get("stats")
             self.nodes[node_id] = {
                 "url": url,
+                # Which machine this member lives on. Two members of the same
+                # lineage on one host share its compute and add no
+                # information, so growth decisions need to see it (round 115).
+                "host": _host_of(url),
                 "checkpoint": checkpoint,
                 "capability": cap or {},
                 "last_seen": time.monotonic(),

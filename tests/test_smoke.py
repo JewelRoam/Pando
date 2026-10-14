@@ -338,6 +338,24 @@ class TestSmoke(unittest.TestCase):
         self.assertGreater(idle.cooling_down(), 0)
         self.assertEqual(idle.actions, [])
 
+        # Host awareness: never grow a lineage onto a machine that already
+        # carries one, because that adds compute contention and no
+        # information (rounds 95 and 114, measured).
+        from pandosi.elastic import Member, co_located
+        members = [
+            Member("a", "english", 40.0, 5, "127.0.0.1"),
+            Member("b", "english", 45.0, 5, "10.0.0.9"),
+            Member("c", "rlcd-v7", 50.0, 5, "127.0.0.1"),
+        ]
+        self.assertEqual(len(co_located(members, "127.0.0.1", "english")), 1)
+        self.assertEqual(len(co_located(members, "127.0.0.1", "rlcd-v7")), 1)
+        self.assertEqual(co_located(members, "10.0.0.9", "rlcd-v7"), [])
+        self.assertEqual(co_located(members, None, "english"), [])
+        blocked = supervisor.decide(status(), co_located_members=1,
+                                   candidate="127.0.0.1/english")
+        self.assertEqual(blocked.action, "hold")
+        self.assertIn("add no information", blocked.reason)
+
     def test_quorum_floor_is_per_category(self):
         """A security decision keeps its voters under latency pressure.
 

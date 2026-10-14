@@ -139,6 +139,16 @@ devices, one mind.
   checkpoint *name* (a misnamed stem silently changes the gate), and a naive
   sweep would have shipped a threshold that acts on a minority vote
   (`docs/research/2026-10-14-round100.md`).
+- **Growth that knows where it is going, and can undo itself**: the
+  supervisor refuses to grow a lineage onto a host that already runs one
+  (same compute, no new information), and treats a growth as a bet —
+  recording the latency before it and rolling the change back if the bet
+  loses, under the *same* reproduce grant that authorised it. Measured: the
+  round-114 setup now needs **one** reproduction (363.0 → 126.5 ms) instead
+  of two ending at 791.8 ms; and when the second growth is forced through, a
+  rollback recovers from 882 ms to 124 ms within two rounds
+  (`tools/elastic_growth_check.py`,
+  `docs/research/2026-10-14-round115.md`).
 - **Growth through real reproduction, and where it stops helping**: the
   supervisor's `grow` action is wired to the real spore path (served
   artifact, declared lineage and digest, attestation, `reproduce` grant), and
