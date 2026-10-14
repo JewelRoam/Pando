@@ -101,6 +101,14 @@ devices, one mind.
   replicas are interchangeable voters, and ensemble diversity must come from
   the checkpoint, not the runtime
   (`tools/cross_ecosystem_check.py`, `docs/research/2026-10-14-round95.md`).
+- **Topology planner**: `pandosi/topology.py` decides replicate vs stage vs
+  infeasible from measured device/link numbers, splitting work in proportion
+  to device speed and enforcing `L < T`, memory fit, and a minimum gain over
+  replication. `tools/topology_check.py` pins it to the project's own
+  measurements (in CI). It predicts that a speed-proportional split beats a
+  synchronous quorum 8.7x where a 50/50 node split lost 0.47x — a
+  model-based prediction, flagged as such
+  (`docs/research/2026-10-14-round96.md`).
 - **Real lineage identity over HTTP**: en/ml/td ONNX stems now register as
   distinct checkpoints; twelve shared choice tasks produced 11 cross-lineage
   splits, making model diversity visible to the live quorum.
