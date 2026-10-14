@@ -21,10 +21,12 @@ jobs:
         run: |
           python -m pandosi --help
           python -m pandosi doctor --plan > /dev/null
-      - name: Build and verify wheel
+      - name: Build and verify distributions
         run: |
-          python -m pip wheel . --no-deps -w dist
+          python -m pip install build
+          python -m build
           python tools/verify_wheel.py dist
+          python tools/verify_sdist.py dist
 
   demo:
     runs-on: ubuntu-latest

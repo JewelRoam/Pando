@@ -161,6 +161,8 @@ The wheel includes playbook examples, small graft suites, and calibration
 JSON files. Model weights and generated ONNX graphs remain separate.
 CI builds and inspects the wheel archive so packaged entry points and
 runtime assets cannot silently disappear.
+Source distributions are checked too; a `v*` tag creates a GitHub release
+with wheel, sdist, and `SHA256SUMS`.
 
 LAN is a separate explicit grant:
 
