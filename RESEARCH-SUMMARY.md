@@ -152,6 +152,11 @@ checkpoint preserves all 14 English decision labels while changing
 confidence by up to 0.182. A conflicting `intent` schema across rows is
 documented as a data-normalization requirement before generalization claims.
 
+Round 76 implements that normalization: canonical question ids bind the
+prompt name to an option-set digest in both live inference and RLCD export.
+The v3 CUDA run removes the trainer's schema-conflict warning while keeping
+all 14 English labels stable.
+
 ## Remaining work
 
 - NPU: deep graph analysis (IsNaN was removed; other ops may block)

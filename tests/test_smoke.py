@@ -18,7 +18,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from pandosi.backend import MockBackend
-from pandosi.common import DecisionRequest, Vote, aggregate
+from pandosi.common import (DecisionRequest, Vote, aggregate,
+                            canonical_question)
 from pandosi.rootd import Coordinator, INITIAL_STEM_TIMEOUT, Root
 from pandosi.stemd import Stem
 from pandosi.onboard import build_plan
@@ -42,6 +43,18 @@ class TestSmoke(unittest.TestCase):
         self.assertEqual(result.tier, "verify")
 
         self.assertEqual(aggregate(strong[:2]).tier, "escalate")
+
+    def test_question_schema_identity_includes_option_set(self):
+        first, first_options = canonical_question(
+            "intent", ["refund", "complaint", "greeting"])
+        reordered, reordered_options = canonical_question(
+            "intent", ["greeting", "refund", "complaint"])
+        different, _ = canonical_question(
+            "intent", ["refund", "greeting"])
+
+        self.assertEqual(first, reordered)
+        self.assertEqual(first_options, reordered_options)
+        self.assertNotEqual(first, different)
 
     def test_quorum_fanout_is_parallel(self):
         delay_s = 0.25

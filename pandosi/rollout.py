@@ -12,6 +12,8 @@ import json
 import time
 from pathlib import Path
 
+from .common import canonical_question
+
 
 class RolloutRecorder:
     def __init__(self, rollout_dir: Path | str = "rollouts"):
@@ -62,14 +64,16 @@ def export_training_rows(rollout_path: Path, out_path: Path,
             sorted_c = sorted(counts.items(), key=lambda kv: -kv[1])
             preferred, rejected = sorted_c[0][0], sorted_c[1][0]
             # Nested format accepted by laya.train.items_from_rows:
-            qid = e.get("question") or "decision"
+            qid, options = canonical_question(
+                e.get("question") or "decision",
+                e.get("candidates") or sorted(counts))
             out.write(json.dumps({
                 "state": e["state"],
                 "questions": {
                     qid: {"type": "choice",
-                          "instructions": f"Classify: {qid}.",
-                          "criteria": e.get("candidates")
-                          or sorted(counts)},
+                          "instructions": "Classify: "
+                                          f"{e.get('question') or 'decision'}.",
+                          "criteria": options},
                 },
                 "expected": {qid: preferred},
                 "rejected": {qid: rejected},

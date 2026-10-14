@@ -51,8 +51,10 @@ devices, one mind.
   preserved 14/14 English decision labels while changing confidence.
 - **Multi-step CUDA evolution**: ten exported live-lineage contrast pairs
   produced nine optimizer updates on the 3070; decision labels stayed
-  stable (14/14), while the data-schema conflict remains a documented
-  follow-up.
+  stable (14/14), exposing the schema conflict fixed in round 76.
+- **Canonical decision schemas**: question identity now includes a hash of
+  the option set, so en/ml/td rollouts with incompatible label spaces can
+  no longer be silently merged during RLCD export.
 - **Real lineage identity over HTTP**: en/ml/td ONNX stems now register as
   distinct checkpoints; twelve shared choice tasks produced 11 cross-lineage
   splits, making model diversity visible to the live quorum.

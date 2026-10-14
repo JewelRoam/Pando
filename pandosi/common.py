@@ -3,8 +3,25 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import uuid
 from dataclasses import asdict, dataclass, field
+
+
+def canonical_question(question: str,
+                       candidates: list[str]) -> tuple[str, list[str]]:
+    """Stable id and option order for the same logical decision schema.
+
+    The prompt name alone is not a schema: two requests named ``intent`` can
+    carry different option sets. The digest prevents RLCD training from
+    merging incompatible label spaces.
+    """
+    base = (question or "decision").strip() or "decision"
+    options = sorted({str(candidate) for candidate in candidates})
+    if not options:
+        return base, options
+    digest = hashlib.sha256("\x1f".join(options).encode("utf-8")).hexdigest()
+    return f"{base}.{digest[:8]}", options
 
 
 @dataclass

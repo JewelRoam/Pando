@@ -9,7 +9,7 @@ try:
 except ImportError:  # MockBackend is a dependency-free Ring 0 path.
     np = None
 
-from .common import DecisionRequest, Vote
+from .common import DecisionRequest, Vote, canonical_question
 
 
 class MockBackend:
@@ -135,10 +135,11 @@ class OnnxLayaBackend:
     def decide(self, req: DecisionRequest) -> Vote:
         if not req.candidates:
             raise ValueError("candidates must be non-empty")
-        qid = req.question or "decision"
+        qid, options = canonical_question(req.question, req.candidates)
         questions = {qid: {"type": "choice",
-                           "instructions": qid,
-                           "criteria": req.candidates}}
+                           "instructions": f"Classify: "
+                                           f"{req.question or 'decision'}.",
+                           "criteria": options}}
         result = self._agent.predict(req.state, questions)
         answer = result["answers"][qid]
         choice = answer.get("choice")
