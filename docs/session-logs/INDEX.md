@@ -31,3 +31,4 @@ Timestamped, sanitized snapshots of this PandoSI working session.
 | 2026-10-14T143003 | `docs/session-logs/2026-10-14T143003-session-backup.md` | 96de57c9f047 | 178/871/1555 | automatic snapshot after 2e1fcde chore: session backup 2026-10-14T142928 |
 | 2026-10-14T143203 | `docs/session-logs/2026-10-14T143203-session-backup.md` | 244d2fe90712 | 178/874/1561 | automatic snapshot after 6d38445 feat: declare a question's category instead of guessing it from text |
 | 2026-10-14T143601 | `docs/session-logs/2026-10-14T143601-session-backup.md` | 9d549d28099e | 179/880/1576 | automatic snapshot after df7c05c feat: close the elasticity loop with a supervisor |
+| 2026-10-14T144827 | `docs/session-logs/2026-10-14T144827-session-backup.md` | 096782cda490 | 180/887/1592 | automatic snapshot after 3caeafb feat: grow through real reproduction, with a cooldown and an executor rule |
