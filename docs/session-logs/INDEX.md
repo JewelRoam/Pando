@@ -21,3 +21,4 @@ Timestamped, sanitized snapshots of this PandoSI working session.
 | 2026-10-14T131933 | `docs/session-logs/2026-10-14T131933-session-backup.md` | 1cea6dbc57db | 170/801/1434 | automatic snapshot after a33e37a feat: sign playbooks and pin the signer at load |
 | 2026-10-14T133003 | `docs/session-logs/2026-10-14T133003-session-backup.md` | 6de58e248e58 | 171/810/1444 | automatic snapshot after 4f78829 chore: session backup 2026-10-14T131933 |
 | 2026-10-14T134428 | `docs/session-logs/2026-10-14T134428-session-backup.md` | 90350e7c1f3c | 171/813/1457 | automatic snapshot after 72e4488 feat: self-replication loop, and four bugs it exposed |
+| 2026-10-14T135101 | `docs/session-logs/2026-10-14T135101-session-backup.md` | 1055e43c66f8 | 172/824/1471 | automatic snapshot after 36ba589 perf: batched spore transfer with keep-alive (8.8x on 1.68 GB) |
