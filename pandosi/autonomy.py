@@ -102,11 +102,13 @@ class AutonomyLoop:
     """
 
     def __init__(self, decide, actuator=None, allowed_tiers=("auto",),
-                 min_responders: int = 1, journal: Journal | None = None):
+                 min_responders: int = 1, require_calibration: bool = True,
+                 journal: Journal | None = None):
         self.decide = decide
         self.actuator = actuator
         self.allowed_tiers = tuple(allowed_tiers)
         self.min_responders = min_responders
+        self.require_calibration = require_calibration
         self.journal = journal
         self.outcomes: list[Outcome] = []
 
@@ -115,13 +117,22 @@ class AutonomyLoop:
         tier = str(result.get("tier", "escalate"))
         choice = result.get("choice")
         responded = int(result.get("responded", 0))
+        uncalibrated = list(result.get("uncalibrated_checkpoints") or [])
         acted = (tier in self.allowed_tiers and choice is not None
                  and responded >= self.min_responders)
+        if acted and self.require_calibration and uncalibrated:
+            # The auto tier thresholds assume a known confidence scale; a
+            # vote with no temperature table is on an unknown scale, so the
+            # rule that let it through cannot be trusted (round 100).
+            acted = False
         if acted and self.actuator is not None:
             self.actuator(observation, choice, result)
         if acted:
             reason = (f"tier {tier!r} allowed with {responded} responders "
                       f">= {self.min_responders}")
+        elif self.require_calibration and uncalibrated:
+            reason = ("uncalibrated checkpoint(s): "
+                      + ", ".join(uncalibrated))
         elif tier not in self.allowed_tiers:
             reason = f"tier {tier!r} not in {list(self.allowed_tiers)}"
         elif choice is None:

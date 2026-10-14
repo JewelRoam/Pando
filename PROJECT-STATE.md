@@ -91,6 +91,7 @@ NPU) all voting in the same consensus quorum.
 | Gate with production calibration | 48.1% coverage at 92.3%; held set 14.3% accurate | round 100 |
 | Live vs offline gate | identical to 4dp over real HTTP stems | round 100 |
 | Calibration keying defect | temperature selected by checkpoint name string | round 100 |
+| Calibration enforcement | report in rootd, enforce in AutonomyLoop | round 101 |
 
 ## What is NOT yet done
 

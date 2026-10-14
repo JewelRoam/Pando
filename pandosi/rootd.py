@@ -84,12 +84,22 @@ class Coordinator:
         self.failure_backoff_max = failure_backoff_max
         self.playbook_hash: str | None = None
         self._calibrator = Calibrator()
+        self._uncalibrated_warned: set[str] = set()
         self.known_questions: set[str] | None = None  # None = accept any
         self._recorder = RolloutRecorder(rollout_dir)
 
     # -- registry -------------------------------------------------------
     def register(self, node_id: str, url: str, checkpoint: str,
                  cap: dict | None = None) -> None:
+        # Calibration is looked up by checkpoint string, so a misnamed stem
+        # silently changes the gate. Say so once, at join time, rather than
+        # letting it alter every later decision in silence (round 100).
+        _, is_calibrated = self._calibrator.calibrate(checkpoint, 0.5)
+        if not is_calibrated and checkpoint not in self._uncalibrated_warned:
+            self._uncalibrated_warned.add(checkpoint)
+            print(f"[calibration] checkpoint {checkpoint!r} has no "
+                  f"temperature table; its votes cannot reach tier 'auto'",
+                  flush=True)
         with self._lock:
             stats = self.nodes.get(node_id, {}).get("stats")
             self.nodes[node_id] = {
@@ -257,8 +267,12 @@ class Coordinator:
 
         # Calibrate probabilities before aggregation (blueprint 3.2.1)
         calibrated_votes = []
+        uncalibrated: set[str] = set()
         for v in votes:
-            cp, _ = self._calibrator.calibrate(v.checkpoint, v.probability)
+            cp, is_calibrated = self._calibrator.calibrate(
+                v.checkpoint, v.probability)
+            if not is_calibrated:
+                uncalibrated.add(v.checkpoint)
             calibrated_votes.append(Vote(v.node_id, v.checkpoint, v.choice, cp))
 
         # Security questions get stricter gating (lower thresholds)
@@ -289,6 +303,11 @@ class Coordinator:
         out["quorum_size"] = len(quorum)
         out["responded"] = len(votes)
         out["fanout_ms"] = fanout_ms
+        # Report uncalibrated voters rather than acting on them silently. The
+        # tier is left alone so a synthetic test harness is unaffected; the
+        # policy belongs to whatever acts on the answer (see AutonomyLoop).
+        if uncalibrated:
+            out["uncalibrated_checkpoints"] = sorted(uncalibrated)
         return out
 
 

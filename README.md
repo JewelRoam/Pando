@@ -139,6 +139,13 @@ devices, one mind.
   checkpoint *name* (a misnamed stem silently changes the gate), and a naive
   sweep would have shipped a threshold that acts on a minority vote
   (`docs/research/2026-10-14-round100.md`).
+- **Calibration is enforced where the risk is**: `rootd` warns at
+  registration and reports `uncalibrated_checkpoints` in every decision;
+  `AutonomyLoop(require_calibration=True)` refuses to act on them. Placing
+  the hard rule in the coordinator instead broke every synthetic harness and
+  two CI checks, which is recorded — the coordinator is shared by production
+  and test rigs, so the rule belongs in the component that acts
+  (`docs/research/2026-10-14-round101.md`).
 - **Real lineage identity over HTTP**: en/ml/td ONNX stems now register as
   distinct checkpoints; twelve shared choice tasks produced 11 cross-lineage
   splits, making model diversity visible to the live quorum.

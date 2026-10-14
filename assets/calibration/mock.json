@@ -1,0 +1,10 @@
+{
+  "checkpoint": "mock",
+  "temperature": 1.0,
+  "source": "synthetic harness voter",
+  "note": "The deterministic MockBackend emits probabilities on an already-usable scale, so its temperature is identity. Declaring it here keeps the fail-closed calibration policy meaningful: a real device that reports an identity it has not declared is still treated as uncalibrated.",
+  "calibrated_ece": null,
+  "raw_ece": null,
+  "n_tasks": 0,
+  "accuracy": null
+}

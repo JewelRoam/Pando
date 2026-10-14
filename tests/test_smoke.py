@@ -287,6 +287,48 @@ class TestSmoke(unittest.TestCase):
                 grants.name + ".audit.jsonl"))
             self.assertEqual(audit["status"], "valid")
 
+    def test_uncalibrated_checkpoint_cannot_reach_auto(self):
+        """The acting loop refuses votes whose confidence scale is unknown.
+
+        Calibration is looked up by the checkpoint string a stem reports, so
+        a misnamed or brand-new device runs a different gate with no error.
+        The coordinator reports that in ``uncalibrated_checkpoints``; the
+        autonomy loop must refuse to act on it (round 100).
+        """
+        from pandosi.autonomy import AutonomyLoop, Observation, RootDecider
+
+        root = Root()
+        root.start()
+        coord = root.coordinator
+        stems = []
+        acted = []
+        try:
+            for i in range(3):
+                stem = Stem(f"u{i}", MockBackend(f"u{i}", "uncatalogued-v9",
+                                                 correct_choice="approve",
+                                                 agree_rate=1.0))
+                stem.start()
+                stems.append(stem)
+                coord.register(stem.node_id, stem.url(), "uncatalogued-v9")
+
+            loop = AutonomyLoop(
+                decide=RootDecider(root.url()),
+                actuator=lambda obs, choice, res: acted.append(choice),
+                allowed_tiers=("auto",), min_responders=3)
+            outcome = loop.step(Observation("obs", "smoke", "approve?",
+                                            ["approve", "reject"]))
+
+            # The consensus itself is strong and unanimous; only the missing
+            # calibration table stops the loop from acting.
+            self.assertNotEqual(outcome.tier, "escalate")
+            self.assertFalse(outcome.acted)
+            self.assertIn("uncalibrated", outcome.reason)
+            self.assertEqual(acted, [])
+        finally:
+            for stem in stems:
+                stem.stop()
+            root.stop()
+
     def test_end_to_end_http_vote(self):
         """Real root + real HTTP stems; dead node shrinks quorum gracefully."""
         root = Root()

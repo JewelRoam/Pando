@@ -124,8 +124,12 @@ def main() -> int:
             procs.append(root_proc)
             wait_root(root_url)
 
+            # The synthetic backend declares identity calibration in
+            # assets/calibration/mock.json, so these votes are calibrated and
+            # the act path is reachable. A real stem that has not declared a
+            # calibration is held instead (tests/test_smoke.py).
             for index in range(3):
-                start_stem(f"worker-{index}", f"mock-{index}")
+                start_stem(f"worker-{index}", "mock")
             wait_nodes(root_url, token, 3)
 
             loop = AutonomyLoop(decide=RootDecider(root_url, token),
