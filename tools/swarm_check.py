@@ -162,6 +162,7 @@ def main() -> int:
                      str(token_file)],
                     cwd=ROOT, stdout=out, stderr=err,
                     creationflags=creationflags)
+            wait_root(root_url)
             code, payload = request(f"{root_url}/register", method="POST",
                                     payload={"node_id": "unauthorized",
                                              "url": "http://127.0.0.1:1",
@@ -171,7 +172,6 @@ def main() -> int:
             if code != 403:
                 raise RuntimeError(
                     f"unauthenticated registration was not rejected: {payload}")
-            wait_root(root_url)
 
             for stem_id, checkpoint in zip(stem_ids, checkpoints):
                 stem_procs.append(subprocess.Popen(
