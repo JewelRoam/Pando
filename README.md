@@ -58,6 +58,10 @@ devices, one mind.
 - **Held-out RLCD check**: after removing 9 training-overlap states, 31
   held-out tasks kept 31/31 labels but showed no accuracy gain, which is
   the honest current limit of ten contrast pairs and one epoch.
+- **Confidence overfitting detected**: with a deterministic 34/6 split and
+  20 contrast rows, 72 CUDA updates left held-out accuracy unchanged while
+  increasing confidence, including on one wrong answer. The small-data
+  training branch is stopped.
 - **Real lineage identity over HTTP**: en/ml/td ONNX stems now register as
   distinct checkpoints; twelve shared choice tasks produced 11 cross-lineage
   splits, making model diversity visible to the live quorum.

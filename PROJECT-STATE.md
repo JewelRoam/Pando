@@ -33,7 +33,8 @@ NPU) all voting in the same consensus quorum.
 | Runtime elastic membership | tools/swarm_check.py | live 3 -> 5 -> 4 transitions |
 | CUDA hot-plug | tools/hetero_http_check.py --hotplug-cuda | Intel 3 -> +RTX 3070 |
 | Hierarchical groups | pandosi/bridge.py + tools/two_group_check.py | remote aggregate + partition fallback |
-| CUDA RLCD training | tools/rlcd_cuda_train.py + artifacts/rlcd-cuda-v4 | 9 updates, 31 held-out labels stable, no accuracy gain |
+| CUDA RLCD training | tools/rlcd_cuda_train.py + artifacts/rlcd-cuda-v6 | 72 updates overfit confidence, no held-out accuracy gain |
+| Deterministic suite split | tools/build_suite_split.py | 34 train / 6 holdout tasks |
 | Real lineage HTTP identity | backend/stemd checkpoint override + tools/real_lineage_http_check.py | en/ml/td distinct, 11/12 split |
 
 ## What is proven (key numbers)

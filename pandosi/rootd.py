@@ -68,7 +68,8 @@ class Coordinator:
                  timeout_multiplier: float = STEM_TIMEOUT_MULTIPLIER,
                  timeout_margin: float = STEM_TIMEOUT_MARGIN,
                  failure_backoff_base: float = FAILURE_BACKOFF_BASE,
-                 failure_backoff_max: float = FAILURE_BACKOFF_MAX):
+                 failure_backoff_max: float = FAILURE_BACKOFF_MAX,
+                 rollout_dir: str | Path = "rollouts"):
         self.nodes: dict[str, dict] = {}
         self._lock = threading.Lock()
         self._transport = transport
@@ -84,7 +85,7 @@ class Coordinator:
         self.playbook_hash: str | None = None
         self._calibrator = Calibrator()
         self.known_questions: set[str] | None = None  # None = accept any
-        self._recorder = RolloutRecorder()
+        self._recorder = RolloutRecorder(rollout_dir)
 
     # -- registry -------------------------------------------------------
     def register(self, node_id: str, url: str, checkpoint: str,
@@ -493,6 +494,8 @@ def main() -> None:
                         help="fixed stem admission token; generated when omitted")
     parser.add_argument("--pairing-token-file", default=None,
                         help="read the fixed admission token from a user-owned file")
+    parser.add_argument("--rollout-dir", default="rollouts",
+                        help="directory for local rollout evidence")
     parser.add_argument("--stem-call-timeout", type=float, default=CALL_TIMEOUT,
                         help="maximum per-stem call timeout")
     parser.add_argument("--initial-stem-timeout", type=float,
@@ -529,7 +532,8 @@ def main() -> None:
         listen_host = "0.0.0.0"
     coordinator = Coordinator(
         call_timeout=args.stem_call_timeout,
-        initial_stem_timeout=args.initial_stem_timeout)
+        initial_stem_timeout=args.initial_stem_timeout,
+        rollout_dir=args.rollout_dir)
     root = Root(coordinator=coordinator, host=listen_host, port=args.port,
                 spore_files=spore_files)
     import secrets

@@ -163,6 +163,13 @@ all 31 labels but did not improve accuracy (0.6129 before and after), so the
 current ten-pair dataset is sufficient to prove pipeline stability, not
 generalization.
 
+Round 78 makes the split explicit and expands the training set to 20
+contrast rows. One epoch (18 updates) and four epochs (72 updates) both left
+the six-task held-out accuracy unchanged. Four epochs drove confidence
+toward saturation, including a wrong answer reaching probability 1.0, so
+the current small-data training branch is stopped pending more independent
+contrast and calibration data.
+
 ## Remaining work
 
 - NPU: deep graph analysis (IsNaN was removed; other ops may block)

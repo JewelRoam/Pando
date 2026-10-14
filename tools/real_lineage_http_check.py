@@ -22,6 +22,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from pandosi.rollout import export_training_rows
+
 
 def free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -75,6 +77,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--yes", action="store_true")
     parser.add_argument("--tasks", type=int, default=12)
+    parser.add_argument("--qtypes", default="choice",
+                        help="comma-separated question types, or 'all'")
+    parser.add_argument("--suite",
+                        default=str(ROOT / "assets" / "graft_suite.jsonl"))
+    parser.add_argument("--export-training", default=None,
+                        help="optional RLCD JSONL output path")
     args = parser.parse_args()
     if not args.yes:
         parser.error("this loads real model workers; pass --yes")
@@ -90,11 +98,19 @@ def main() -> int:
 
     suite = [
         json.loads(line)
-        for line in (ROOT / "assets" / "graft_suite.jsonl")
+        for line in Path(args.suite)
         .read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    tasks = [task for task in suite if task["qtype"] == "choice"][:args.tasks]
+    qtypes = set() if args.qtypes == "all" else {
+        part.strip() for part in args.qtypes.split(",") if part.strip()
+    }
+    tasks = [
+        task for task in suite
+        if not qtypes or task["qtype"] in qtypes
+    ]
+    if args.tasks > 0:
+        tasks = tasks[:args.tasks]
     if not tasks:
         raise SystemExit("no choice tasks in graft suite")
 
@@ -106,12 +122,14 @@ def main() -> int:
     processes: list[subprocess.Popen] = []
 
     with tempfile.TemporaryDirectory(prefix="pandosi-lineage-http-") as td:
-        token_file = Path(td) / "pairing.token"
+        work = Path(td)
+        token_file = work / "pairing.token"
         token_file.write_text(token, encoding="utf-8")
+        rollout_dir = work / "rollouts"
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) \
             if sys.platform == "win32" else 0
-        root_out = Path(td) / "rootd.out"
-        root_err = Path(td) / "rootd.err"
+        root_out = work / "rootd.out"
+        root_err = work / "rootd.err"
 
         def cleanup() -> None:
             for process in processes:
@@ -128,7 +146,8 @@ def main() -> int:
                 processes.append(subprocess.Popen(
                     [sys.executable, "-m", "pandosi.rootd",
                      "--port", str(root_port),
-                     "--pairing-token-file", str(token_file)],
+                     "--pairing-token-file", str(token_file),
+                     "--rollout-dir", str(rollout_dir)],
                     cwd=ROOT, stdout=out, stderr=err,
                     creationflags=creationflags))
             wait_root(root_url)
@@ -158,7 +177,9 @@ def main() -> int:
                     f"{root_url}/decide", method="POST", token=token,
                     payload={"state": task["state"],
                              "question": task["question"],
-                             "candidates": task["candidates"]})
+                             "candidates": task.get(
+                                 "candidates", task.get("criteria",
+                                                        ["true", "false"]))})
                 if code != 200:
                     raise RuntimeError(f"decision failed: {result}")
                 votes = {
@@ -186,6 +207,12 @@ def main() -> int:
             if set(details[-1]["choices"]) != expected:
                 raise RuntimeError(
                     f"lineage identity mismatch: {details[-1]['choices']}")
+            if args.export_training:
+                exported = export_training_rows(
+                    rollout_dir / "rollouts.jsonl",
+                    Path(args.export_training), min_votes=3)
+                summary["exported_training_rows"] = exported
+                summary["training_path"] = str(Path(args.export_training))
             summary["status"] = "OK"
         except Exception as exc:
             summary["status"] = "FAILED"
