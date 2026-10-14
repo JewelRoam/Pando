@@ -38,6 +38,9 @@ STEM_TIMEOUT_MARGIN = 0.25
 STEM_EWMA_ALPHA = 0.3
 FAILURE_BACKOFF_BASE = 1.0
 FAILURE_BACKOFF_MAX = 30.0
+# Voters whose latencies fall in the same band are treated as interchangeable
+# when a quorum is selected, so the rotation can spread load across them.
+LATENCY_BAND_MS = 25.0
 
 
 def _empty_stem_stats() -> dict:
@@ -69,12 +72,24 @@ class Coordinator:
                  timeout_margin: float = STEM_TIMEOUT_MARGIN,
                  failure_backoff_base: float = FAILURE_BACKOFF_BASE,
                  failure_backoff_max: float = FAILURE_BACKOFF_MAX,
+                 adaptive_quorum: bool = False,
+                 quorum_floor: int = 1,
+                 latency_target_ms: float | None = None,
                  rollout_dir: str | Path = "rollouts"):
         self.nodes: dict[str, dict] = {}
         self._lock = threading.Lock()
         self._pick_rotation = 0
+        self._inflight: dict[str, int] = {}
         self._transport = transport
         self.quorum_k = quorum_k
+        # Adaptive quorum (round 110): a larger k means more independent
+        # voters per decision and fewer decisions in parallel, so the size is
+        # traded against latency under load - down to a floor, never below it.
+        self.adaptive_quorum = adaptive_quorum
+        self.quorum_floor = max(1, int(quorum_floor))
+        self.quorum_ceiling = max(self.quorum_floor, int(quorum_k))
+        self.latency_target_ms = latency_target_ms
+        self._decision_ewma_ms: float | None = None
         self.gating = gating or {}
         self.call_timeout = call_timeout
         self.initial_stem_timeout = initial_stem_timeout
@@ -139,28 +154,38 @@ class Coordinator:
         """Pick k live nodes maximizing checkpoint diversity (round-robin
         across checkpoint groups). Falls back to any live nodes.
 
-        Within a checkpoint group the starting member rotates per decision, so
-        concurrent decisions can use disjoint subsets. Without that rotation
-        every decision used the same voters and adding replicas bought no
-        capacity at all (round 109).
+        Candidates are ordered by how many calls they are already serving,
+        then by latency, with a per-decision rotation breaking ties among
+        equally idle members. Round 109 showed that without spreading,
+        concurrent decisions used the same voters and extra replicas bought no
+        capacity; round 110 showed blind rotation still queued behind a busy
+        voter, so load comes first.
         """
         nodes = self._selectable_nodes()
+        with self._lock:
+            inflight = dict(self._inflight)
         groups: dict[str, list[tuple[str, dict]]] = {}
         for nid, info in nodes.items():
             groups.setdefault(info["checkpoint"], []).append((nid, info))
         for members in groups.values():
-            members.sort(key=lambda item: (
-                item[1]["stats"].get("latency_ewma_ms")
-                if item[1]["stats"].get("latency_ewma_ms") is not None
-                else float("inf"),
-                item[0]))
+            members.sort(key=lambda item: item[0])
         with self._lock:
             rotation = self._pick_rotation
             self._pick_rotation = (rotation + 1) % 1_000_003
         for checkpoint, members in groups.items():
             if len(members) > 1:
                 shift = rotation % len(members)
-                groups[checkpoint] = members[shift:] + members[:shift]
+                members = members[shift:] + members[:shift]
+            # Order: least loaded first; then a coarse latency band, so two
+            # fast nodes are treated as equals; then the rotation, which is
+            # what spreads concurrent decisions over equally good members
+            # instead of always taking the same one.
+            ranked = sorted(enumerate(members), key=lambda pair: (
+                inflight.get(pair[1][0], 0),
+                int((pair[1][1]["stats"].get("latency_ewma_ms") or 0.0)
+                    // LATENCY_BAND_MS),
+                pair[0]))
+            groups[checkpoint] = [item for _, item in ranked]
         picked: list[tuple[str, dict]] = []
         group_iter = iter(sorted(groups))
         while len(picked) < k and groups:
@@ -226,6 +251,29 @@ class Coordinator:
                 stats["unhealthy_until"] = time.monotonic() + backoff
                 stats["last_error"] = error
 
+    def _adapt_quorum(self) -> None:
+        """Trade voters per decision against decisions in parallel.
+
+        Called once per decision. With a latency target, the quorum shrinks
+        while loaded decisions run slow and recovers once they do not; the
+        floor is a policy decision (how few independent voters are still
+        acceptable), not a tuning knob.
+        """
+        target = self.latency_target_ms
+        if target is None or self._decision_ewma_ms is None:
+            return
+        available = len(self._selectable_nodes())
+        ceiling = min(self.quorum_ceiling, max(available, 1))
+        if self._decision_ewma_ms > target and self.quorum_k > self.quorum_floor:
+            self.quorum_k -= 1
+            print(f"[quorum] {self._decision_ewma_ms:.0f} ms > target "
+                  f"{target:.0f} ms -> k={self.quorum_k}", flush=True)
+        elif (self._decision_ewma_ms < target * 0.6
+              and self.quorum_k < ceiling):
+            self.quorum_k += 1
+            print(f"[quorum] {self._decision_ewma_ms:.0f} ms < target "
+                  f"{target * 0.6:.0f} ms -> k={self.quorum_k}", flush=True)
+
     def _timeout_for(self, node_id: str) -> float:
         with self._lock:
             info = self.nodes.get(node_id)
@@ -241,6 +289,8 @@ class Coordinator:
     def _call_stem(self, node_id: str, info: dict,
                    payload: bytes) -> Vote | None:
         timeout = self._timeout_for(node_id)
+        with self._lock:
+            self._inflight[node_id] = self._inflight.get(node_id, 0) + 1
         started = time.perf_counter()
         try:
             raw = self._transport(f"{info['url']}/decide", payload,
@@ -257,6 +307,10 @@ class Coordinator:
                 node_id, False, (time.perf_counter() - started) * 1000,
                 f"{type(exc).__name__}: {exc}")
             return None  # dead node: shrink quorum, never block the vote
+        finally:
+            with self._lock:
+                self._inflight[node_id] = max(
+                    0, self._inflight.get(node_id, 1) - 1)
 
 
     def decide(self, req: DecisionRequest) -> dict:
@@ -264,6 +318,8 @@ class Coordinator:
             return {"error": f"question {req.question!r} not in playbook; "
                     f"known: {sorted(self.known_questions)}",
                     "responded": 0, "quorum_size": 0}
+        if self.adaptive_quorum:
+            self._adapt_quorum()
         quorum = self.pick_quorum(self.quorum_k)
         payload = req.to_json()
         fanout_started = time.perf_counter()
@@ -278,6 +334,15 @@ class Coordinator:
         else:
             votes = []
         fanout_ms = round((time.perf_counter() - fanout_started) * 1000, 3)
+        # Track the end-to-end decision time, not just the fan-out, so the
+        # adaptive quorum reacts to queueing rather than to one slow voter.
+        with self._lock:
+            if self._decision_ewma_ms is None:
+                self._decision_ewma_ms = fanout_ms
+            else:
+                self._decision_ewma_ms = (
+                    STEM_EWMA_ALPHA * fanout_ms
+                    + (1 - STEM_EWMA_ALPHA) * self._decision_ewma_ms)
 
         # Calibrate probabilities before aggregation (blueprint 3.2.1)
         calibrated_votes = []
@@ -631,6 +696,14 @@ def main() -> None:
     parser.add_argument("--quorum-k", type=int, default=QUORUM_K,
                         help="voters per decision; keep it fixed while adding "
                              "replicas or every decision uses every replica")
+    parser.add_argument("--adaptive-quorum", action="store_true",
+                        help="let the quorum size fall under latency pressure "
+                             "and recover when idle (requires "
+                             "--latency-target-ms)")
+    parser.add_argument("--quorum-floor", type=int, default=1,
+                        help="fewest voters the adaptive policy may use")
+    parser.add_argument("--latency-target-ms", type=float, default=None,
+                        help="decision latency the adaptive quorum aims for")
     parser.add_argument("--initial-stem-timeout", type=float,
                         default=INITIAL_STEM_TIMEOUT,
                         help="discovery timeout before latency is learned")
@@ -673,6 +746,9 @@ def main() -> None:
         call_timeout=args.stem_call_timeout,
         initial_stem_timeout=args.initial_stem_timeout,
         quorum_k=args.quorum_k,
+        adaptive_quorum=args.adaptive_quorum,
+        quorum_floor=args.quorum_floor,
+        latency_target_ms=args.latency_target_ms,
         rollout_dir=args.rollout_dir)
     root = Root(coordinator=coordinator, host=listen_host, port=args.port,
                 spore_files=spore_files, chunking=args.chunking)

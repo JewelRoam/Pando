@@ -122,6 +122,10 @@ def main() -> int:
     parser.add_argument("--serialize", action="store_true",
                         help="give every replica a device-like serialization "
                              "gate (one decision at a time)")
+    parser.add_argument("--adaptive-quorum", action="store_true",
+                        help="let the root trade quorum size against latency")
+    parser.add_argument("--quorum-floor", type=int, default=1)
+    parser.add_argument("--latency-target-ms", type=float, default=None)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
     if not args.yes:
@@ -146,7 +150,12 @@ def main() -> int:
              "--pairing-token-file", str(token_file),
              "--rollout-dir", str(work / "rollouts"),
              *(["--quorum-k", str(args.quorum_k)]
-               if args.quorum_k is not None else [])],
+               if args.quorum_k is not None else []),
+             *(["--adaptive-quorum", "--quorum-floor",
+                str(args.quorum_floor), "--latency-target-ms",
+                str(args.latency_target_ms)]
+               if args.adaptive_quorum and args.latency_target_ms
+               else [])],
             cwd=ROOT, stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL, creationflags=creationflags))
         wait_root(url)
@@ -198,8 +207,14 @@ def main() -> int:
                     2),
                 "latency_cost_ms": round(last["p50_ms"] - first["p50_ms"], 1),
             })
-    summary = {"label": args.label or (f"quorum-k={args.quorum_k}"
-                                       if args.quorum_k else "default"),
+    if args.adaptive_quorum:
+        default_label = f"adaptive-k<={args.quorum_k or 5}@{args.latency_target_ms}ms"
+    elif args.quorum_k:
+        default_label = f"quorum-k={args.quorum_k}"
+    else:
+        default_label = "default"
+    summary = {"label": args.label or default_label,
+               "adaptive": args.adaptive_quorum,
                "quorum_k": args.quorum_k,
                "delay_ms": args.delay_ms, "tasks": args.tasks,
                "replicas": replica_counts, "concurrency": concurrencies,

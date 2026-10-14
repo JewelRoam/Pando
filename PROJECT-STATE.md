@@ -103,6 +103,8 @@ NPU) all voting in the same consensus quorum.
 | rlcd-v7 calibration | assets/calibration/rlcd-v7.json | T=2.6704 from round 81 |
 | Scaling law of the quorum | tools/scaling_law_check.py | replicas alone +9%; fixed k + rotation 1.9x |
 | Configurable quorum size | rootd --quorum-k + per-decision rotation | scaling unit is the quorum |
+| Load-aware quorum picking | Coordinator in-flight ordering | 16-24% over blind rotation |
+| Adaptive quorum size | --adaptive-quorum/--latency-target-ms | holds k=5 idle, k=3 under load |
 | Reproduce grant | grants.py action "reproduce" | operator-approved, expiring |
 
 ## What is NOT yet done

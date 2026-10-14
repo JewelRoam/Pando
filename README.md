@@ -139,6 +139,15 @@ devices, one mind.
   checkpoint *name* (a misnamed stem silently changes the gate), and a naive
   sweep would have shipped a threshold that acts on a minority vote
   (`docs/research/2026-10-14-round100.md`).
+- **A quorum that knows how busy it is**: `pick_quorum` now orders voters by
+  in-flight load (then latency band, then rotation), and
+  `rootd --adaptive-quorum --latency-target-ms` lets the quorum size shrink
+  under latency pressure and recover when idle. Load-aware selection beat
+  blind rotation by 16–24% with lower latency; the adaptive root held full
+  agreement while idle (k=5) and settled at k=3 under load, hitting its
+  120 ms target at 71 req/s where static k=5 gave 23.5 req/s at 306 ms
+  (`tools/scaling_law_check.py`,
+  `docs/research/2026-10-14-round110.md`).
 - **What scales is the quorum, not the replica**: with a device-like
   serialized replica, going 1 → 6 replicas bought only 9% throughput while
   every voter was used on every decision. With `--quorum-k 2` fixed and
