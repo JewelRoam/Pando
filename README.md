@@ -40,6 +40,9 @@ devices, one mind.
 - **Runtime elastic membership**: one running root moved from 3 to 5 workers
   by live registration, then back to 4 after heartbeat expiry, with a
   successful decision at every size.
+- **Live CUDA hot-plug**: Intel CPU/iGPU/NPU served the root first; an RTX
+  3070 joined the running swarm after model load and expanded the quorum
+  checkpoints from 3 to 4 without a restart.
 - **Signed self-replication (sandboxed)**: Spore payload = weights +
   playbook + harness. Ed25519 manifest, 64KiB chunk Merkle tree,
   per-chunk hash-on-arrival, selective re-fetch, TOFU key pinning,

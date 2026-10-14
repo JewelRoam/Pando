@@ -31,6 +31,7 @@ NPU) all voting in the same consensus quorum.
 | LAN-interface HTTP | tools/lan_http_check.py + stemd advertise host | same-host protocol path verified |
 | Remote-link degradation | tools/remote_latency_check.py | timeout -> skip -> recovery verified |
 | Runtime elastic membership | tools/swarm_check.py | live 3 -> 5 -> 4 transitions |
+| CUDA hot-plug | tools/hetero_http_check.py --hotplug-cuda | Intel 3 -> +RTX 3070 |
 
 ## What is proven (key numbers)
 

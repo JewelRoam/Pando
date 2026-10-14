@@ -99,6 +99,8 @@ def main() -> int:
     parser.add_argument("--cuda-python", default=None)
     parser.add_argument("--skip-igpu", action="store_true")
     parser.add_argument("--skip-npu", action="store_true")
+    parser.add_argument("--hotplug-cuda", action="store_true",
+                        help="start Intel workers first, then join CUDA live")
     parser.add_argument("--yes", action="store_true")
     args = parser.parse_args()
     if not args.yes:
@@ -209,7 +211,7 @@ def main() -> int:
                 raise RuntimeError(
                     f"unauthenticated registration was not rejected: {payload}")
 
-            for worker in workers:
+            def start_worker(worker):
                 out_path = work / f"{worker['node_id']}.out"
                 err_path = work / f"{worker['node_id']}.err"
                 with out_path.open("wb") as out, err_path.open("wb") as err:
@@ -223,28 +225,40 @@ def main() -> int:
                         creationflags=creationflags)
                 procs.append((worker["node_id"], proc, out_path, err_path))
 
+            cuda_worker = next(
+                worker for worker in workers
+                if worker["node_id"] == "nvidia-3070-cuda")
+            if args.hotplug_cuda:
+                initial_workers = [
+                    worker for worker in workers
+                    if worker["node_id"] != "nvidia-3070-cuda"]
+                late_workers = [cuda_worker]
+            else:
+                initial_workers = workers
+                late_workers = []
+
+            for worker in initial_workers:
+                start_worker(worker)
             nodes = wait_nodes(root_url, token,
-                               {worker["node_id"] for worker in workers})
+                               {worker["node_id"]
+                                for worker in initial_workers})
             summary["registered"] = sorted(nodes["nodes"])
-            summary["steps"].append({"step": "register", "code": 0,
+            summary["steps"].append({"step": "register_initial", "code": 0,
                                      "count": len(summary["registered"])})
 
-            latencies = []
-            decisions = []
-            for index in range(5):
+            def run_decision(state):
                 started = time.perf_counter()
                 code, result = request(
                     f"{root_url}/decide", method="POST",
-                    payload={"state": f"heterogeneous HTTP vote {index}",
+                    payload={"state": state,
                              "question": "approve?",
                              "candidates": ["approve", "reject"]},
                     token=token, timeout=120)
                 elapsed_ms = (time.perf_counter() - started) * 1000
                 if code != 200:
                     raise RuntimeError(f"decision failed ({code}): {result}")
-                latencies.append(elapsed_ms)
                 votes = result.get("votes", [])
-                decisions.append({
+                return {
                     "choice": result.get("choice"),
                     "tier": result.get("tier"),
                     "responded": result.get("responded"),
@@ -252,7 +266,43 @@ def main() -> int:
                     "root_fanout_ms": result.get("fanout_ms"),
                     "checkpoints": sorted(
                         vote["checkpoint"] for vote in votes),
-                })
+                }
+
+            summary["baseline_decisions"] = [
+                run_decision(f"heterogeneous baseline vote {index}")
+                for index in range(2)
+            ]
+            if any(decision["responded"] != len(initial_workers)
+                   for decision in summary["baseline_decisions"]):
+                raise RuntimeError(
+                    "baseline responded mismatch: "
+                    f"{summary['baseline_decisions']}")
+            summary["steps"].append({"step": "baseline_decisions", "code": 0})
+
+            if late_workers:
+                hotplug_started = time.perf_counter()
+                for worker in late_workers:
+                    start_worker(worker)
+                nodes = wait_nodes(root_url, token,
+                                   {worker["node_id"] for worker in workers})
+                hotplug_ms = (time.perf_counter() - hotplug_started) * 1000
+                summary["hotplug"] = {
+                    "workers": [worker["node_id"]
+                                for worker in late_workers],
+                    "registered": sorted(nodes["nodes"]),
+                    "elapsed_ms": round(hotplug_ms, 1),
+                }
+                summary["steps"].append({"step": "hotplug_cuda", "code": 0,
+                                         "elapsed_ms": round(hotplug_ms, 1)})
+            else:
+                summary["hotplug"] = None
+
+            latencies = []
+            decisions = []
+            for index in range(5):
+                decision = run_decision(f"heterogeneous HTTP vote {index}")
+                latencies.append(decision["latency_ms"])
+                decisions.append(decision)
 
             summary["wire_latency_p50_ms"] = round(
                 statistics.median(latencies), 1)
@@ -279,6 +329,17 @@ def main() -> int:
                 *({"onnx-gpu"} if not args.skip_igpu else set()),
                 *({"onnx-npu"} if not args.skip_npu else set()),
             }
+            expected_initial = {
+                checkpoint
+                for checkpoint in expected_checkpoints
+                if not (args.hotplug_cuda and checkpoint == "onnx-cuda")
+            }
+            for decision in summary["baseline_decisions"]:
+                if set(decision["checkpoints"]) != expected_initial:
+                    raise RuntimeError(
+                        "baseline checkpoint mismatch: "
+                        f"{decision['checkpoints']} != "
+                        f"{sorted(expected_initial)}")
             if set(decisions[-1]["checkpoints"]) != expected_checkpoints:
                 raise RuntimeError(
                     "checkpoint diversity mismatch: "
