@@ -11,6 +11,7 @@ on:
       - "pandosi/common.py"
       - "tools/swarm_check.py"
       - "tools/slow_stem_check.py"
+      - "tools/lan_http_check.py"
   workflow_dispatch:
 
 jobs:
@@ -32,3 +33,5 @@ jobs:
         run: python tools/swarm_check.py --yes
       - name: Verify slow-stem timeout, cooldown, and retry
         run: python tools/slow_stem_check.py --yes
+      - name: Verify LAN-interface HTTP registration and quorum
+        run: python tools/lan_http_check.py --yes

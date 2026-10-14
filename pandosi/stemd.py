@@ -65,17 +65,19 @@ def build_handler(backend, node_id: str):
 class Stem:
     """One worker node bound to a decision backend."""
 
-    def __init__(self, node_id: str, backend, host: str = "127.0.0.1", port: int = 0):
+    def __init__(self, node_id: str, backend, host: str = "127.0.0.1",
+                 port: int = 0, advertise_host: str | None = None):
         self.node_id = node_id
         self.backend = backend
         self.host = host
+        self.advertise_host = advertise_host or host
         self.port = port
         self._httpd = _PandoHTTPServer((host, port), build_handler(backend, node_id))
         self.port = self._httpd.server_address[1]
         self._thread: threading.Thread | None = None
 
     def url(self) -> str:
-        return f"http://{self.host}:{self.port}"
+        return f"http://{self.advertise_host}:{self.port}"
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
@@ -115,6 +117,10 @@ def main() -> None:
     parser.add_argument("--node-id", required=True)
     parser.add_argument("--checkpoint", default="mock")
     parser.add_argument("--port", type=int, default=0)
+    parser.add_argument("--host", default="127.0.0.1",
+                        help="interface to bind; use 0.0.0.0 for LAN")
+    parser.add_argument("--advertise-host", default=None,
+                        help="address reported to root (defaults to --host)")
     parser.add_argument("--root", default=None, help="rootd URL to register with")
     parser.add_argument("--pairing-token", default=None,
                         help="secret required by a pairing-enabled root")
@@ -146,7 +152,8 @@ def main() -> None:
         print("model loaded", flush=True)
     else:
         backend = MockBackend(args.node_id, args.checkpoint)
-    stem = Stem(args.node_id, backend, port=args.port)
+    stem = Stem(args.node_id, backend, host=args.host, port=args.port,
+                advertise_host=args.advertise_host)
     stem.start()
     print(f"stemd {args.node_id} listening on {stem.url()} "
           f"(checkpoint={args.checkpoint})")

@@ -31,6 +31,9 @@ devices, one mind.
   instead of the 30 s global timeout.
 - **Controlled slow-node isolation**: a 2 s slow worker was timed out,
   removed from the next 24 ms decision, and retried after cooldown.
+- **LAN-interface protocol**: root and stems can use a real LAN address
+  (`--host` / `--advertise-host`) instead of loopback; same-host latency
+  showed no penalty, while true remote-network effects remain untested.
 - **Signed self-replication (sandboxed)**: Spore payload = weights +
   playbook + harness. Ed25519 manifest, 64KiB chunk Merkle tree,
   per-chunk hash-on-arrival, selective re-fetch, TOFU key pinning,
