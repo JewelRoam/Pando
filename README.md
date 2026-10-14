@@ -130,6 +130,15 @@ devices, one mind.
   right only 16.7% of the time. Confidence separates cleanly (0.825 correct
   vs 0.427 wrong). The swarm knows when it is guessing, at no extra cost
   (`tools/gating_check.py`, `docs/research/2026-10-14-round99.md`).
+- **Verified end to end**: with the production calibration applied, the gate
+  covers **48.1% at 92.3%** locally — and a real `rootd` with three real
+  lineage stems over HTTP reproduces that **exactly** (delta 0.0000), with
+  the held set only 14.3% accurate (2/14). Threshold tuning
+  (`tools/gate_tune.py`) finds the shipped `0.6/0.6` default already
+  optimal. Two defects surfaced on the way: calibration is selected by the
+  checkpoint *name* (a misnamed stem silently changes the gate), and a naive
+  sweep would have shipped a threshold that acts on a minority vote
+  (`docs/research/2026-10-14-round100.md`).
 - **Real lineage identity over HTTP**: en/ml/td ONNX stems now register as
   distinct checkpoints; twelve shared choice tasks produced 11 cross-lineage
   splits, making model diversity visible to the live quorum.

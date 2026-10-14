@@ -23,12 +23,18 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from pandosi.backend import OnnxLayaBackend  # noqa: E402
-from pandosi.common import DecisionRequest, aggregate  # noqa: E402
+from pandosi.calibrate import Calibrator  # noqa: E402
+from pandosi.common import DecisionRequest, Vote, aggregate  # noqa: E402
 
+# Checkpoint identity is what select the calibration table, so these must be
+# the production names; a stem mislabelled "en" silently loses its fitted
+# temperature.
 LINEAGES = [
-    ("en", "convaiinnovations/laya", "artifacts/laya-en.onnx"),
-    ("ml", "convaiinnovations/laya-multilingual", "artifacts/laya-ml.onnx"),
-    ("td", "convaiinnovations/laya-typed-decisions", "artifacts/laya-td.onnx"),
+    ("english", "convaiinnovations/laya", "artifacts/laya-en.onnx"),
+    ("multilingual", "convaiinnovations/laya-multilingual",
+     "artifacts/laya-ml.onnx"),
+    ("typed-decisions", "convaiinnovations/laya-typed-decisions",
+     "artifacts/laya-td.onnx"),
 ]
 
 
@@ -53,13 +59,24 @@ def main() -> int:
         backends.append(OnnxLayaBackend(name, str(path), repo=repo,
                                         device="CPU", checkpoint=name))
 
+    calibrator = Calibrator()
     rows = []
     for task in tasks:
         request = DecisionRequest(state=task["state"],
                                   question=task["question"],
                                   candidates=task["candidates"])
         votes = [backend.decide(request) for backend in backends]
-        result = aggregate(votes, min_quorum=3)
+        # Mirror rootd: temperature-scale every vote before aggregation, or
+        # the offline curve describes a gate the live swarm does not run.
+        calibrated = []
+        temperatures = []
+        for vote in votes:
+            probability, is_calibrated = calibrator.calibrate(
+                vote.checkpoint, vote.probability)
+            temperatures.append(f"{vote.checkpoint}={probability}")
+            calibrated.append(Vote(vote.node_id, vote.checkpoint, vote.choice,
+                                   probability))
+        result = aggregate(calibrated, min_quorum=3)
         correct = result.choice == task["expected"]
         rows.append({
             "task_id": task["task_id"],
@@ -69,8 +86,11 @@ def main() -> int:
             "choice": result.choice,
             "expected": task["expected"],
             "correct": correct,
-            "votes": [vote.choice for vote in votes],
-            "distinct_votes": len({vote.choice for vote in votes}),
+            "votes": [vote.choice for vote in calibrated],
+            "distinct_votes": len({vote.choice for vote in calibrated}),
+            "raw_confidences": [vote.probability for vote in votes],
+            "calibrated_confidences": [vote.probability for vote in calibrated],
+            "temperatures": temperatures,
         })
         print(f"  {task['task_id']}: {result.tier:8s} "
               f"agree={result.agreement:.2f} "

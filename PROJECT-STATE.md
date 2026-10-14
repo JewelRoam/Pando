@@ -34,6 +34,8 @@ NPU) all voting in the same consensus quorum.
 | Topology planner | pandosi/topology.py + tools/topology_check.py | replicate/stage/infeasible from measured numbers |
 | Autonomy loop | pandosi/autonomy.py + tools/autonomy_check.py | observe-decide-act, two-part gate |
 | Gate risk-coverage | tools/gating_check.py | auto 51.8% coverage at 92.9% accuracy |
+| Gate threshold tuning | tools/gate_tune.py | shipped 0.6/0.6 already optimal |
+| Gate live verification | tools/gate_e2e_check.py | live == offline, delta 0.0000 |
 | Adaptive stem timeouts | rootd.py per-stem EWMA | 5s cold -> 0.7-1.0s learned |
 | Slow-node isolation | tools/slow_stem_check.py | 4->3 quorum, 24ms cooldown skip |
 | LAN-interface HTTP | tools/lan_http_check.py + stemd advertise host | same-host protocol path verified |
@@ -86,6 +88,9 @@ NPU) all voting in the same consensus quorum.
 | Laya act head | saturated at 1.0 on 8 states, both ecosystems | round 98 |
 | Lone-survivor quorum | tier=auto with 1 responder; needs a responder policy | round 98 |
 | Gate value (3 lineages) | auto 92.9% vs 51.8% overall; splits 16.7% | round 99 |
+| Gate with production calibration | 48.1% coverage at 92.3%; held set 14.3% accurate | round 100 |
+| Live vs offline gate | identical to 4dp over real HTTP stems | round 100 |
+| Calibration keying defect | temperature selected by checkpoint name string | round 100 |
 
 ## What is NOT yet done
 
