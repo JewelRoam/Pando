@@ -35,6 +35,8 @@ NPU) all voting in the same consensus quorum.
 | Hierarchical groups | pandosi/bridge.py + tools/two_group_check.py | remote aggregate + partition fallback |
 | CUDA RLCD training | tools/rlcd_cuda_train.py + artifacts/rlcd-cuda-v6 | 72 updates overfit confidence, no held-out accuracy gain |
 | Deterministic suite split | tools/build_suite_split.py | 34 train / 6 holdout tasks |
+| Expanded prompt pool | tools/build_prompt_pool.py | 78 prompts, 45 contrast rows |
+| CUDA candidate v7 | artifacts/rlcd-cuda-v7 | 41 updates, stable holdout, not promoted |
 | Real lineage HTTP identity | backend/stemd checkpoint override + tools/real_lineage_http_check.py | en/ml/td distinct, 11/12 split |
 
 ## What is proven (key numbers)

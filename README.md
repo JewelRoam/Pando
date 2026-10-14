@@ -62,6 +62,9 @@ devices, one mind.
   20 contrast rows, 72 CUDA updates left held-out accuracy unchanged while
   increasing confidence, including on one wrong answer. The small-data
   training branch is stopped.
+- **Expanded RLCD pool**: 78 new multi-lingual prompts yielded 45 contrast
+  rows and a 41-update CUDA candidate. Held-out accuracy stayed unchanged,
+  but confidence drift fell versus the over-trained small-data run.
 - **Real lineage identity over HTTP**: en/ml/td ONNX stems now register as
   distinct checkpoints; twelve shared choice tasks produced 11 cross-lineage
   splits, making model diversity visible to the live quorum.

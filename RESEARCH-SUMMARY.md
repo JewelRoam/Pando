@@ -170,6 +170,12 @@ toward saturation, including a wrong answer reaching probability 1.0, so
 the current small-data training branch is stopped pending more independent
 contrast and calibration data.
 
+Round 79 adds a 78-prompt multi-lingual pool, from which the live lineages
+produced 45 new contrast rows. The resulting CUDA v7 candidate ran 41
+updates and kept all six held-out labels stable while reducing confidence
+drift versus the four-epoch small-data run. It did not improve held-out
+accuracy and is retained as a candidate, not promoted.
+
 ## Remaining work
 
 - NPU: deep graph analysis (IsNaN was removed; other ops may block)
