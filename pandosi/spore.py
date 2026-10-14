@@ -307,9 +307,14 @@ class SporeServer:
 
     def __init__(self, manifest: dict, files: dict[str, Path],
                  host: str = "0.0.0.0", port: int = 0,
-                 auth_token: str | None = None):
+                 auth_token: str | None = None,
+                 history: dict[str, dict] | None = None):
         self.manifest = manifest
         self.auth_token = auth_token
+        # Signed manifests this node can serve by content hash. A peer that
+        # holds only a descendant can fetch a missing parent from here.
+        self._manifests: dict[str, dict] = dict(history or {})
+        self._manifests[manifest_hash(manifest)] = manifest
         self._chunks: dict[tuple[str, int], bytes] = {}
         for name, path in files.items():
             for i, chunk in enumerate(chunk_file(path)):
@@ -340,6 +345,13 @@ class SporeServer:
                     return
                 if self.path == "/spore/manifest":
                     self._send(200, json.dumps(manifest).encode())
+                elif self.path.startswith("/spore/manifests/"):
+                    digest = self.path.rsplit("/", 1)[-1]
+                    cached = server._manifests.get(digest)
+                    if cached is None:
+                        self._send(404, b'{"error":"unknown manifest"}')
+                    else:
+                        self._send(200, json.dumps(cached).encode())
                 elif self.path.startswith("/spore/chunk/"):
                     parts = self.path.split("/")
                     name = "/".join(parts[3:-1])
@@ -419,5 +431,51 @@ def pull_spore(manifest_url: str, out_dir: Path, verify_key,
                 stats["chunks_pulled"] += 1
         stats["files"][name] = verify_file(target, manifest, name)
     return stats
+
+
+def fetch_manifest(base_url: str, digest: str,
+                   auth_token: str | None = None,
+                   timeout: float = 15.0) -> dict:
+    """Fetch one signed manifest from a peer by content hash."""
+    headers = ({"Authorization": f"Bearer {auth_token}"}
+               if auth_token else {})
+    url = f"{base_url}/spore/manifests/{digest}"
+    with urllib.request.urlopen(
+            urllib.request.Request(url, headers=headers),
+            timeout=timeout) as resp:
+        return json.loads(resp.read())
+
+
+def ensure_parent_lineage(base_url: str, child: dict, cache_dir: Path,
+                          verify_key: nacl.signing.VerifyKey,
+                          auth_token: str | None = None
+                          ) -> tuple[str, str]:
+    """Validate cached lineage, fetching a missing parent from the peer.
+
+    A node that holds only a descendant can pull the missing parent manifest
+    from the serving peer and upgrade "parent-missing" to "valid". Only a
+    hash-matching, signature-valid manifest is accepted: a hash mismatch or a
+    bad signature is reported as "untrusted" and never upgrades the lineage.
+    Any network failure leaves the status at "parent-missing".
+    """
+    status, detail = validate_cached_lineage(cache_dir, child, verify_key)
+    if status != "parent-missing":
+        return status, detail
+    parent_hash = (child.get("metadata", {}) or {}).get("parent_manifest_hash")
+    if not parent_hash:
+        return status, detail
+    try:
+        parent = fetch_manifest(base_url, parent_hash, auth_token)
+    except Exception as exc:  # network/HTTP failure: stay unverified
+        return "parent-missing", (
+            f"parent {parent_hash[:16]} not cached and fetch failed: {exc}")
+    if manifest_hash(parent) != parent_hash:
+        return "untrusted", (
+            f"peer returned manifest {manifest_hash(parent)[:16]} but "
+            f"{parent_hash[:16]} was requested")
+    if not verify_manifest(parent, verify_key):
+        return "untrusted", "fetched parent signature verification failed"
+    store_manifest(cache_dir, parent)
+    return validate_cached_lineage(cache_dir, child, verify_key)
 
 

@@ -252,12 +252,16 @@ def main() -> None:
               f"files={list(manifest['files'])}", flush=True)
 
         cache_dir = Path("spore-cache") / node_id
-        from .spore import validate_cached_lineage
-        lineage_status, lineage_detail = validate_cached_lineage(
-            cache_dir / "manifests", manifest, verify_key)
-        if lineage_status == "invalid":
+        from .spore import ensure_parent_lineage
+        # A joiner that holds only a descendant fetches the missing parent
+        # manifest from the serving peer; a hash/signature mismatch is
+        # 'untrusted' and refuses instead of silently upgrading lineage.
+        lineage_status, lineage_detail = ensure_parent_lineage(
+            args.spore_url, manifest, cache_dir / "manifests", verify_key,
+            args.pairing_token)
+        if lineage_status in ("invalid", "untrusted"):
             raise SystemExit(
-                f"SECURITY: cached Spore lineage invalid: {lineage_detail}")
+                f"SECURITY: Spore lineage {lineage_status}: {lineage_detail}")
         print(f"SPORE lineage status: {lineage_status} ({lineage_detail})",
               flush=True)
         stats = pull_spore(args.spore_url, cache_dir, verify_key,

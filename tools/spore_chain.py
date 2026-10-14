@@ -19,9 +19,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from pandosi.spore import (SporeServer, append_lineage, build_manifest,
-                           generate_signing_key, manifest_hash, pull_spore,
-                           store_manifest, validate_cached_lineage,
-                           validate_reproduction, verify_file)
+                           ensure_parent_lineage, generate_signing_key,
+                           manifest_hash, pull_spore, store_manifest,
+                           validate_cached_lineage, validate_reproduction,
+                           verify_file)
 
 
 def main() -> None:
@@ -105,12 +106,18 @@ def main() -> None:
     assert cached == "valid", f"cached lineage failed: {cached_detail}"
     append_lineage(tmp / "lineage.jsonl", manifest_3)
     print(f"  lineage: {detail}", flush=True)
-    server_3 = SporeServer(manifest_3, {"model.bin": node_c_file})
+    server_3 = SporeServer(manifest_3, {"model.bin": node_c_file},
+                           history={manifest_hash(manifest_2): manifest_2})
     server_3.start()
 
     node_d_dir = tmp / "nodeD"
     stats_d = pull_spore(server_3.url(), node_d_dir, key.verify_key,
                          sandbox_confirmed=True)
+    # nodeD holds only the hop-3 manifest locally; it bootstraps provenance
+    # by fetching the missing hop-2 parent from the serving peer over HTTP.
+    boot_status, boot_detail = ensure_parent_lineage(
+        server_3.url(), manifest_3, node_d_dir / "manifests", key.verify_key)
+    assert boot_status == "valid", boot_detail
     server_3.stop()
     node_d_file = node_d_dir / "model.bin"
     node_d_hash = hashlib.sha256(node_d_file.read_bytes()).hexdigest()
@@ -131,6 +138,7 @@ def main() -> None:
     print(f"  generations: {manifest_1['metadata']['generation']} -> "
           f"{manifest_2['metadata']['generation']} -> "
           f"{manifest_3['metadata']['generation']}", flush=True)
+    print(f"  nodeD peer-fetched parent lineage: {boot_detail}", flush=True)
     print(f"  origin -> B -> C -> D: all byte-identical to original", flush=True)
     print(f"  3 hops, {1 + stats_b['chunks_pulled'] + stats_c['chunks_pulled'] + stats_d['chunks_pulled']} total chunks, "
           f"0 integrity failures", flush=True)

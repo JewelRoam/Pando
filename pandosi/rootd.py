@@ -351,6 +351,14 @@ def build_handler(coordinator: Coordinator, root=None):
                     and root is not None
                     and getattr(root, chr(115)+chr(112)+chr(111)+chr(114)+chr(101)+chr(95)+chr(109)+chr(97)+chr(110)+chr(105)+chr(102)+chr(101)+chr(115)+chr(116), None) is not None):
                 self._send(200, root.spore_manifest)
+            elif (self.path.startswith("/spore/manifests/")
+                    and root is not None):
+                digest = self.path.rsplit("/", 1)[-1]
+                cached = getattr(root, "spore_history", {}).get(digest)
+                if cached is None:
+                    self._send(404, {"error": "unknown manifest"})
+                else:
+                    self._send(200, cached)
             elif (self.path.startswith("/spore/chunk/")
                     and root is not None
                     and getattr(root, chr(115)+chr(112)+chr(111)+chr(114)+chr(101)+chr(95)+chr(109)+chr(97)+chr(110)+chr(105)+chr(102)+chr(101)+chr(115)+chr(116), None) is not None):
@@ -440,6 +448,11 @@ class Root:
                 pb_meta["playbook_version"] = self.playbook.version
             self.spore_manifest = build_manifest(spore_files, key,
                                                  metadata=pb_meta)
+            # Signed manifests this root can serve by content hash, so a
+            # joiner that already holds a descendant can fetch its parent.
+            from .spore import manifest_hash
+            self.spore_history: dict[str, dict] = {
+                manifest_hash(self.spore_manifest): self.spore_manifest}
             self.spore_chunks = {}
             for name, path in spore_files.items():
                 data = path.read_bytes()

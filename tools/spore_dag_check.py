@@ -8,9 +8,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from pandosi.spore import (build_manifest, generate_signing_key,
-                           lineage_entry, store_manifest,
-                           validate_cached_lineage, validate_lineage_graph)
+from pandosi.spore import (SporeServer, build_manifest, ensure_parent_lineage,
+                           generate_signing_key, lineage_entry, manifest_hash,
+                           store_manifest, validate_cached_lineage,
+                           validate_lineage_graph)
 
 
 def main() -> int:
@@ -66,6 +67,53 @@ def main() -> int:
             cache, bad_child)
         assert bad_status == "invalid", bad_detail
         print("cached generation mismatch rejected")
+
+        # A node that holds only a descendant can pull the missing parent
+        # manifest from a peer, verifying hash and signature before storing.
+        peer_cache = root / "peer-cache"
+        peer_status, _ = validate_cached_lineage(peer_cache, branch_b,
+                                                 key.verify_key)
+        assert peer_status == "parent-missing", peer_status
+
+        server = SporeServer(branch_b, {"model.bin": payload},
+                             history={manifest_hash(origin): origin})
+        server.start()
+        try:
+            fetched_status, fetched_detail = ensure_parent_lineage(
+                server.url(), branch_b, peer_cache, key.verify_key)
+            assert fetched_status == "valid", fetched_detail
+            print("missing parent fetched from peer and verified")
+
+            # A peer that cannot serve the parent leaves lineage unverified.
+            blind = SporeServer(branch_b, {"model.bin": payload})
+            blind.start()
+            try:
+                missed, _ = ensure_parent_lineage(
+                    blind.url(), branch_b, root / "blind-cache", key.verify_key)
+                assert missed == "parent-missing", missed
+                print("peer without the parent leaves lineage unverified")
+            finally:
+                blind.stop()
+
+            # A peer returning a different manifest for the requested hash is
+            # untrusted: content hash must match before anything is stored.
+            server._manifests[manifest_hash(origin)] = dict(branch_c)
+            wrong, _ = ensure_parent_lineage(
+                server.url(), branch_b, root / "wrong-cache", key.verify_key)
+            assert wrong == "untrusted", wrong
+            print("peer returning a different manifest rejected")
+
+            # manifest_hash ignores the signature, so a tampered signature
+            # still hashes correctly and must be caught by verify_manifest.
+            forged = dict(origin)
+            forged["signature"] = "00" * 64
+            server._manifests[manifest_hash(origin)] = forged
+            unsigned, _ = ensure_parent_lineage(
+                server.url(), branch_b, root / "forged-cache", key.verify_key)
+            assert unsigned == "untrusted", unsigned
+            print("peer returning a bad signature rejected")
+        finally:
+            server.stop()
 
         fork_denied, fork_problems, _ = validate_lineage_graph(
             entries, allow_forks=False)

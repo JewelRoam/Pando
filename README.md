@@ -78,6 +78,10 @@ devices, one mind.
   roots, missing parents, generation gaps, and optional single-chain mode.
 - **Cached parent lineage**: received manifests are stored by hash, and
   `join` distinguishes verified lineage from missing-history evidence.
+- **Peer-fetched lineage**: a node holding only a descendant pulls the
+  missing parent manifest from its serving peer by content hash
+  (`/spore/manifests/<hash>`), checks hash + Ed25519 signature, and upgrades
+  lineage to verified — a wrong-hash or bad-signature manifest is refused.
 - **Real lineage identity over HTTP**: en/ml/td ONNX stems now register as
   distinct checkpoints; twelve shared choice tasks produced 11 cross-lineage
   splits, making model diversity visible to the live quorum.

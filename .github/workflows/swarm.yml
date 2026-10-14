@@ -18,6 +18,7 @@ on:
       - "tools/two_group_check.py"
       - "tools/spore_chain.py"
       - "tools/spore_dag_check.py"
+      - "tools/spore_root_check.py"
   workflow_dispatch:
 
 jobs:
@@ -49,3 +50,5 @@ jobs:
         run: python tools/spore_chain.py
       - name: Verify branching Spore reproduction DAG
         run: python tools/spore_dag_check.py
+      - name: Verify root spore HTTP surface and peer manifest fetch
+        run: python tools/spore_root_check.py
