@@ -20,6 +20,7 @@ while a slow decision with quorum left to spend is a policy question.
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -172,7 +173,8 @@ class ElasticSupervisor:
     def __init__(self, root_url: str, pairing_token: str | None = None,
                  max_members: int = 5, keep: int = 2,
                  max_member_latency_ms: float = 250.0,
-                 pressure_factor: float = 1.1, timeout: float = 30):
+                 pressure_factor: float = 1.1, cooldown_s: float = 30.0,
+                 clock=None, timeout: float = 30):
         self.root_url = root_url.rstrip("/")
         self.pairing_token = pairing_token
         self.max_members = max_members
@@ -180,6 +182,24 @@ class ElasticSupervisor:
         self.max_member_latency_ms = max_member_latency_ms
         self.pressure_factor = pressure_factor
         self.timeout = timeout
+        # A change takes time to have an effect - a reproduced node has to
+        # transfer an artifact, start and register before it can vote - so
+        # deciding again immediately would stack changes on top of a change
+        # whose result is not in yet (round 114).
+        self.cooldown_s = cooldown_s
+        self._clock = clock or time.monotonic
+        self.last_action: Supervision | None = None
+        self.last_action_at: float | None = None
+        self.actions: list[tuple[float, str, str | None]] = []
+
+    def cooling_down(self) -> float:
+        """Seconds left before the last change is allowed to have landed."""
+        if self.last_action is None or self.last_action_at is None:
+            return 0.0
+        if self.last_action.action == "hold":
+            return 0.0
+        return max(0.0, self.cooldown_s
+                   - (self._clock() - self.last_action_at))
 
     def _get(self, path: str) -> dict:
         headers = {"Authorization": f"Bearer {self.pairing_token}"} \
@@ -241,6 +261,22 @@ class ElasticSupervisor:
     def step(self, grow=None, retire=None,
              journal: Journal | None = None) -> Supervision:
         """Decide, then execute. ``grow``/``retire`` are caller callbacks."""
+        remaining = self.cooling_down()
+        if remaining > 0 and self.last_action is not None:
+            supervision = Supervision(
+                "hold",
+                f"cooling down {remaining:.0f}s after "
+                f"{self.last_action.action} ({self.last_action.target or 'swarm'})",
+                latency_ms=self.last_action.latency_ms,
+                members=self.last_action.members)
+            if journal is not None:
+                journal.append(Outcome(
+                    observation_id="swarm", tier="hold", acted=False,
+                    choice=None, agreement=0.0, mean_probability=0.0,
+                    responded=supervision.members,
+                    quorum_size=supervision.quorum_k or 0,
+                    reason=supervision.reason))
+            return supervision
         members = []
         try:
             members = Retirer(self.root_url, self.pairing_token,
@@ -260,12 +296,25 @@ class ElasticSupervisor:
                 latency_ms=slowest.latency_ewma_ms, members=len(members))
         else:
             supervision = self.decide()
-        if supervision.action == "grow" and grow is not None:
-            supervision.reason += f"; grow -> {grow()}"
-        elif supervision.action == "retire" and retire is not None:
-            outcome = retire(supervision.target, supervision.reason)
-            supervision.reason = (outcome.reason if outcome else
-                                  supervision.reason)
+        # A decision nobody executed must not start a cooldown or be recorded
+        # as an action: a supervisor with no retire executor would otherwise
+        # report the same retirement every cooldown cycle, having never
+        # performed one (found in round 114).
+        executed = False
+        if supervision.action == "grow":
+            if grow is not None:
+                supervision.reason += f"; grow -> {grow()}"
+                executed = True
+            else:
+                supervision.reason += "; no grow executor configured"
+        elif supervision.action == "retire":
+            if retire is not None:
+                outcome = retire(supervision.target, supervision.reason)
+                supervision.reason = (outcome.reason if outcome
+                                      else supervision.reason)
+                executed = bool(outcome and outcome.acted)
+            else:
+                supervision.reason += "; no retire executor configured"
         if journal is not None:
             journal.append(Outcome(
                 observation_id=supervision.target or "swarm",
@@ -274,4 +323,9 @@ class ElasticSupervisor:
                 responded=supervision.members,
                 quorum_size=supervision.quorum_k or 0,
                 reason=supervision.reason))
+        if executed:
+            self.last_action = supervision
+            self.last_action_at = self._clock()
+            self.actions.append((self.last_action_at, supervision.action,
+                                 supervision.target))
         return supervision

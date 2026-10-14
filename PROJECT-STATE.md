@@ -110,6 +110,8 @@ NPU) all voting in the same consensus quorum.
 | Declared categories | playbook question category + conservative default | risk_check holds k=4, not k=2 |
 | Category validation | load rejects an unknown category | typo fails at load, not at decision time |
 | Elastic supervisor | GET /status + ElasticSupervisor | grew 2 -> 3 members, p50 92.8 -> 61 ms |
+| Growth via real reproduction | grow wired to reproduce() + cooldown | 1st growth 449.7 -> 119.3 ms, 2nd 138.7 -> 981 ms |
+| Cooldown/executor rule | executed actions only | an unexecuted decision starts no cooldown |
 | Reproduce grant | grants.py action "reproduce" | operator-approved, expiring |
 
 ## What is NOT yet done

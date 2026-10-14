@@ -139,6 +139,17 @@ devices, one mind.
   checkpoint *name* (a misnamed stem silently changes the gate), and a naive
   sweep would have shipped a threshold that acts on a minority vote
   (`docs/research/2026-10-14-round100.md`).
+- **Growth through real reproduction, and where it stops helping**: the
+  supervisor's `grow` action is wired to the real spore path (served
+  artifact, declared lineage and digest, attestation, `reproduce` grant), and
+  it now has a cooldown so it does not stack changes. Measured with two slow
+  members at an 80 ms target: the first reproduction took p50 from 449.7 ms
+  to **119.3 ms**, the second — another ONNX worker on the *same host* — took
+  it to **981 ms**. Growing across devices adds capacity; growing within one
+  host adds voters, not cores, and the supervisor's own signal then reports
+  "a per-decision-cost problem, not a capacity one"
+  (`tools/elastic_growth_check.py`,
+  `docs/research/2026-10-14-round114.md`).
 - **The elasticity loop closes**: `GET /status` exposes the swarm's own
   signals (members, quorum size/floor/ceiling, latency target, decision
   EWMA) and `ElasticSupervisor` decides grow / retire / hold. It grows only

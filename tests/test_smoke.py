@@ -296,6 +296,7 @@ class TestSmoke(unittest.TestCase):
         at the floor with members to spare is a capacity one (round 113).
         """
         from pandosi.elastic import ElasticSupervisor
+        from pandosi.elastic import Supervision
 
         supervisor = ElasticSupervisor("http://127.0.0.1:1", max_members=5,
                                       keep=2)
@@ -326,6 +327,16 @@ class TestSmoke(unittest.TestCase):
         # No signal yet: never act on nothing.
         self.assertEqual(
             supervisor.decide(status(decision_ewma_ms=None)).action, "hold")
+
+        # A decision nobody executed must not start a cooldown or be recorded
+        # as an action (found in round 114: a supervisor with no retire
+        # executor re-reported the same retirement every cycle).
+        idle = ElasticSupervisor("http://127.0.0.1:1", max_members=2,
+                                cooldown_s=60.0)
+        idle.last_action = Supervision("retire", "test", target="member-9")
+        idle.last_action_at = idle._clock()
+        self.assertGreater(idle.cooling_down(), 0)
+        self.assertEqual(idle.actions, [])
 
     def test_quorum_floor_is_per_category(self):
         """A security decision keeps its voters under latency pressure.
