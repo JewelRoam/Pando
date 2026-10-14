@@ -97,6 +97,42 @@ class TestSmoke(unittest.TestCase):
         self.assertLess(timeouts[1], INITIAL_STEM_TIMEOUT)
         self.assertGreaterEqual(timeouts[1], 0.5)
 
+    def test_failed_stem_enters_cooldown_and_is_temporarily_skipped(self):
+        slow_calls = 0
+
+        def transport(url, payload, timeout):
+            nonlocal slow_calls
+            if "slow" in url:
+                slow_calls += 1
+                time.sleep(0.2)
+                raise TimeoutError("controlled slow stem")
+            return json.dumps({
+                "vote": {"choice": "approve", "probability": 0.9}
+            }).encode()
+
+        coordinator = Coordinator(
+            transport=transport, quorum_k=5,
+            call_timeout=0.05, initial_stem_timeout=0.05,
+            failure_backoff_base=1.0, failure_backoff_max=1.0)
+        for index, checkpoint in enumerate(("en", "ml", "td")):
+            coordinator.register(
+                f"fast-{index}", f"http://fast-{index}", checkpoint)
+        coordinator.register("slow-0", "http://slow-0", "slow")
+        request = DecisionRequest(state="cooldown", question="approve?",
+                                  candidates=["approve", "reject"])
+
+        first = coordinator.decide(request)
+        self.assertEqual(first["responded"], 3)
+        self.assertEqual(first["quorum_size"], 4)
+        slow_info = coordinator.live_nodes()["slow-0"]
+        self.assertEqual(slow_info["stats"]["consecutive_failures"], 1)
+        self.assertGreater(slow_info["stats"]["cooldown_remaining_s"], 0)
+
+        second = coordinator.decide(request)
+        self.assertEqual(second["responded"], 3)
+        self.assertEqual(second["quorum_size"], 3)
+        self.assertEqual(slow_calls, 1)
+
     def test_onboarding_plan_prioritizes_ring0_over_sandbox(self):
         rows = [
             {"status": "ok", "item": "python", "fix": ""},

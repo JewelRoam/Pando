@@ -27,6 +27,7 @@ NPU) all voting in the same consensus quorum.
 | CUDA worker | backend.py CUDA branch + tools/cuda_bench.py | RTX 3070 live |
 | Heterogeneous HTTP check | tools/hetero_http_check.py | CPU+iGPU+NPU+CUDA live |
 | Adaptive stem timeouts | rootd.py per-stem EWMA | 5s cold -> 0.7-1.0s learned |
+| Slow-node isolation | tools/slow_stem_check.py | 4->3 quorum, 24ms cooldown skip |
 
 ## What is proven (key numbers)
 

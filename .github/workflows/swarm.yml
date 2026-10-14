@@ -10,6 +10,7 @@ on:
       - "pandosi/backend.py"
       - "pandosi/common.py"
       - "tools/swarm_check.py"
+      - "tools/slow_stem_check.py"
   workflow_dispatch:
 
 jobs:
@@ -29,3 +30,5 @@ jobs:
           python -S -c "from pandosi.backend import MockBackend; print('mock backend import without site-packages: ok')"
       - name: Run isolated tokenized swarm lifecycle
         run: python tools/swarm_check.py --yes
+      - name: Verify slow-stem timeout, cooldown, and retry
+        run: python tools/slow_stem_check.py --yes

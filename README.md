@@ -29,6 +29,8 @@ devices, one mind.
   reduced steady-state wire p50 from 430.5 ms to 237.8 ms, and per-stem
   EWMA memory now gives unresponsive workers a 0.7-1.0 s learned budget
   instead of the 30 s global timeout.
+- **Controlled slow-node isolation**: a 2 s slow worker was timed out,
+  removed from the next 24 ms decision, and retried after cooldown.
 - **Signed self-replication (sandboxed)**: Spore payload = weights +
   playbook + harness. Ed25519 manifest, 64KiB chunk Merkle tree,
   per-chunk hash-on-arrival, selective re-fetch, TOFU key pinning,
@@ -155,6 +157,7 @@ python -m pandosi.stemd --node-id stem-2 --root http://ROOT_IP:8080 \
 - [TERMUX.md](TERMUX.md) — Android TV box onboarding guide
 - [Swarm check](docs/SWARM-CHECK.md) — multi-process tokenized consensus and shrinkage
 - [RTX 3070 CUDA worker](docs/CUDA-3070.md) — non-OpenVINO HTTP integration
+- [Slow-stem check](tools/slow_stem_check.py) — timeout, cooldown, and retry proof
 - [Windows service check](docs/SERVICE-CHECK-WINDOWS.md) — real lifecycle validation record
 - [Linux CI service check](docs/SERVICE-CHECK-LINUX-CI.md) — user-systemd lifecycle validation record
 

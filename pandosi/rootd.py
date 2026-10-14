@@ -36,6 +36,8 @@ MIN_STEM_TIMEOUT = 0.5
 STEM_TIMEOUT_MULTIPLIER = 4.0
 STEM_TIMEOUT_MARGIN = 0.25
 STEM_EWMA_ALPHA = 0.3
+FAILURE_BACKOFF_BASE = 1.0
+FAILURE_BACKOFF_MAX = 30.0
 
 
 def _empty_stem_stats() -> dict:
@@ -45,6 +47,8 @@ def _empty_stem_stats() -> dict:
         "last_latency_ms": None,
         "latency_ewma_ms": None,
         "last_error": None,
+        "consecutive_failures": 0,
+        "unhealthy_until": 0.0,
     }
 
 
@@ -57,12 +61,26 @@ def http_transport(url: str, payload: bytes, timeout: float) -> bytes:
 
 class Coordinator:
     def __init__(self, transport=http_transport, quorum_k: int = QUORUM_K,
-                 gating: dict | None = None):
+                 gating: dict | None = None,
+                 call_timeout: float = CALL_TIMEOUT,
+                 initial_stem_timeout: float = INITIAL_STEM_TIMEOUT,
+                 min_stem_timeout: float = MIN_STEM_TIMEOUT,
+                 timeout_multiplier: float = STEM_TIMEOUT_MULTIPLIER,
+                 timeout_margin: float = STEM_TIMEOUT_MARGIN,
+                 failure_backoff_base: float = FAILURE_BACKOFF_BASE,
+                 failure_backoff_max: float = FAILURE_BACKOFF_MAX):
         self.nodes: dict[str, dict] = {}
         self._lock = threading.Lock()
         self._transport = transport
         self.quorum_k = quorum_k
         self.gating = gating or {}
+        self.call_timeout = call_timeout
+        self.initial_stem_timeout = initial_stem_timeout
+        self.min_stem_timeout = min_stem_timeout
+        self.timeout_multiplier = timeout_multiplier
+        self.timeout_margin = timeout_margin
+        self.failure_backoff_base = failure_backoff_base
+        self.failure_backoff_max = failure_backoff_max
         self.playbook_hash: str | None = None
         self._calibrator = Calibrator()
         self.known_questions: set[str] | None = None  # None = accept any
@@ -84,18 +102,40 @@ class Coordinator:
     def live_nodes(self) -> dict[str, dict]:
         now = time.monotonic()
         with self._lock:
-            return {nid: n for nid, n in self.nodes.items()
-                    if now - n["last_seen"] <= HEARTBEAT_TTL}
+            live = {}
+            for node_id, info in self.nodes.items():
+                if now - info["last_seen"] > HEARTBEAT_TTL:
+                    continue
+                copy = dict(info)
+                stats = dict(info.get("stats", _empty_stem_stats()))
+                stats["cooldown_remaining_s"] = round(
+                    max(0.0, stats.get("unhealthy_until", 0.0) - now), 3)
+                copy["stats"] = stats
+                live[node_id] = copy
+            return live
+
+    def _selectable_nodes(self) -> dict[str, dict]:
+        live = self.live_nodes()
+        now = time.monotonic()
+        healthy = {
+            node_id: info for node_id, info in live.items()
+            if info["stats"].get("unhealthy_until", 0.0) <= now
+        }
+        return healthy or live
 
     def pick_quorum(self, k: int) -> list[tuple[str, dict]]:
         """Pick k live nodes maximizing checkpoint diversity (round-robin
         across checkpoint groups). Falls back to any live nodes."""
-        nodes = self.live_nodes()
+        nodes = self._selectable_nodes()
         groups: dict[str, list[tuple[str, dict]]] = {}
         for nid, info in nodes.items():
             groups.setdefault(info["checkpoint"], []).append((nid, info))
         for members in groups.values():
-            members.sort()
+            members.sort(key=lambda item: (
+                item[1]["stats"].get("latency_ewma_ms")
+                if item[1]["stats"].get("latency_ewma_ms") is not None
+                else float("inf"),
+                item[0]))
         picked: list[tuple[str, dict]] = []
         group_iter = iter(sorted(groups))
         while len(picked) < k and groups:
@@ -141,6 +181,8 @@ class Coordinator:
             stats["last_latency_ms"] = round(latency_ms, 3)
             if ok:
                 stats["successes"] += 1
+                stats["consecutive_failures"] = 0
+                stats["unhealthy_until"] = 0.0
                 previous = stats.get("latency_ewma_ms")
                 stats["latency_ewma_ms"] = round(
                     latency_ms if previous is None else
@@ -150,6 +192,13 @@ class Coordinator:
                 stats["last_error"] = None
             else:
                 stats["failures"] += 1
+                failures = int(stats.get("consecutive_failures", 0)) + 1
+                stats["consecutive_failures"] = failures
+                backoff = min(
+                    self.failure_backoff_max,
+                    self.failure_backoff_base
+                    * (2 ** min(failures - 1, 50)))
+                stats["unhealthy_until"] = time.monotonic() + backoff
                 stats["last_error"] = error
 
     def _timeout_for(self, node_id: str) -> float:
@@ -158,10 +207,11 @@ class Coordinator:
             stats = info.get("stats", {}) if info else {}
             ewma_ms = stats.get("latency_ewma_ms")
         if ewma_ms is None:
-            return INITIAL_STEM_TIMEOUT
-        learned_s = (float(ewma_ms) / 1000.0) * STEM_TIMEOUT_MULTIPLIER \
-            + STEM_TIMEOUT_MARGIN
-        return min(CALL_TIMEOUT, max(MIN_STEM_TIMEOUT, learned_s))
+            return self.initial_stem_timeout
+        learned_s = (float(ewma_ms) / 1000.0) * self.timeout_multiplier \
+            + self.timeout_margin
+        return min(self.call_timeout,
+                   max(self.min_stem_timeout, learned_s))
 
     def _call_stem(self, node_id: str, info: dict,
                    payload: bytes) -> Vote | None:
@@ -443,6 +493,11 @@ def main() -> None:
                         help="fixed stem admission token; generated when omitted")
     parser.add_argument("--pairing-token-file", default=None,
                         help="read the fixed admission token from a user-owned file")
+    parser.add_argument("--stem-call-timeout", type=float, default=CALL_TIMEOUT,
+                        help="maximum per-stem call timeout")
+    parser.add_argument("--initial-stem-timeout", type=float,
+                        default=INITIAL_STEM_TIMEOUT,
+                        help="discovery timeout before latency is learned")
     parser.add_argument("--lan", action="store_true",
                         help="bind 0.0.0.0; requires an active lan_listen grant")
     parser.add_argument("--reveal-pairing-token", action="store_true",
@@ -472,7 +527,11 @@ def main() -> None:
         except PermissionError as exc:
             raise SystemExit(f"[locked] {exc}")
         listen_host = "0.0.0.0"
-    root = Root(host=listen_host, port=args.port, spore_files=spore_files)
+    coordinator = Coordinator(
+        call_timeout=args.stem_call_timeout,
+        initial_stem_timeout=args.initial_stem_timeout)
+    root = Root(coordinator=coordinator, host=listen_host, port=args.port,
+                spore_files=spore_files)
     import secrets
     root.set_pairing_token(args.pairing_token or secrets.token_urlsafe(18))
     token_digest = hashlib.sha256(
