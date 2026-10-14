@@ -13,6 +13,7 @@ on:
       - "tools/slow_stem_check.py"
       - "tools/lan_http_check.py"
       - "tools/remote_latency_check.py"
+      - "tools/two_group_check.py"
   workflow_dispatch:
 
 jobs:
@@ -38,3 +39,5 @@ jobs:
         run: python tools/lan_http_check.py --yes
       - name: Verify remote-link degradation, cooldown, and recovery
         run: python tools/remote_latency_check.py --yes
+      - name: Verify hierarchical two-group consensus and partition fallback
+        run: python tools/two_group_check.py --yes
