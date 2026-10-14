@@ -95,6 +95,12 @@ devices, one mind.
   offloading half the model to a slower device is 0.47x. Replicate-and-vote
   stays the default; stage only on disjoint devices with comparable
   throughput (`docs/research/2026-10-14-round94.md`).
+- **Ecosystem-independent votes**: the same Laya checkpoint run through ONNX
+  Runtime (CPU) and native PyTorch (CUDA) agreed on **27/27** choice tasks
+  with a 0.3% mean confidence gap and identical accuracy — heterogeneous
+  replicas are interchangeable voters, and ensemble diversity must come from
+  the checkpoint, not the runtime
+  (`tools/cross_ecosystem_check.py`, `docs/research/2026-10-14-round95.md`).
 - **Real lineage identity over HTTP**: en/ml/td ONNX stems now register as
   distinct checkpoints; twelve shared choice tasks produced 11 cross-lineage
   splits, making model diversity visible to the live quorum.

@@ -30,6 +30,7 @@ NPU) all voting in the same consensus quorum.
 | Stem wire contract | docs/STEM-PROTOCOL.md | framework-free join spec (3 endpoints) |
 | Stage graph splitter | tools/stage_split.py | node-boundary cut, shared external weights |
 | Pipeline measurement | tools/stage_pipeline_check.py | real HTTP 2-stage chain, latency + throughput |
+| Cross-ecosystem votes | tools/cross_ecosystem_check.py | ONNX vs PyTorch, 27/27 agreement |
 | Adaptive stem timeouts | rootd.py per-stem EWMA | 5s cold -> 0.7-1.0s learned |
 | Slow-node isolation | tools/slow_stem_check.py | 4->3 quorum, 24ms cooldown skip |
 | LAN-interface HTTP | tools/lan_http_check.py + stemd advertise host | same-host protocol path verified |
@@ -75,6 +76,7 @@ NPU) all voting in the same consensus quorum.
 | Pipeline staging on one CPU | 0.95-1.13x throughput (no gain), +1.4-24.6 ms latency | round 94 |
 | Cross-device staging (CUDA+CPU) | 0.47x throughput, +50 ms latency | round 94 |
 | Activation interface size | 0.15-1.22 MB, loopback hop 1-2 ms | round 94 |
+| Ecosystem effect on votes | ONNX vs PyTorch: 27/27 agreement, conf gap 0.0028 | round 95 |
 
 ## What is NOT yet done
 
