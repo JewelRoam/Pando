@@ -139,6 +139,13 @@ devices, one mind.
   checkpoint *name* (a misnamed stem silently changes the gate), and a naive
   sweep would have shipped a threshold that acts on a minority vote
   (`docs/research/2026-10-14-round100.md`).
+- **Batched replication**: spore chunks transfer 64 at a time over one
+  keep-alive connection (`/spore/chunks/<name>/<start>/<count>`) while every
+  chunk is still hash-verified, with a per-chunk fallback for a bad chunk.
+  The 1.68 GB artifact went from ~125 s to **14.2 s** (8.8x, 113 MB/s,
+  byte-identical); end-to-end replication from ~4.5 min to **59 s**
+  (`tools/spore_transfer_check.py`,
+  `docs/research/2026-10-14-round106.md`).
 - **Self-replication loop**: `pandosi/reproduce.py` orders the existing
   pieces — Spore transfer, artifact attestation, lineage admission, and an
   operator-approved `reproduce` grant — and refuses before anything moves.

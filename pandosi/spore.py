@@ -392,6 +392,23 @@ class SporeServer:
                         self._send(404, b"{}")
                     else:
                         self._send(200, chunk, "application/octet-stream")
+                elif self.path.startswith("/spore/chunks/"):
+                    # Batched transfer: /spore/chunks/<name>/<start>/<count>
+                    # returns the concatenated chunks, so a multi-gigabyte
+                    # payload costs hundreds of requests instead of tens of
+                    # thousands (round 106). Per-chunk hashes still verify.
+                    parts = self.path.split("/")
+                    name = "/".join(parts[3:-2])
+                    start, count = int(parts[-2]), int(parts[-1])
+                    body = b"".join(
+                        server._chunks.get((name, index), b"")
+                        for index in range(start, start + count))
+                    ok = all((name, index) in server._chunks
+                             for index in range(start, start + count))
+                    if not ok or count <= 0:
+                        self._send(404, b"{}")
+                    else:
+                        self._send(200, body, "application/octet-stream")
                 else:
                     self._send(404, b"{}")
 
@@ -410,27 +427,82 @@ class SporeServer:
         return f"http://127.0.0.1:{self.port}"
 
 
+def _chunk_length(entry: dict, index: int) -> int:
+    """Every chunk is CHUNK_SIZE except the last one of a file."""
+    if index < entry["chunks"] - 1:
+        return CHUNK_SIZE
+    return entry["size"] - (entry["chunks"] - 1) * CHUNK_SIZE
+
+
+class SporeClient:
+    """A keep-alive HTTP client for one spore server."""
+
+    def __init__(self, base_url: str, headers: dict, timeout: float = 60.0):
+        import http.client
+        from urllib.parse import urlsplit
+
+        self._http = http.client
+        self._timeout = timeout
+        self._headers = dict(headers)
+        parts = urlsplit(base_url)
+        self._host = parts.hostname
+        self._port = parts.port or 80
+        self._connection = http.client.HTTPConnection(
+            self._host, self._port, timeout=timeout)
+
+    def get(self, path: str) -> bytes:
+        for attempt in range(2):
+            try:
+                self._connection.request("GET", path, headers=self._headers)
+                response = self._connection.getresponse()
+                body = response.read()
+                if response.status != 200:
+                    raise ValueError(
+                        f"GET {path} -> {response.status}")
+                return body
+            except (OSError, self._http.HTTPException, ValueError):
+                if attempt:
+                    raise
+                # A dropped keep-alive connection is worth exactly one retry
+                # on a fresh socket before the caller sees a failure.
+                self.close()
+                self._reconnect()
+        raise AssertionError("unreachable")
+
+    def _reconnect(self) -> None:
+        self._connection = self._http.HTTPConnection(
+            self._host, self._port, timeout=self._timeout)
+
+    def close(self) -> None:
+        try:
+            self._connection.close()
+        except Exception:
+            pass
+
+
 def pull_spore(manifest_url: str, out_dir: Path, verify_key,
                sandbox_confirmed: bool = False,
-               auth_token: str | None = None) -> dict:
+               auth_token: str | None = None,
+               batch_chunks: int = 64) -> dict:
     """Pull a spore payload with verify-on-arrival for every chunk.
 
     Refuses without sandbox_confirmed=True (see THREAT-MODEL.md). Verifies:
     signature over the manifest, per-file Merkle roots, then on-disk files.
+
+    Chunks arrive ``batch_chunks`` at a time over one keep-alive connection
+    (round 106); every chunk is still hash-checked before it is written, and
+    a batch that fails verification falls back to per-chunk re-fetching.
+    ``batch_chunks=1`` reproduces the original request-per-chunk behaviour.
     """
     if not sandbox_confirmed:
         raise PermissionError(
             "spore pull requires sandbox_confirmed=True (container/VM target); "
             "see THREAT-MODEL.md")
 
-    import urllib.request  # local import keeps module import light
-
     headers = ({"Authorization": f"Bearer {auth_token}"}
                if auth_token else {})
-    with urllib.request.urlopen(urllib.request.Request(
-            f"{manifest_url}/spore/manifest", headers=headers),
-            timeout=30) as resp:
-        manifest = json.loads(resp.read())
+    client = SporeClient(manifest_url, headers)
+    manifest = json.loads(client.get("/spore/manifest"))
     if not verify_manifest(manifest, verify_key):
         raise ValueError("manifest signature verification FAILED")
 
@@ -438,29 +510,44 @@ def pull_spore(manifest_url: str, out_dir: Path, verify_key,
     out_dir.mkdir(parents=True, exist_ok=True)
     stats = {"files": {}, "chunks_pulled": 0, "chunks_rejected": 0}
 
-    for name, entry in manifest["files"].items():
-        target = out_dir / name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with target.open("wb") as fh:
-            for i in range(entry["chunks"]):
-                expected = bytes.fromhex(entry["chunk_hashes"][i])
-                chunk = None
-                # Selective re-fetch: a corrupt chunk is re-requested up to
-                # 3 times (transient corruption vs persistent tampering).
-                for attempt in range(3):
-                    url = f"{manifest_url}/spore/chunk/{name}/{i}"
-                    with urllib.request.urlopen(urllib.request.Request(
-                            url, headers=headers), timeout=30) as resp:
-                        chunk = resp.read()
-                    if hashlib.sha256(chunk).digest() == expected:
-                        break
-                else:
-                    raise ValueError(
-                        f"chunk {name}#{i} failed hash check after 3 attempts "
-                        "(tampered or persistently corrupt)")
-                fh.write(chunk)
-                stats["chunks_pulled"] += 1
-        stats["files"][name] = verify_file(target, manifest, name)
+    def fetch_chunk(name: str, entry: dict, index: int) -> bytes:
+        """One chunk, with the selective re-fetch rule."""
+        expected = bytes.fromhex(entry["chunk_hashes"][index])
+        for _ in range(3):
+            chunk = client.get(f"/spore/chunk/{name}/{index}")
+            if hashlib.sha256(chunk).digest() == expected:
+                return chunk
+            stats["chunks_rejected"] += 1
+        raise ValueError(
+            f"chunk {name}#{index} failed hash check after 3 attempts "
+            "(tampered or persistently corrupt)")
+
+    try:
+        for name, entry in manifest["files"].items():
+            target = out_dir / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with target.open("wb") as fh:
+                start = 0
+                while start < entry["chunks"]:
+                    count = min(batch_chunks, entry["chunks"] - start)
+                    body = client.get(f"/spore/chunks/{name}/{start}/{count}")
+                    offset = 0
+                    for index in range(start, start + count):
+                        length = _chunk_length(entry, index)
+                        chunk = body[offset:offset + length]
+                        offset += length
+                        expected = bytes.fromhex(entry["chunk_hashes"][index])
+                        if len(chunk) != length or \
+                                hashlib.sha256(chunk).digest() != expected:
+                            # One bad chunk in a batch: refetch it alone so a
+                            # single transient fault does not fail the file.
+                            chunk = fetch_chunk(name, entry, index)
+                        fh.write(chunk)
+                        stats["chunks_pulled"] += 1
+                    start += count
+            stats["files"][name] = verify_file(target, manifest, name)
+    finally:
+        client.close()
     return stats
 
 

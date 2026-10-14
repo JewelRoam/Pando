@@ -289,6 +289,58 @@ class TestSmoke(unittest.TestCase):
                 grants.name + ".audit.jsonl"))
             self.assertEqual(audit["status"], "valid")
 
+    def test_batched_spore_transfer(self):
+        """Batches arrive verified per chunk, with a per-chunk fallback.
+
+        Round 105 moved a 1.68 GB artifact in roughly four minutes because
+        every 64 KiB chunk was its own request; batching cut the wall time
+        8.8x (round 106). Correctness must not depend on the transport being
+        polite, so one transient corruption inside a batch has to fall back
+        to fetching that chunk alone.
+        """
+        import secrets
+
+        from pandosi.spore import (SporeClient, SporeServer, build_manifest,
+                                   generate_signing_key, pull_spore)
+
+        tmp = Path(tempfile.mkdtemp(prefix="pandosi-batch-"))
+        payload = tmp / "model.bin"
+        # 151 chunks: several batches, with a short final chunk.
+        body = secrets.token_bytes(150 * 64 * 1024 + 1234)
+        payload.write_bytes(body)
+        key = generate_signing_key()
+        manifest = build_manifest({"model.bin": payload}, key)
+        server = SporeServer(manifest, {"model.bin": payload})
+        server.start()
+        try:
+            out = tmp / "plain"
+            stats = pull_spore(server.url(), out, key.verify_key,
+                               sandbox_confirmed=True, batch_chunks=16)
+            self.assertEqual(stats["chunks_pulled"], 151)
+            self.assertEqual((out / "model.bin").read_bytes(), body)
+
+            original = SporeClient.get
+            state = {"faulted": False}
+
+            def flaky(client, path):
+                data = original(client, path)
+                if path.startswith("/spore/chunks/") and not state["faulted"]:
+                    state["faulted"] = True
+                    return data[:-1] + bytes([data[-1] ^ 0xFF])
+                return data
+
+            SporeClient.get = flaky
+            try:
+                recovered = tmp / "recovered"
+                pull_spore(server.url(), recovered, key.verify_key,
+                           sandbox_confirmed=True, batch_chunks=16)
+            finally:
+                SporeClient.get = original
+            self.assertTrue(state["faulted"], "the fault was never injected")
+            self.assertEqual((recovered / "model.bin").read_bytes(), body)
+        finally:
+            server.stop()
+
     def test_reproduction_policy_fails_closed(self):
         """Every reason to refuse is checked before anything transfers.
 

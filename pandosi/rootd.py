@@ -394,6 +394,26 @@ def build_handler(coordinator: Coordinator, root=None):
                     self.send_header("Content-Length", str(len(chunk)))
                     self.end_headers()
                     self.wfile.write(chunk)
+            elif (self.path.startswith("/spore/chunks/")
+                    and root is not None
+                    and getattr(root, chr(115)+chr(112)+chr(111)+chr(114)+chr(101)+chr(95)+chr(109)+chr(97)+chr(110)+chr(105)+chr(102)+chr(101)+chr(115)+chr(116), None) is not None):
+                # Batched transfer, same as SporeServer (round 106).
+                parts = self.path.split("/")
+                name = "/".join(parts[3:-2])
+                start, count = int(parts[-2]), int(parts[-1])
+                present = all((name, index) in root.spore_chunks
+                              for index in range(start, start + count))
+                if not present or count <= 0:
+                    self._send(404, b"{}")
+                else:
+                    body = b"".join(root.spore_chunks[(name, index)]
+                                    for index in range(start, start + count))
+                    self.send_response(200)
+                    self.send_header("Content-Type",
+                                     "application/octet-stream")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
             else:
                 self._send(404, {"error": "not found"})
 
