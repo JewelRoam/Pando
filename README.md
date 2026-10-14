@@ -37,6 +37,9 @@ devices, one mind.
 - **Remote-link degradation recovery**: a proxied worker degraded from
   100 ms to 1.5 s, was timed out and skipped in a 16 ms decision, then
   rejoined after cooldown when the link recovered.
+- **Runtime elastic membership**: one running root moved from 3 to 5 workers
+  by live registration, then back to 4 after heartbeat expiry, with a
+  successful decision at every size.
 - **Signed self-replication (sandboxed)**: Spore payload = weights +
   playbook + harness. Ed25519 manifest, 64KiB chunk Merkle tree,
   per-chunk hash-on-arrival, selective re-fetch, TOFU key pinning,

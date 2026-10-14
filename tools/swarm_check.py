@@ -107,6 +107,8 @@ def main() -> int:
     parser.add_argument("--root-port", type=int, default=0,
                         help="root loopback port; 0 selects a free port")
     parser.add_argument("--stems", type=int, default=5)
+    parser.add_argument("--initial-stems", type=int, default=3,
+                        help="workers started before the first decision")
     parser.add_argument("--yes", action="store_true",
                         help="approve local isolated OS process creation")
     args = parser.parse_args()
@@ -114,6 +116,8 @@ def main() -> int:
         parser.error("create local root/stem processes only with --yes")
     if not 3 <= args.stems <= 16:
         parser.error("--stems must be between 3 and 16")
+    if not 3 <= args.initial_stems <= args.stems:
+        parser.error("--initial-stems must be between 3 and --stems")
     if args.root_port and not 1024 <= args.root_port <= 65535:
         parser.error("--root-port must be a high port")
 
@@ -125,7 +129,9 @@ def main() -> int:
     checkpoints = ["en", "ml", "td", "en", "ml", "td", "en", "ml",
                    "td", "en", "ml", "td", "en", "ml", "td", "en"]
     stem_ids = [f"swarm-stem-{index}" for index in range(args.stems)]
-    summary: dict = {"root_url": None, "stems": stem_ids, "steps": []}
+    summary: dict = {"root_url": None, "stems": stem_ids,
+                     "initial_stems": stem_ids[:args.initial_stems],
+                     "steps": []}
 
     with tempfile.TemporaryDirectory(prefix="pandosi-swarmcheck-") as td:
         work = Path(td)
@@ -173,7 +179,39 @@ def main() -> int:
                 raise RuntimeError(
                     f"unauthenticated registration was not rejected: {payload}")
 
-            for stem_id, checkpoint in zip(stem_ids, checkpoints):
+            initial_ids = stem_ids[:args.initial_stems]
+            initial_checkpoints = checkpoints[:args.initial_stems]
+            for stem_id, checkpoint in zip(initial_ids, initial_checkpoints):
+                stem_procs.append(subprocess.Popen(
+                    [python, "-m", "pandosi.stemd", "--node-id", stem_id,
+                     "--checkpoint", checkpoint, "--root", root_url,
+                     "--pairing-token-file", str(token_file)],
+                    cwd=ROOT, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=creationflags))
+                time.sleep(0.05)
+
+            nodes = wait_nodes(root_url, token, set(initial_ids))
+            summary["registered_initial"] = sorted(nodes.get("nodes", {}))
+            summary["steps"].append({
+                "step": "register_initial", "code": 0,
+                "count": len(summary["registered_initial"])})
+
+            initial = decide(root_url, token, "swarm-check-initial")
+            summary["decision_initial"] = {
+                "choice": initial.get("choice"),
+                "tier": initial.get("tier"),
+                "responded": initial.get("responded"),
+                "quorum_size": initial.get("quorum_size")}
+            summary["steps"].append({"step": "decision_initial", "code": 0})
+            if initial.get("responded") != args.initial_stems:
+                raise RuntimeError(
+                    f"initial quorum responded {initial.get('responded')}, "
+                    f"expected {args.initial_stems}")
+
+            for stem_id, checkpoint in zip(
+                    stem_ids[args.initial_stems:],
+                    checkpoints[args.initial_stems:]):
                 stem_procs.append(subprocess.Popen(
                     [python, "-m", "pandosi.stemd", "--node-id", stem_id,
                      "--checkpoint", checkpoint, "--root", root_url,
@@ -185,7 +223,7 @@ def main() -> int:
 
             nodes = wait_nodes(root_url, token, set(stem_ids))
             summary["registered"] = sorted(nodes.get("nodes", {}))
-            summary["steps"].append({"step": "register", "code": 0,
+            summary["steps"].append({"step": "scale_up", "code": 0,
                                      "count": len(summary["registered"])})
 
             first = decide(root_url, token, "swarm-check-before-shrink")

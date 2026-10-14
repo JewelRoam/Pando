@@ -19,8 +19,8 @@ The checker starts independent OS processes, not in-process test doubles:
 It verifies:
 
 1. `/register` without a token returns `403`;
-2. all five stems register;
-3. full quorum returns a real decision;
+2. three initial stems register and answer as a quorum;
+3. two more stems join the running root and enlarge the quorum to five;
 4. one stem is terminated;
 5. heartbeat expiry removes it from root;
 6. the quorum shrinks from 5 to 4 and still answers;

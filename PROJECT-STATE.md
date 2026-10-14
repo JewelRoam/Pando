@@ -30,6 +30,7 @@ NPU) all voting in the same consensus quorum.
 | Slow-node isolation | tools/slow_stem_check.py | 4->3 quorum, 24ms cooldown skip |
 | LAN-interface HTTP | tools/lan_http_check.py + stemd advertise host | same-host protocol path verified |
 | Remote-link degradation | tools/remote_latency_check.py | timeout -> skip -> recovery verified |
+| Runtime elastic membership | tools/swarm_check.py | live 3 -> 5 -> 4 transitions |
 
 ## What is proven (key numbers)
 
