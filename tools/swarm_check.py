@@ -47,6 +47,8 @@ def request(url: str, *, method: str = "GET", payload: dict | None = None,
         except Exception:
             payload = {"error": str(exc)}
         return exc.code, payload
+    except urllib.error.URLError as exc:
+        return 0, {"error": str(exc)}
 
 
 def wait_root(url: str, timeout: float = 20) -> dict:
