@@ -18,3 +18,4 @@ Timestamped, sanitized snapshots of this PandoSI working session.
 | 2026-10-14T130003 | `docs/session-logs/2026-10-14T130003-session-backup.md` | 5589e647fe67 | 168/774/1376 | automatic snapshot after dff3e16 chore: session backup 2026-10-14T125643 |
 | 2026-10-14T130443 | `docs/session-logs/2026-10-14T130443-session-backup.md` | 3d83ac3c8ae1 | 168/781/1392 | automatic snapshot after 268dc12 fix: enforce calibration where the risk is, not in the coordinator |
 | 2026-10-14T131448 | `docs/session-logs/2026-10-14T131448-session-backup.md` | 55dd4ac9a06a | 169/793/1412 | automatic snapshot after 3321add feat: artifact attestation for declared lineages |
+| 2026-10-14T131933 | `docs/session-logs/2026-10-14T131933-session-backup.md` | 1cea6dbc57db | 170/801/1434 | automatic snapshot after a33e37a feat: sign playbooks and pin the signer at load |
