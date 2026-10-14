@@ -14,3 +14,4 @@ Timestamped, sanitized snapshots of this PandoSI working session.
 | 2026-10-14T122748 | `docs/session-logs/2026-10-14T122748-session-backup.md` | 83a256cb23f9 | 165/719/1264 | automatic snapshot after 43259be docs: transport-aware topology rule (replicate vs stage) |
 | 2026-10-14T123007 | `docs/session-logs/2026-10-14T123007-session-backup.md` | ed5d0a19550a | 166/724/1273 | automatic snapshot after 1919829 chore: session backup 2026-10-14T122749 |
 | 2026-10-14T124728 | `docs/session-logs/2026-10-14T124728-session-backup.md` | 03594b59cca8 | 166/749/1332 | automatic snapshot after 0d022e0 feat: topology planner (replicate vs stage vs infeasible) |
+| 2026-10-14T125642 | `docs/session-logs/2026-10-14T125642-session-backup.md` | 9c7d5bf99e10 | 167/767/1363 | automatic snapshot after aa2b1c4 test: measure the swarm gate's ri[TOKEN] |
