@@ -493,6 +493,21 @@ def build_handler(coordinator: Coordinator, root=None):
                 return
             if self.path == "/nodes":
                 self._send(200, {"nodes": coordinator.live_nodes()})
+            elif self.path == "/status":
+                # What an elastic supervisor needs to decide, in one read
+                # (round 113): how much checking is left to spend, and how
+                # slow decisions actually are.
+                self._send(200, {
+                    "members": len(coordinator.live_nodes()),
+                    "blocked": sorted(coordinator.blocked),
+                    "quorum_k": coordinator.quorum_k,
+                    "quorum_floor": coordinator.quorum_floor,
+                    "quorum_ceiling": coordinator.quorum_ceiling,
+                    "adaptive": coordinator.adaptive_quorum,
+                    "latency_target_ms": coordinator.latency_target_ms,
+                    "decision_ewma_ms": coordinator._decision_ewma_ms,
+                    "question_categories": coordinator.question_categories,
+                })
             elif self.path == "/playbook" and root is not None \
                     and getattr(root, "playbook", None) is not None:
                 self._send(200, {

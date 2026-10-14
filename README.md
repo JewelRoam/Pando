@@ -139,6 +139,16 @@ devices, one mind.
   checkpoint *name* (a misnamed stem silently changes the gate), and a naive
   sweep would have shipped a threshold that acts on a minority vote
   (`docs/research/2026-10-14-round100.md`).
+- **The elasticity loop closes**: `GET /status` exposes the swarm's own
+  signals (members, quorum size/floor/ceiling, latency target, decision
+  EWMA) and `ElasticSupervisor` decides grow / retire / hold. It grows only
+  when decisions are slow, the quorum is already at its floor and there are
+  members to spare — anything else is a policy question, not a capacity one.
+  Measured: 2 members at 92.8 ms → grow → 3 members at ~61 ms, then three
+  rounds of hold. A playbook category must now resolve to a real gating
+  table, so a typo fails at load instead of silently yielding the permissive
+  floor (`tools/elastic_loop_check.py`,
+  `docs/research/2026-10-14-round113.md`).
 - **Category by declaration**: a playbook question declares
   `category = "security"`, so the quorum floor follows what the operator
   wrote down rather than a keyword scan of the question text. `risk_check`

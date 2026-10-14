@@ -108,6 +108,8 @@ NPU) all voting in the same consensus quorum.
 | Per-category quorum floors | playbook gating quorum_floor | security k=4 vs ordinary k=2 under load |
 | Retirement | pandosi/elastic.py + POST /retire + blocklist | slow member removed, stays removed |
 | Declared categories | playbook question category + conservative default | risk_check holds k=4, not k=2 |
+| Category validation | load rejects an unknown category | typo fails at load, not at decision time |
+| Elastic supervisor | GET /status + ElasticSupervisor | grew 2 -> 3 members, p50 92.8 -> 61 ms |
 | Reproduce grant | grants.py action "reproduce" | operator-approved, expiring |
 
 ## What is NOT yet done

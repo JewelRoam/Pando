@@ -289,6 +289,44 @@ class TestSmoke(unittest.TestCase):
                 grants.name + ".audit.jsonl"))
             self.assertEqual(audit["status"], "valid")
 
+    def test_elastic_supervisor_policy(self):
+        """Grow only when the other dials are exhausted.
+
+        A slow decision with quorum left to spend is a policy question; slow
+        at the floor with members to spare is a capacity one (round 113).
+        """
+        from pandosi.elastic import ElasticSupervisor
+
+        supervisor = ElasticSupervisor("http://127.0.0.1:1", max_members=5,
+                                      keep=2)
+
+        def status(**overrides) -> dict:
+            base = {"members": 3, "quorum_k": 1, "quorum_floor": 1,
+                    "latency_target_ms": 50.0, "decision_ewma_ms": 200.0,
+                    "adaptive": True}
+            base.update(overrides)
+            return base
+
+        self.assertEqual(supervisor.decide(status()).action, "grow")
+        # Quorum head-room: shrink the quorum before adding hardware.
+        held = supervisor.decide(status(quorum_k=3))
+        self.assertEqual(held.action, "hold")
+        self.assertIn("can still shrink", held.reason)
+        # At the member ceiling, more members are not the answer.
+        capped = supervisor.decide(status(members=5))
+        self.assertEqual(capped.action, "hold")
+        self.assertIn("per-decision-cost", capped.reason)
+        # Inside the target, leave it alone.
+        calm = supervisor.decide(status(decision_ewma_ms=52.0))
+        self.assertEqual(calm.action, "hold")
+        self.assertIn("within", calm.reason)
+        # A static quorum cannot shrink, so the floor test does not apply.
+        static = supervisor.decide(status(adaptive=False, quorum_k=3))
+        self.assertEqual(static.action, "grow")
+        # No signal yet: never act on nothing.
+        self.assertEqual(
+            supervisor.decide(status(decision_ewma_ms=None)).action, "hold")
+
     def test_quorum_floor_is_per_category(self):
         """A security decision keeps its voters under latency pressure.
 

@@ -105,6 +105,21 @@ def load_playbook(path: Path) -> Playbook:
     # Identity is declared, not inferred from whatever string a stem sends.
     # A declared id must also have a calibration table, so an operator cannot
     # admit a lineage whose confidence scale is unknown (round 101).
+    categories = {q["id"]: q["category"].strip()
+                  for q in questions if q.get("category")}
+    # A declared category must resolve to a floor, or the declaration is a
+    # typo that silently yields the permissive default (round 113). "ordinary"
+    # is the top-level [gating] table and is always valid.
+    gating_raw = raw.get("gating") or {}
+    known_categories = {name for name, value in gating_raw.items()
+                        if isinstance(value, dict)}
+    for qid, category in categories.items():
+        if category != "ordinary" and category not in known_categories:
+            raise ValueError(
+                f"question {qid!r}: category {category!r} has no "
+                f"[gating.{category}] table (known: "
+                f"{sorted(known_categories) + ['ordinary']})")
+
     lineages = None
     lineages_raw = raw.get("lineages")
     if lineages_raw is not None:
@@ -147,8 +162,7 @@ def load_playbook(path: Path) -> Playbook:
         questions=questions,
         actions=actions,
         lineages=lineages,
-        question_categories={q["id"]: q["category"].strip()
-                             for q in questions if q.get("category")},
+        question_categories=categories,
         source_path=str(path),
     )
 

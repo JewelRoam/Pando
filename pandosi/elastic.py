@@ -1,4 +1,4 @@
-"""Retirement: the half of elasticity that removes a device.
+"""Elasticity: growing, shrinking, and deciding which.
 
 Reproduction grows a swarm (rounds 105-108) and the adaptive quorum decides
 how much of it to use per decision (rounds 109-110). Nothing removed a
@@ -10,6 +10,11 @@ So retirement is a *decision* plus a *durable* effect: the root blocks the
 node, and refusing its re-registration is what makes it stick. Removing a
 device is sensitive, so it goes through the same grant ledger and journal as
 reproduction.
+
+`ElasticSupervisor` closes the loop: it reads the root's own signals and says
+when to grow, when to retire, and - more often - when to leave the swarm
+alone, because a slow decision at the quorum floor is a capacity problem
+while a slow decision with quorum left to spend is a policy question.
 """
 
 from __future__ import annotations
@@ -139,3 +144,134 @@ class Retirer:
         reason = (f"slowest voter above {max_latency_ms:.0f} ms while "
                   f"{len(self.members())} members are live")
         return [self.retire(node_id, reason)], refusals
+@dataclass
+class Supervision:
+    """What the supervisor decided, and why."""
+
+    action: str                      # grow | retire | hold
+    reason: str
+    target: str | None = None
+    latency_ms: float | None = None
+    quorum_k: int | None = None
+    members: int = 0
+
+
+class ElasticSupervisor:
+    """Decide whether the swarm should grow, shrink, or leave itself alone.
+
+    The loop this closes: reproduction can add a device (rounds 105-108), the
+    adaptive quorum can spend checking power for throughput (round 110), and
+    retirement can remove a device (round 111) - but nothing decided *when*.
+
+    Growth is only proposed when the swarm is out of room on the other two
+    dials: decisions are slow, the quorum is already at its floor, and there
+    are members to spare below the ceiling. Anything else is a request to
+    spend checking power, which is a policy question, not a capacity one.
+    """
+
+    def __init__(self, root_url: str, pairing_token: str | None = None,
+                 max_members: int = 5, keep: int = 2,
+                 max_member_latency_ms: float = 250.0,
+                 pressure_factor: float = 1.1, timeout: float = 30):
+        self.root_url = root_url.rstrip("/")
+        self.pairing_token = pairing_token
+        self.max_members = max_members
+        self.keep = keep
+        self.max_member_latency_ms = max_member_latency_ms
+        self.pressure_factor = pressure_factor
+        self.timeout = timeout
+
+    def _get(self, path: str) -> dict:
+        headers = {"Authorization": f"Bearer {self.pairing_token}"} \
+            if self.pairing_token else {}
+        request = urllib.request.Request(f"{self.root_url}{path}",
+                                         headers=headers)
+        with urllib.request.urlopen(request, timeout=self.timeout) as resp:
+            return json.loads(resp.read())
+
+    def status(self) -> dict:
+        return self._get("/status")
+
+    def decide(self, status: dict | None = None,
+               retired: list[str] | None = None) -> Supervision:
+        """One decision. ``status`` is injectable so the policy is testable."""
+        status = status or self.status()
+        members = int(status.get("members", 0))
+        quorum_k = status.get("quorum_k")
+        floor = status.get("quorum_floor")
+        target = status.get("latency_target_ms")
+        latency = status.get("decision_ewma_ms")
+        adaptive = bool(status.get("adaptive"))
+
+        if retired:
+            return Supervision("retire", retired[0], target=retired[1],
+                               latency_ms=latency, quorum_k=quorum_k,
+                               members=members)
+        if latency is None or target is None:
+            return Supervision("hold", "no latency signal yet",
+                               latency_ms=latency, quorum_k=quorum_k,
+                               members=members)
+        if latency <= target * self.pressure_factor:
+            return Supervision("hold",
+                               f"{latency:.0f} ms within {target:.0f} ms "
+                               f"target (x{self.pressure_factor})",
+                               latency_ms=latency, quorum_k=quorum_k,
+                               members=members)
+        if adaptive and floor is not None and quorum_k is not None \
+                and quorum_k > floor:
+            return Supervision(
+                "hold",
+                f"{latency:.0f} ms is slow but the quorum can still shrink "
+                f"({quorum_k} > floor {floor})",
+                latency_ms=latency, quorum_k=quorum_k, members=members)
+        if members >= self.max_members:
+            return Supervision(
+                "hold",
+                f"{latency:.0f} ms and at the member ceiling "
+                f"({members}/{self.max_members}); this is a "
+                "per-decision-cost problem, not a capacity one",
+                latency_ms=latency, quorum_k=quorum_k, members=members)
+        return Supervision(
+            "grow",
+            f"{latency:.0f} ms > {target * self.pressure_factor:.0f} ms and "
+            f"the quorum is at its floor ({quorum_k}) with "
+            f"{members}/{self.max_members} members",
+            latency_ms=latency, quorum_k=quorum_k, members=members)
+
+    def step(self, grow=None, retire=None,
+             journal: Journal | None = None) -> Supervision:
+        """Decide, then execute. ``grow``/``retire`` are caller callbacks."""
+        members = []
+        try:
+            members = Retirer(self.root_url, self.pairing_token,
+                              timeout=self.timeout).members()
+        except (urllib.error.URLError, urllib.error.HTTPError):
+            pass
+        slow = [member for member in members
+                if member.latency_ewma_ms is not None
+                and member.latency_ewma_ms > self.max_member_latency_ms]
+        if len(members) > self.keep and slow:
+            slowest = max(slow, key=lambda member: member.latency_ewma_ms)
+            supervision = Supervision(
+                "retire",
+                f"{slowest.node_id} at {slowest.latency_ewma_ms:.0f} ms "
+                f"while {len(members)} members are live",
+                target=slowest.node_id,
+                latency_ms=slowest.latency_ewma_ms, members=len(members))
+        else:
+            supervision = self.decide()
+        if supervision.action == "grow" and grow is not None:
+            supervision.reason += f"; grow -> {grow()}"
+        elif supervision.action == "retire" and retire is not None:
+            outcome = retire(supervision.target, supervision.reason)
+            supervision.reason = (outcome.reason if outcome else
+                                  supervision.reason)
+        if journal is not None:
+            journal.append(Outcome(
+                observation_id=supervision.target or "swarm",
+                tier=supervision.action, acted=supervision.action != "hold",
+                choice=None, agreement=0.0, mean_probability=0.0,
+                responded=supervision.members,
+                quorum_size=supervision.quorum_k or 0,
+                reason=supervision.reason))
+        return supervision
