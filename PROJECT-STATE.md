@@ -60,6 +60,7 @@ NPU) all voting in the same consensus quorum.
 | Packaged assets | pandosi/resources.py + setuptools data-files | playbook + calibration found outside repo |
 | Wheel integrity | tools/verify_wheel.py + CI build | 37 entries, required code/assets present |
 | Source distribution | tools/verify_sdist.py + release workflow | sdist checked, tag release prepared |
+| GitHub URL install | tools/package_check.py --source git | clone -> wheel -> console verified |
 | CUDA vs CPU p50 | 15.0 ms vs 125.6 ms (8.36x) | round 65 |
 | CUDA decision parity | 14/14 English tasks; max conf delta 0.0009 | round 65 |
 | Four-runtime HTTP p50 | 430.5 ms sequential -> 237.8 ms parallel | rounds 65/66 |

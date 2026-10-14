@@ -29,12 +29,15 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--extras", default="",
                         help="comma-separated extras, e.g. lan,onnx")
+    parser.add_argument("--source", choices=["local", "git"], default="local")
+    parser.add_argument("--git-ref", default="main")
     parser.add_argument("--keep", action="store_true")
     args = parser.parse_args()
 
     temp = Path(tempfile.mkdtemp(prefix="pandosi-package-check-"))
     venv = temp / "venv"
-    report = {"temp": str(temp), "extras": args.extras, "steps": []}
+    report = {"temp": str(temp), "extras": args.extras,
+              "source": args.source, "steps": []}
     try:
         code = run([sys.executable, "-m", "venv", str(venv)], temp)
         report["steps"].append({"step": "venv", "code": code.returncode})
@@ -43,9 +46,18 @@ def main() -> int:
 
         python = venv / ("Scripts/python.exe" if os.name == "nt"
                          else "bin/python")
-        target = str(ROOT)
-        if args.extras:
-            target = f"{target}[{args.extras}]"
+        if args.source == "git":
+            requirement = "pandosi"
+            if args.extras:
+                requirement += f"[{args.extras}]"
+            target = (
+                f"{requirement} @ "
+                f"git+https://github.com/JewelRoam/PandoSI.git@{args.git_ref}")
+        else:
+            target = str(ROOT)
+            if args.extras:
+                target = f"{target}[{args.extras}]"
+        report["target"] = target
         install = run(
             [str(python), "-m", "pip", "install", "--no-cache-dir", target],
             temp)
