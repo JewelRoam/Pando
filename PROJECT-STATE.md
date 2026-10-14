@@ -101,6 +101,8 @@ NPU) all voting in the same consensus quorum.
 | Packed chunk store | ChunkStore (chunks.bin + index) | delta leg 5.84 s vs 10.49 s cold |
 | Delta in the live path | rootd --chunking cdc + join --chunk-store | end-to-end 105 MB vs 1610 MB |
 | rlcd-v7 calibration | assets/calibration/rlcd-v7.json | T=2.6704 from round 81 |
+| Scaling law of the quorum | tools/scaling_law_check.py | replicas alone +9%; fixed k + rotation 1.9x |
+| Configurable quorum size | rootd --quorum-k + per-decision rotation | scaling unit is the quorum |
 | Reproduce grant | grants.py action "reproduce" | operator-approved, expiring |
 
 ## What is NOT yet done

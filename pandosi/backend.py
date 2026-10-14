@@ -22,15 +22,33 @@ class MockBackend:
     """
 
     def __init__(self, node_id: str, checkpoint: str = "mock",
-                 correct_choice: str | None = None, agree_rate: float = 1.0):
+                 correct_choice: str | None = None, agree_rate: float = 1.0,
+                 delay_ms: float = 0.0, serialize: bool = False):
         self.node_id = node_id
         self.checkpoint = checkpoint
         self.correct_choice = correct_choice
         self.agree_rate = agree_rate
+        # A simulated device speed, so scaling behaviour can be measured
+        # without loading a real model per replica (round 109).
+        self.delay_ms = float(delay_ms)
+        # A real device serves one decision at a time; an unsynchronised
+        # sleep is infinitely parallel and hides the capacity limit entirely.
+        self.serialize = bool(serialize)
+        self._gate = None
 
     def decide(self, req: DecisionRequest) -> Vote:
         if not req.candidates:
             raise ValueError("candidates must be non-empty")
+        if self.delay_ms:
+            import time
+            if self.serialize:
+                import threading
+                if self._gate is None:
+                    self._gate = threading.Lock()
+                with self._gate:
+                    time.sleep(self.delay_ms / 1000.0)
+            else:
+                time.sleep(self.delay_ms / 1000.0)
         digest = hashlib.sha256(f"{req.state}|{req.question}".encode()).digest()
         hashed_choice = req.candidates[digest[0] % len(req.candidates)]
 

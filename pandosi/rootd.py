@@ -72,6 +72,7 @@ class Coordinator:
                  rollout_dir: str | Path = "rollouts"):
         self.nodes: dict[str, dict] = {}
         self._lock = threading.Lock()
+        self._pick_rotation = 0
         self._transport = transport
         self.quorum_k = quorum_k
         self.gating = gating or {}
@@ -136,7 +137,13 @@ class Coordinator:
 
     def pick_quorum(self, k: int) -> list[tuple[str, dict]]:
         """Pick k live nodes maximizing checkpoint diversity (round-robin
-        across checkpoint groups). Falls back to any live nodes."""
+        across checkpoint groups). Falls back to any live nodes.
+
+        Within a checkpoint group the starting member rotates per decision, so
+        concurrent decisions can use disjoint subsets. Without that rotation
+        every decision used the same voters and adding replicas bought no
+        capacity at all (round 109).
+        """
         nodes = self._selectable_nodes()
         groups: dict[str, list[tuple[str, dict]]] = {}
         for nid, info in nodes.items():
@@ -147,6 +154,13 @@ class Coordinator:
                 if item[1]["stats"].get("latency_ewma_ms") is not None
                 else float("inf"),
                 item[0]))
+        with self._lock:
+            rotation = self._pick_rotation
+            self._pick_rotation = (rotation + 1) % 1_000_003
+        for checkpoint, members in groups.items():
+            if len(members) > 1:
+                shift = rotation % len(members)
+                groups[checkpoint] = members[shift:] + members[:shift]
         picked: list[tuple[str, dict]] = []
         group_iter = iter(sorted(groups))
         while len(picked) < k and groups:
@@ -614,6 +628,9 @@ def main() -> None:
                         help="directory for local rollout evidence")
     parser.add_argument("--stem-call-timeout", type=float, default=CALL_TIMEOUT,
                         help="maximum per-stem call timeout")
+    parser.add_argument("--quorum-k", type=int, default=QUORUM_K,
+                        help="voters per decision; keep it fixed while adding "
+                             "replicas or every decision uses every replica")
     parser.add_argument("--initial-stem-timeout", type=float,
                         default=INITIAL_STEM_TIMEOUT,
                         help="discovery timeout before latency is learned")
@@ -655,6 +672,7 @@ def main() -> None:
     coordinator = Coordinator(
         call_timeout=args.stem_call_timeout,
         initial_stem_timeout=args.initial_stem_timeout,
+        quorum_k=args.quorum_k,
         rollout_dir=args.rollout_dir)
     root = Root(coordinator=coordinator, host=listen_host, port=args.port,
                 spore_files=spore_files, chunking=args.chunking)

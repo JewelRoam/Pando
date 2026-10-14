@@ -139,6 +139,14 @@ devices, one mind.
   checkpoint *name* (a misnamed stem silently changes the gate), and a naive
   sweep would have shipped a threshold that acts on a minority vote
   (`docs/research/2026-10-14-round100.md`).
+- **What scales is the quorum, not the replica**: with a device-like
+  serialized replica, going 1 → 6 replicas bought only 9% throughput while
+  every voter was used on every decision. With `--quorum-k 2` fixed and
+  member rotation, the same 6 replicas reached **1.9x** (37.4 vs 19.6 req/s
+  at concurrency 4), bounded by `N/k = 3` parallel decisions. Capacity is
+  bought from agreement diversity, so "reproduce more" and "decide faster"
+  are different instructions (`tools/scaling_law_check.py`,
+  `docs/research/2026-10-14-round109.md`).
 - **Delta replication, end to end**: `rootd --chunking cdc` serves
   content-defined manifests and `join --chunk-store` reuses what a replica
   already holds. Two real roots and two real joiners: the second device

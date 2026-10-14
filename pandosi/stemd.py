@@ -142,6 +142,12 @@ def main() -> None:
     parser.add_argument("--model", default="convaiinnovations/laya",
                         help="HF id or local path for the torch (laya) backend")
     parser.add_argument("--device", default="CPU")
+    parser.add_argument("--delay-ms", type=float, default=0.0,
+                        help="mock backend only: simulated per-decision "
+                             "device speed, for scaling measurements")
+    parser.add_argument("--serialize", action="store_true",
+                        help="mock backend only: serve one decision at a time, "
+                             "like a real device")
     parser.add_argument("--pad-to", type=int, default=None,
                         help="static-shape bucket for non-CPU EUs (default 256 on GPU/NPU)")
     args = parser.parse_args()
@@ -179,7 +185,9 @@ def main() -> None:
                                    checkpoint=args.checkpoint)
         print("model loaded", flush=True)
     else:
-        backend = MockBackend(args.node_id, args.checkpoint or "mock")
+        backend = MockBackend(args.node_id, args.checkpoint or "mock",
+                              delay_ms=args.delay_ms,
+                              serialize=args.serialize)
     stem = Stem(args.node_id, backend, host=args.host, port=args.port,
                 advertise_host=args.advertise_host)
     stem.start()
