@@ -135,6 +135,8 @@ def main() -> None:
                              "(default: PANDOSI_PAIRING_TOKEN)")
     parser.add_argument("--onnx-path", default=None,
                         help="use this ONNX file as the decision backend")
+    parser.add_argument("--checkpoint", default=None,
+                        help="explicit lineage/checkpoint identity for ONNX stems")
     parser.add_argument("--lan", action="store_true",
                         help="bind/advertise beyond loopback; requires an "
                              "active lan_listen grant")
@@ -280,7 +282,8 @@ def main() -> None:
     import importlib
     backend_mod = importlib.import_module(".backend", __package__)
     if backend_name == "onnx":
-        backend = backend_mod.OnnxLayaBackend(node_id, **backend_cfg)
+        backend = backend_mod.OnnxLayaBackend(
+            node_id, checkpoint=args.checkpoint, **backend_cfg)
     else:
         backend = backend_mod.MockBackend(node_id, **backend_cfg)
 
@@ -294,7 +297,8 @@ def main() -> None:
             gpu_backend = backend_mod.OnnxLayaBackend(
                 node_id + "-gpu", str(bucket_files[-1]),
                 repo="convaiinnovations/laya", device="GPU",
-                onnx_buckets=[str(b) for b in bucket_files])
+                onnx_buckets=[str(b) for b in bucket_files],
+                checkpoint=f"{args.checkpoint}-gpu" if args.checkpoint else None)
             stems.append(Stem(node_id + "-gpu", gpu_backend,
                               host=stem_host, port=0))
             print(f"multi-EU: iGPU stem added "
@@ -305,7 +309,8 @@ def main() -> None:
             npu_backend = backend_mod.OnnxLayaBackend(
                 node_id + "-npu", str(npu_file),
                 repo="convaiinnovations/laya", device="NPU",
-                pad_to=256)
+                pad_to=256,
+                checkpoint=f"{args.checkpoint}-npu" if args.checkpoint else None)
             stems.append(Stem(node_id + "-npu", npu_backend,
                               host=stem_host, port=0))
             print("multi-EU: NPU stem added (IsNaN-free static graph)",

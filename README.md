@@ -49,6 +49,9 @@ devices, one mind.
 - **CUDA RLCD training**: a real `laya.train.finetune` run on the RTX 3070
   used 1.74 GB peak memory, produced a reloadable CUDA checkpoint, and
   preserved 14/14 English decision labels while changing confidence.
+- **Real lineage identity over HTTP**: en/ml/td ONNX stems now register as
+  distinct checkpoints; twelve shared choice tasks produced 11 cross-lineage
+  splits, making model diversity visible to the live quorum.
 - **Signed self-replication (sandboxed)**: Spore payload = weights +
   playbook + harness. Ed25519 manifest, 64KiB chunk Merkle tree,
   per-chunk hash-on-arrival, selective re-fetch, TOFU key pinning,

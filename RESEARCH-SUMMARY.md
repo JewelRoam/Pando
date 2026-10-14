@@ -139,6 +139,13 @@ Round 67 adds per-stem latency memory. After five real decisions, the
 learned failure budgets were 0.72-1.00 s per heterogeneous worker, replacing
 the previous 30 s global call timeout for unresponsive stems.
 
+Round 74 fixes real ONNX checkpoint identity: en/ml/td stems now register as
+distinct lineages instead of collapsing to device-derived names. On twelve
+shared English-biased choice tasks, 11/12 produced cross-lineage splits.
+This is a harsher, same-input comparison than the earlier lineage-specific
+32.5% figure and does not replace it; it does reinforce verify/escalate
+routing.
+
 ## Remaining work
 
 - NPU: deep graph analysis (IsNaN was removed; other ops may block)

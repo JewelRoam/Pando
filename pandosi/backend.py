@@ -81,7 +81,8 @@ class OnnxLayaBackend:
     def __init__(self, node_id: str, onnx_path: str,
                  repo: str = "convaiinnovations/laya", device: str = "CPU",
                  pad_to: int | None = None,
-                 onnx_buckets: list[str] | None = None):
+                 onnx_buckets: list[str] | None = None,
+                 checkpoint: str | None = None):
         if np is None:
             raise RuntimeError(
                 "ONNX backend requires numpy; install numpy and onnxruntime")
@@ -89,12 +90,10 @@ class OnnxLayaBackend:
 
         self.node_id = node_id
         normalized_device = device.strip().upper()
-        if normalized_device == "CPU":
-            self.checkpoint = "onnx"
-        elif normalized_device == "CUDA":
-            self.checkpoint = "onnx-cuda"
-        else:
-            self.checkpoint = f"onnx-{normalized_device.lower()}"
+        default_checkpoint = "onnx" if normalized_device == "CPU" else (
+            "onnx-cuda" if normalized_device == "CUDA"
+            else f"onnx-{normalized_device.lower()}")
+        self.checkpoint = checkpoint or default_checkpoint
         self._agent = ONNXAgent(repo, onnx_path=onnx_path)
         if normalized_device == "CUDA":
             providers = self._agent.session.get_providers()

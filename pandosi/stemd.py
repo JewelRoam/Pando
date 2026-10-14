@@ -115,7 +115,8 @@ def heartbeat_loop(stem: Stem, root_url: str,
 def main() -> None:
     parser = argparse.ArgumentParser(description="PandoSI stem worker")
     parser.add_argument("--node-id", required=True)
-    parser.add_argument("--checkpoint", default="mock")
+    parser.add_argument("--checkpoint", default=None,
+                        help="lineage/checkpoint identity; defaults by backend")
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--host", default="127.0.0.1",
                         help="interface to bind; use 0.0.0.0 for LAN")
@@ -148,10 +149,11 @@ def main() -> None:
             else (256 if args.device != "CPU" else None)
         backend = OnnxLayaBackend(args.node_id, args.onnx_path,
                                   repo=args.repo, device=args.device,
-                                  pad_to=pad_to)
+                                  pad_to=pad_to,
+                                  checkpoint=args.checkpoint)
         print("model loaded", flush=True)
     else:
-        backend = MockBackend(args.node_id, args.checkpoint)
+        backend = MockBackend(args.node_id, args.checkpoint or "mock")
     stem = Stem(args.node_id, backend, host=args.host, port=args.port,
                 advertise_host=args.advertise_host)
     stem.start()
