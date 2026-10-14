@@ -26,6 +26,8 @@ NPU) all voting in the same consensus quorum.
 | Dashboard v2 | tools/dashboard.py | lineage + attribution + disagreements |
 | CUDA worker | backend.py CUDA branch + tools/cuda_bench.py | RTX 3070 live |
 | Heterogeneous HTTP check | tools/hetero_http_check.py | CPU+iGPU+NPU+CUDA live |
+| PyTorch (non-OpenVINO) stem | backend.py TorchLayaBackend + stemd --backend laya | torch-cuda votes in the same quorum |
+| Stem wire contract | docs/STEM-PROTOCOL.md | framework-free join spec (3 endpoints) |
 | Adaptive stem timeouts | rootd.py per-stem EWMA | 5s cold -> 0.7-1.0s learned |
 | Slow-node isolation | tools/slow_stem_check.py | 4->3 quorum, 24ms cooldown skip |
 | LAN-interface HTTP | tools/lan_http_check.py + stemd advertise host | same-host protocol path verified |
@@ -67,6 +69,7 @@ NPU) all voting in the same consensus quorum.
 | CUDA vs CPU p50 | 15.0 ms vs 125.6 ms (8.36x) | round 65 |
 | CUDA decision parity | 14/14 English tasks; max conf delta 0.0009 | round 65 |
 | Four-runtime HTTP p50 | 430.5 ms sequential -> 237.8 ms parallel | rounds 65/66 |
+| Two-ecosystem quorum | torch-cuda + onnx/onnx-cuda/onnx-gpu, tier auto, 4/4 | round 92 |
 
 ## What is NOT yet done
 

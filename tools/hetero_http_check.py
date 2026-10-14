@@ -101,6 +101,10 @@ def main() -> int:
     parser.add_argument("--skip-npu", action="store_true")
     parser.add_argument("--hotplug-cuda", action="store_true",
                         help="start Intel workers first, then join CUDA live")
+    parser.add_argument("--torch-stem", action="store_true",
+                        help="also join a native PyTorch (CUDA) Laya stem, a "
+                             "non-OpenVINO ecosystem, into the same quorum")
+    parser.add_argument("--torch-model", default="convaiinnovations/laya")
     parser.add_argument("--yes", action="store_true")
     args = parser.parse_args()
     if not args.yes:
@@ -158,6 +162,15 @@ def main() -> int:
             "python": host_python,
             "args": ["--backend", "onnx", "--onnx-path", str(npu_graph),
                      "--device", "NPU", "--pad-to", "256"],
+        })
+    if args.torch_stem:
+        # Same Laya model, different ecosystem: native PyTorch on CUDA rather
+        # than ONNX Runtime. Nothing about the HTTP contract changes.
+        workers.append({
+            "node_id": "nvidia-3070-torch",
+            "python": cuda_python,
+            "args": ["--backend", "laya", "--device", "CUDA",
+                     "--model", args.torch_model],
         })
 
     summary: dict = {
@@ -328,6 +341,7 @@ def main() -> int:
                 "onnx", "onnx-cuda",
                 *({"onnx-gpu"} if not args.skip_igpu else set()),
                 *({"onnx-npu"} if not args.skip_npu else set()),
+                *({"torch-cuda"} if args.torch_stem else set()),
             }
             expected_initial = {
                 checkpoint

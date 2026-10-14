@@ -82,6 +82,11 @@ devices, one mind.
   missing parent manifest from its serving peer by content hash
   (`/spore/manifests/<hash>`), checks hash + Ed25519 signature, and upgrades
   lineage to verified — a wrong-hash or bad-signature manifest is refused.
+- **Runtime-agnostic quorum**: a native PyTorch Laya stem (`--backend laya`,
+  `torch-cuda` checkpoint) votes in the same consensus as the OpenVINO/ONNX
+  Runtime Intel stems and the ONNX Runtime CUDA stem — four workers, two
+  ecosystems, one HTTP contract, tier `auto`. The contract itself is
+  documented with no framework named in it (`docs/STEM-PROTOCOL.md`).
 - **Real lineage identity over HTTP**: en/ml/td ONNX stems now register as
   distinct checkpoints; twelve shared choice tasks produced 11 cross-lineage
   splits, making model diversity visible to the live quorum.

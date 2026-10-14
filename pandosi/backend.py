@@ -148,6 +148,61 @@ class OnnxLayaBackend:
         return Vote(self.node_id, self.checkpoint, choice, round(probability, 4))
 
 
+class TorchLayaBackend:
+    """Native PyTorch Laya backend (transformers + torch), not OpenVINO.
+
+    Runs the same decision model under the torch ecosystem on any torch
+    device. Fails closed when CUDA is requested but torch cannot see it, so a
+    misconfigured host cannot silently answer under a CUDA checkpoint label.
+    Inference is serialized: one torch model is not safe for concurrent
+    forward passes from the threaded stem server.
+    """
+
+    def __init__(self, node_id: str, model: str = "convaiinnovations/laya",
+                 device: str = "CPU", checkpoint: str | None = None):
+        try:
+            import threading
+            import torch
+            from laya import load as laya_load
+        except ImportError as exc:
+            raise RuntimeError(
+                "torch backend requires torch and laya; install them in this "
+                "environment and retry") from exc
+
+        requested = (device or "CPU").strip().lower()
+        if requested == "cuda" and not torch.cuda.is_available():
+            raise RuntimeError(
+                "CUDA requested but torch.cuda.is_available() is False; "
+                "install a CUDA torch build or select a different --device")
+
+        self.node_id = node_id
+        self.checkpoint = checkpoint or (
+            "torch-cuda" if requested == "cuda" else f"torch-{requested}")
+        self._lock = threading.Lock()
+        self._agent = laya_load(model, device=requested)
+        resolved = getattr(self._agent, "device", None)
+        if requested == "cuda" and getattr(resolved, "type", None) != "cuda":
+            raise RuntimeError(
+                f"CUDA requested but Laya resolved device={resolved}; "
+                "refusing to run a CPU worker under a CUDA label")
+
+    def decide(self, req: DecisionRequest) -> Vote:
+        if not req.candidates:
+            raise ValueError("candidates must be non-empty")
+        qid, options = canonical_question(req.question, req.candidates)
+        questions = {qid: {"type": "choice",
+                           "instructions": f"Classify: "
+                                           f"{req.question or 'decision'}.",
+                           "criteria": options}}
+        with self._lock:
+            result = self._agent.predict(req.state, questions)
+        answer = result["answers"][qid]
+        choice = answer.get("choice")
+        probability = float(answer.get("answer_confidence")
+                            or answer.get("confidence") or 0.5)
+        return Vote(self.node_id, self.checkpoint, choice, round(probability, 4))
+
+
 class _OVLazySession:
     """Duck-types ort.InferenceSession with OpenVINO.
 

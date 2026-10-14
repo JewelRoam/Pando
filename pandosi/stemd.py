@@ -18,7 +18,7 @@ class _PandoHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-from .backend import MockBackend, OnnxLayaBackend
+from .backend import MockBackend, OnnxLayaBackend, TorchLayaBackend
 from .common import DecisionRequest
 from .graft import assign_role, capability
 
@@ -127,9 +127,14 @@ def main() -> None:
                         help="secret required by a pairing-enabled root")
     parser.add_argument("--pairing-token-file", default=None,
                         help="read the pairing token from a user-owned file")
-    parser.add_argument("--backend", default="mock", choices=["mock", "onnx"])
+    parser.add_argument("--backend", default="mock",
+                        choices=["mock", "onnx", "laya"],
+                        help="mock | onnx (ONNX Runtime/OpenVINO) | "
+                             "laya (native PyTorch)")
     parser.add_argument("--onnx-path", default="artifacts/laya-en.int8.onnx")
     parser.add_argument("--repo", default="convaiinnovations/laya")
+    parser.add_argument("--model", default="convaiinnovations/laya",
+                        help="HF id or local path for the torch (laya) backend")
     parser.add_argument("--device", default="CPU")
     parser.add_argument("--pad-to", type=int, default=None,
                         help="static-shape bucket for non-CPU EUs (default 256 on GPU/NPU)")
@@ -151,6 +156,13 @@ def main() -> None:
                                   repo=args.repo, device=args.device,
                                   pad_to=pad_to,
                                   checkpoint=args.checkpoint)
+        print("model loaded", flush=True)
+    elif args.backend == "laya":
+        print(f"loading torch Laya from {args.model} on {args.device} ...",
+              flush=True)
+        backend = TorchLayaBackend(args.node_id, model=args.model,
+                                   device=args.device,
+                                   checkpoint=args.checkpoint)
         print("model loaded", flush=True)
     else:
         backend = MockBackend(args.node_id, args.checkpoint or "mock")
