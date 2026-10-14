@@ -12,3 +12,4 @@ Timestamped, sanitized snapshots of this PandoSI working session.
 | 2026-10-14T113003 | `docs/session-logs/2026-10-14T113003-session-backup.md` | 88b909aeaeac | 148/605/1040 | automatic snapshot after 85865d2 fix: preserve real lineage identity in ONNX stems |
 | 2026-10-14T120003 | `docs/session-logs/2026-10-14T120003-session-backup.md` | d597cad7387f | 157/652/1129 | automatic snapshot after ba7405a feat: validate branching spore reproduction DAG |
 | 2026-10-14T122748 | `docs/session-logs/2026-10-14T122748-session-backup.md` | 83a256cb23f9 | 165/719/1264 | automatic snapshot after 43259be docs: transport-aware topology rule (replicate vs stage) |
+| 2026-10-14T123007 | `docs/session-logs/2026-10-14T123007-session-backup.md` | ed5d0a19550a | 166/724/1273 | automatic snapshot after 1919829 chore: session backup 2026-10-14T122749 |
