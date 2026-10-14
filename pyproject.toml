@@ -14,7 +14,14 @@ dependencies = ["PyNaCl>=1.5"]
 [project.optional-dependencies]
 model = ["transformers>=4.40", "torch>=2.1"]
 serve = ["fastapi", "uvicorn"]
+lan = ["zeroconf>=0.131"]
+onnx = ["onnxruntime>=1.18", "numpy>=1.26"]
 cuda = ["onnxruntime-gpu>=1.31"]
+runtime = [
+  "zeroconf>=0.131",
+  "onnxruntime>=1.18",
+  "numpy>=1.26",
+]
 
 [project.scripts]
 pandosi = "pandosi.cli:main"

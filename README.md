@@ -142,12 +142,19 @@ graph TB
 ## Quickstart
 
 ```bash
-pip install pynacl zeroconf                  # deps
+pip install -e ".[runtime]"                  # source checkout
 python -m pandosi doctor --plan              # safe onboarding plan
 python -m pandosi onboard --dry-run          # no install/elevation
 python -m pandosi join                       # local root + stem (loopback)
 python -m pandosi doctor                     # capability report
 python tools/dashboard.py                    # render local metrics
+```
+
+Installed-package form:
+
+```bash
+pip install "pandosi[runtime]"
+pandosi doctor --plan
 ```
 
 LAN is a separate explicit grant:

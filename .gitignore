@@ -31,3 +31,6 @@ join_*_log.txt
 _mufix3.py
 logs/
 .venv-cuda/
+build/
+dist/
+*.egg-info/
