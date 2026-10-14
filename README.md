@@ -34,6 +34,9 @@ devices, one mind.
 - **LAN-interface protocol**: root and stems can use a real LAN address
   (`--host` / `--advertise-host`) instead of loopback; same-host latency
   showed no penalty, while true remote-network effects remain untested.
+- **Remote-link degradation recovery**: a proxied worker degraded from
+  100 ms to 1.5 s, was timed out and skipped in a 16 ms decision, then
+  rejoined after cooldown when the link recovered.
 - **Signed self-replication (sandboxed)**: Spore payload = weights +
   playbook + harness. Ed25519 manifest, 64KiB chunk Merkle tree,
   per-chunk hash-on-arrival, selective re-fetch, TOFU key pinning,

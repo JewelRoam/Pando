@@ -12,6 +12,7 @@ on:
       - "tools/swarm_check.py"
       - "tools/slow_stem_check.py"
       - "tools/lan_http_check.py"
+      - "tools/remote_latency_check.py"
   workflow_dispatch:
 
 jobs:
@@ -35,3 +36,5 @@ jobs:
         run: python tools/slow_stem_check.py --yes
       - name: Verify LAN-interface HTTP registration and quorum
         run: python tools/lan_http_check.py --yes
+      - name: Verify remote-link degradation, cooldown, and recovery
+        run: python tools/remote_latency_check.py --yes

@@ -29,6 +29,7 @@ NPU) all voting in the same consensus quorum.
 | Adaptive stem timeouts | rootd.py per-stem EWMA | 5s cold -> 0.7-1.0s learned |
 | Slow-node isolation | tools/slow_stem_check.py | 4->3 quorum, 24ms cooldown skip |
 | LAN-interface HTTP | tools/lan_http_check.py + stemd advertise host | same-host protocol path verified |
+| Remote-link degradation | tools/remote_latency_check.py | timeout -> skip -> recovery verified |
 
 ## What is proven (key numbers)
 
