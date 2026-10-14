@@ -16,3 +16,4 @@ Timestamped, sanitized snapshots of this PandoSI working session.
 | 2026-10-14T124728 | `docs/session-logs/2026-10-14T124728-session-backup.md` | 03594b59cca8 | 166/749/1332 | automatic snapshot after 0d022e0 feat: topology planner (replicate vs stage vs infeasible) |
 | 2026-10-14T125642 | `docs/session-logs/2026-10-14T125642-session-backup.md` | 9c7d5bf99e10 | 167/767/1363 | automatic snapshot after aa2b1c4 test: measure the swarm gate's ri[TOKEN] |
 | 2026-10-14T130003 | `docs/session-logs/2026-10-14T130003-session-backup.md` | 5589e647fe67 | 168/774/1376 | automatic snapshot after dff3e16 chore: session backup 2026-10-14T125643 |
+| 2026-10-14T130443 | `docs/session-logs/2026-10-14T130443-session-backup.md` | 3d83ac3c8ae1 | 168/781/1392 | automatic snapshot after 268dc12 fix: enforce calibration where the risk is, not in the coordinator |
