@@ -73,9 +73,9 @@ def wait_nodes(url: str, token: str, expected: int,
     raise SystemExit(f"wanted {expected} nodes, saw {sorted(seen)}")
 
 
-def decide(url: str, token: str, index: int) -> dict:
+def decide(url: str, token: str, index: int, question: str) -> dict:
     body = json.dumps({"state": f"scaling probe {index}",
-                       "question": "approve?",
+                       "question": question,
                        "candidates": ["approve", "reject"]}).encode()
     request = urllib.request.Request(
         f"{url}/decide", data=body,
@@ -89,10 +89,11 @@ def decide(url: str, token: str, index: int) -> dict:
             "quorum_size": payload.get("quorum_size")}
 
 
-def sweep(url: str, token: str, concurrency: int, tasks: int) -> dict:
+def sweep(url: str, token: str, concurrency: int, tasks: int,
+          question: str) -> dict:
     started = time.perf_counter()
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
-        results = list(pool.map(lambda i: decide(url, token, i),
+        results = list(pool.map(lambda i: decide(url, token, i, question),
                                 range(tasks)))
     elapsed = time.perf_counter() - started
     latencies = sorted(row["ms"] for row in results)
@@ -126,6 +127,11 @@ def main() -> int:
                         help="let the root trade quorum size against latency")
     parser.add_argument("--quorum-floor", type=int, default=1)
     parser.add_argument("--latency-target-ms", type=float, default=None)
+    parser.add_argument("--question", default="approve?",
+                        help="question text; the playbook's category floors "
+                             "are chosen from it")
+    parser.add_argument("--playbook", default=None,
+                        help="playbook whose gating carries the quorum floors")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
     if not args.yes:
@@ -155,7 +161,8 @@ def main() -> int:
                 str(args.quorum_floor), "--latency-target-ms",
                 str(args.latency_target_ms)]
                if args.adaptive_quorum and args.latency_target_ms
-               else [])],
+               else []),
+             *(["--playbook", str(args.playbook)] if args.playbook else [])],
             cwd=ROOT, stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL, creationflags=creationflags))
         wait_root(url)
@@ -177,7 +184,8 @@ def main() -> int:
             wait_nodes(url, token, target)
             time.sleep(0.5)
             for concurrency in concurrencies:
-                row = sweep(url, token, concurrency, args.tasks)
+                row = sweep(url, token, concurrency, args.tasks,
+                            args.question)
                 row["replicas"] = target
                 rows.append(row)
                 print(f"  replicas={target} concurrency={concurrency} "
@@ -214,6 +222,8 @@ def main() -> int:
     else:
         default_label = "default"
     summary = {"label": args.label or default_label,
+               "question": args.question,
+               "playbook": args.playbook,
                "adaptive": args.adaptive_quorum,
                "quorum_k": args.quorum_k,
                "delay_ms": args.delay_ms, "tasks": args.tasks,

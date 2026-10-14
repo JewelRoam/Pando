@@ -105,6 +105,8 @@ NPU) all voting in the same consensus quorum.
 | Configurable quorum size | rootd --quorum-k + per-decision rotation | scaling unit is the quorum |
 | Load-aware quorum picking | Coordinator in-flight ordering | 16-24% over blind rotation |
 | Adaptive quorum size | --adaptive-quorum/--latency-target-ms | holds k=5 idle, k=3 under load |
+| Per-category quorum floors | playbook gating quorum_floor | security k=4 vs ordinary k=2 under load |
+| Retirement | pandosi/elastic.py + POST /retire + blocklist | slow member removed, stays removed |
 | Reproduce grant | grants.py action "reproduce" | operator-approved, expiring |
 
 ## What is NOT yet done

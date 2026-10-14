@@ -80,6 +80,9 @@ class Coordinator:
         self._lock = threading.Lock()
         self._pick_rotation = 0
         self._inflight: dict[str, int] = {}
+        # Retired nodes stay out: a stem re-registers every few seconds, so
+        # simply deleting it from the registry would last five seconds.
+        self.blocked: dict[str, str] = {}
         self._transport = transport
         self.quorum_k = quorum_k
         # Adaptive quorum (round 110): a larger k means more independent
@@ -106,7 +109,11 @@ class Coordinator:
 
     # -- registry -------------------------------------------------------
     def register(self, node_id: str, url: str, checkpoint: str,
-                 cap: dict | None = None) -> None:
+                 cap: dict | None = None) -> bool:
+        """Add or refresh a node. Returns False for a retired node."""
+        with self._lock:
+            if node_id in self.blocked:
+                return False
         # Calibration is looked up by checkpoint string, so a misnamed stem
         # silently changes the gate. Say so once, at join time, rather than
         # letting it alter every later decision in silence (round 100).
@@ -125,6 +132,16 @@ class Coordinator:
                 "last_seen": time.monotonic(),
                 "stats": stats or _empty_stem_stats(),
             }
+        return True
+
+    def retire(self, node_id: str, reason: str = "retired") -> bool:
+        """Drop a node from the registry and refuse its re-registration."""
+        with self._lock:
+            existed = node_id in self.nodes
+            self.nodes.pop(node_id, None)
+            self._inflight.pop(node_id, None)
+            self.blocked[node_id] = reason
+        return existed
 
     def live_nodes(self) -> dict[str, dict]:
         now = time.monotonic()
@@ -251,23 +268,47 @@ class Coordinator:
                 stats["unhealthy_until"] = time.monotonic() + backoff
                 stats["last_error"] = error
 
-    def _adapt_quorum(self) -> None:
+    def _category_floor(self, question: str) -> int:
+        """The fewest voters acceptable for this question's category.
+
+        The floor is the same knob as "how much agreement am I willing to
+        give up", and a security question is where giving it up is least
+        acceptable, so a playbook can set a higher floor for that category
+        (round 111).
+        """
+        gating = self.gating or {}
+        is_security = any(
+            keyword in (question or "").lower()
+            for keyword in ("security", "suspicious", "phishing", "threat"))
+        floor = self.quorum_floor
+        if "quorum_floor" in gating:
+            floor = max(1, int(gating["quorum_floor"]))
+        if is_security and (gating.get("security") or {}).get("quorum_floor"):
+            floor = max(floor, int(gating["security"]["quorum_floor"]))
+        return max(1, floor)
+
+    def _adapt_quorum(self, question: str) -> None:
         """Trade voters per decision against decisions in parallel.
 
         Called once per decision. With a latency target, the quorum shrinks
         while loaded decisions run slow and recovers once they do not; the
-        floor is a policy decision (how few independent voters are still
-        acceptable), not a tuning knob.
+        floor is per question category, so a security decision keeps its
+        voters while an ordinary one may give them up for throughput.
         """
         target = self.latency_target_ms
         if target is None or self._decision_ewma_ms is None:
             return
+        floor = self._category_floor(question)
         available = len(self._selectable_nodes())
         ceiling = min(self.quorum_ceiling, max(available, 1))
-        if self._decision_ewma_ms > target and self.quorum_k > self.quorum_floor:
+        if self.quorum_k < floor:
+            self.quorum_k = floor
+            return
+        if self._decision_ewma_ms > target and self.quorum_k > floor:
             self.quorum_k -= 1
             print(f"[quorum] {self._decision_ewma_ms:.0f} ms > target "
-                  f"{target:.0f} ms -> k={self.quorum_k}", flush=True)
+                  f"{target:.0f} ms -> k={self.quorum_k} (floor {floor})",
+                  flush=True)
         elif (self._decision_ewma_ms < target * 0.6
               and self.quorum_k < ceiling):
             self.quorum_k += 1
@@ -319,7 +360,7 @@ class Coordinator:
                     f"known: {sorted(self.known_questions)}",
                     "responded": 0, "quorum_size": 0}
         if self.adaptive_quorum:
-            self._adapt_quorum()
+            self._adapt_quorum(req.question)
         quorum = self.pick_quorum(self.quorum_k)
         payload = req.to_json()
         fanout_started = time.perf_counter()
@@ -528,9 +569,30 @@ def build_handler(coordinator: Coordinator, root=None):
                         "expected_sha256": expected_artifact,
                         "reported_sha256": data.get("artifact_sha256")})
                     return
-                coordinator.register(data["node_id"], data["url"],
-                                     data["checkpoint"], data.get("capability"))
+                if not coordinator.register(data["node_id"], data["url"],
+                                            data["checkpoint"],
+                                            data.get("capability")):
+                    self._send(403, {
+                        "error": f"node {data['node_id']!r} was retired by "
+                                 "this swarm",
+                        "reason": coordinator.blocked.get(data["node_id"])})
+                    return
                 self._send(200, {"ok": True})
+            elif self.path == "/retire":
+                # Durable removal: the registry entry goes and the node is
+                # blocked, or a stem's own heartbeats undo it in five seconds.
+                data = json.loads(raw)
+                node_id = data.get("node_id")
+                if not node_id:
+                    self._send(400, {"error": "node_id is required"})
+                    return
+                existed = coordinator.retire(node_id,
+                                             data.get("reason", "retired"))
+                print(f"[retire] {node_id} ({data.get('reason')})"
+                      f"{'' if existed else ' (was not registered)'}",
+                      flush=True)
+                self._send(200, {"ok": True, "blocked": sorted(
+                    coordinator.blocked)})
             elif self.path == "/spore/blobs":
                 # Delta pulls: return only the chunks a replica asked for and
                 # does not already hold (round 107).

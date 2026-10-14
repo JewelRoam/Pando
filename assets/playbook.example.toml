@@ -32,6 +32,9 @@ admit = ["english", "multilingual", "typed-decisions"]
 auto_min_agreement = 0.6
 auto_min_probability = 0.6
 escalate_above_disagreement = 0.5
+# Fewest voters an adaptive quorum may fall back to for ordinary questions.
+# This is the same trade as "how much agreement am I willing to give up".
+quorum_floor = 2
 
 [[questions]]
 id = "intent"
@@ -58,6 +61,9 @@ criteria = ["low", "moderate", "high"]  # 3-level: adjacent-level errors dominat
 # than a false positive (unnecessary verification)
 auto_min_agreement = 0.5
 auto_min_probability = 0.4
+# ...but a security decision never trades its voters for throughput: with an
+# adaptive quorum this floor overrides the ordinary one (round 111).
+quorum_floor = 4
 
 [[questions]]
 id = "security_check"

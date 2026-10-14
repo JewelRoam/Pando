@@ -289,6 +289,46 @@ class TestSmoke(unittest.TestCase):
                 grants.name + ".audit.jsonl"))
             self.assertEqual(audit["status"], "valid")
 
+    def test_quorum_floor_is_per_category(self):
+        """A security decision keeps its voters under latency pressure.
+
+        The adaptive quorum trades checking power for throughput, but a
+        playbook can make that trade impossible below a per-category floor
+        (round 111). The floor is binding even when the latency target is
+        not reachable.
+        """
+        from pandosi.rootd import Coordinator
+
+        coordinator = Coordinator(
+            adaptive_quorum=True, quorum_floor=1, quorum_k=5,
+            latency_target_ms=10.0)
+        coordinator.gating = {
+            "quorum_floor": 2,
+            "security": {"quorum_floor": 4},
+        }
+        self.assertEqual(coordinator._category_floor("approve?"), 2)
+        self.assertEqual(coordinator._category_floor("is this phishing?"), 4)
+        self.assertEqual(coordinator._category_floor("security threat?"), 4)
+
+        # Under sustained pressure the ordinary floor is reached and held,
+        # while the security floor stops the shrink sooner.
+        coordinator._decision_ewma_ms = 500.0
+        for _ in range(8):
+            coordinator._adapt_quorum("approve?")
+        self.assertEqual(coordinator.quorum_k, 2)
+        coordinator.quorum_k = 5
+        for _ in range(8):
+            coordinator._adapt_quorum("security threat?")
+        self.assertEqual(coordinator.quorum_k, 4)
+
+        # A coordinator with no playbook falls back to the CLI floor.
+        bare = Coordinator(adaptive_quorum=True, quorum_floor=3,
+                           latency_target_ms=10.0)
+        bare._decision_ewma_ms = 500.0
+        for _ in range(8):
+            bare._adapt_quorum("approve?")
+        self.assertEqual(bare.quorum_k, 3)
+
     def test_content_defined_delta_transfer(self):
         """A replica that holds the parent should receive only the diff.
 

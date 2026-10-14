@@ -139,6 +139,16 @@ devices, one mind.
   checkpoint *name* (a misnamed stem silently changes the gate), and a naive
   sweep would have shipped a threshold that acts on a minority vote
   (`docs/research/2026-10-14-round100.md`).
+- **Per-category quorum floors and retirement**: a playbook sets a
+  `quorum_floor` per category, so under load an ordinary question gave up
+  voters down to 2 while a security question stopped at 4 — twice the
+  independent voters for 22% less throughput, with both keeping the full
+  quorum while idle. The floors are binding, so an unreachable latency
+  target means "grow the swarm", not "weaken the check". And the other half
+  of elasticity now exists: a slow member can be retired through the grant
+  ledger, with the root blocking its re-registration so the removal is
+  durable rather than a five-second deletion
+  (`tools/retirement_check.py`, `docs/research/2026-10-14-round111.md`).
 - **A quorum that knows how busy it is**: `pick_quorum` now orders voters by
   in-flight load (then latency band, then rotation), and
   `rootd --adaptive-quorum --latency-target-ms` lets the quorum size shrink
