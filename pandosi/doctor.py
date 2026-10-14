@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 from .graft import assign_role, capability, enumerate_execution_units
+from .resources import asset_path
 
 
 def _have(module: str) -> bool:
@@ -69,7 +70,7 @@ def checks() -> list[dict]:
         "python tools/vendor/export_onnx.py --model convaiinnovations/laya "
         "--output artifacts/laya-en.onnx")
 
-    pb_exists = Path("assets/playbook.example.toml").exists()
+    pb_exists = asset_path("playbook.example.toml").exists()
     add("ok" if pb_exists else "miss", "playbook (assets/)",
         "" if pb_exists else "create assets/playbook.example.toml")
 
@@ -80,7 +81,7 @@ def checks() -> list[dict]:
         "python tools/postprocess_onnx.py --in artifacts/laya-en-static-fixed.onnx "
         "--out artifacts/laya-en-static-nonisnan.onnx")
 
-    cal_dir = Path("assets/calibration")
+    cal_dir = asset_path("calibration")
     cal_files = list(cal_dir.glob("*.json")) if cal_dir.exists() else []
     add("ok" if cal_files else "miss",
         f"calibration data ({len(cal_files)} checkpoints)",

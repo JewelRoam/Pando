@@ -71,6 +71,13 @@ def main() -> int:
         payload = json.loads(doctor.stdout)
         rows = {row["item"]: row["status"] for row in payload["rows"]}
         report["doctor"] = rows
+        if rows.get("playbook (assets/)") != "ok":
+            raise RuntimeError("packaged playbook asset was not found")
+        calibration = next(
+            (status for item, status in rows.items()
+             if item.startswith("calibration data (")), None)
+        if calibration != "ok":
+            raise RuntimeError("packaged calibration assets were not found")
         if args.extras:
             for expected in ("module zeroconf", "module onnxruntime"):
                 if rows.get(expected) != "ok":

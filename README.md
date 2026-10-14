@@ -157,6 +157,9 @@ pip install "pandosi[runtime]"
 pandosi doctor --plan
 ```
 
+The wheel includes playbook examples, small graft suites, and calibration
+JSON files. Model weights and generated ONNX graphs remain separate.
+
 LAN is a separate explicit grant:
 
 ```bash

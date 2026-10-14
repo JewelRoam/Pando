@@ -28,3 +28,12 @@ pandosi = "pandosi.cli:main"
 
 [tool.setuptools]
 packages = ["pandosi"]
+
+[tool.setuptools.data-files]
+"share/pandosi/assets" = [
+  "assets/*.jsonl",
+  "assets/*.toml",
+]
+"share/pandosi/assets/calibration" = [
+  "assets/calibration/*.json",
+]
