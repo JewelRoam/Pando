@@ -237,6 +237,20 @@ devices, one mind.
   three makes it *worse*. The premise needs members chosen for
   disagreement, not for solo accuracy (`tools/foreign_voter_check.py`,
   `docs/research/2026-10-15-round122.md`).
+- **On wording it has never seen, the swarm still beats its best member — and
+  the diversity rule still holds**: the generated suite's two seeds turned
+  out to share all 53 of their phrasings, so a genuinely held-out suite was
+  built (`assets/heldout_test.jsonl`, 48 new phrasings, 0 seen before). Every
+  lineage loses 10-15 points on it (`english` 85.0→75.4, `typed-decisions`
+  87.1→72.5 — the previous "best member" is the one that loses most), the
+  gate trades coverage for accuracy (172/240 at 90.1%), and the ensemble's
+  matched-coverage edge survives at +1.17 points. On that instrument the
+  round-122 outsiders collapse to 57.5% and 17.5% — they were recognising
+  vocabulary — but the mechanism behind them holds with accuracies that now
+  *bracket* the neural members: a 57.5%-accurate decorrelated voter is worth
+  **+4.1 points** at matched coverage, while a 76.25%-accurate voter whose
+  errors were aligned with an existing member is worth −2.5
+  (`docs/research/2026-10-15-round123.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage

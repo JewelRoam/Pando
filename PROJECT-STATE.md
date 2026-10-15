@@ -106,7 +106,12 @@ NPU) all voting in the same consensus quorum.
 | Ensemble buys decorrelation, not accuracy | 98.75%-accurate aligned voter helps least; 95.00% decorrelated helps most | round 122 |
 | Matched-coverage edge with a decorrelated member | 96.26% (trio) -> 100% on the 187 rows the gate accepts | round 122 |
 | Same-family member (rlcd-v7) | phi +1.000, -5.0 points | round 119 |
-| Suite phrasing leak | 100 of 102 test cues appear verbatim in dev; naive Bayes reaches 93.75% | round 122 |
+| Suite phrasing leak | dev and test share all 53 cues; every test row reuses a dev cue | round 122 |
+| Phrasing-held-out suite | assets/heldout_test.jsonl, 48 cues seen in no earlier split | round 122 |
+| Accuracy on unseen wording | english 85.0->75.4, multilingual 74.2->64.2, typed-decisions 87.1->72.5 | round 123 |
+| Member ranking is wording-dependent | typed-decisions best on shared wording, english on new wording | round 123 |
+| Outsiders on unseen wording | bayes 93.75->57.50, rules 95.0->17.5 but 42/42 precise | round 123 |
+| Decorrelated weak voter still wins | 57.5% member: +4.1 pt matched, +3.8 pt full; 76.25% aligned member: -2.5 pt full | round 123 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |

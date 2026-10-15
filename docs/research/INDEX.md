@@ -135,6 +135,7 @@ Rebuilt by tools/build_research_index.py; one row per file.
 | 2026-10-15-round120.md | 120 | Narrowing the ballot does not resolve the disagreement |
 | 2026-10-15-round121.md | 121 | The quorum should not care how many copies you keep |
 | 2026-10-15-round122.md | 122 | The ensemble buys decorrelation, not accuracy |
+| 2026-10-15-round123.md | 123 | What the swarm is worth on wording it has never seen |
 
 ## Files without a round number
 

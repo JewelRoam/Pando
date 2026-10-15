@@ -89,7 +89,92 @@ FILLERS = [
     "I am writing from my phone.", "The reference number is in the email.",
 ]
 
+# Round 122 found that the two seeds shared their phrasing inventory: 100 of
+# the test split's 102 distinct first sentences appeared verbatim in dev, so a
+# learner fitted on dev could recognise wording instead of generalising. This
+# inventory is the second half of the fix - a set of phrasings that appears in
+# no earlier split, so a suite built from it measures new wording.
+HELDOUT_CUES = {
+    "refund": [
+        "kindly put the money back on my card", 
+        "I paid twice and want one of the payments undone",
+        "could you undo what I was charged for",
+        "the charge should never have gone through, take it off",
+        "please release the funds back to me",
+        "I would like my outlay returned",
+    ],
+    "chargeback": [
+        "I have escalated this with my card provider",
+        "the transaction is being contested through my bank",
+        "my credit card company is looking into the payment",
+        "I started a reversal with my issuer",
+        "this is going through the dispute process now",
+        "the payment network has been asked to undo it",
+    ],
+    "exchange": [
+        "may I trade this for the larger model",
+        "can you send an alternative item",
+        "I got the wrong size and want to switch it",
+        "let me trade this in for a different one",
+        "I would prefer a substitute product",
+        "the one I received is the wrong variant, I want the other",
+    ],
+    "complaint": [
+        "this has been a dreadful experience",
+        "honestly, the whole thing was handled poorly",
+        "I am angry that this took so long",
+        "nobody helped me and it shows",
+        "the standard of service was not acceptable",
+        "I expected much better from you",
+    ],
+    "praise": [
+        "you people are wonderful",
+        "that was a superb experience",
+        "the crew went above and beyond",
+        "five stars, honestly",
+        "I could not be happier with the result",
+        "whoever handled it deserves a raise",
+    ],
+    "greeting": [
+        "hey there, just popping in",
+        "top of the morning to you",
+        "howdy, hope all is well",
+        "this is just a hello from Lisbon",
+        "evening, hope you had a good day",
+        "waving hello to everyone",
+    ],
+    "login_issue": [
+        "I am unable to access my account",
+        "the security code does not work",
+        "authentication keeps failing",
+        "I am locked out of my profile",
+        "the app rejects my credentials",
+        "I never get the verification code",
+    ],
+    "invoice": [
+        "could you send me the bill for last month",
+        "I require the VAT paperwork",
+        "please issue an itemised bill",
+        "where can I find my payment documents",
+        "I need the accounts document for my records",
+        "can you send over the statement of charges",
+    ],
+}
+
+CUE_SETS = {"a": INTENT_CUES, "b": HELDOUT_CUES}
+
 QUESTION = "intent"
+
+
+def cue_words(table: dict) -> set:
+    owners: dict[str, set] = {}
+    for label, group in table.items():
+        for cue in group:
+            for raw in cue.split():
+                word = raw.strip(".,!?").lower()
+                if len(word) > 4:
+                    owners.setdefault(word, set()).add(label)
+    return {word for word, labels in owners.items() if len(labels) == 1}
 
 
 def assert_fillers_are_neutral() -> None:
@@ -97,28 +182,49 @@ def assert_fillers_are_neutral() -> None:
 
     A word shared by several classes ("please", "send") cannot disambiguate a
     row, so only words appearing in exactly one class count as class
-    vocabulary.
+    vocabulary. Every cue set is checked: a filler that is neutral for one
+    inventory and distinctive for another would leak into whichever suite
+    used the second one.
     """
-    owners: dict[str, set] = {}
-    for label, group in INTENT_CUES.items():
-        for cue in group:
-            for raw in cue.split():
-                word = raw.strip(".,!?").lower()
-                if len(word) > 4:
-                    owners.setdefault(word, set()).add(label)
-    distinctive = {word for word, labels in owners.items() if len(labels) == 1}
-    for filler in FILLERS:
-        tokens = {raw.strip(".,!?").lower() for raw in filler.split()}
-        overlap = tokens & distinctive
-        if overlap:
-            raise SystemExit(
-                f"filler {filler!r} contains class vocabulary {overlap}")
+    for name, table in CUE_SETS.items():
+        distinctive = cue_words(table)
+        for filler in FILLERS:
+            tokens = {raw.strip(".,!?").lower() for raw in filler.split()}
+            overlap = tokens & distinctive
+            if overlap:
+                raise SystemExit(
+                    f"filler {filler!r} contains class vocabulary {overlap} "
+                    f"from cue set {name!r}")
 
 
-def build(count: int, seed: int, exclude: set) -> list[dict]:
+def overlap_report() -> None:
+    """How much wording cue set b still shares with cue set a, per class.
+
+    Paraphrasing a concept reuses some of its words, so this is a diagnostic
+    rather than a guarantee: the number printed is the longest run of words
+    that appears in a cue from both sets. A suite built from set b is only as
+    "held out" as this makes it.
+    """
+    for label in sorted(INTENT_CUES):
+        longest = 0
+        for left in INTENT_CUES[label]:
+            for right in HELDOUT_CUES[label]:
+                words_left = left.lower().split()
+                words_right = right.lower().split()
+                for size in range(1, min(len(words_left), len(words_right)) + 1):
+                    runs = {" ".join(words_left[start:start + size])
+                            for start in range(len(words_left) - size + 1)}
+                    if any(" ".join(words_right[start:start + size]) in runs
+                           for start in
+                           range(len(words_right) - size + 1)):
+                        longest = max(longest, size)
+        print(f"  {label:14s} longest shared run: {longest} words")
+
+
+def build(count: int, seed: int, exclude: set, table: dict) -> list[dict]:
     rng = random.Random(seed)
-    labels = sorted(INTENT_CUES)
-    cues = {label: list(INTENT_CUES[label]) for label in labels}
+    labels = sorted(table)
+    cues = {label: list(table[label]) for label in labels}
     for group in cues.values():
         rng.shuffle(group)
     tasks = []
@@ -127,7 +233,7 @@ def build(count: int, seed: int, exclude: set) -> list[dict]:
         label = labels[index % len(labels)]
         index += 1
         if not cues[label]:
-            cues[label] = list(INTENT_CUES[label])
+            cues[label] = list(table[label])
             rng.shuffle(cues[label])
         cue = cues[label].pop()
         filler = rng.choice(FILLERS)
@@ -159,19 +265,25 @@ def main() -> int:
     parser.add_argument("--count", type=int, default=240)
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--out", default=str(ROOT / "assets" / "big_dev.jsonl"))
+    parser.add_argument("--cues", choices=sorted(CUE_SETS), default="a",
+                        help="a: the original inventory; b: phrasings that "
+                             "appear in no earlier split (round 122)")
     args = parser.parse_args()
 
     assert_fillers_are_neutral()
-    tasks = build(args.count, args.seed, set())
+    tasks = build(args.count, args.seed, set(), CUE_SETS[args.cues])
     target = Path(args.out)
     target.write_text("\n".join(json.dumps(task, ensure_ascii=False)
                                 for task in tasks) + "\n", encoding="utf-8")
     counts: dict[str, int] = {}
     for task in tasks:
         counts[task["expected"]] = counts.get(task["expected"], 0) + 1
-    print(f"wrote {target.name}: {len(tasks)} tasks, seed {args.seed}")
+    print(f"wrote {target.name}: {len(tasks)} tasks, seed {args.seed}, "
+          f"cue set {args.cues}")
     print(f"class balance: {dict(sorted(counts.items()))}")
     print(f"unique states: {len({task['state'] for task in tasks})}")
+    if args.cues == "b":
+        overlap_report()
     return 0
 
 
