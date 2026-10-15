@@ -103,6 +103,10 @@ NPU) all voting in the same consensus quorum.
 | Invariance under replication | shipped drifts up to 14.6 pt by copy pattern; collapsed drifts 0.000 | round 121 |
 | Replica of the weakest member | quorum falls toward that member (0.746 vs 0.892) | round 121 |
 | Near-duplicate under a new name | still admitted at full weight - needs an admission-time divergence test | round 121 |
+| Ensemble buys decorrelation, not accuracy | 98.75%-accurate aligned voter helps least; 95.00% decorrelated helps most | round 122 |
+| Matched-coverage edge with a decorrelated member | 96.26% (trio) -> 100% on the 187 rows the gate accepts | round 122 |
+| Same-family member (rlcd-v7) | phi +1.000, -5.0 points | round 119 |
+| Suite phrasing leak | 100 of 102 test cues appear verbatim in dev; naive Bayes reaches 93.75% | round 122 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |

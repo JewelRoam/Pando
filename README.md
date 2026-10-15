@@ -226,6 +226,17 @@ devices, one mind.
   *identical* to the first ballot (83.9%). Both routes to the 93.6% the trio
   holds on those rows are now closed by measurement; it is a members problem
   (`docs/research/2026-10-15-round120.md`).
+- **The ensemble buys decorrelation, not accuracy**: adding a fourth voter
+  from outside the neural family — a zero-shot keyword matcher at 95.0%, a
+  naive Bayes at 93.75%, and a control that is 98.75% accurate but whose
+  errors are aligned with an existing member — ranks the resulting
+  ensembles in the *inverse* order of accuracy and in the same order as
+  error correlation. The decorrelated outsider takes the weighted vote to
+  **100% on the 187 rows the shipped gate accepts** (trio: 96.26%) and to
+  95.0% at full coverage (trio: 88.75%); the most accurate voter of the
+  three makes it *worse*. The premise needs members chosen for
+  disagreement, not for solo accuracy (`tools/foreign_voter_check.py`,
+  `docs/research/2026-10-15-round122.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage
