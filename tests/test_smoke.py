@@ -19,7 +19,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from pandosi.backend import MockBackend
+from pandosi.backend import (MockBackend, OpenAIChoiceBackend,
+                            parse_openai_choice)
 from pandosi.common import (DecisionRequest, Vote, aggregate,
                             canonical_question)
 from pandosi.rootd import Coordinator, INITIAL_STEM_TIMEOUT, Root
@@ -83,6 +84,45 @@ class TestSmoke(unittest.TestCase):
         control = decide("reject")
         self.assertEqual(control["choice"], "approve")
         self.assertEqual(control["tier"], "auto")
+
+    def test_openai_choice_backend_parsing_and_payload(self):
+        """Variant B parsing is strict, and the request is the agreed shape."""
+        candidates = ["approve", "reject", "escalate"]
+        self.assertEqual(parse_openai_choice("approve", candidates), "approve")
+        self.assertEqual(parse_openai_choice("  APPROVE  ", candidates),
+                         "approve")
+        self.assertEqual(parse_openai_choice("答案：reject。", candidates),
+                         "reject")
+        with self.assertRaises(ValueError):
+            parse_openai_choice("approve or reject", candidates)
+        with self.assertRaises(ValueError):
+            parse_openai_choice("no idea", candidates)
+
+        seen = {}
+
+        def fake_transport(url, payload, api_key, timeout):
+            seen.update(url=url, payload=payload, api_key=api_key,
+                        timeout=timeout)
+            return {"choices": [{"message": {"content": " escalate "}}]}
+
+        backend = OpenAIChoiceBackend(
+            "mac-test", "http://127.0.0.1:9999/v1/", api_key="secret",
+            model="qwen-test", checkpoint="openai-v1",
+            probability=0.6, transport=fake_transport)
+        vote = backend.decide(DecisionRequest(
+            state="state", question="what?", candidates=candidates))
+        self.assertEqual(vote.choice, "escalate")
+        self.assertEqual(vote.probability, 0.6)
+        self.assertEqual(seen["url"],
+                         "http://127.0.0.1:9999/v1/chat/completions")
+        self.assertEqual(seen["api_key"], "secret")
+        self.assertEqual(seen["payload"]["max_tokens"], 16)
+        self.assertEqual(seen["payload"]["temperature"], 0.0)
+        self.assertFalse(seen["payload"]["stream"])
+        self.assertEqual(seen["payload"]["model"], "qwen-test")
+        self.assertIn("只输出候选词本身", seen["payload"]["messages"][0]["content"])
+        self.assertIn("只从以上候选中选择一个。",
+                      seen["payload"]["messages"][1]["content"])
 
     def test_question_schema_identity_includes_option_set(self):
         first, first_options = canonical_question(

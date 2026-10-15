@@ -27,7 +27,8 @@ class _PandoHTTPServer(ThreadingHTTPServer):
 
 from contextlib import nullcontext
 
-from .backend import MockBackend, OnnxLayaBackend, TorchLayaBackend
+from .backend import (MockBackend, OnnxLayaBackend,
+                     OpenAIChoiceBackend, TorchLayaBackend)
 from .common import DecisionRequest
 from .graft import assign_role, capability
 
@@ -196,15 +197,27 @@ def main() -> None:
     parser.add_argument("--pairing-token-file", default=None,
                         help="read the pairing token from a user-owned file")
     parser.add_argument("--backend", default="mock",
-                        choices=["mock", "onnx", "laya", "text"],
+                        choices=["mock", "onnx", "laya", "text", "openai"],
                         help="mock | onnx (ONNX Runtime/OpenVINO) | "
-                             "laya (native PyTorch) | text (naive Bayes)")
+                             "laya (native PyTorch) | text (naive Bayes) | "
+                             "openai (OpenAI-compatible chat API)")
     parser.add_argument("--onnx-path", default="artifacts/laya-en.int8.onnx")
     parser.add_argument("--repo", default="convaiinnovations/laya")
     parser.add_argument("--model", default="convaiinnovations/laya",
                         help="HF id or local path for the torch (laya) backend")
     parser.add_argument("--text-model", default="assets/textmodel.json",
                         help="fitted TextModel for --backend text")
+    parser.add_argument("--openai-url", default="http://127.0.0.1:8080/v1",
+                        help="base URL for --backend openai "
+                             "(OpenAI-compatible /chat/completions)")
+    parser.add_argument("--openai-key-file", default="~/.pandosi/llm-api.token",
+                        help="file containing the API key for --backend "
+                             "openai (empty string disables auth)")
+    parser.add_argument("--openai-model", default="qwen3-4b-instruct-2507",
+                        help="model name for --backend openai")
+    parser.add_argument("--openai-probability", type=float, default=0.5,
+                        help="constant probability reported by --backend "
+                             "openai (variant B has no confidence output)")
     parser.add_argument("--device", default="CPU")
     parser.add_argument("--delay-ms", type=float, default=0.0,
                         help="mock backend only: simulated per-decision "
@@ -251,6 +264,21 @@ def main() -> None:
                                    device=args.device,
                                    checkpoint=args.checkpoint)
         print("model loaded", flush=True)
+    elif args.backend == "openai":
+        from .common import read_secret_file
+        api_key = ""
+        if args.openai_key_file:
+            try:
+                api_key = read_secret_file(args.openai_key_file)
+            except ValueError as exc:
+                raise SystemExit(str(exc))
+        backend = OpenAIChoiceBackend(
+            args.node_id, args.openai_url, api_key=api_key,
+            model=args.openai_model, checkpoint=args.checkpoint or "openai",
+            prompt_variant="b", timeout=60.0,
+            probability=args.openai_probability)
+        print(f"openai backend ready: {args.openai_url} "
+              f"model={args.openai_model}", flush=True)
     elif args.backend == "text":
         # The cheap, independent member (rounds 122-125): stdlib only, so a
         # device that cannot hold a neural graph can still contribute a vote
@@ -270,7 +298,7 @@ def main() -> None:
                 serialize=not args.parallel)
     stem.start()
     print(f"stemd {args.node_id} listening on {stem.url()} "
-          f"(checkpoint={args.checkpoint})")
+          f"(checkpoint={backend.checkpoint})")
     if args.root:
         threading.Thread(target=heartbeat_loop,
                          args=(stem, args.root, args.pairing_token),

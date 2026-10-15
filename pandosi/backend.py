@@ -221,6 +221,148 @@ class TorchLayaBackend:
         return Vote(self.node_id, self.checkpoint, choice, round(probability, 4))
 
 
+def parse_openai_choice(text: str, candidates: list[str]) -> str:
+    """Map an OpenAI-compatible completion to exactly one candidate.
+
+    Exact matches ignore surrounding whitespace and case. When no candidate
+    is an exact match, a candidate that appears as a substring of the
+    response is accepted only if it is the unique such candidate; ambiguity
+    is an error so a broken deployment cannot silently vote for the wrong
+    class.
+    """
+    if not candidates:
+        raise ValueError("candidates must be non-empty")
+    stripped = (text or "").strip()
+    exact = {}
+    for candidate in candidates:
+        key = str(candidate).strip().lower()
+        if key and key not in exact:
+            exact[key] = candidate
+    if stripped.lower() in exact:
+        return exact[stripped.lower()]
+    lowered = stripped.lower()
+    matches = []
+    for candidate in candidates:
+        value = str(candidate).strip()
+        if value and value.lower() in lowered and candidate not in matches:
+            matches.append(candidate)
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise ValueError(
+            f"ambiguous response {text!r}: matches candidates {matches}")
+    raise ValueError(f"response {text!r} did not match any candidate")
+
+
+def _openai_completion_text(response: dict) -> str:
+    choices = response.get("choices") or []
+    if not choices:
+        return ""
+    choice = choices[0] or {}
+    message = choice.get("message") or {}
+    content = message.get("content", "")
+    if content is None:
+        return ""
+    text = content if isinstance(content, str) else str(content)
+    return text
+
+
+class OpenAIChoiceBackend:
+    """Decision backend for an OpenAI-compatible chat-completions endpoint.
+
+    This is the bridge for a Windows-hosted stemd to use a Mac LLM worker over
+    LAN: the process runs on Windows, the request goes to the Mac API. The
+    prompt is Task 004's variant B, validated on the held-out suite: ask for
+    the candidate word only, no JSON and no confidence, which cut latency and
+    parse errors while improving accuracy. There is no calibrated probability
+    in that response, so the backend reports a fixed, configurable constant.
+    """
+
+    SYSTEM_PROMPT = (
+        "只输出候选词本身，不要 JSON、不要置信度，不要任何其他文字。"
+    )
+
+    def __init__(self, node_id: str, base_url: str, api_key: str = "",
+                 model: str = "qwen3-4b-instruct-2507",
+                 checkpoint: str = "openai", prompt_variant: str = "b",
+                 timeout: float = 60.0, probability: float = 0.5,
+                 transport=None):
+        if (prompt_variant or "b").strip().lower() != "b":
+            raise ValueError("OpenAIChoiceBackend only implements prompt variant b")
+        if not base_url:
+            raise ValueError("base_url must be non-empty")
+        self.node_id = node_id
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key or ""
+        self.model = model
+        self.checkpoint = checkpoint or "openai"
+        self.prompt_variant = "b"
+        self.timeout = float(timeout)
+        self.probability = float(probability)
+        self._transport = transport or self._default_transport
+
+    @staticmethod
+    def _default_transport(url: str, payload: dict, api_key: str,
+                           timeout: float) -> dict:
+        import json
+        import urllib.error
+        import urllib.request
+
+        from .common import bypass_proxy_for_lan
+
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        request = urllib.request.Request(url, data=data, headers=headers,
+                                         method="POST")
+        # LAN/loopback traffic must not be surrendered to a system proxy.
+        bypass_proxy_for_lan()
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        try:
+            with opener.open(request, timeout=timeout) as response:
+                body = response.read()
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", "replace")
+            raise RuntimeError(f"HTTP {exc.code}: {detail}") from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"unreachable: {exc}") from exc
+        try:
+            return json.loads(body)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"invalid JSON response: {body[:500]!r}") from exc
+
+    def _user_prompt(self, req: DecisionRequest) -> str:
+        return (
+            f"状态：{req.state}\n"
+            f"问题：{req.question}\n"
+            "候选：\n"
+            + "\n".join(f"- {candidate}" for candidate in req.candidates)
+            + "\n只从以上候选中选择一个。"
+        )
+
+    def decide(self, req: DecisionRequest) -> Vote:
+        if not req.candidates:
+            raise ValueError("candidates must be non-empty")
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": self.SYSTEM_PROMPT},
+                {"role": "user", "content": self._user_prompt(req)},
+            ],
+            "temperature": 0.0,
+            "max_tokens": 16,
+            "stream": False,
+        }
+        response = self._transport(self.base_url + "/chat/completions",
+                                   payload, self.api_key, self.timeout)
+        choice = parse_openai_choice(
+            _openai_completion_text(response), req.candidates)
+        return Vote(self.node_id, self.checkpoint, choice,
+                    round(self.probability, 4))
+
+
 class _OVLazySession:
     """Duck-types ort.InferenceSession with OpenVINO.
 
