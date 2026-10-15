@@ -46,3 +46,4 @@ Timestamped, sanitized snapshots of this PandoSI working session.
 | 2026-10-15T213003 | `docs/session-logs/2026-10-15T213003-session-backup.md` | 0b000a6b8604 | 211/1096/2089 | automatic snapshot after df9d032 feat: the NPU is a graph problem, not a hardware problem |
 | 2026-10-15T220004 | `docs/session-logs/2026-10-15T220004-session-backup.md` | f02aca6cbb4d | 213/1111/2115 | automatic snapshot after 14ab3d7 test: the host is the ceiling, and one host is noisy |
 | 2026-10-15T223004 | `docs/session-logs/2026-10-15T223004-session-backup.md` | ba9a8448e280 | 214/1141/2173 | automatic snapshot after 7701d14 fix: a stem must not refuse connections when its host is busy |
+| 2026-10-15T230645 | `docs/session-logs/2026-10-15T230645-session-backup.md` | 925c89a1974a | 220/1179/2235 | automatic snapshot after a8b2803 feat: ship the fitted combiner as an advisory artifact |
