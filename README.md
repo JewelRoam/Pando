@@ -340,6 +340,19 @@ devices, one mind.
   not change. Corroboration is a dial with a measured price
   (`tools/hetero_capacity_check.py`,
   `docs/research/2026-10-15-round132.md`).
+- **The host is the ceiling, and one host is noisy**: re-running the capacity
+  matrix with the stems started the way production starts them — separate
+  `stemd` processes, own interpreter and session — changes nothing: 1 unit
+  26.5 / 2 units 25.0 / 3 units 26.0 dec/s at k=1, while **k=3 costs 2-3x**
+  (9.6 dec/s, p50 383 ms). Adding accelerators buys nothing because a single
+  stem already saturates the host's per-request work (tokenisation, JSON,
+  HTTP). Under four concurrent clients the units' *ranking* also flips —
+  the NPU, slowest sequentially (8.7 dec/s), is fastest under load
+  (33.2 /s) — and the same cell measured 16.8 and 34.1 /s in two runs, so
+  single-host numbers carry 30-50% noise. The next doubling is another
+  machine or less host work per request, not another unit
+  (`tools/process_fleet_capacity_check.py`,
+  `docs/research/2026-10-15-round133.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage

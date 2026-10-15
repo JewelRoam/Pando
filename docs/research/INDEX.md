@@ -145,6 +145,7 @@ Rebuilt by tools/build_research_index.py; one row per file.
 | 2026-10-15-round130.md | 130 | One device, several compute units, one opinion |
 | 2026-10-15-round131.md | 131 | The NPU is a graph problem, not a hardware problem |
 | 2026-10-15-round132.md | 132 | Corroboration is paid for in throughput |
+| 2026-10-15-round133.md | 133 | The host is the ceiling, and one host is noisy |
 
 ## Files without a round number
 

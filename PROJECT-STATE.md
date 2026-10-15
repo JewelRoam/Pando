@@ -147,6 +147,10 @@ NPU) all voting in the same consensus quorum.
 | Units add capacity at k=1 | 1 unit 14.7/s -> 2 units 27.1/s = the sum of their solo rates | round 132 |
 | One host, not three servers | the 3rd unit (NPU) adds little or subtracts; all stems share the host CPU | round 132 |
 | Elastic dial, measured | k=3 -> k=1 at 3 units: 2.3x throughput, half the p50 latency | round 132 |
+| Process-shaped fleet | separate stemd processes behave the same: 1u 26.5, 2u 25.0, 3u 26.0 /s | round 133 |
+| k is reproducible, units are not | k=3 costs 2-3x in both process shapes; units add nothing | round 133 |
+| Unit rank depends on load | at 4 clients: NPU 33.2/s > CPU 24.9 > iGPU 24.0 (sequential: NPU last) | round 133 |
+| Single-host variance | the same cell measured 16.8/s and 34.1/s in two runs - 30-50% noise | round 133 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |
