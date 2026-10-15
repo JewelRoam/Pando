@@ -159,6 +159,7 @@ Rebuilt by tools/build_research_index.py; one row per file.
 | 2026-10-15-round144.md | 144 | A portable combiner, and the smallest real fleet |
 | 2026-10-15-round145.md | 145 | The governance layer, verified through the file an operator writes |
 | 2026-10-15-round146.md | 146 | Growing and shrinking a fleet while it serves |
+| 2026-10-15-round147.md | 147 | The cross-device path, verified on one machine |
 
 ## Files without a round number
 

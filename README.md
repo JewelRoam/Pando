@@ -492,6 +492,18 @@ devices, one mind.
   copy contributes none
   (`tools/elastic_fleet_check.py`,
   `docs/research/2026-10-15-round146.md`).
+- **The cross-device path, verified on a real interface**: the session has run
+  everything on loopback and reported cross-device as hardware-blocked — but
+  "no second machine" is not "no second network path". With the operator's
+  `lan_listen` grant, a root advertises itself and a second `pandosi join
+  --lan` process **discovers it with no URL** (`found existing root at
+  http://192.168.31.100:56385`), registers as the second member, and a
+  decision asked over the LAN address comes back `tier=auto responded=2
+  quorum=2 votes=['onnx','onnx']`. Discovery finds the address; the pairing
+  token, read off the root's console, authorises joining. The only thing
+  between this and a two-device fleet is the second device
+  (`tools/lan_path_check.py`,
+  `docs/research/2026-10-15-round147.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage

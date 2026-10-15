@@ -200,6 +200,9 @@ NPU) all voting in the same consensus quorum.
 | A new opinion | opinions 1->2; auto 50->15 rows, accuracy 0.800 -> 1.000 | round 146 |
 | A replica buys nothing | opinions stay 2, throughput and answers unchanged | round 146 |
 | Removal is free | retiring the replica changes nothing measurable | round 146 |
+| LAN path verified | grant -> mDNS discovery -> 2 members -> `tier=auto responded=2` over 192.168.31.100 | round 147 |
+| Pairing design confirmed | discovery finds the address; the token (read from the root console) authorises joining | round 147 |
+| Cross-device gap | software path proven on a real interface; only a second device is missing | round 147 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |
