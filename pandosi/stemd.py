@@ -17,6 +17,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 class _PandoHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+    # The default backlog is 5. A device whose host is busy - which is the
+    # normal state of a personal computer, and the case this project is built
+    # for - cannot always accept that fast, and once the queue is full the
+    # kernel refuses connections: the root counts a failed call, drops the
+    # vote, and escalates without saying why. Measured in round 134: 85% of
+    # decisions escalated on a loaded host until this was raised.
+    request_queue_size = 128
 
 from .backend import MockBackend, OnnxLayaBackend, TorchLayaBackend
 from .common import DecisionRequest
