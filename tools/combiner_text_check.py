@@ -103,7 +103,7 @@ def main() -> int:
         for row in rows:
             votes = [(name, row["per_lineage"][name],
                       row["confidences"][name]) for name in lineages]
-            cells.append(vote_features(votes, classes, lineages)
+            cells.append(vote_features(votes, classes)
                          + text_features(text_model,
                                          tasks[row["task_id"]], classes))
         return np.array(cells)
@@ -112,7 +112,7 @@ def main() -> int:
     train_y = np.array([index[row["expected"]] for row in dev["rows"]])
     test_x = build(held["rows"], held_tasks)
     print(f"features: {train_x.shape[1]} "
-          f"({vote_features([('a', 'refund', 0.5)], classes, lineages).__len__()} "
+          f"({vote_features([('a', 'refund', 0.5)], classes).__len__()} "
           f"vote-pattern + {len(classes)} text posterior)")
 
     order = np.arange(len(train_y))

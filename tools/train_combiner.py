@@ -69,7 +69,6 @@ def main() -> int:
     rows = [row for path in paths
             for row in json.loads(path.read_text(encoding="utf-8"))["rows"]]
     classes = sorted({row["expected"] for row in rows})
-    lineages = sorted(rows[0]["per_lineage"])
     index = {name: position for position, name in enumerate(classes)}
 
     text_model = None
@@ -98,12 +97,12 @@ def main() -> int:
             distribution = text_model.posterior(
                 task["state"], task["question"], classes)
             posterior = [distribution.get(name, 0.0) for name in classes]
-        return features(votes_of(row), classes, lineages, posterior)
+        return features(votes_of(row), classes, posterior)
 
     train_x = np.array([cells_of(row) for row in rows])
     train_y = np.array([index[row["expected"]] for row in rows])
     print(f"{len(rows)} rows, {train_x.shape[1]} features, "
-          f"{len(classes)} classes, lineages {lineages}")
+          f"{len(classes)} classes")
 
     order = np.arange(len(train_y))
     best = None
@@ -124,7 +123,7 @@ def main() -> int:
     weights = fit(train_x, train_y, classes, l2)
     in_sample = float((((train_x @ weights).argmax(axis=1))
                        == train_y).mean())
-    combiner = Combiner(classes, lineages, weights.tolist(),
+    combiner = Combiner(classes, weights.tolist(),
                         {"trained_on": [path.name for path in paths],
                          "rows": len(rows), "l2": l2,
                          "cross_validated_accuracy": round(cv, 4),

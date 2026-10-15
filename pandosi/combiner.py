@@ -13,9 +13,9 @@ gate could not decide, and nothing here may change a tier or a choice. The
 safety of the swarm stays with the hand-written thresholds; what improves is
 the prior a human or a verification step starts from.
 
-Features are addressed by **lineage**, not by node: a quorum's members depend
-on which stems happen to be picked, while the admitted lineages are stable, so
-an absent lineage contributes zeros.
+Spec 3 keeps the features membership-agnostic (see `features`) and carries the
+text model inside the artifact, so one file works on any quorum that speaks the
+same question schema.
 """
 
 from __future__ import annotations
@@ -25,16 +25,21 @@ import math
 from collections import Counter
 from pathlib import Path
 
-SPEC_VERSION = 2
+SPEC_VERSION = 3
 
 
 def features(votes: list[tuple[str, str, float]], classes: list[str],
-             lineages: list[str],
              text_posterior: list[float] | None = None) -> list[float]:
-    """One row of features: per-candidate support, then per-lineage behaviour.
+    """One row of features: per-candidate support, then the text posterior.
 
     `votes` is (lineage, choice, calibrated probability) for the members that
     actually answered.
+
+    Spec 3 dropped the per-lineage cells that specs 1-2 carried. Measured on
+    the third wording split, removing them *raised* held-out accuracy from
+    82.92% to 85.00% - they encode "which named member dissented", which does
+    not generalise - and it makes the artifact independent of the quorum's
+    membership, so a fleet of different devices can use the same file.
     """
     counts = Counter(choice for _, choice, _ in votes)
     mass: dict[str, float] = {}
@@ -43,16 +48,9 @@ def features(votes: list[tuple[str, str, float]], classes: list[str],
     top = counts.most_common(1)
     majority = top[0][0] if top else None
     size = len(votes) or 1
-    by_lineage = {lineage: (choice, probability)
-                  for lineage, choice, probability in votes}
     cells = [counts.get(name, 0) / size for name in classes]
     cells += [mass.get(name, 0.0) / size for name in classes]
     cells += [(top[0][1] / size) if top else 0.0]
-    cells += [0.0 if majority is None or lineage not in by_lineage
-              else float(by_lineage[lineage][0] != majority)
-              for lineage in lineages]
-    cells += [by_lineage[lineage][1] if lineage in by_lineage else 0.0
-              for lineage in lineages]
     cells += [len({choice for _, choice, _ in votes}) / size]
     # Spec v2 appends the text model's posterior over the candidates: round
     # 141 measured it as worth +3.9 points on the rows the gate declines, when
@@ -66,11 +64,10 @@ def features(votes: list[tuple[str, str, float]], classes: list[str],
 class Combiner:
     """Weights plus the class and lineage order they were fitted with."""
 
-    def __init__(self, classes: list[str], lineages: list[str],
+    def __init__(self, classes: list[str],
                  weights: list[list[float]], meta: dict | None = None,
                  text_model: "TextModel | None" = None):
         self.classes = list(classes)
-        self.lineages = list(lineages)
         self.weights = [list(row) for row in weights]
         self.meta = dict(meta or {})
         self.text_model = text_model
@@ -93,7 +90,7 @@ class Combiner:
             distribution = self.text_model.posterior(
                 state, question or "", list(self.classes))
             posterior = [distribution.get(name, 0.0) for name in self.classes]
-        cells = features(votes, self.classes, self.lineages, posterior)
+        cells = features(votes, self.classes, posterior)
         width = len(cells)
         scores = [sum(cells[column] * self.weights[column][index]
                       for column in range(width))
@@ -116,7 +113,6 @@ class Combiner:
 
     def to_json(self) -> dict:
         payload = {"spec_version": SPEC_VERSION, "classes": self.classes,
-                "lineages": self.lineages,
                 "weights": [[round(value, 8) for value in column]
                             for column in self.weights],
                 "meta": self.meta}
@@ -134,8 +130,8 @@ class Combiner:
         if payload.get("text_model"):
             from .textmodel import TextModel
             text_model = TextModel.from_json(payload["text_model"])
-        return cls(payload["classes"], payload["lineages"],
-                   payload["weights"], payload.get("meta"), text_model)
+        return cls(payload["classes"], payload["weights"],
+                   payload.get("meta"), text_model)
 
     def save(self, path: str | Path) -> Path:
         target = Path(path)

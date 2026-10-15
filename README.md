@@ -460,6 +460,17 @@ devices, one mind.
   suggestions landing on an auto row
   (`pandosi/combiner.py`, `tools/combiner_artifact_check.py`,
   `docs/research/2026-10-15-round142.md`).
+- **A portable combiner, and the smallest real fleet measured end to end**:
+  spec 3 drops the per-lineage feature cells, which both makes the artifact
+  membership-agnostic *and* raises held-out accuracy — **85.00%** full
+  coverage on split C (spec 2: 82.92%, gate 77.08%, best member 73.75%, oracle
+  85.83%) with **67.53%** on the 77 rows the gate declines. With that file a
+  live two-stem fleet — the Laya `english` lineage on the iGPU plus the
+  **19 KB text member** — decides all 240 held-out rows over HTTP in
+  **13 seconds**: 76 auto-executed at **97.37%**, 164 declined with combiner
+  suggestions at 68.29%, a decided answer in **77.5%** of all rows
+  (`tools/live_fleet_quality_check.py`,
+  `docs/research/2026-10-15-round144.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage

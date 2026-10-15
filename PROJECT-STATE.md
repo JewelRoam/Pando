@@ -189,6 +189,10 @@ NPU) all voting in the same consensus quorum.
 | Two-provenance training rule | `--reports` (votes) + `--text-train` (wording) disjoint, recorded in meta | round 142 |
 | Spec-2 verified on split C | full 82.92%, declined rows 62.34%, 0/77 suggestions at auto | round 142 |
 | Text reaches the model live | same votes, different text -> different suggestion probabilities | round 142 |
+| Combiner spec 3 | membership-agnostic (27 features): per-lineage cells dropped | round 144 |
+| Dropping features helped | split C: full 85.00% (spec 2: 82.92%), declined rows 67.53% | round 144 |
+| Smallest real fleet | iGPU english + 19 KB text member, k=2, 240 rows in 13 s | round 144 |
+| Live outcomes | auto 76 at 97.37%; declined 164, suggestions 68.29%; decided 77.50% | round 144 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |
