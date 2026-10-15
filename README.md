@@ -566,6 +566,28 @@ devices, one mind.
   as one that scored 0.96
   (`tools/generation_curve_check.py`,
   `docs/research/2026-10-16-round152.md`).
+- **The admission rule, applied to real candidates**: all five fine-tunes on
+  the fourth split clear all three floors — capability (0.83-0.975 against
+  the 0.769 bar), independence (mean phi +0.04…+0.26, where a copied
+  descendant once measured +1.000) and fleet-no-regression — and the rule
+  still shows what it is: a floor, not a lift. `ft-v3-s2` decides 0.9750
+  alone, yet the system with it seated decides 0.8792, because the
+  gate+combiner were fitted on the weaker trio; and admitting a *run* is
+  not selecting a *recipe* (sample means 0.9431 at 720 rows and 0.8959 at
+  960; the weakest admitted draw, 0.8292, clears the floor by 2.6 points)
+  (`tools/admit_member_check.py`, `docs/research/2026-10-16-round153.md`).
+- **The fleet runs with the CPU left alone**: the iGPU and the NPU
+  (OpenVINO, english lineage) plus the RTX 3070 carrying the project's own
+  fine-tune `ft-v3` (torch/CUDA — the first live member from outside the
+  OpenVINO ecosystem) decided a 240-row held-out split with **zero CPU
+  inference**: 240/240 three-vote answers, 0 dropouts, 7.2-8.4 rows/s at
+  p50 ~115 ms, host CPU 16-22% busy — 78-84% left for its owner. The
+  per-decision CPU bill: NPU 5.1 ms, 3070 45.0 ms, iGPU 55-76 ms, against
+  a CPU stem's ~2856 ms; the coordination left is ~9-10 ms per row. The
+  first run's "0.00 CPU-seconds for the CUDA stem" was a venv redirector
+  being measured instead of the interpreter it spawns — caught, fixed, and
+  kept in the log (`tools/cpu_free_fleet_check.py`,
+  `docs/research/2026-10-16-round153.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage

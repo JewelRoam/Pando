@@ -1,6 +1,6 @@
 # PandoSI Project State
 
-*Last updated: 2026-10-14 (after ~3 hours of continuous development)*
+*Last updated: 2026-10-16 (round 153; continuous research session)*
 
 ## Where we are
 
@@ -225,6 +225,12 @@ NPU) all voting in the same consensus quorum.
 | Loop, replicated | parent 0.7458; corpus 648: 3 samples mean 0.9292; corpus 864: 2 samples mean 0.8959 | round 152 |
 | Training variance dominates | spreads 5.0 (648) and 13.3 (864) points; ranges overlap | round 152 |
 | Admission needs a third condition | independence + capability + **replication**: one run is one draw | round 152 |
+| Admission rule, applied | five fine-tunes clear capability (>=0.83 vs floor 0.7692), independence (mean phi +0.04..+0.26), fleet floor, on split D | round 153 |
+| Admission is a floor, not a lift | ft-v3-s2 solo 0.9750 vs 0.8792 decided with it seated (gate fitted on the weaker trio) | round 153 |
+| Recipe mean vs admitted run | 720 rows mean 0.9431, 960 rows mean 0.8959; admitting a run is not selecting a recipe | round 153 |
+| CPU-free live fleet | iGPU+NPU+3070 (torch ft-v3) stems, zero CPU inference: 240/240 three-vote rows, 7.2-8.4 rows/s | round 153 |
+| CPU left free | host 16-22% busy during the run; per-decision CPU: npu 5.1, dgpu 45.0, igpu 55-76 ms | round 153 |
+| Venv redirector trap | Scripts\python.exe (255 KB) runs the real interpreter as a child; pid CPU reads 0.00, measure the tree | round 153 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |
