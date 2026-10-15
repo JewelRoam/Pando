@@ -37,6 +37,20 @@ SYSTEM_PROMPT = (
     "\"probability\": <0~1 小数>}，不得输出任何其他文字。"
 )
 
+# Task 004 found a candidate-only prompt ("variant B") beats the JSON prompt
+# ("variant A") on held-out wording, so both are kept selectable here.
+PROMPT_VARIANTS = {
+    "a": SYSTEM_PROMPT,
+    "b": ("只输出候选词本身，不要 JSON、不要置信度，不要任何其他文字。"),
+}
+
+# Variant B carries no confidence, so its votes are recorded at chance.
+VARIANT_B_PROBABILITY = 0.5
+VARIANT_B_PROBABILITY_NOTE = (
+    "variant b (candidate-only prompt) emits no confidence; "
+    "probability recorded as 0.5 for every row"
+)
+
 
 def load_tasks(path: Path) -> list[dict]:
     rows: list[dict] = []
@@ -167,10 +181,11 @@ def run_one(args, task: dict, api_key: str) -> dict:
         + "\n".join(f"- {candidate}" for candidate in candidates)
         + "\n只从以上候选中选择一个。"
     )
+    variant = getattr(args, "variant", "a")
     payload = {
         "model": args.model,
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": PROMPT_VARIANTS[variant]},
             {"role": "user", "content": user_prompt},
         ],
         "temperature": 0.0,
@@ -183,7 +198,15 @@ def run_one(args, task: dict, api_key: str) -> dict:
                          payload, api_key, args.timeout)
     latency_ms = (time.perf_counter() - started) * 1000.0
     content = completion_text(response)
-    answer = parse_answer(content, candidates)
+    if variant == "b":
+        choice = candidate_match(content, candidates)
+        answer = {
+            "choice": choice,
+            "probability": VARIANT_B_PROBABILITY,
+            "parse_mode": "regex" if choice is not None else "parse_error",
+        }
+    else:
+        answer = parse_answer(content, candidates)
 
     usage = response.get("usage") or {}
     completion_tokens = number(usage.get("completion_tokens"))
@@ -287,6 +310,11 @@ def main() -> int:
                         help="run only the first N rows for a smoke test")
     parser.add_argument("--summary-out", type=Path, default=None,
                         help="optionally save the detailed summary as JSON")
+    parser.add_argument("--variant", choices=sorted(PROMPT_VARIANTS),
+                        default="a",
+                        help="a: JSON choice+probability prompt (default); "
+                             "b: candidate-only prompt (no confidence; "
+                             "probability recorded as 0.5)")
     args = parser.parse_args()
 
     tasks = load_tasks(args.suite)
@@ -297,8 +325,8 @@ def main() -> int:
 
     api_key = load_api_key(args.api_key_file)
 
-    print(f"suite={args.suite} rows={len(tasks)} model={args.model}",
-          flush=True)
+    print(f"suite={args.suite} rows={len(tasks)} model={args.model} "
+          f"variant={getattr(args, 'variant', 'a')}", flush=True)
     rows: list[dict] = []
     started = time.perf_counter()
     for index, task in enumerate(tasks, start=1):
@@ -313,6 +341,7 @@ def main() -> int:
     summary = summarize(rows)
     summary["model"] = args.model
     summary["suite"] = args.suite.name
+    summary["prompt_variant"] = getattr(args, "variant", "a")
     print("SUMMARY " + json.dumps(summary, ensure_ascii=False, sort_keys=True),
           flush=True)
 
@@ -327,11 +356,18 @@ def main() -> int:
         }
         for row in rows
     ]
-    out.write_text(json.dumps({
+    variant = getattr(args, "variant", "a")
+    record = {
         "model": args.model,
         "suite": args.suite.name,
+        "prompt": {"variant": variant,
+                   "system": PROMPT_VARIANTS[variant]},
         "rows": vote_rows,
-    }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    }
+    if variant == "b":
+        record["probability_note"] = VARIANT_B_PROBABILITY_NOTE
+    out.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n",
+                   encoding="utf-8")
     print(f"wrote {out}", flush=True)
 
     if args.summary_out:

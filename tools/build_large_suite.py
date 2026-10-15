@@ -309,6 +309,80 @@ FOURTH_CUES = {
 
 CUE_SETS["d"] = FOURTH_CUES
 
+
+# A fifth inventory, for the split-E evaluation (task 007): 48 fresh
+# phrasings, none of which appear verbatim in A, B, C or D, so a model or
+# combiner fitted on any earlier inventory is measured on genuinely new
+# wording again.
+FIFTH_CUES = {
+    "refund": [
+        "I need the transaction refunded to my bank account",
+        "would you return the purchase price",
+        "please compensate me for this charge",
+        "issue me a credit for the amount paid",
+        "return the money taken from my card",
+        "I am looking for a repayment of the fee",
+    ],
+    "chargeback": [
+        "I am disputing this payment through my bank",
+        "my card provider has opened a dispute",
+        "the issuer has begun a reversal case",
+        "my bank has started a challenge against the payment",
+        "this charge is now in the card network's dispute process",
+        "my financial institution is reversing the amount",
+    ],
+    "exchange": [
+        "could this purchase be exchanged for another style",
+        "can I exchange the order for another model",
+        "please let me choose a replacement variant",
+        "I need to swap the item I received",
+        "could you trade this item for the one I wanted",
+        "send a different version instead of this one",
+    ],
+    "complaint": [
+        "I am upset with the way this was dealt with",
+        "the support I received was disappointing",
+        "what a frustrating ordeal this turned into",
+        "I have never had such poor help",
+        "your service fell far below expectations",
+        "nothing in this process worked well",
+    ],
+    "praise": [
+        "the assistance I got was outstanding",
+        "I am delighted with how this turned out",
+        "your representative handled everything perfectly",
+        "this was an excellent piece of support",
+        "many thanks for the great help",
+        "the service could not have been better",
+    ],
+    "greeting": [
+        "good evening, I hope you are doing well",
+        "hello, I just wanted to check in",
+        "greetings from Seoul",
+        "hey there, pleased to make your acquaintance",
+        "a quick hello from my side",
+        "good day to you",
+    ],
+    "login_issue": [
+        "I cannot get past the sign-in screen",
+        "my password is not being accepted",
+        "the account recovery code is missing",
+        "authentication is not letting me through",
+        "the platform keeps rejecting my login",
+        "my access credentials are not working",
+    ],
+    "invoice": [
+        "please send the invoice for my order",
+        "please supply a record of the charges",
+        "can you send the payment summary",
+        "kindly forward the receipt for this transaction",
+        "I would like the billing information",
+        "where can I download the tax invoice",
+    ],
+}
+
+CUE_SETS["e"] = FIFTH_CUES
+
 QUESTION = "intent"
 
 
@@ -341,6 +415,56 @@ def assert_fillers_are_neutral() -> None:
                 raise SystemExit(
                     f"filler {filler!r} contains class vocabulary {overlap} "
                     f"from cue set {name!r}")
+
+
+def longest_shared_run(left_cues: list[str], right_cues: list[str]) -> int:
+    """Longest run of words that appears in a cue from both inventories."""
+    longest = 0
+    for left in left_cues:
+        for right in right_cues:
+            words_left = left.lower().split()
+            words_right = right.lower().split()
+            for size in range(1, min(len(words_left), len(words_right)) + 1):
+                runs = {" ".join(words_left[start:start + size])
+                        for start in range(len(words_left) - size + 1)}
+                if any(" ".join(words_right[start:start + size]) in runs
+                       for start in range(len(words_right) - size + 1)):
+                    longest = max(longest, size)
+    return longest
+
+
+def cross_inventory_report(target_name: str) -> None:
+    """Exact-string overlap and longest shared run of one cue set vs the rest.
+
+    A2 is not a separate inventory: ``big2`` (seed 2, dev/test) reuses cue set
+    A, so the five named inventories A-E are the full comparison space.
+    """
+    target = CUE_SETS[target_name]
+    target_strings = {cue.lower() for group in target.values()
+                      for cue in group}
+    target_total = sum(len(group) for group in target.values())
+    print(f"cross-inventory check for cue set {target_name!r}: "
+          f"{target_total} cues, {len(target_strings)} unique")
+    grand_total = 0
+    for other_name in sorted(CUE_SETS):
+        if other_name == target_name:
+            continue
+        other = CUE_SETS[other_name]
+        other_strings = {cue.lower() for group in other.values()
+                         for cue in group}
+        exact = target_strings & other_strings
+        grand_total += len(exact)
+        print(f"  vs {other_name}: exact overlap {len(exact)}")
+    print(f"  total exact overlap across all other sets: {grand_total}")
+    for label in sorted(target):
+        longest = 0
+        for other_name in sorted(CUE_SETS):
+            if other_name == target_name:
+                continue
+            for right in CUE_SETS[other_name].get(label, []):
+                longest = max(longest,
+                              longest_shared_run(target[label], [right]))
+        print(f"  {label:14s} longest shared run: {longest} words")
 
 
 def overlap_report() -> None:
@@ -413,7 +537,9 @@ def main() -> int:
     parser.add_argument("--out", default=str(ROOT / "assets" / "big_dev.jsonl"))
     parser.add_argument("--cues", choices=sorted(CUE_SETS), default="a",
                         help="a: the original inventory; b: phrasings that "
-                             "appear in no earlier split (round 122)")
+                             "appear in no earlier split (round 122); "
+                             "c/d: later held-out inventories; "
+                             "e: fresh inventory for split E (task 007)")
     args = parser.parse_args()
 
     assert_fillers_are_neutral()
@@ -430,6 +556,8 @@ def main() -> int:
     print(f"unique states: {len({task['state'] for task in tasks})}")
     if args.cues == "b":
         overlap_report()
+    if args.cues == "e":
+        cross_inventory_report("e")
     return 0
 
 
