@@ -438,6 +438,18 @@ devices, one mind.
   a suggestion is now masked to the question's options like any member's vote
   (`pandosi/combiner.py`, `tools/combiner_artifact_check.py`,
   `docs/research/2026-10-15-round140.md`).
+- **Three disjoint wording sets, and a combiner that beats every member on
+  unseen wording**: the generator now carries a third inventory
+  (`--cues c`, 0 cue overlap with the other two), which separates the roles —
+  combiner fitted on set A, text model trained on set B, **evaluated once on
+  set C**. On C the plain majority beats the best single member by 3.3
+  points, and a combiner over the members' votes plus the text model's
+  posterior reaches **82.92% against the best member's 73.75%**; on the 77
+  rows the gate declines it answers **62.34%** against the member's 40.26%
+  and an oracle of 71.43%. Votes alone carry most of it (58.44%), the text
+  adds +3.9 points there
+  (`tools/combiner_text_check.py`, `assets/heldout2_test.jsonl`,
+  `docs/research/2026-10-15-round141.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage

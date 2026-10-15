@@ -163,6 +163,79 @@ HELDOUT_CUES = {
 
 CUE_SETS = {"a": INTENT_CUES, "b": HELDOUT_CUES}
 
+# A third inventory, so that a model can be trained on one wording set, a
+# combiner fitted on a second, and the whole thing evaluated on a third that
+# neither has seen (round 141). With two sets the two roles collide: a text
+# model trained on set B is out-of-sample on A but contaminates B.
+THIRD_CUES = {
+    "refund": [
+        "put the charge back on my card",
+        "I want a full reversal of the payment",
+        "please return what I paid",
+        "the money should come back to me",
+        "undo the transaction and give me my funds",
+        "I am asking for my cash again",
+    ],
+    "chargeback": [
+        "I have taken this up with my card company",
+        "the bank is contesting it for me",
+        "I filed a claim with my issuer",
+        "the payment is being clawed back by the scheme",
+        "my provider is disputing the amount",
+        "this follows the card scheme's rules",
+    ],
+    "exchange": [
+        "can I get a different model instead",
+        "swap it for a bigger one",
+        "I want the other colourway",
+        "send a replacement unit",
+        "trade mine for another",
+        "I would like a substitute",
+    ],
+    "complaint": [
+        "this is really poor",
+        "the service was shocking",
+        "I am unhappy with all of it",
+        "nothing has worked at all",
+        "the handling was a disgrace",
+        "I have lost patience",
+    ],
+    "praise": [
+        "you did a marvellous job",
+        "the team was excellent",
+        "very pleased with this",
+        "outstanding support",
+        "that was a delight",
+        "absolutely spot on",
+    ],
+    "greeting": [
+        "hiya, just checking in",
+        "good afternoon",
+        "hello from Madrid",
+        "just dropping by to say hi",
+        "hey, nice to meet you",
+        "salutations",
+    ],
+    "login_issue": [
+        "I cannot get into my account",
+        "my credentials are rejected",
+        "the sign-in keeps looping",
+        "my profile is inaccessible",
+        "the code never arrives",
+        "I am blocked at the entrance screen",
+    ],
+    "invoice": [
+        "please send the bill again",
+        "I need the tax paperwork",
+        "where do I find my billing summary",
+        "send the tax documentation",
+        "I want the itemised account",
+        "please issue the statement for last month",
+    ],
+}
+
+CUE_SETS["c"] = THIRD_CUES
+
 QUESTION = "intent"
 
 

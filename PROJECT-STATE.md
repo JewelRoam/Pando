@@ -180,6 +180,11 @@ NPU) all voting in the same consensus quorum.
 | Advisory by construction | `suggested_choice` only when the tier is not auto; 0/68 at auto | round 140 |
 | Artifact reproduces the claim | full 80.42%, declined rows 54.41% (gate declines them, best member 41.18%) | round 140 |
 | Candidate contract | a suggestion outside the request's candidates is refused (found live) | round 140 |
+| Third wording set | `--cues c`, 48 phrasings, 0 overlap with A and B; assets/heldout2_test.jsonl | round 141 |
+| Three roles separated | combiner on A, text model on B, evaluation on C | round 141 |
+| Swarm on unseen wording (split C) | majority 77.08% vs best member 73.75% (+3.3) | round 141 |
+| Combiner + text, evaluated on C | full 82.92% (best member 73.75); declined rows 62.34% vs member 40.26%, oracle 71.43% | round 141 |
+| Votes vs text | votes alone 58.44% on declined rows, +text 62.34% | round 141 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |
