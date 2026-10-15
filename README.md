@@ -644,6 +644,19 @@ devices, one mind.
   scales do not transfer across model families, and the answer is model
   tiers composed by the aggregation layer, not a herd of identical voters
   (`tools/mac_group_check.py`, `docs/research/2026-10-16-round157.md`).
+- **The first real LLM tier — deployed, evaluated, and honestly not yet a
+  win**: the Mac node (via the task mailbox) deployed Qwen3-4B-Instruct
+  Q4_K_M on llama.cpp with Metal (~45 tok/s, OpenAI-compatible, key-guarded)
+  and ran it as a PandoSI decision worker over split D: **0.7375 zero-shot
+  with 100% parse success** — within a point of untuned Laya, far under the
+  fine-tuned member's 0.9417. Seated into the fleet, its raw confidence
+  (mean 0.9586 against 0.7375 accuracy, ECE 0.2211) swings the gate wide
+  open: auto coverage 159 → **225 rows at 0.9244**, but the system's decided
+  accuracy falls 0.9750 → 0.9167. The combination layer is the bottleneck,
+  not the model tier — calibration (fit on C, evaluate on D) is the next
+  dispatched experiment (`tools/llm_decision_check.py`,
+  `metrics/lan-check/combine_llm_check.py`,
+  `docs/research/2026-10-16-round158.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage
