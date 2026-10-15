@@ -38,13 +38,19 @@ from pandosi.backend import OnnxLayaBackend  # noqa: E402
 from pandosi.calibrate import Calibrator  # noqa: E402
 from pandosi.common import DecisionRequest, Vote, aggregate  # noqa: E402
 
-LINEAGES = [
-    ("english", "convaiinnovations/laya", "artifacts/laya-en.onnx"),
-    ("multilingual", "convaiinnovations/laya-multilingual",
-     "artifacts/laya-ml.onnx"),
-    ("typed-decisions", "convaiinnovations/laya-typed-decisions",
-     "artifacts/laya-td.onnx"),
-]
+LINEAGES = {
+    "english": ("convaiinnovations/laya", "artifacts/laya-en.onnx"),
+    "multilingual": ("convaiinnovations/laya-multilingual",
+                     "artifacts/laya-ml.onnx"),
+    "typed-decisions": ("convaiinnovations/laya-typed-decisions",
+                        "artifacts/laya-td.onnx"),
+    # Trained in this repository (the child of laya-en.onnx in the delta
+    # replication checks), so its weights differ from the three above rather
+    # than re-rendering them - the membership the swarm premise needs
+    # (round 119).
+    "rlcd-v7": ("local/rlcd-v7", "artifacts/laya-rlcd-v7.onnx"),
+}
+DEFAULT_LINEAGES = "english,multilingual,typed-decisions"
 
 
 def accuracy_at(ranked: list[dict], count: int,
@@ -68,16 +74,26 @@ def main() -> int:
     parser.add_argument("--suite",
                         default=str(ROOT / "assets" / "graft_suite.jsonl"))
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--lineages", default=DEFAULT_LINEAGES,
+                        help="comma-separated lineage names")
     args = parser.parse_args()
+
+    chosen = [name.strip() for name in args.lineages.split(",") if name.strip()]
+    unknown = [name for name in chosen if name not in LINEAGES]
+    if unknown:
+        raise SystemExit(f"unknown lineage(s) {unknown}; "
+                         f"known: {sorted(LINEAGES)}")
 
     tasks = [json.loads(line) for line in
              Path(args.suite).read_text(encoding="utf-8").splitlines()
              if line.strip()]
     tasks = [task for task in tasks if task.get("qtype") == "choice"]
-    print(f"suite: {len(tasks)} labeled choice tasks", flush=True)
+    print(f"suite: {Path(args.suite).name}, {len(tasks)} labeled choice "
+          f"tasks", flush=True)
 
     backends = []
-    for name, repo, onnx in LINEAGES:
+    for name in chosen:
+        repo, onnx = LINEAGES[name]
         path = ROOT / onnx
         if not path.exists():
             raise SystemExit(f"missing graph for {name}: {path}")
@@ -98,7 +114,7 @@ def main() -> int:
                                                   vote.probability)
             calibrated.append(Vote(vote.node_id, vote.checkpoint, vote.choice,
                                    probability))
-        result = aggregate(calibrated, min_quorum=3)
+        result = aggregate(calibrated, min_quorum=len(chosen))
         expected = task["expected"]
         choices = [vote.choice for vote in calibrated]
         top_votes = Counter(choices).most_common()
@@ -137,7 +153,7 @@ def main() -> int:
     swarm_ranked = sorted(rows, key=lambda row: (order[row["tier"]],
                                                  -row["mean_probability"]))
     single = {}
-    for name, _, _ in LINEAGES:
+    for name in chosen:
         lane = [dict(row, correct=row["lineage_correct"][name])
                 for row in rows]
         ranked = sorted(lane, key=lambda row, n=name:
@@ -165,6 +181,8 @@ def main() -> int:
     unanimous = [row for row in rows if row["distinct"] == 1]
 
     summary = {
+        "suite": Path(args.suite).name,
+        "lineages": chosen,
         "tasks": total,
         "per_lineage_full_coverage": {name: entry["accuracy_full"]
                                       for name, entry in single.items()},

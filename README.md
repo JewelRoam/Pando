@@ -187,15 +187,23 @@ devices, one mind.
   cost of 28% throughput. An unclassified question in a categorised playbook
   fails conservative, and keywords can still only raise the floor
   (`docs/research/2026-10-14-round112.md`).
-- **The swarm's accuracy claim is unverified**: on the 27 labeled choice
-  tasks the majority vote scores **51.9%**, below every member (55.6-59.3%),
-  and the shipped gate is beaten at matched coverage by a single lineage's
-  own confidence (92.3% vs 100% on the same 13 tasks). The trio does hold
-  the answer 74.1% of the time, so the gap is in the combiner, not the
-  members — and 27 tasks cannot separate these numbers, which is why the
-  next step is a few hundred labeled tasks rather than a new combiner
-  (`tools/ensemble_value_check.py`, `tools/combiner_check.py`,
-  `docs/research/2026-10-14-round117.md`).
+- **The swarm's edge over its best member is real but small — and the
+  members matter 13x more than the combiner**: over 480 labeled tasks (two
+  independent 240-task splits) the weighted vote scores **89.6%** against
+  the best single lineage's **88.5%** — +1.0 point, 95% CI [-1.0, +3.1] —
+  and +1.6 points at the coverage the shipped gate accepts, CI [0.00, +3.4].
+  Round 117's headline (the gate beaten by "the best member", 92.3% vs
+  100%) does not survive scale: that row was the *reference* lineage, here
+  the weakest of the three, and its 100% was 13 tasks. What does survive is
+  structural: the three admitted lineages span **13.5 accuracy points**
+  while every combiner in a six-way sweep spans 1, their errors arrive
+  together (phi +0.23 to +0.50, both-wrong 2.0-4.3x the independence rate),
+  and the answer sits in the trio on **91.7%** of the 157 disagreements
+  while the best rule captures **74.5%**. That 17-point gap is the headroom,
+  and it needs more diverse members rather than more tasks: at the observed
+  5.6% discordance, resolving a 1-point difference takes ~3,900 tasks
+  (`tools/build_large_suite.py`, `tools/ensemble_significance.py`,
+  `docs/research/2026-10-15-round118.md`).
 - **Per-category quorum floors and retirement**: a playbook sets a
   `quorum_floor` per category, so under load an ordinary question gave up
   voters down to 2 while a security question stopped at 4 — twice the

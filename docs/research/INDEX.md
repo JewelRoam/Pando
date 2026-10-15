@@ -130,6 +130,7 @@ Rebuilt by tools/build_research_index.py; one row per file.
 | 2026-10-14-round115.md | 115 | Growth that knows where it is going, and undoes its own mistakes |
 | 2026-10-14-round116.md | 116 | Judging a bet properly, and remembering a loss |
 | 2026-10-14-round117.md | 117 | Does the swarm decide better than its best member? |
+| 2026-10-15-round118.md | 118 | The ensemble question at 480 tasks, and why little is left to combine |
 
 ## Files without a round number
 
