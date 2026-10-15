@@ -33,11 +33,32 @@ DEFAULT_CHECKPOINT = "text-nb-v1"
 DEFAULT_ALPHA = 1.0
 
 
-def features(text: str) -> list[str]:
-    """Words plus adjacent pairs; the cue phrases live in the pairs."""
+FEATURE_MODES = ("words", "chars", "mixed")
+
+
+def features(text: str, mode: str = "words") -> list[str]:
+    """The member's view of the text.
+
+    `words` is words plus adjacent pairs (the cue phrases live in the pairs);
+    `chars` is character trigrams over the normalized text, which sees typo'd
+    and inflected forms the word view misses; `mixed` is both. Round 128 asks
+    whether a second cheap member is worth a seat, and the honest version of
+    that question is whether a *different view* of the same text decorrelates
+    its errors - a different hyperparameter on the same view would not.
+    """
+    if mode not in FEATURE_MODES:
+        raise ValueError(f"unknown feature mode {mode!r}")
     words = re.findall(r"[a-z0-9']+", text.lower())
+    if mode == "words":
+        return words + [f"{first} {second}"
+                        for first, second in zip(words, words[1:])]
+    normalized = " ".join(words)
+    grams = [normalized[index:index + 3]
+             for index in range(len(normalized) - 2)]
+    if mode == "chars":
+        return grams
     return words + [f"{first} {second}"
-                    for first, second in zip(words, words[1:])]
+                    for first, second in zip(words, words[1:])] + grams
 
 
 class TextModel:
@@ -48,9 +69,12 @@ class TextModel:
     """
 
     def __init__(self, checkpoint: str = DEFAULT_CHECKPOINT,
-                 alpha: float = DEFAULT_ALPHA):
+                 alpha: float = DEFAULT_ALPHA, feature_mode: str = "words"):
+        if feature_mode not in FEATURE_MODES:
+            raise ValueError(f"unknown feature mode {feature_mode!r}")
         self.checkpoint = checkpoint
         self.alpha = float(alpha)
+        self.feature_mode = feature_mode
         self._counts: dict[str, Counter] = {}
         self._totals: Counter = Counter()
         self._vocabulary = 1
@@ -70,7 +94,8 @@ class TextModel:
             if label is None:
                 continue
             tokens = features(self.request_text(row.get("state", ""),
-                                                row.get("question", "")))
+                                                row.get("question", "")),
+                              self.feature_mode)
             counts.setdefault(label, Counter()).update(tokens)
             totals[label] += len(tokens)
             vocabulary.update(tokens)
@@ -85,7 +110,8 @@ class TextModel:
                   candidates: list[str]) -> dict[str, float]:
         if not candidates:
             raise ValueError("candidates must be non-empty")
-        tokens = features(self.request_text(state, question))
+        tokens = features(self.request_text(state, question),
+                          self.feature_mode)
         logits: dict[str, float] = {}
         for choice in candidates:
             counts = self._counts.get(choice)
@@ -120,6 +146,7 @@ class TextModel:
         return {
             "checkpoint": self.checkpoint,
             "alpha": self.alpha,
+            "feature_mode": self.feature_mode,
             "vocabulary": self._vocabulary,
             "totals": dict(self._totals),
             "counts": {label: dict(counter)
@@ -129,12 +156,14 @@ class TextModel:
     def summary(self) -> dict:
         return {"checkpoint": self.checkpoint, "labels": len(self._counts),
                 "features": self._vocabulary,
-                "tokens": sum(self._totals.values())}
+                "tokens": sum(self._totals.values()),
+                "feature_mode": self.feature_mode}
 
     @classmethod
     def from_json(cls, payload: dict) -> "TextModel":
         model = cls(payload.get("checkpoint", DEFAULT_CHECKPOINT),
-                    payload.get("alpha", DEFAULT_ALPHA))
+                    payload.get("alpha", DEFAULT_ALPHA),
+                    payload.get("feature_mode", "words"))
         model._counts = {label: Counter(counter) for label, counter
                          in payload.get("counts", {}).items()}
         model._totals = Counter(payload.get("totals", {}))

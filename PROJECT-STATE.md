@@ -124,6 +124,10 @@ NPU) all voting in the same consensus quorum.
 | Heartbeat TTL | an un-heartbeating stem is dropped after 15 s; a check must heartbeat | round 126 |
 | Tied quorum answers | 2-2 splits ranked by confidence at verify, never auto | round 127 |
 | Tie-break measured | trio 73.75 -> 77.08; +text 72.92 -> 78.33; auto tier unchanged | round 127 |
+| Member portfolio | best single addition is the weakest member (centroid 42.9%): +3.39 pt, 100% of resamples | round 128 |
+| Four cheap additions | -11.62 pt vs the trio; two reweightings do not fix it | round 128 |
+| Cheap members resemble each other | chars x mixed phi +0.898, words x centroid +0.687; each ~0 vs the trio | round 128 |
+| Synthetic independent voters | monotone in count at every accuracy >= 0.5; six 50% members = +13 pt | round 128 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |

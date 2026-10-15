@@ -140,6 +140,7 @@ Rebuilt by tools/build_research_index.py; one row per file.
 | 2026-10-15-round125.md | 125 | What a device can and cannot do with the model it has |
 | 2026-10-15-round126.md | 126 | The cheap independent member, shipped |
 | 2026-10-15-round127.md | 127 | A tied quorum should answer, not go silent |
+| 2026-10-15-round128.md | 128 | Scaling is a membership problem, not a head-count |
 
 ## Files without a round number
 

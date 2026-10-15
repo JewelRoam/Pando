@@ -283,6 +283,18 @@ devices, one mind.
   73.75% → **77.08%** at full coverage and the four-member swarm
   72.92% → **78.33%**, with the `auto` tier untouched
   (`docs/research/2026-10-15-round126.md`, `…round127.md`).
+- **Scaling is a membership problem, not a head-count**: adding a *second*
+  cheap independent member stops paying — four of them leave the swarm
+  **11.6 points worse** than the trio (paired bootstrap, ahead in 0.1% of
+  2000 resamples) — because the cheap members resemble each other
+  (chars × mixed **phi +0.898**, words × centroid +0.687) while each is
+  decorrelated from the neural family. A synthetic control with *truly*
+  independent voters is monotone in count at every accuracy down to 50%
+  (six 50% members: +13 points; six 60% members: +17). So the fleet's
+  constraint is error correlation, not member strength or member count: a
+  device is worth a seat only if it diverges from the members already seated
+  (`tools/member_portfolio_check.py`, `tools/scaling_curve_check.py`,
+  `docs/research/2026-10-15-round128.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage
