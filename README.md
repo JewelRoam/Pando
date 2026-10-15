@@ -226,6 +226,16 @@ devices, one mind.
   *identical* to the first ballot (83.9%). Both routes to the 93.6% the trio
   holds on those rows are now closed by measurement; it is a members problem
   (`docs/research/2026-10-15-round120.md`).
+- **The quorum is now invariant under replication**: a same-lineage vote is
+  folded into its lineage (`aggregate(count_lineages=True)`, `rootd
+  --lineage-quorum`), so counting stems no longer lets a copied lineage
+  outvote a distinct one. Replaying the recorded decisions with replicas
+  added: the shipped rule moves by up to **14.6 points** of accuracy
+  depending only on which lineage was copied — replicating the *weakest*
+  member drags the quorum to 74.6%, replicating the *best* inflates it to
+  90.0% — while the lineage-counted rule moves by **0.000** and is byte-identical
+  on a quorum with no duplicates
+  (`tools/lineage_quorum_check.py`, `docs/research/2026-10-15-round121.md`).
 - **Per-category quorum floors and retirement**: a playbook sets a
   `quorum_floor` per category, so under load an ordinary question gave up
   voters down to 2 while a security question stopped at 4 — twice the

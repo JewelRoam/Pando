@@ -84,6 +84,7 @@ class Coordinator:
                  adaptive_quorum: bool = False,
                  quorum_floor: int = 1,
                  latency_target_ms: float | None = None,
+                 count_lineages: bool = False,
                  rollout_dir: str | Path = "rollouts"):
         self.nodes: dict[str, dict] = {}
         self._lock = threading.Lock()
@@ -94,6 +95,10 @@ class Coordinator:
         self.blocked: dict[str, str] = {}
         self._transport = transport
         self.quorum_k = quorum_k
+        # Round 119: a replica is a correlated voter, so counting stems lets
+        # a replicated lineage decide alone. With this on, the quorum is
+        # counted over lineages and repeated stems collapse to one vote.
+        self.count_lineages = count_lineages
         # Adaptive quorum (round 110): a larger k means more independent
         # voters per decision and fewer decisions in parallel, so the size is
         # traded against latency under load - down to a floor, never below it.
@@ -447,9 +452,13 @@ class Coordinator:
             eff_gating["auto_min_probability"] = sec.get(
                 "auto_min_probability", 0.4)
         result = aggregate(
-            calibrated_votes, min_quorum=min(3, len(quorum)),
+            calibrated_votes,
+            min_quorum=min(3, len({info["checkpoint"]
+                                   for _, info in quorum})
+                           if self.count_lineages else len(quorum)),
             auto_min_agreement=eff_gating.get("auto_min_agreement", 0.6),
-            auto_min_probability=eff_gating.get("auto_min_probability", 0.6))
+            auto_min_probability=eff_gating.get("auto_min_probability", 0.6),
+            count_lineages=self.count_lineages)
         self._log_decision(req, result, len(quorum), fanout_ms)
         try:
             self._recorder.record(req.request_id, req.state, req.question,
@@ -821,6 +830,10 @@ def main() -> None:
                         help="fewest voters the adaptive policy may use")
     parser.add_argument("--latency-target-ms", type=float, default=None,
                         help="decision latency the adaptive quorum aims for")
+    parser.add_argument("--lineage-quorum", action="store_true",
+                        help="count the quorum over lineages, not stems: "
+                             "replicated members collapse to one vote "
+                             "(round 119)")
     parser.add_argument("--initial-stem-timeout", type=float,
                         default=INITIAL_STEM_TIMEOUT,
                         help="discovery timeout before latency is learned")
@@ -866,6 +879,7 @@ def main() -> None:
         adaptive_quorum=args.adaptive_quorum,
         quorum_floor=args.quorum_floor,
         latency_target_ms=args.latency_target_ms,
+        count_lineages=args.lineage_quorum,
         rollout_dir=args.rollout_dir)
     root = Root(coordinator=coordinator, host=listen_host, port=args.port,
                 spore_files=spore_files, chunking=args.chunking)

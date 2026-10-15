@@ -73,14 +73,23 @@ class DecisionResult:
 
 def aggregate(votes: list[Vote], min_quorum: int = 3,
               auto_min_agreement: float = 0.6,
-              auto_min_probability: float = 0.6) -> DecisionResult:
+              auto_min_probability: float = 0.6,
+              count_lineages: bool = False) -> DecisionResult:
     """Aggregate votes into a gated decision.
 
     Tiers:
       auto     - strict majority and healthy mean probability
       verify   - majority but weak confidence, or tie
       escalate - quorum not met
+
+    With count_lineages the quorum is counted over *lineages* rather than
+    stems: same-lineage members are reduced to one vote first (round 119
+    measured a same-lineage pair agreeing on 240 of 240 tasks, so a
+    replicated lineage would otherwise outvote a distinct one 2:1 on
+    evidence it does not have). min_quorum then applies to lineages too.
     """
+    if count_lineages:
+        votes = collapse_lineages(votes)
     if not votes:
         return DecisionResult(None, 0.0, 0.0, "escalate", [])
     if len(votes) < min_quorum:
@@ -110,6 +119,31 @@ def aggregate(votes: list[Vote], min_quorum: int = 3,
         tier = "verify"
     return DecisionResult(best_choice, agreement, mean_probability, tier,
                           [v.to_json() for v in votes])
+
+
+def collapse_lineages(votes: list[Vote]) -> list[Vote]:
+    """Reduce a quorum to one vote per lineage.
+
+    The lineage's vote is the choice carrying the most probability mass among
+    its members, at the mean probability of the members that backed it. A
+    tie between equally heavy choices resolves by choice name, so the result
+    never depends on arrival order.
+    """
+    groups: dict[str, list[Vote]] = {}
+    for vote in votes:
+        groups.setdefault(vote.checkpoint, []).append(vote)
+
+    collapsed: list[Vote] = []
+    for checkpoint, members in sorted(groups.items()):
+        mass: dict[str, float] = {}
+        for vote in members:
+            mass[vote.choice] = mass.get(vote.choice, 0.0) + vote.probability
+        choice = max(sorted(mass), key=lambda name: mass[name])
+        backers = [vote for vote in members if vote.choice == choice]
+        collapsed.append(Vote(
+            backers[0].node_id, checkpoint, choice,
+            sum(vote.probability for vote in backers) / len(backers)))
+    return collapsed
 
 
 def read_secret_file(path: str | Path) -> str:

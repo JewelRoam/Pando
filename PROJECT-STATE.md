@@ -99,6 +99,10 @@ NPU) all voting in the same consensus quorum.
 | Re-ask on disagreements | weighted vote 75.6% -> 76.9%; answer moves on 12/78 rows | round 120 |
 | Re-ask unanimity as a signal | 31/78 settle, accuracy identical to the first ballot (83.9%) | round 120 |
 | Routes to the split headroom | combiner <=1.0 pt, narrower ballot +1.3 pt, of 18 available | round 118/120 |
+| Lineage-counted quorum | `aggregate(count_lineages=)` + `rootd --lineage-quorum` | round 121 |
+| Invariance under replication | shipped drifts up to 14.6 pt by copy pattern; collapsed drifts 0.000 | round 121 |
+| Replica of the weakest member | quorum falls toward that member (0.746 vs 0.892) | round 121 |
+| Near-duplicate under a new name | still admitted at full weight - needs an admission-time divergence test | round 121 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |
