@@ -90,7 +90,8 @@ class Coordinator:
                  blocs: dict | None = None,
                  combiner=None,
                  rollout_dir: str | Path = "rollouts",
-                 assent_checkpoint: str | None = None):
+                 assent_checkpoint: str | None = None,
+                 assent_fallback: str = "advisor"):
         self.nodes: dict[str, dict] = {}
         self._lock = threading.Lock()
         self._pick_rotation = 0
@@ -123,7 +124,13 @@ class Coordinator:
         self.gating = gating or {}
         # Opt-in policy (round 157): a named checkpoint may veto auto tier
         # when its (collapsed) vote disagrees with the aggregate choice.
+        # Round 158 made the answer source an explicit deployment policy:
+        # "advisor" keeps the aggregate choice at verify, while "veto"
+        # returns the assent member's choice without fabricating agreement.
+        if assent_fallback not in {"advisor", "veto"}:
+            raise ValueError("assent_fallback must be 'advisor' or 'veto'")
         self.assent_checkpoint = assent_checkpoint
+        self.assent_fallback = assent_fallback
         self.call_timeout = call_timeout
         self.initial_stem_timeout = initial_stem_timeout
         self.min_stem_timeout = min_stem_timeout
@@ -549,6 +556,7 @@ class Coordinator:
         # without wanting same-lineage votes collapsed.
         corroboration_floor = max(1, int(
             eff_gating.get("corroboration_floor", 1)))
+        veto_checkpoint = None
         if result.tier == "auto" and opinions < corroboration_floor:
             result = DecisionResult(result.choice, result.agreement,
                                     result.mean_probability, "verify",
@@ -561,7 +569,11 @@ class Coordinator:
                 (vote for vote in collapsed
                  if vote.checkpoint == self.assent_checkpoint), None)
             if assent_vote is not None and assent_vote.choice != result.choice:
-                result = DecisionResult(result.choice, result.agreement,
+                choice = result.choice
+                if self.assent_fallback == "veto":
+                    choice = assent_vote.choice
+                    veto_checkpoint = self.assent_checkpoint
+                result = DecisionResult(choice, result.agreement,
                                         result.mean_probability, "verify",
                                         result.votes)
         self._log_decision(req, result, len(quorum), fanout_ms)
@@ -575,6 +587,8 @@ class Coordinator:
             pass
         out = result.__dict__.copy()
         out["quorum_size"] = len(quorum)
+        if veto_checkpoint is not None:
+            out["veto"] = veto_checkpoint
         # Agreement over a single lineage is vacuous, so an operator needs to
         # see how many opinions stood behind the vote (round 119: a quorum of
         # replicas is one model with extra steps).
@@ -672,6 +686,7 @@ def build_handler(coordinator: Coordinator, root=None):
                     "decision_ewma_ms": coordinator._decision_ewma_ms,
                     "question_categories": coordinator.question_categories,
                     "assent_checkpoint": coordinator.assent_checkpoint,
+                    "assent_fallback": coordinator.assent_fallback,
                 })
             elif self.path == "/playbook" and root is not None \
                     and getattr(root, "playbook", None) is not None:
@@ -986,6 +1001,11 @@ def main() -> None:
                         help="a named checkpoint whose (collapsed) vote may "
                              "veto an auto tier when it disagrees with the "
                              "aggregate choice")
+    parser.add_argument("--assent-fallback", default="advisor",
+                        choices=["advisor", "veto"],
+                        help="what to return after an assent demotion: "
+                             "advisor keeps the aggregate choice; veto "
+                             "returns the assent member's choice")
     parser.add_argument("--initial-stem-timeout", type=float,
                         default=INITIAL_STEM_TIMEOUT,
                         help="discovery timeout before latency is learned")
@@ -1043,7 +1063,8 @@ def main() -> None:
         count_lineages=args.lineage_quorum,
         combiner=combiner,
         rollout_dir=args.rollout_dir,
-        assent_checkpoint=args.assent_checkpoint)
+        assent_checkpoint=args.assent_checkpoint,
+        assent_fallback=args.assent_fallback)
     root = Root(coordinator=coordinator, host=listen_host, port=args.port,
                 spore_files=spore_files, chunking=args.chunking)
     import secrets
