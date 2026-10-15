@@ -161,6 +161,10 @@ NPU) all voting in the same consensus quorum.
 | Accelerator dropout | under 4 concurrent clients the iGPU/NPU stems fail ~half their calls; the CPU stem never does | round 135 |
 | Round 134 accelerator numbers | **withdrawn** - the dropouts masqueraded as throughput | round 135 |
 | Device should serialise | the `serialize` model (one decision at a time) is the next fix | round 135 |
+| Stems serialise by default | lock around `backend.decide`; `stemd --parallel` to opt out | round 136 |
+| Dropouts fixed | silent decisions 49-56/120 -> **0**; the fleet routes to the accelerators | round 136 |
+| Unit table (serialised, loaded host) | CPU service 94->309 ms at 2856 ms host CPU/decision; iGPU 53->35 ms at 36; NPU 112->109 ms at **4** | round 136 |
+| Cost ratio, corrected | 80-700x between the NPU and the CPU per decision | round 136 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |

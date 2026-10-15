@@ -25,6 +25,8 @@ class _PandoHTTPServer(ThreadingHTTPServer):
     # decisions escalated on a loaded host until this was raised.
     request_queue_size = 128
 
+from contextlib import nullcontext
+
 from .backend import MockBackend, OnnxLayaBackend, TorchLayaBackend
 from .common import DecisionRequest
 from .graft import assign_role, capability
@@ -38,7 +40,8 @@ def host_ms_per_decision(usage: dict | None) -> float | None:
     return round(1000.0 * used / usage["decisions"], 2)
 
 
-def build_handler(backend, node_id: str, usage: dict | None = None):
+def build_handler(backend, node_id: str, usage: dict | None = None,
+                  gate: threading.Lock | None = None):
     class StemHandler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):  # quiet by default
             pass
@@ -71,7 +74,14 @@ def build_handler(backend, node_id: str, usage: dict | None = None):
             length = int(self.headers.get("Content-Length", 0))
             req = DecisionRequest.from_json(self.rfile.read(length))
             try:
-                vote = backend.decide(req)
+                # One decision at a time is what a device is (round 109), and
+                # round 135 measured what happens without it: the OpenVINO
+                # stems failed about half their calls under four concurrent
+                # clients while the ONNX CPU stem never did. A backend that
+                # proves itself thread-safe can be served in parallel with
+                # --parallel; the default is the honest one.
+                with (gate if gate is not None else nullcontext()):
+                    vote = backend.decide(req)
                 if usage is not None:
                     usage["decisions"] += 1
                 self._send(200, {"vote": vote.to_json()})
@@ -85,12 +95,18 @@ class Stem:
     """One worker node bound to a decision backend."""
 
     def __init__(self, node_id: str, backend, host: str = "127.0.0.1",
-                 port: int = 0, advertise_host: str | None = None):
+                 port: int = 0, advertise_host: str | None = None,
+                 serialize: bool = True):
         self.node_id = node_id
         self.backend = backend
         self.host = host
         self.advertise_host = advertise_host or host
         self.port = port
+        # A device serves one decision at a time unless its backend can prove
+        # otherwise (round 135: the OpenVINO path failed half its calls under
+        # four concurrent clients; the ONNX CPU path never failed).
+        self.serialize = bool(serialize)
+        self._gate = threading.Lock() if self.serialize else None
         # What this device costs the machine it lives on, measured rather than
         # claimed: round 134 found the CPU unit spends 791-1647 ms of host CPU
         # per decision against the NPU's 1.4-1.8 ms, so a fleet that picks by
@@ -98,7 +114,7 @@ class Stem:
         self.usage = {"decisions": 0, "started": time.process_time()}
         self._httpd = _PandoHTTPServer((host, port),
                                        build_handler(backend, node_id,
-                                                     self.usage))
+                                                     self.usage, self._gate))
         self.port = self._httpd.server_address[1]
         self._thread: threading.Thread | None = None
 
@@ -187,8 +203,11 @@ def main() -> None:
                         help="mock backend only: simulated per-decision "
                              "device speed, for scaling measurements")
     parser.add_argument("--serialize", action="store_true",
-                        help="mock backend only: serve one decision at a time, "
-                             "like a real device")
+                        help="deprecated: stems serialise by default now")
+    parser.add_argument("--parallel", action="store_true",
+                        help="serve decisions concurrently. Only for a backend "
+                             "proven thread-safe - ONNX Runtime's CPU session "
+                             "is, the OpenVINO path is not (round 135)")
     parser.add_argument("--pad-to", type=int, default=None,
                         help="static-shape bucket for non-CPU EUs (default 256 on GPU/NPU)")
     args = parser.parse_args()
@@ -240,7 +259,8 @@ def main() -> None:
                               delay_ms=args.delay_ms,
                               serialize=args.serialize)
     stem = Stem(args.node_id, backend, host=args.host, port=args.port,
-                advertise_host=args.advertise_host)
+                advertise_host=args.advertise_host,
+                serialize=not args.parallel)
     stem.start()
     print(f"stemd {args.node_id} listening on {stem.url()} "
           f"(checkpoint={args.checkpoint})")

@@ -381,6 +381,16 @@ devices, one mind.
   as speed. The next fix is what `MockBackend.serialize` already models: a
   device should serve one decision at a time
   (`docs/research/2026-10-15-round135.md`).
+- **A device serves one decision at a time — and the numbers come back**:
+  stems now serialise `backend.decide` by default (`stemd --parallel` to opt
+  out). The accelerator dropouts went from 49-56 silent decisions per 120 to
+  **zero**, and the fleet now serves entirely from the accelerators, leaving
+  the CPU for the user. Re-measured service times on a loaded host: CPU
+  94 → **309 ms** at **2856 ms of host CPU per decision**, Intel iGPU
+  53 → 35 ms at 36 ms, Intel NPU 112 → 109 ms at **4 ms** — a corrected cost
+  ratio of 80-700x, and the accelerators do not degrade at all while the CPU
+  stem loses 3.3x
+  (`docs/research/2026-10-15-round136.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage
