@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "provenance": "Each accuracy value is the measured member accuracy on the named recorded-votes file for that split; no values are inferred.",
+  "members": {
+    "english": {
+      "accuracy": {
+        "D": 0.7292,
+        "E": 0.8375
+      },
+      "updated": "2026-10-16",
+      "source": {
+        "D": "votes-d-seated-english.json",
+        "E": "metrics/lan-check/e-votes-english.json"
+      }
+    },
+    "ft-v3": {
+      "accuracy": {
+        "D": 0.9417,
+        "E": 0.9917
+      },
+      "updated": "2026-10-16",
+      "source": {
+        "D": "votes-d-ft-v3.json",
+        "E": "metrics/lan-check/e-votes-ft-v3.json"
+      }
+    },
+    "mac-llm": {
+      "accuracy": {
+        "D": 0.8167,
+        "E": 0.9167
+      },
+      "updated": "2026-10-16",
+      "source": {
+        "D": "llm-votes-d-b-only.json",
+        "E": "llm-votes-e.json"
+      }
+    }
+  }
+}

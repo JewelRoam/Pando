@@ -35,6 +35,9 @@ packages = ["pandosi"]
   "assets/*.jsonl",
   "assets/*.toml",
 ]
+"share/pandosi/assets/registry" = [
+  "assets/registry/*.json",
+]
 "share/pandosi/assets/calibration" = [
   "assets/calibration/*.json",
 ]
