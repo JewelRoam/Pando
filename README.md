@@ -504,6 +504,18 @@ devices, one mind.
   between this and a two-device fleet is the second device
   (`tools/lan_path_check.py`,
   `docs/research/2026-10-15-round147.md`).
+- **Calibration does not transfer, and the gate is tuned to it**: with 720
+  labelled rows the swarm's calibration tables — fitted on 12-22 items — could
+  finally be refitted, and the transform inverts exactly, so no model had to
+  be re-run. The refit is much better where it is fitted (`typed-decisions`
+  T 5.0 → 0.5, log-loss 0.573 → 0.252) and **slightly worse on wording it was
+  not** (0.5895 vs 0.5863), while fitting on the deployment's own rows would
+  be worth 9%. Downstream it is a *regression*: sharper confidences pass
+  `auto_min_probability` more often, so the gate auto-executes 163 → 179 rows
+  at 0.908 → 0.860 accuracy. Calibration and gating are one system — the old
+  tables' five-fold over-softening was quietly acting as a safety margin
+  (`tools/refit_calibration_check.py`,
+  `docs/research/2026-10-15-round148.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage

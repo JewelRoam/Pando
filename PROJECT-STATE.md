@@ -203,6 +203,10 @@ NPU) all voting in the same consensus quorum.
 | LAN path verified | grant -> mDNS discovery -> 2 members -> `tier=auto responded=2` over 192.168.31.100 | round 147 |
 | Pairing design confirmed | discovery finds the address; the token (read from the root console) authorises joining | round 147 |
 | Cross-device gap | software path proven on a real interface; only a second device is missing | round 147 |
+| Calibration does not transfer | refit on 240 dev rows: better on dev, 0.5895 vs 0.5863 held-out | round 148 |
+| In-place calibration ceiling | fitted on the deployment's own wording: 0.5318 (-9%) | round 148 |
+| Gate is tuned to the tables | sharper confidences: auto 163 -> 179 rows at 0.908 -> 0.860 | round 148 |
+| NPU op analysis | **solved** in round 131 (nonisnan graph compiles and votes) | round 148 (backlog fix) |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |
@@ -244,13 +248,12 @@ NPU) all voting in the same consensus quorum.
 
 | item | blocker | effort estimate |
 |---|---|---|
-| NPU deep op analysis | IsNaN removed but other ops may block | 1-2 days |
 | Termux/TV box real test | needs Android hardware | 0.5 day on device |
 | Docker image build test | needs Docker environment | 0.5 day |
-| RLCD scale-up beyond one contrast pair | needs more accumulated pairs | 1-2 days |
+| RLCD scale-up beyond one contrast pair | 720 labelled rows now exist, but its descendant may stay a copy (round 119) | 1-2 days |
 | Multi-hop with graph adaptation | origin -> B(NPU) -> C(CPU) format conversion | 1 day |
 | Dashboard live update mode | design done, not coded | 0.5 day |
-| Rootd calibration from held-out set | needs labeled eval data | 0.5 day |
+| Per-deployment recalibration | possible, but must re-tune `auto_min_probability` in the same edit (round 148) | 0.5 day |
 
 ## How to resume
 
