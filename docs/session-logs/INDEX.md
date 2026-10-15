@@ -62,3 +62,4 @@ Timestamped, sanitized snapshots of this PandoSI working session.
 | 2026-10-16T053003 | `docs/session-logs/2026-10-16T053003-session-backup.md` | d963696dba64 | 247/1384/2536 | automatic snapshot after 3e13c69 chore: session backup 2026-10-16T050004 |
 | 2026-10-16T060003 | `docs/session-logs/2026-10-16T060003-session-backup.md` | 5faed6fdf1ee | 248/1391/2545 | automatic snapshot after 20b36ee feat: fresh split E - assent gives 227/227 correct auto live; the demoted-row fallback flips by split and becomes a policy slot |
 | 2026-10-16T063003 | `docs/session-logs/2026-10-16T063003-session-backup.md` | 7703e1af9299 | 249/1400/2556 | automatic snapshot after c274ddf feat: --assent-fallback advisor\|veto lands; live veto on E decides 0.9750 at 227/227 correct auto |
+| 2026-10-16T070003 | `docs/session-logs/2026-10-16T070003-session-backup.md` | bb0d32a0a5ad | 250/1402/2558 | automatic snapshot after 8d4d35f chore: session backup 2026-10-16T063004 |
