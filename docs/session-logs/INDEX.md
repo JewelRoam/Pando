@@ -48,3 +48,4 @@ Timestamped, sanitized snapshots of this PandoSI working session.
 | 2026-10-15T223004 | `docs/session-logs/2026-10-15T223004-session-backup.md` | ba9a8448e280 | 214/1141/2173 | automatic snapshot after 7701d14 fix: a stem must not refuse connections when its host is busy |
 | 2026-10-15T230645 | `docs/session-logs/2026-10-15T230645-session-backup.md` | 925c89a1974a | 220/1179/2235 | automatic snapshot after a8b2803 feat: ship the fitted combiner as an advisory artifact |
 | 2026-10-15T233004 | `docs/session-logs/2026-10-15T233004-session-backup.md` | b41f4aa3278b | 225/1213/2295 | automatic snapshot after 4bc7ee4 feat: govern the advisory combiner, and verify the rules through a playbook |
+| 2026-10-16T000003 | `docs/session-logs/2026-10-16T000003-session-backup.md` | 8ea3981cefad | 229/1245/2343 | automatic snapshot after ce0d2e2 test: the shipped gate is at the optimum of its own grid |
