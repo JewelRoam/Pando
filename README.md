@@ -471,6 +471,17 @@ devices, one mind.
   suggestions at 68.29%, a decided answer in **77.5%** of all rows
   (`tools/live_fleet_quality_check.py`,
   `docs/research/2026-10-15-round144.md`).
+- **The governance layer, verified through the file an operator writes**: the
+  advisory combiner is now declared and digest-pinned in the playbook
+  (`[combiner] path + sha256`, refused if it changed), and
+  `tools/playbook_e2e_check.py` drives a real `pandosi root --playbook` with
+  live HTTP stems to isolate four rules — an undeclared lineage gets
+  `403 ... is not declared by this playbook`, a declared bloc collapses three
+  stems into `opinions=2`, a tampered combiner stops the root, and
+  `corroboration_floor=2` refuses auto-execution to **one opinion that agrees
+  with itself at agreement 1.0**
+  (`assets/playbook.example.toml`,
+  `docs/research/2026-10-15-round145.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage

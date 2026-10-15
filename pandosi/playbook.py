@@ -35,6 +35,7 @@ class Playbook:
     questions: list[dict]
     actions: list[dict]
     lineages: dict | None = None
+    combiner: dict | None = None
     question_categories: dict | None = None
     source_path: str | None = None
 
@@ -183,6 +184,24 @@ def load_playbook(path: Path) -> Playbook:
         lineages = {"admit": cleaned, "artifacts": dict(artifacts),
                     "blocs": blocs}
 
+    # [combiner] pins the advisory rule the way [lineages.artifacts] pins a
+    # graph: a path plus the sha256 the operator expects to find there. An
+    # advisory rule still shapes what a human is shown, so a root should not
+    # load one that changed underneath it (round 145).
+    combiner = None
+    combiner_raw = raw.get("combiner")
+    if combiner_raw is not None:
+        combiner_path = combiner_raw.get("path")
+        if not isinstance(combiner_path, str) or not combiner_path.strip():
+            raise ValueError("[combiner].path must be a non-empty string")
+        digest = combiner_raw.get("sha256")
+        if not isinstance(digest, str) or len(digest) != 64 or \
+                any(ch not in "0123456789abcdef" for ch in digest):
+            raise ValueError(
+                "[combiner].sha256 must be a lowercase 64-character sha256 - "
+                "an unpinned advisory rule is one nobody can check")
+        combiner = {"path": combiner_path.strip(), "sha256": digest}
+
     return Playbook(
         name=meta["name"],
         version=meta["version"],
@@ -191,6 +210,7 @@ def load_playbook(path: Path) -> Playbook:
         questions=questions,
         actions=actions,
         lineages=lineages,
+        combiner=combiner,
         question_categories=categories,
         source_path=str(path),
     )
@@ -210,6 +230,28 @@ def resolve_blocs(pb: Playbook | None) -> dict[str, str]:
         for name in group:
             blocs[name] = group[0]
     return blocs
+
+
+def resolve_combiner(pb: Playbook | None):
+    """Load the playbook's advisory combiner, refusing a digest mismatch.
+
+    An unpinned path would let anyone who can write the file change what a
+    human is shown on the rows the gate declines; the digest is the same
+    check [lineages.artifacts] applies to graphs (round 145).
+    """
+    if pb is None or not pb.combiner:
+        return None
+    from .combiner import Combiner
+
+    path = Path(pb.combiner["path"])
+    if not path.exists():
+        raise ValueError(f"[combiner] {path} does not exist")
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if digest != pb.combiner["sha256"]:
+        raise ValueError(
+            f"[combiner] {path} has sha256 {digest[:16]}..., the playbook "
+            f"pins {pb.combiner['sha256'][:16]}...")
+    return Combiner.load(path)
 
 
 def resolve_admitted_lineages(pb: Playbook | None) -> tuple[set[str], list[str]]:

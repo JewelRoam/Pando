@@ -1004,7 +1004,8 @@ def main() -> None:
     if args.playbook:
         from .pb_history import verify_chain
         from .playbook import (load_verified_playbook,
-                               resolve_admitted_lineages, resolve_blocs)
+                               resolve_admitted_lineages, resolve_blocs,
+                               resolve_combiner)
         try:
             root.playbook, signature_status = load_verified_playbook(
                 Path(args.playbook), args.playbook_key,
@@ -1019,6 +1020,14 @@ def main() -> None:
             print(f"[playbook] {signature_status}", flush=True)
         admitted, unusable = resolve_admitted_lineages(root.playbook)
         blocs = resolve_blocs(root.playbook)
+        if root.playbook and root.playbook.combiner and combiner is None:
+            try:
+                combiner = resolve_combiner(root.playbook)
+            except (OSError, ValueError, KeyError) as exc:
+                raise SystemExit(str(exc))
+            root.coordinator.combiner = combiner
+            print(f"[combiner] {root.playbook.combiner['path']} loaded from "
+                  f"the playbook (pinned sha256 verified)", flush=True)
         if blocs:
             root.coordinator.blocs = blocs
             print(f"[lineages] blocs: "

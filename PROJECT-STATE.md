@@ -193,6 +193,9 @@ NPU) all voting in the same consensus quorum.
 | Dropping features helped | split C: full 85.00% (spec 2: 82.92%), declined rows 67.53% | round 144 |
 | Smallest real fleet | iGPU english + 19 KB text member, k=2, 240 rows in 13 s | round 144 |
 | Live outcomes | auto 76 at 97.37%; declined 164, suggestions 68.29%; decided 77.50% | round 144 |
+| Combiner pinned by playbook | `[combiner] path + sha256`; refused on mismatch | round 145 |
+| Governance e2e | real root + HTTP stems: admit 403, blocs, floor, pinning | round 145 |
+| Corroboration floor isolated | one opinion, agreement 1.0 -> tier verify | round 145 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |

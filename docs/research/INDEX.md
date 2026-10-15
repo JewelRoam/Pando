@@ -157,6 +157,7 @@ Rebuilt by tools/build_research_index.py; one row per file.
 | 2026-10-15-round142.md | 142 | The artifact grows a text model |
 | 2026-10-15-round143.md | 143 | From nothing to a served decision in 1.5 seconds |
 | 2026-10-15-round144.md | 144 | A portable combiner, and the smallest real fleet |
+| 2026-10-15-round145.md | 145 | The governance layer, verified through the file an operator writes |
 
 ## Files without a round number
 

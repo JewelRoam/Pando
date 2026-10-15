@@ -26,6 +26,15 @@ admit = ["english", "multilingual", "typed-decisions"]
 # information; declare it from measured divergence, not from intuition.
 # blocs = [["text-nb-v1", "text-chars-v1"]]
 
+# Optional advisory rule (rounds 139-145): a fitted combiner whose answer is
+# attached to decisions the gate does not auto-execute. It never changes a
+# tier or an auto-executed choice, but it does shape what a human is shown, so
+# it is pinned by digest the way a graph is - a root refuses to load one that
+# changed underneath the playbook. Train it with tools/train_combiner.py.
+# [combiner]
+# path = "assets/combiner.json"
+# sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+
 # Optional attestation. Declaring a lineage is a claim; requiring an artifact
 # digest makes it checkable: a stem that registers as `english` must also
 # report the sha256 of the graph it loaded, or it is refused. Generate these
