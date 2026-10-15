@@ -11,6 +11,7 @@ import hashlib
 import hmac
 import json
 import math
+import os
 import sys
 import threading
 import time
@@ -44,6 +45,68 @@ FAILURE_BACKOFF_MAX = 30.0
 # Voters whose latencies fall in the same band are treated as interchangeable
 # when a quorum is selected, so the rotation can spread load across them.
 LATENCY_BAND_MS = 25.0
+
+# The measured-accuracy registry is deliberately data, not a model: a
+# checkpoint is eligible for auto-assent only when a recorded evaluation
+# names it. Unknown members are ignored rather than assigned a prior.
+ASSENT_REGISTRY_ENV = "PANDOSI_ASSENT_REGISTRY"
+ASSENT_REGISTRY_DEFAULT = ("registry", "accuracies.json")
+
+
+def load_accuracy_registry(
+        source: str | Path | dict | None = None) -> dict[str, dict[str, float]]:
+    """Load per-checkpoint measured accuracy, keyed by split.
+
+    ``source`` may be a registry path, an already-parsed payload, or ``None``
+    for the checked-in ``assets/registry/accuracies.json`` (overridable with
+    ``PANDOSI_ASSENT_REGISTRY``). Missing, malformed, and empty registries
+    all become an empty mapping so callers can fall back to no-assent
+    behavior without treating bad data as a reason to guess.
+    """
+    if isinstance(source, dict):
+        payload = source
+    else:
+        if source is None:
+            configured = os.environ.get(ASSENT_REGISTRY_ENV)
+            if configured:
+                path = Path(configured).expanduser()
+            else:
+                from .resources import asset_path
+                path = asset_path(*ASSENT_REGISTRY_DEFAULT)
+        else:
+            path = Path(source).expanduser()
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    if not isinstance(payload, dict):
+        return {}
+    members = payload.get("members")
+    if members is None and "accuracy" not in payload:
+        # Also accept a compact direct mapping:
+        # {"english": {"D": 0.7292}, ...}.
+        members = payload
+    if not isinstance(members, dict):
+        return {}
+
+    registry: dict[str, dict[str, float]] = {}
+    for checkpoint, record in members.items():
+        if not isinstance(checkpoint, str) or not isinstance(record, dict):
+            continue
+        accuracy = record.get("accuracy", record)
+        if not isinstance(accuracy, dict):
+            continue
+        known: dict[str, float] = {}
+        for split, raw in accuracy.items():
+            if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+                continue
+            value = float(raw)
+            if math.isfinite(value):
+                known[str(split)] = value
+        if known:
+            registry[checkpoint] = known
+    return registry
 
 
 def _host_of(url: str) -> str:
@@ -91,7 +154,9 @@ class Coordinator:
                  combiner=None,
                  rollout_dir: str | Path = "rollouts",
                  assent_checkpoint: str | None = None,
-                 assent_fallback: str = "advisor"):
+                 assent_fallback: str = "advisor",
+                 assent_registry: str | Path | dict | None = None,
+                 assent_registry_path: str | Path | None = None):
         self.nodes: dict[str, dict] = {}
         self._lock = threading.Lock()
         self._pick_rotation = 0
@@ -127,10 +192,21 @@ class Coordinator:
         # Round 158 made the answer source an explicit deployment policy:
         # "advisor" keeps the aggregate choice at verify, while "veto"
         # returns the assent member's choice without fabricating agreement.
+        # "auto" resolves that name from measured accuracy at decision time.
         if assent_fallback not in {"advisor", "veto"}:
             raise ValueError("assent_fallback must be 'advisor' or 'veto'")
+        if assent_registry is not None and assent_registry_path is not None:
+            raise ValueError("assent_registry and assent_registry_path are "
+                             "mutually exclusive")
+        if assent_registry_path is not None:
+            assent_registry = assent_registry_path
         self.assent_checkpoint = assent_checkpoint
         self.assent_fallback = assent_fallback
+        self.assent_registry = load_accuracy_registry(assent_registry)
+        # Keep a readable alias for callers that inspect the loaded data.
+        self.assent_accuracies = self.assent_registry
+        self.assent_resolved: str | None = None
+        self._assent_warning_emitted = False
         self.call_timeout = call_timeout
         self.initial_stem_timeout = initial_stem_timeout
         self.min_stem_timeout = min_stem_timeout
@@ -152,6 +228,7 @@ class Coordinator:
         with self._lock:
             if node_id in self.blocked:
                 return False
+        self._maybe_warn_assent_registry()
         # Calibration is looked up by checkpoint string, so a misnamed stem
         # silently changes the gate. Say so once, at join time, rather than
         # letting it alter every later decision in silence (round 100).
@@ -219,6 +296,34 @@ class Coordinator:
         if cost is None:
             return 9
         return int(math.log10(max(float(cost), 1.0)))
+
+    def _maybe_warn_assent_registry(self) -> None:
+        """Warn once when auto-assent has no usable measured registry."""
+        if (self.assent_checkpoint != "auto" or self.assent_registry
+                or self._assent_warning_emitted):
+            return
+        self._assent_warning_emitted = True
+        print("[assent] measured accuracy registry is missing or empty; "
+              "auto assent disabled", flush=True)
+
+    def _resolve_assent_checkpoint(self,
+                                   votes: list[Vote]) -> str | None:
+        """Choose the highest mean measured accuracy among present votes.
+
+        Only checkpoints named in the registry are eligible. Ties resolve by
+        checkpoint name so a decision is reproducible across runs.
+        """
+        ranked: list[tuple[float, str]] = []
+        for vote in votes:
+            accuracies = self.assent_registry.get(vote.checkpoint)
+            if not accuracies:
+                continue
+            ranked.append((sum(accuracies.values()) / len(accuracies),
+                           vote.checkpoint))
+        if not ranked:
+            return None
+        ranked.sort(key=lambda item: (-item[0], item[1]))
+        return ranked[0][1]
 
     def _selectable_nodes(self) -> dict[str, dict]:
         live = self.live_nodes()
@@ -480,6 +585,7 @@ class Coordinator:
 
 
     def decide(self, req: DecisionRequest) -> dict:
+        self._maybe_warn_assent_registry()
         if self.known_questions and req.question not in self.known_questions:
             return {"error": f"question {req.question!r} not in playbook; "
                     f"known: {sorted(self.known_questions)}",
@@ -561,21 +667,30 @@ class Coordinator:
             result = DecisionResult(result.choice, result.agreement,
                                     result.mean_probability, "verify",
                                     result.votes)
-        if result.tier == "auto" and self.assent_checkpoint is not None:
-            collapsed = (collapse_lineages(calibrated_votes,
-                                           self.blocs or None)
-                         if self._collapses() else calibrated_votes)
-            assent_vote = next(
-                (vote for vote in collapsed
-                 if vote.checkpoint == self.assent_checkpoint), None)
-            if assent_vote is not None and assent_vote.choice != result.choice:
-                choice = result.choice
-                if self.assent_fallback == "veto":
-                    choice = assent_vote.choice
-                    veto_checkpoint = self.assent_checkpoint
-                result = DecisionResult(choice, result.agreement,
-                                        result.mean_probability, "verify",
-                                        result.votes)
+        resolved_assent = None
+        if self.assent_checkpoint is not None:
+            collapsed_assent_votes = (
+                collapse_lineages(calibrated_votes, self.blocs or None)
+                if self._collapses() else calibrated_votes)
+            if self.assent_checkpoint == "auto":
+                resolved_assent = self._resolve_assent_checkpoint(
+                    collapsed_assent_votes)
+                self.assent_resolved = resolved_assent
+            elif result.tier == "auto":
+                resolved_assent = self.assent_checkpoint
+            if result.tier == "auto" and resolved_assent is not None:
+                assent_vote = next(
+                    (vote for vote in collapsed_assent_votes
+                     if vote.checkpoint == resolved_assent), None)
+                if (assent_vote is not None
+                        and assent_vote.choice != result.choice):
+                    choice = result.choice
+                    if self.assent_fallback == "veto":
+                        choice = assent_vote.choice
+                        veto_checkpoint = resolved_assent
+                    result = DecisionResult(choice, result.agreement,
+                                            result.mean_probability, "verify",
+                                            result.votes)
         self._log_decision(req, result, len(quorum), fanout_ms)
         try:
             self._recorder.record(req.request_id, req.state, req.question,
@@ -627,6 +742,8 @@ class Coordinator:
             if suggestion:
                 out["suggested_choice"] = suggestion["choice"]
                 out["suggested_probability"] = suggestion["probability"]
+        if self.assent_checkpoint == "auto" and resolved_assent is not None:
+            out["assent"] = resolved_assent
         out["fanout_ms"] = fanout_ms
         # Report uncalibrated voters rather than acting on them silently. The
         # tier is left alone so a synthetic test harness is unaffected; the
@@ -687,6 +804,7 @@ def build_handler(coordinator: Coordinator, root=None):
                     "question_categories": coordinator.question_categories,
                     "assent_checkpoint": coordinator.assent_checkpoint,
                     "assent_fallback": coordinator.assent_fallback,
+                    "assent_resolved": coordinator.assent_resolved,
                 })
             elif self.path == "/playbook" and root is not None \
                     and getattr(root, "playbook", None) is not None:
@@ -1000,7 +1118,9 @@ def main() -> None:
     parser.add_argument("--assent-checkpoint", default=None,
                         help="a named checkpoint whose (collapsed) vote may "
                              "veto an auto tier when it disagrees with the "
-                             "aggregate choice")
+                             "aggregate choice; 'auto' picks the present "
+                             "checkpoint with the highest mean measured "
+                             "accuracy in assets/registry/accuracies.json")
     parser.add_argument("--assent-fallback", default="advisor",
                         choices=["advisor", "veto"],
                         help="what to return after an assent demotion: "

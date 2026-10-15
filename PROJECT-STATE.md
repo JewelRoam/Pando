@@ -275,6 +275,8 @@ NPU) all voting in the same consensus quorum.
 | Next (dispatched) | Task 008: --assent-fallback advisor|veto as a declared policy slot + tests | round 161 |
 | Fallback slot landed | --assent-fallback advisor|veto (rootd + CLI + /status + veto field), tests 23/23 | round 161 |
 | Veto live on E | auto 227 @ 1.0000, decided 0.9750 (advisor live 0.9583; offline veto 0.9917) | round 161 |
+| assent=auto landed | assets/registry/accuracies.json + runtime resolution among present voters; /status assent_resolved; 24/24 smoke | round 161 |
+| auto live on E | registry resolved to ft-v3; auto 227 @ 1.0000, decided 0.9750 - identical to explicit ft-v3 | round 161 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |
