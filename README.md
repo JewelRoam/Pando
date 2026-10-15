@@ -391,6 +391,19 @@ devices, one mind.
   ratio of 80-700x, and the accelerators do not degrade at all while the CPU
   stem loses 3.3x
   (`docs/research/2026-10-15-round136.md`).
+- **Independence is the admission test; the rest is noise**: ten cheap
+  members (three feature views × three smoothing strengths, plus a
+  nearest-centroid classifier) were measured for accuracy, mean error
+  correlation with the neural trio, rescues, harms and the value each adds to
+  the swarm. All ten are decorrelated (mean phi −0.06…+0.08) and nine add a
+  positive amount — the family-level effect of rounds 122-129, reproduced ten
+  times. But *within* that family nothing predicts the value: rank
+  correlation against the measured gain is **−0.55 for accuracy** (the most
+  accurate members are not the most valuable), −0.02 for phi and −0.55 for
+  net rescues, with the whole spread inside 240-row sampling error. A fleet
+  should admit on decorrelation and measure the rest after the fact
+  (`tools/member_value_check.py`,
+  `docs/research/2026-10-15-round137.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage

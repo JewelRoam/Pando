@@ -165,6 +165,9 @@ NPU) all voting in the same consensus quorum.
 | Dropouts fixed | silent decisions 49-56/120 -> **0**; the fleet routes to the accelerators | round 136 |
 | Unit table (serialised, loaded host) | CPU service 94->309 ms at 2856 ms host CPU/decision; iGPU 53->35 ms at 36; NPU 112->109 ms at **4** | round 136 |
 | Cost ratio, corrected | 80-700x between the NPU and the CPU per decision | round 136 |
+| Member portfolio (10 cheap members) | all decorrelated (mean phi -0.06..+0.08); 9 of 10 add value | round 137 |
+| What predicts a member's value | nothing does at 240 rows: accuracy rank -0.55 (inverted), phi -0.02, net rescues -0.55 | round 137 |
+| Admission rule, bounded | admit on decorrelation; measure the rest after the fact | round 137 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |
