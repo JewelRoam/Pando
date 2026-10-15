@@ -143,6 +143,10 @@ NPU) all voting in the same consensus quorum.
 | Three units, one voter | CPU / iGPU / NPU: identical choices 240/240, gaps 0.0002/0.0003 | round 131 |
 | Unit speeds (this model) | iGPU 17.6 dec/s, CPU 10.0, NPU 8.7 (53/94/112 ms median) | round 131 |
 | Cross-unit graph dialects | GPU reject: GatherND; NPU reject: the GPU's GatherElements repair | round 131 |
+| Corroboration costs throughput | 3 units: k=1 24.1/s, k=2 14.4/s, k=3 10.5/s (p50 140/245/374 ms) | round 132 |
+| Units add capacity at k=1 | 1 unit 14.7/s -> 2 units 27.1/s = the sum of their solo rates | round 132 |
+| One host, not three servers | the 3rd unit (NPU) adds little or subtracts; all stems share the host CPU | round 132 |
+| Elastic dial, measured | k=3 -> k=1 at 3 units: 2.3x throughput, half the p50 latency | round 132 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |

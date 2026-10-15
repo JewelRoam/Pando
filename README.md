@@ -328,6 +328,18 @@ devices, one mind.
   silicon buys capacity, not information
   (`tools/multi_eu_swarm_check.py`,
   `docs/research/2026-10-15-round131.md`).
+- **Corroboration is paid for in throughput**: with one lineage on the three
+  units (so every configuration answers identically), a units-by-quorum
+  matrix under four concurrent clients gives 1u-k1 14.7 dec/s, **2u-k1
+  27.1/s**, 3u-k1 24.1/s, 3u-k2 14.4/s, **3u-k3 10.5/s** (p50 262/133/140/
+  245/374 ms). Two units at k=1 reach exactly the sum of their solo rates
+  (10.0 + 17.6 = 27.6/s) — but the third adds little and sometimes subtracts,
+  because **three units on one host are not three servers**: they share one
+  CPU for tokenization, data movement and orchestration. Dropping k from 3 to
+  1 multiplies throughput 2.3x and halves p50 latency, and the answer does
+  not change. Corroboration is a dial with a measured price
+  (`tools/hetero_capacity_check.py`,
+  `docs/research/2026-10-15-round132.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage
