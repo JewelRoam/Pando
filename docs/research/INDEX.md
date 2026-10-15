@@ -173,6 +173,7 @@ Rebuilt by tools/build_research_index.py; one row per file.
 | 2026-10-16-round158.md | 158 | The first real LLM tier: deployed, evaluated, and honestly not yet a win |
 | 2026-10-16-round159.md | 159 | Reliability-aware gating: the tiered fleet beats its core (offline) |
 | 2026-10-16-round160.md | 160 | Live, the three-tier fleet beats its core (0.9833, replicated) |
+| 2026-10-16-round161.md | 161 | A fresh split (E) and the fallback that depends on the split |
 
 ## Files without a round number
 

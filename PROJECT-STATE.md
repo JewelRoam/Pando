@@ -1,6 +1,6 @@
 # PandoSI Project State
 
-*Last updated: 2026-10-16 (round 160; continuous research session)*
+*Last updated: 2026-10-16 (round 161; continuous research session)*
 
 ## Where we are
 
@@ -268,6 +268,11 @@ NPU) all voting in the same consensus quorum.
 | Live three-tier, run 1 | auto 195 @ 1.0000, decided 0.9833 (core 0.9750), p50 182 ms | round 160 |
 | Live three-tier, replicated | run 2 identical to the digit (195 @ 1.0000, 0.9833, p50 181 ms, 5.60 rows/s) | round 160 |
 | Prediction matched live | offline 0.9833 predicted (round 159) and delivered; auto 195 vs 199 explained by max_tokens 16 vs 64 | round 160 |
+| Split E built | 240 rows, zero cue overlap A/A2/B/C/D (Mac, branch split-e a6eb045) | round 161 |
+| Solo on E | english 0.8375, ft-v3 0.9917, mac-llm 0.9167 | round 161 |
+| Assent on fresh E | live auto 227 @ 1.0000, decided 0.9583 (advisor fallback), p50 181 ms; offline prediction matched | round 161 |
+| Fallback flips by split | D: advisor 0.9833 > veto 0.9417; E: veto 0.9917 > advisor 0.9583; near-tied over 480 rows | round 161 |
+| Next (dispatched) | Task 008: --assent-fallback advisor|veto as a declared policy slot + tests | round 161 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |

@@ -677,6 +677,15 @@ devices, one mind.
   predicted 0.9833 before the run; the naive seating of the same LLM tier
   decided 0.9167 (`tools/tiered_live_check.py`,
   `docs/research/2026-10-16-round160.md`).
+- **Fresh split E confirms the tier and exposes the fallback slot**: on a
+  fifth wording inventory with zero overlap with A/A2/B/C/D, the three-tier
+  fleet live-executed **227 rows auto, every one correct** (D: 195) at
+  decided 0.9583, matching the offline prediction to the digit. And the
+  answer for *demoted* rows flips by split — the advisor wins on D
+  (0.9833 vs 0.9417), the trusted member's veto wins on E (0.9917 vs
+  0.9583) — so it becomes a declared, validation-chosen policy:
+  `--assent-fallback advisor|veto` (Task 008)
+  (`docs/research/2026-10-16-round161.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage
