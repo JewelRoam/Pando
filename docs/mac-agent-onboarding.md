@@ -18,7 +18,7 @@ nothing more.
    ```bash
    mkdir -p ~/.pandosi
    printf '%s' '<TOKEN>' > ~/.pandosi/mailbox.token
-   nohup python3 tools/agent_mailbox.py serve --port 8766 \
+   nohup python3 tools/agent_mailbox.py serve --port 8776 \
        --dir ~/.pandosi/mailbox --token-file ~/.pandosi/mailbox.token \
        > ~/.pandosi/mailbox.log 2>&1 &
    ```
@@ -31,10 +31,10 @@ nothing more.
 ## What the Windows session uses
 
 ```powershell
-python tools/agent_mailbox.py put --url http://192.168.31.41:8766 `
+python tools/agent_mailbox.py put --url http://192.168.31.41:8776 `
     --token-file metrics/lan-check/mac-mailbox.token `
     --title "..." --body-file task.md
-python tools/agent_mailbox.py list --url http://192.168.31.41:8766 `
+python tools/agent_mailbox.py list --url http://192.168.31.41:8776 `
     --token-file metrics/lan-check/mac-mailbox.token --status done
 python tools/agent_mailbox.py get --id t-... --url ... --token-file ...
 ```
