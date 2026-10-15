@@ -168,6 +168,10 @@ NPU) all voting in the same consensus quorum.
 | Member portfolio (10 cheap members) | all decorrelated (mean phi -0.06..+0.08); 9 of 10 add value | round 137 |
 | What predicts a member's value | nothing does at 240 rows: accuracy rank -0.55 (inverted), phi -0.02, net rescues -0.55 | round 137 |
 | Admission rule, bounded | admit on decorrelation; measure the rest after the fact | round 137 |
+| Birth latency (transfer excluded) | load 9.4 s + register 0.2 s + first vote 5.0 s = 14.6 s | round 138 |
+| Birth latency (whole artifact) | ~29 s, composed with round 106's 14.2 s transfer | round 138 |
+| What the newborn buys | nothing: k=1 26.1/s -> k=2 13.5/s (its 4 votes are the quorum working) | round 138 |
+| Spore pull gate | `sandbox_confirmed` refuses by default; the check does not assert it | round 138 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |

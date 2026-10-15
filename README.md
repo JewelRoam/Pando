@@ -404,6 +404,16 @@ devices, one mind.
   should admit on decorrelation and measure the rest after the fact
   (`tools/member_value_check.py`,
   `docs/research/2026-10-15-round137.md`).
+- **Reproduction costs about half a minute and buys nothing**: measured end
+  to end against a running root, a new member's birth is **9.4 s to load**
+  the artifact + **0.2 s to register** + **5.0 s to its first vote** (14.6 s,
+  transfer excluded; ~29 s with round 106's 14.2 s whole-artifact transfer).
+  What it buys is nothing: the second member of the same lineage is the same
+  opinion on the same silicon, and putting it in the quorum takes the fleet
+  from 26.1 to 13.5 decisions/s exactly as k predicts. A self-replicating
+  swarm is cheap to grow and hard to make smarter, and both halves are now
+  numbers (`tools/device_birth_check.py`,
+  `docs/research/2026-10-15-round138.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage
