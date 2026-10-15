@@ -25,11 +25,12 @@ import math
 from collections import Counter
 from pathlib import Path
 
-SPEC_VERSION = 1
+SPEC_VERSION = 2
 
 
 def features(votes: list[tuple[str, str, float]], classes: list[str],
-             lineages: list[str]) -> list[float]:
+             lineages: list[str],
+             text_posterior: list[float] | None = None) -> list[float]:
     """One row of features: per-candidate support, then per-lineage behaviour.
 
     `votes` is (lineage, choice, calibrated probability) for the members that
@@ -53,6 +54,11 @@ def features(votes: list[tuple[str, str, float]], classes: list[str],
     cells += [by_lineage[lineage][1] if lineage in by_lineage else 0.0
               for lineage in lineages]
     cells += [len({choice for _, choice, _ in votes}) / size]
+    # Spec v2 appends the text model's posterior over the candidates: round
+    # 141 measured it as worth +3.9 points on the rows the gate declines, when
+    # the text model is trained on wording disjoint from the combiner's.
+    if text_posterior is not None:
+        cells += list(text_posterior)
     cells += [1.0]
     return cells
 
@@ -61,14 +67,18 @@ class Combiner:
     """Weights plus the class and lineage order they were fitted with."""
 
     def __init__(self, classes: list[str], lineages: list[str],
-                 weights: list[list[float]], meta: dict | None = None):
+                 weights: list[list[float]], meta: dict | None = None,
+                 text_model: "TextModel | None" = None):
         self.classes = list(classes)
         self.lineages = list(lineages)
         self.weights = [list(row) for row in weights]
         self.meta = dict(meta or {})
+        self.text_model = text_model
 
     def suggest(self, votes: list[tuple[str, str, float]],
-                candidates: list[str] | None = None) -> dict | None:
+                candidates: list[str] | None = None,
+                state: str | None = None,
+                question: str | None = None) -> dict | None:
         """The fitted rule's answer for these votes, never a decision.
 
         With `candidates`, the answer is restricted to them: the model is
@@ -78,7 +88,12 @@ class Combiner:
         """
         if not votes:
             return None
-        cells = features(votes, self.classes, self.lineages)
+        posterior = None
+        if self.text_model is not None and state is not None:
+            distribution = self.text_model.posterior(
+                state, question or "", list(self.classes))
+            posterior = [distribution.get(name, 0.0) for name in self.classes]
+        cells = features(votes, self.classes, self.lineages, posterior)
         width = len(cells)
         scores = [sum(cells[column] * self.weights[column][index]
                       for column in range(width))
@@ -100,11 +115,14 @@ class Combiner:
                 "probability": round(weights[best] / total, 4)}
 
     def to_json(self) -> dict:
-        return {"spec_version": SPEC_VERSION, "classes": self.classes,
+        payload = {"spec_version": SPEC_VERSION, "classes": self.classes,
                 "lineages": self.lineages,
                 "weights": [[round(value, 8) for value in column]
                             for column in self.weights],
                 "meta": self.meta}
+        if self.text_model is not None:
+            payload["text_model"] = self.text_model.to_json()
+        return payload
 
     @classmethod
     def from_json(cls, payload: dict) -> "Combiner":
@@ -112,8 +130,12 @@ class Combiner:
             raise ValueError(
                 f"combiner artifact spec {payload.get('spec_version')!r} is "
                 f"not {SPEC_VERSION}; retrain it")
+        text_model = None
+        if payload.get("text_model"):
+            from .textmodel import TextModel
+            text_model = TextModel.from_json(payload["text_model"])
         return cls(payload["classes"], payload["lineages"],
-                   payload["weights"], payload.get("meta"))
+                   payload["weights"], payload.get("meta"), text_model)
 
     def save(self, path: str | Path) -> Path:
         target = Path(path)

@@ -450,6 +450,16 @@ devices, one mind.
   adds +3.9 points there
   (`tools/combiner_text_check.py`, `assets/heldout2_test.jsonl`,
   `docs/research/2026-10-15-round141.md`).
+- **The combiner artifact now carries its own text model (spec 2)**: the
+  feature block appends the text model's posterior over the candidates and
+  the artifact embeds that model, so one signed **35 KB** file ships both
+  (`--reports` for the votes, `--text-train` for the wording, both recorded).
+  Replayed on split C — unseen by the combiner and by the embedded text model
+  — it reproduces **82.92% full coverage** (gate 77.08%, best member 73.75%)
+  and **62.34% on the 77 rows the gate declines**, with 0 of its 77
+  suggestions landing on an auto row
+  (`pandosi/combiner.py`, `tools/combiner_artifact_check.py`,
+  `docs/research/2026-10-15-round142.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage

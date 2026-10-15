@@ -557,7 +557,8 @@ class Coordinator:
         if self.combiner is not None and result.tier != "auto" and votes:
             suggestion = self.combiner.suggest(
                 [(vote.checkpoint, vote.choice, vote.probability)
-                 for vote in calibrated_votes], req.candidates)
+                 for vote in calibrated_votes], req.candidates,
+                state=req.state, question=req.question)
             if suggestion:
                 out["suggested_choice"] = suggestion["choice"]
                 out["suggested_probability"] = suggestion["probability"]

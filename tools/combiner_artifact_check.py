@@ -39,11 +39,19 @@ def main() -> int:
                                                   / "combiner.json"))
     parser.add_argument("--report", default=str(ROOT / "metrics"
                                                 / "ensemble-checks"
-                                                / "ensemble-1792064900.json"))
+                                                / "ensemble-1792076803.json"))
+    parser.add_argument("--suite", default=str(ROOT / "assets"
+                                               / "heldout2_test.jsonl"),
+                        help="the tasks the report's rows came from; needed "
+                             "for a spec-2 artifact's text features")
     args = parser.parse_args()
 
     combiner = Combiner.load(args.combiner)
     report = json.loads(Path(args.report).read_text(encoding="utf-8"))
+    tasks = {task["task_id"]: task for task in
+             (json.loads(line) for line
+              in Path(args.suite).read_text(encoding="utf-8").splitlines()
+              if line.strip())}
     rows = report["rows"]
     members = sorted(rows[0]["per_lineage"])
     print(f"artifact {Path(args.combiner).name}: {combiner.meta}")
@@ -63,7 +71,10 @@ def main() -> int:
         if result.tier != "auto":
             suggestion = combiner.suggest(
                 [(name, row["per_lineage"][name], row["confidences"][name])
-                 for name in members])
+                 for name in members],
+                tasks[row["task_id"]]["candidates"],
+                state=tasks[row["task_id"]]["state"],
+                question=tasks[row["task_id"]]["question"])
             if suggestion is not None:
                 suggestions += 1
                 if result.tier == "auto":
@@ -74,7 +85,10 @@ def main() -> int:
     for row in rows:
         suggestion = combiner.suggest(
             [(name, row["per_lineage"][name], row["confidences"][name])
-             for name in members])
+             for name in members],
+            tasks[row["task_id"]]["candidates"],
+            state=tasks[row["task_id"]]["state"],
+            question=tasks[row["task_id"]]["question"])
         suggested_hits[row["task_id"]] = bool(
             suggestion and suggestion["choice"] == row["expected"])
 

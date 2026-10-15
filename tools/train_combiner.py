@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from pandosi.combiner import Combiner, features  # noqa: E402
+from pandosi.textmodel import TextModel  # noqa: E402
 
 
 def votes_of(row: dict) -> list[tuple[str, str, float]]:
@@ -48,6 +49,16 @@ def fit(train_x: np.ndarray, train_y: np.ndarray, classes: list[str],
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reports", required=True)
+    parser.add_argument("--text-train", default=None,
+                        help="a labeled suite the text model learns from. "
+                             "Keep it disjoint from --reports' wording: a "
+                             "text model trained on the combiner's own rows "
+                             "looks near-perfect while fitting and is not "
+                             "(round 141)")
+    parser.add_argument("--suite", default=str(ROOT / "assets"
+                                               / "big_dev.jsonl"),
+                        help="the tasks the --reports rows came from, needed "
+                             "only for the text features")
     parser.add_argument("--out", default=str(ROOT / "assets"
                                              / "combiner.json"))
     parser.add_argument("--folds", type=int, default=5)
@@ -60,8 +71,36 @@ def main() -> int:
     classes = sorted({row["expected"] for row in rows})
     lineages = sorted(rows[0]["per_lineage"])
     index = {name: position for position, name in enumerate(classes)}
-    train_x = np.array([features(votes_of(row), classes, lineages)
-                        for row in rows])
+
+    text_model = None
+    tasks = {}
+    if args.text_train:
+        text_rows = [json.loads(line) for line
+                     in Path(args.text_train).read_text(
+                         encoding="utf-8").splitlines() if line.strip()]
+        text_model = TextModel()
+        print(f"text model fitted on {args.text_train}: "
+              f"{text_model.fit(text_rows)}")
+    suite = Path(args.suite)
+    if text_model is not None and suite.exists():
+        tasks = {task["task_id"]: task for task in
+                 (json.loads(line) for line in suite.read_text(
+                     encoding="utf-8").splitlines() if line.strip())}
+
+    def cells_of(row: dict) -> list[float]:
+        posterior = None
+        if text_model is not None:
+            task = tasks.get(row["task_id"])
+            if task is None:
+                raise SystemExit(
+                    f"--suite must contain {row['task_id']} for the text "
+                    "features")
+            distribution = text_model.posterior(
+                task["state"], task["question"], classes)
+            posterior = [distribution.get(name, 0.0) for name in classes]
+        return features(votes_of(row), classes, lineages, posterior)
+
+    train_x = np.array([cells_of(row) for row in rows])
     train_y = np.array([index[row["expected"]] for row in rows])
     print(f"{len(rows)} rows, {train_x.shape[1]} features, "
           f"{len(classes)} classes, lineages {lineages}")
@@ -89,7 +128,11 @@ def main() -> int:
                         {"trained_on": [path.name for path in paths],
                          "rows": len(rows), "l2": l2,
                          "cross_validated_accuracy": round(cv, 4),
-                         "in_sample_accuracy": round(in_sample, 4)})
+                         "in_sample_accuracy": round(in_sample, 4),
+                         "text_model_trained_on":
+                             Path(args.text_train).name
+                             if args.text_train else None},
+                        text_model)
     out = combiner.save(args.out)
     print(f"  in-sample {in_sample:.4f}; wrote {out} "
           f"({out.stat().st_size} bytes)")

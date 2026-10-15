@@ -185,6 +185,10 @@ NPU) all voting in the same consensus quorum.
 | Swarm on unseen wording (split C) | majority 77.08% vs best member 73.75% (+3.3) | round 141 |
 | Combiner + text, evaluated on C | full 82.92% (best member 73.75); declined rows 62.34% vs member 40.26%, oracle 71.43% | round 141 |
 | Votes vs text | votes alone 58.44% on declined rows, +text 62.34% | round 141 |
+| Combiner spec v2 | text posterior appended; text model embedded in the artifact (35 KB) | round 142 |
+| Two-provenance training rule | `--reports` (votes) + `--text-train` (wording) disjoint, recorded in meta | round 142 |
+| Spec-2 verified on split C | full 82.92%, declined rows 62.34%, 0/77 suggestions at auto | round 142 |
+| Text reaches the model live | same votes, different text -> different suggestion probabilities | round 142 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |
