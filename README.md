@@ -516,6 +516,20 @@ devices, one mind.
   tables' five-fold over-softening was quietly acting as a safety margin
   (`tools/refit_calibration_check.py`,
   `docs/research/2026-10-15-round148.md`).
+- **The shipped gate is at the optimum of its own grid — and that optimum is
+  partly an accident**: tuning temperatures *and* thresholds on a deployment's
+  own labelled rows (25/50/100 of them) does not beat shipping — at a 90%
+  accuracy floor the shipped configuration accepts 83 rows at 0.9036 and the
+  best tuning accepts 75 at 0.9200, while 25–50 rows do not even hold the
+  floor. Letting the tuning peek (thresholds chosen on the evaluation half
+  itself) gives **the same 83 rows at 0.9036**, so on this distribution no
+  tuning procedure could have won. What that leaves behind is worth knowing:
+  `typed-decisions`' temperature is five times too soft, and correcting it
+  makes the gate auto-execute 16 more rows at four points lower accuracy —
+  **part of the shipped gate's safety comes from a calibration error acting as
+  a margin**, which the playbook example now says beside the thresholds
+  (`tools/tune_gate_check.py`,
+  `docs/research/2026-10-15-round149.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage

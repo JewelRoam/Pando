@@ -161,6 +161,7 @@ Rebuilt by tools/build_research_index.py; one row per file.
 | 2026-10-15-round146.md | 146 | Growing and shrinking a fleet while it serves |
 | 2026-10-15-round147.md | 147 | The cross-device path, verified on one machine |
 | 2026-10-15-round148.md | 148 | Calibration does not transfer, and the gate is tuned to it |
+| 2026-10-15-round149.md | 149 | The shipped gate is at the optimum of its own grid |
 
 ## Files without a round number
 

@@ -207,6 +207,10 @@ NPU) all voting in the same consensus quorum.
 | In-place calibration ceiling | fitted on the deployment's own wording: 0.5318 (-9%) | round 148 |
 | Gate is tuned to the tables | sharper confidences: auto 163 -> 179 rows at 0.908 -> 0.860 | round 148 |
 | NPU op analysis | **solved** in round 131 (nonisnan graph compiles and votes) | round 148 (backlog fix) |
+| Tuning on own rows | 25/50 rows miss the 90% floor; 100 rows buys accuracy with coverage | round 149 |
+| In-sample ceiling | thresholds chosen on the evaluation half: 83 rows at 0.9036 = the shipped point | round 149 |
+| Shipped gate is optimal in its grid | no tuning procedure could have won on this distribution | round 149 |
+| Load-bearing calibration error | correcting typed-decisions' T makes the gate 16 rows freer and 4 points less safe | round 149 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |

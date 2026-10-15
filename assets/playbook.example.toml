@@ -45,6 +45,15 @@ admit = ["english", "multilingual", "typed-decisions"]
 # english = "0000000000000000000000000000000000000000000000000000000000000000"
 
 [gating]
+# These two numbers and the per-lineage calibration tables are one system
+# (rounds 148-149): a confidence is `sigmoid(logit(p)/T)`, so changing a
+# lineage's temperature moves the operating point. Measured on 240 held-out
+# rows, correcting `typed-decisions`' temperature - it is five times softer
+# than its own data wants - makes a lineage's votes satisfy auto_min_probability
+# more often, and the gate auto-executes 16 more rows at four points lower
+# accuracy. Tuning temperatures *and* thresholds on a deployment's own rows
+# did not beat this configuration either: the point below turned out to be the
+# grid optimum. Change one of these, re-measure both.
 # Confidence tiers (blueprint 3.2): auto executes, verify re-asks,
 # escalate routes to the offline advisor / human.
 auto_min_agreement = 0.6
