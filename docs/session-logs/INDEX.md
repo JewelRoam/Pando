@@ -43,3 +43,4 @@ Timestamped, sanitized snapshots of this PandoSI working session.
 | 2026-10-15T200003 | `docs/session-logs/2026-10-15T200003-session-backup.md` | 272580f9ca07 | 206/1031/1953 | automatic snapshot after 6e072e3 test: a device cannot mint independence from the model it holds |
 | 2026-10-15T203003 | `docs/session-logs/2026-10-15T203003-session-backup.md` | 883ea72af7ff | 206/1044/1991 | automatic snapshot after a5e897d chore: session backup 2026-10-15T200003 |
 | 2026-10-15T210317 | `docs/session-logs/2026-10-15T210317-session-backup.md` | 2f922e9d61a9 | 209/1081/2063 | automatic snapshot after 24b1624 feat: count the opinions, not the devices |
+| 2026-10-15T213003 | `docs/session-logs/2026-10-15T213003-session-backup.md` | 0b000a6b8604 | 211/1096/2089 | automatic snapshot after df9d032 feat: the NPU is a graph problem, not a hardware problem |
