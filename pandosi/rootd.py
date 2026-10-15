@@ -89,7 +89,8 @@ class Coordinator:
                  count_lineages: bool = False,
                  blocs: dict | None = None,
                  combiner=None,
-                 rollout_dir: str | Path = "rollouts"):
+                 rollout_dir: str | Path = "rollouts",
+                 assent_checkpoint: str | None = None):
         self.nodes: dict[str, dict] = {}
         self._lock = threading.Lock()
         self._pick_rotation = 0
@@ -120,6 +121,9 @@ class Coordinator:
         self.latency_target_ms = latency_target_ms
         self._decision_ewma_ms: float | None = None
         self.gating = gating or {}
+        # Opt-in policy (round 157): a named checkpoint may veto auto tier
+        # when its (collapsed) vote disagrees with the aggregate choice.
+        self.assent_checkpoint = assent_checkpoint
         self.call_timeout = call_timeout
         self.initial_stem_timeout = initial_stem_timeout
         self.min_stem_timeout = min_stem_timeout
@@ -549,6 +553,17 @@ class Coordinator:
             result = DecisionResult(result.choice, result.agreement,
                                     result.mean_probability, "verify",
                                     result.votes)
+        if result.tier == "auto" and self.assent_checkpoint is not None:
+            collapsed = (collapse_lineages(calibrated_votes,
+                                           self.blocs or None)
+                         if self._collapses() else calibrated_votes)
+            assent_vote = next(
+                (vote for vote in collapsed
+                 if vote.checkpoint == self.assent_checkpoint), None)
+            if assent_vote is not None and assent_vote.choice != result.choice:
+                result = DecisionResult(result.choice, result.agreement,
+                                        result.mean_probability, "verify",
+                                        result.votes)
         self._log_decision(req, result, len(quorum), fanout_ms)
         try:
             self._recorder.record(req.request_id, req.state, req.question,
@@ -656,6 +671,7 @@ def build_handler(coordinator: Coordinator, root=None):
                     "latency_target_ms": coordinator.latency_target_ms,
                     "decision_ewma_ms": coordinator._decision_ewma_ms,
                     "question_categories": coordinator.question_categories,
+                    "assent_checkpoint": coordinator.assent_checkpoint,
                 })
             elif self.path == "/playbook" and root is not None \
                     and getattr(root, "playbook", None) is not None:
@@ -966,6 +982,10 @@ def main() -> None:
                              "train_combiner.py); its answer is attached as "
                              "suggested_choice wherever the gate does not "
                              "auto-execute (round 140)")
+    parser.add_argument("--assent-checkpoint", default=None,
+                        help="a named checkpoint whose (collapsed) vote may "
+                             "veto an auto tier when it disagrees with the "
+                             "aggregate choice")
     parser.add_argument("--initial-stem-timeout", type=float,
                         default=INITIAL_STEM_TIMEOUT,
                         help="discovery timeout before latency is learned")
@@ -1022,7 +1042,8 @@ def main() -> None:
         latency_target_ms=args.latency_target_ms,
         count_lineages=args.lineage_quorum,
         combiner=combiner,
-        rollout_dir=args.rollout_dir)
+        rollout_dir=args.rollout_dir,
+        assent_checkpoint=args.assent_checkpoint)
     root = Root(coordinator=coordinator, host=listen_host, port=args.port,
                 spore_files=spore_files, chunking=args.chunking)
     import secrets
