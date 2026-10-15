@@ -112,6 +112,9 @@ NPU) all voting in the same consensus quorum.
 | Member ranking is wording-dependent | typed-decisions best on shared wording, english on new wording | round 123 |
 | Outsiders on unseen wording | bayes 93.75->57.50, rules 95.0->17.5 but 42/42 precise | round 123 |
 | Decorrelated weak voter still wins | 57.5% member: +4.1 pt matched, +3.8 pt full; 76.25% aligned member: -2.5 pt full | round 123 |
+| Lineage rule over real HTTP | 2:1 stem majority auto -> lineage tie verify; 4 scenarios pass | round 124 |
+| Corroboration floor | `[gating] corroboration_floor`: replicas no longer auto-execute at floor 2 | round 124 |
+| Decision response observability | `lineages` + `corroboration_floor` reported when observable | round 124 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |

@@ -24,7 +24,7 @@ class _PandoHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-from .common import DecisionRequest, Vote, aggregate
+from .common import DecisionRequest, DecisionResult, Vote, aggregate
 from .spore import build_manifest, generate_signing_key
 from .rollout import RolloutRecorder
 from .calibrate import Calibrator
@@ -459,6 +459,20 @@ class Coordinator:
             auto_min_agreement=eff_gating.get("auto_min_agreement", 0.6),
             auto_min_probability=eff_gating.get("auto_min_probability", 0.6),
             count_lineages=self.count_lineages)
+        lineages = len({info["checkpoint"] for _, info in quorum})
+        # Corroboration is a policy, not a default: a lone lineage is still
+        # allowed to decide (a single device has to work), but a playbook can
+        # require more opinions than one. Round 119 measured what the
+        # alternative costs - replicas are one opinion, so three copies of one
+        # lineage agreeing is agreement of 1.0 over nothing. This is
+        # independent of count_lineages: a playbook may want two opinions
+        # without wanting same-lineage votes collapsed.
+        corroboration_floor = max(1, int(
+            eff_gating.get("corroboration_floor", 1)))
+        if result.tier == "auto" and lineages < corroboration_floor:
+            result = DecisionResult(result.choice, result.agreement,
+                                    result.mean_probability, "verify",
+                                    result.votes)
         self._log_decision(req, result, len(quorum), fanout_ms)
         try:
             self._recorder.record(req.request_id, req.state, req.question,
@@ -470,6 +484,13 @@ class Coordinator:
             pass
         out = result.__dict__.copy()
         out["quorum_size"] = len(quorum)
+        # Agreement over a single lineage is vacuous, so an operator needs to
+        # see how many opinions stood behind the vote (round 119: a quorum of
+        # replicas is one model with extra steps).
+        if self.count_lineages or corroboration_floor > 1:
+            out["lineages"] = lineages
+        if corroboration_floor > 1:
+            out["corroboration_floor"] = corroboration_floor
         out["responded"] = len(votes)
         out["fanout_ms"] = fanout_ms
         # Report uncalibrated voters rather than acting on them silently. The

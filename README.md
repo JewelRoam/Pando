@@ -251,6 +251,16 @@ devices, one mind.
   **+4.1 points** at matched coverage, while a 76.25%-accurate voter whose
   errors were aligned with an existing member is worth −2.5
   (`docs/research/2026-10-15-round123.md`).
+- **Corroboration is now a policy you can require**: the lineage rule was
+  verified over real HTTP — a 2:1 stem majority of one lineage over another
+  is an `auto` today and a `verify` with the flag on — and the same harness
+  exposed the failure growth would otherwise hide: **three copies of one
+  lineage reach `auto` with agreement 1.00**, one opinion corroborated by
+  nothing. `[gating] corroboration_floor` refuses `auto` below that many
+  distinct lineages (default 1, so a single device still works alone), and
+  the decision response now reports `lineages` and the floor
+  (`tools/lineage_quorum_e2e_check.py`,
+  `docs/research/2026-10-15-round124.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage

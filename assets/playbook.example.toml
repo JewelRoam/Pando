@@ -36,6 +36,14 @@ escalate_above_disagreement = 0.5
 # This is the same trade as "how much agreement am I willing to give up".
 quorum_floor = 2
 
+# Fewest *distinct lineages* that may auto-execute. Default 1, which lets a
+# single device work alone. Raise it to 2 and a quorum of one lineage's
+# replicas stops auto-executing: they agree perfectly and always will, which
+# is agreement of 1.0 over one opinion (round 119 measured a same-lineage
+# pair deciding identically on 240 of 240 tasks). Reported in the decision
+# response as `lineages` and `corroboration_floor`.
+# corroboration_floor = 2
+
 [[questions]]
 id = "intent"
 type = "choice"
