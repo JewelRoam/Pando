@@ -92,6 +92,13 @@ NPU) all voting in the same consensus quorum.
 | Resolution cost | 1 pt at 5.6% discordance needs ~3,900 tasks | round 118 |
 | Gate vs single-model confidence | 92.3% vs 100% was 13 of 27 tasks; not reproduced at n=480 | round 117/118 |
 | Oracle available to the trio | 74.1% (n=27) -> 95.2% (n=480); 91.7% on splits | round 117/118 |
+| Trained lineage vs its parent | rlcd-v7 = english on 240/240 decisions, phi +1.000 | round 119 |
+| Cost of a duplicate member | weighted vote 90.4% -> 85.4%, equal to the duplicated member | round 119 |
+| Quorum over lineages | pick_quorum round-robins checkpoint groups; a duplicate still votes at full weight | round 119 |
+| Majority with a duplicate | accuracy == the duplicated member's accuracy (theorem, 4dp match) | round 119 |
+| Re-ask on disagreements | weighted vote 75.6% -> 76.9%; answer moves on 12/78 rows | round 120 |
+| Re-ask unanimity as a signal | 31/78 settle, accuracy identical to the first ballot (83.9%) | round 120 |
+| Routes to the split headroom | combiner <=1.0 pt, narrower ballot +1.3 pt, of 18 available | round 118/120 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |

@@ -167,9 +167,12 @@ def main() -> int:
     incumbent_point = report["swarm_auto_count"]
     incumbent = MEMBER_PREFIX + args.lineage
     members = [MEMBER_PREFIX + name for name in rows[0]["per_lineage"]]
+    has_incumbent = incumbent in members
     print(f"{total} recorded decisions from {report_path.name}; "
           f"oracle {report['oracle_accuracy']}; incumbent coverage point "
           f"{incumbent_point}/{total}")
+    if not has_incumbent:
+        print(f"  (no {args.lineage} in this trio: {', '.join(members)})")
 
     table = {}
     for name in members + COMBINERS:
@@ -225,7 +228,8 @@ def main() -> int:
         "target": args.target,
         "tasks": total,
         "incumbent_coverage": incumbent_point / total,
-        "incumbent_holds": table[incumbent]["coverage_holding_target"],
+        "incumbent_holds": (table[incumbent]["coverage_holding_target"]
+                            if has_incumbent else None),
         "leaderboard_winner": best_name,
         "best_combiner": best_combiner,
         "best_member": best_member,
@@ -234,8 +238,9 @@ def main() -> int:
         "table": {name: {k: v for k, v in entry.items() if k != "curve"}
                   for name, entry in table.items()},
     }
-    print(f"\nincumbent ({args.lineage}) holds {args.target:.0%} to coverage "
-          f"{summary['incumbent_holds']}")
+    if has_incumbent:
+        print(f"\nincumbent ({args.lineage}) holds {args.target:.0%} to "
+              f"coverage {summary['incumbent_holds']}")
     print(f"best member {best_member} holds it to "
           f"{table[best_member]['coverage_holding_target']}")
     print(f"best combiner {best_name} holds it to "

@@ -47,8 +47,9 @@ LINEAGES = {
     # Trained in this repository (the child of laya-en.onnx in the delta
     # replication checks), so its weights differ from the three above rather
     # than re-rendering them - the membership the swarm premise needs
-    # (round 119).
-    "rlcd-v7": ("local/rlcd-v7", "artifacts/laya-rlcd-v7.onnx"),
+    # (round 119). Its tokenizer and config come from the base it was
+    # fine-tuned out of, which is what the repo argument supplies.
+    "rlcd-v7": ("convaiinnovations/laya", "artifacts/laya-rlcd-v7.onnx"),
 }
 DEFAULT_LINEAGES = "english,multilingual,typed-decisions"
 
@@ -69,6 +70,61 @@ def curve(ranked: list[dict], step: int, key: str = "correct") -> list[dict]:
     return points
 
 
+def load_backends(names: list[str]) -> list[OnnxLayaBackend]:
+    backends = []
+    for name in names:
+        repo, onnx = LINEAGES[name]
+        path = ROOT / onnx
+        if not path.exists():
+            raise SystemExit(f"missing graph for {name}: {path}")
+        print(f"loading {name} ...", flush=True)
+        backends.append(OnnxLayaBackend(name, str(path), repo=repo,
+                                        device="CPU", checkpoint=name))
+    return backends
+
+
+def run_task(backends: list[OnnxLayaBackend], calibrator: Calibrator,
+             task: dict) -> dict:
+    """One task through every lineage, recorded as a ruled-on row."""
+    request = DecisionRequest(state=task["state"], question=task["question"],
+                              candidates=task["candidates"])
+    votes = [backend.decide(request) for backend in backends]
+    calibrated = []
+    for vote in votes:
+        probability, _ = calibrator.calibrate(vote.checkpoint,
+                                              vote.probability)
+        calibrated.append(Vote(vote.node_id, vote.checkpoint, vote.choice,
+                               probability))
+    result = aggregate(calibrated, min_quorum=len(backends))
+    expected = task["expected"]
+    choices = [vote.choice for vote in calibrated]
+    top_votes = Counter(choices).most_common()
+    majority = (top_votes[0][0] if top_votes
+                and (len(top_votes) == 1
+                     or top_votes[0][1] > top_votes[1][1]) else None)
+    per_lineage = {vote.checkpoint: vote.choice for vote in calibrated}
+    return {
+        "task_id": task["task_id"],
+        "expected": expected,
+        "choices": choices,
+        "per_lineage": per_lineage,
+        "confidences": {vote.checkpoint: vote.probability
+                        for vote in calibrated},
+        "tier": result.tier,
+        "agreement": result.agreement,
+        "mean_probability": result.mean_probability,
+        "swarm_choice": result.choice,
+        "correct": result.choice == expected,
+        "unanimous_correct": majority == expected,
+        "distinct": len(set(choices)),
+        # Per-lineage correctness: the swarm's own `correct` says nothing
+        # about an individual member, and mixing them up made every
+        # lineage look as accurate as the vote (found in round 117).
+        "lineage_correct": {name: choice == expected
+                            for name, choice in per_lineage.items()},
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--suite",
@@ -76,6 +132,8 @@ def main() -> int:
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--lineages", default=DEFAULT_LINEAGES,
                         help="comma-separated lineage names")
+    parser.add_argument("--limit", type=int, default=0,
+                        help="stop after N tasks (smoke runs only)")
     args = parser.parse_args()
 
     chosen = [name.strip() for name in args.lineages.split(",") if name.strip()]
@@ -88,64 +146,20 @@ def main() -> int:
              Path(args.suite).read_text(encoding="utf-8").splitlines()
              if line.strip()]
     tasks = [task for task in tasks if task.get("qtype") == "choice"]
+    if args.limit:
+        tasks = tasks[:args.limit]
     print(f"suite: {Path(args.suite).name}, {len(tasks)} labeled choice "
           f"tasks", flush=True)
 
-    backends = []
-    for name in chosen:
-        repo, onnx = LINEAGES[name]
-        path = ROOT / onnx
-        if not path.exists():
-            raise SystemExit(f"missing graph for {name}: {path}")
-        print(f"loading {name} ...", flush=True)
-        backends.append(OnnxLayaBackend(name, str(path), repo=repo,
-                                        device="CPU", checkpoint=name))
+    backends = load_backends(chosen)
     calibrator = Calibrator()
 
     rows = []
     for task in tasks:
-        request = DecisionRequest(state=task["state"],
-                                  question=task["question"],
-                                  candidates=task["candidates"])
-        votes = [backend.decide(request) for backend in backends]
-        calibrated = []
-        for vote in votes:
-            probability, _ = calibrator.calibrate(vote.checkpoint,
-                                                  vote.probability)
-            calibrated.append(Vote(vote.node_id, vote.checkpoint, vote.choice,
-                                   probability))
-        result = aggregate(calibrated, min_quorum=len(chosen))
-        expected = task["expected"]
-        choices = [vote.choice for vote in calibrated]
-        top_votes = Counter(choices).most_common()
-        majority = (top_votes[0][0] if top_votes
-                    and (len(top_votes) == 1
-                         or top_votes[0][1] > top_votes[1][1]) else None)
-        rows.append({
-            "task_id": task["task_id"],
-            "expected": expected,
-            "choices": choices,
-            "per_lineage": {vote.checkpoint: vote.choice
-                            for vote in calibrated},
-            "confidences": {vote.checkpoint: vote.probability
-                            for vote in calibrated},
-            "tier": result.tier,
-            "agreement": result.agreement,
-            "mean_probability": result.mean_probability,
-            "swarm_choice": result.choice,
-            "correct": result.choice == expected,
-            "unanimous_correct": majority == expected,
-            "distinct": len(set(choices)),
-            # Per-lineage correctness: the swarm's own `correct` says nothing
-            # about an individual member, and mixing them up made every
-            # lineage look as accurate as the vote (found in round 117).
-            "lineage_correct": {name: row == expected
-                                for name, row in
-                                {vote.checkpoint: vote.choice
-                                 for vote in calibrated}.items()},
-        })
-        print(f"  {task['task_id']}: {result.tier:8s} "
-              f"{choices} -> {'ok' if rows[-1]['correct'] else 'MISS'}",
+        rows.append(run_task(backends, calibrator, task))
+        print(f"  {task['task_id']}: {rows[-1]['tier']:8s} "
+              f"{rows[-1]['choices']} -> "
+              f"{'ok' if rows[-1]['correct'] else 'MISS'}",
               flush=True)
 
     total = len(rows)
@@ -214,7 +228,10 @@ def main() -> int:
 
     out_dir = ROOT / "metrics" / "ensemble-checks"
     out_dir.mkdir(parents=True, exist_ok=True)
-    report = out_dir / f"ensemble-{int(time.time())}.json"
+    # A truncated run must not become "the newest report" for the tools that
+    # glob ensemble-*.json, so it is written under its own prefix.
+    report = out_dir / (f"smoke-{int(time.time())}.json" if args.limit
+                        else f"ensemble-{int(time.time())}.json")
     report.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
     if args.json:

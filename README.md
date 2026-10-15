@@ -204,6 +204,28 @@ devices, one mind.
   5.6% discordance, resolving a 1-point difference takes ~3,900 tasks
   (`tools/build_large_suite.py`, `tools/ensemble_significance.py`,
   `docs/research/2026-10-15-round118.md`).
+- **Replication buys capacity, not accuracy — and an uncounted replica is
+  worse than neutral**: the repository's one trained checkpoint
+  (`artifacts/laya-rlcd-v7.onnx`, different weights by hash) makes
+  **240/240 identical decisions** to the `english` base it was fine-tuned
+  from — disagreement 0.0%, error correlation **phi = +1.000**. Admitting it
+  as a third voter drops the weighted vote from 90.4% to **85.4%**, which is
+  exactly `english`'s own accuracy to four decimals: when two of three
+  members always agree, the majority *is* the duplicated member, so a quorum
+  with a duplicate is one model with extra steps. `Coordinator.pick_quorum`
+  already round-robins across checkpoint groups, but when k exceeds the
+  number of distinct checkpoints — the state an elastically replicated swarm
+  converges to — the duplicate votes at full weight. Real diversity has to
+  come from a different base or tokenizer, not from a descendant
+  (`docs/research/2026-10-15-round119.md`).
+- **Neither a better combiner nor a narrower ballot reaches the headroom**:
+  re-asking the trio with only the disputed candidates on the ballot — what
+  the verify tier would do in production — lifts the weighted vote on
+  disagreements from 75.6% to **76.9%**, leaves the answer unchanged on 66 of
+  78 rows, and where it manufactures unanimity (31 rows) the accuracy is
+  *identical* to the first ballot (83.9%). Both routes to the 93.6% the trio
+  holds on those rows are now closed by measurement; it is a members problem
+  (`docs/research/2026-10-15-round120.md`).
 - **Per-category quorum floors and retirement**: a playbook sets a
   `quorum_floor` per category, so under load an ordinary question gave up
   voters down to 2 while a security question stopped at 4 — twice the
