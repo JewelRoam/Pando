@@ -40,3 +40,4 @@ Timestamped, sanitized snapshots of this PandoSI working session.
 | 2026-10-15T010003 | `docs/session-logs/2026-10-15T010003-session-backup.md` | 24e84d9c52b2 | 201/954/1710 | automatic snapshot after 57712d2 chore: session backup 2026-10-15T003005 |
 | 2026-10-15T190231 | `docs/session-logs/2026-10-15T190231-session-backup.md` | cd4fa88ecfbd | 204/979/1794 | automatic snapshot after 07f5781 test: the swarm does not yet out-decide its best member |
 | 2026-10-15T193125 | `docs/session-logs/2026-10-15T193125-session-backup.md` | f98ab69a50be | 204/996/1871 | automatic snapshot after c0b1317 test: the swarm's edge is one point, and the members matter 13x more |
+| 2026-10-15T200003 | `docs/session-logs/2026-10-15T200003-session-backup.md` | 272580f9ca07 | 206/1031/1953 | automatic snapshot after 6e072e3 test: a device cannot mint independence from the model it holds |
