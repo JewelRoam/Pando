@@ -305,6 +305,17 @@ devices, one mind.
   throughput at no cost to the decision, while growth for *intelligence*
   still needs a new opinion
   (`docs/research/2026-10-15-round129.md`).
+- **One device, several compute units, one opinion — measured again under the
+  new rules**: the same weights on the CPU (ONNX Runtime) and on the Intel
+  iGPU (OpenVINO) give **identical choices on 240/240** held-out tasks with a
+  0.0002 confidence gap, at 12.3 vs **18.0 decisions per second** (79 vs
+  53 ms median). Registered as two stems, the quorum reports **3 opinions for
+  4 stems** — the lineage rule collapsing the hardware pair — and the second
+  unit therefore buys capacity, not information. The NPU is still out: the
+  current OpenVINO vpux compiler rejects `node_MatMul_215` with unbounded
+  dimensions, the op-level class of blocker rounds 52-54 solved twice
+  (`tools/multi_eu_swarm_check.py`,
+  `docs/research/2026-10-15-round130.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage

@@ -142,6 +142,7 @@ Rebuilt by tools/build_research_index.py; one row per file.
 | 2026-10-15-round127.md | 127 | A tied quorum should answer, not go silent |
 | 2026-10-15-round128.md | 128 | Scaling is a membership problem, not a head-count |
 | 2026-10-15-round129.md | 129 | Count the opinions, not the devices |
+| 2026-10-15-round130.md | 130 | One device, several compute units, one opinion |
 
 ## Files without a round number
 

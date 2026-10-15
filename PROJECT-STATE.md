@@ -134,6 +134,11 @@ NPU) all voting in the same consensus quorum.
 | Bloc collapse measured | 4 correlated members: 65.42% (names) -> 77.92% (one bloc), +12.5 pt | round 129 |
 | Growth with replicas | same-family devices cost nothing: 77.92% vs a trio at 77.08% | round 129 |
 | Bloc representation | mass consensus loses 2.48 pt to the best member (7.3% of resamples) - open | round 129 |
+| CPU vs Intel iGPU (same weights) | identical choices 240/240, confidence gap 0.0002 | round 130 |
+| Heterogeneous unit speed | CPU 12.3 dec/s (79 ms), iGPU 18.0 dec/s (53 ms) | round 130 |
+| Second unit in the quorum | 4 stems, 3 opinions; the device buys capacity, not information | round 130 |
+| NPU, current OpenVINO | blocked: vpux rejects node_MatMul_215 (unbounded dims) | round 130 |
+| GPU graph fix | artifacts/laya-en-static-fixed.onnx compiles on the iGPU in 12-15 s | round 130 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |
