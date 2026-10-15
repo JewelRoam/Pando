@@ -316,6 +316,18 @@ devices, one mind.
   dimensions, the op-level class of blocker rounds 52-54 solved twice
   (`tools/multi_eu_swarm_check.py`,
   `docs/research/2026-10-15-round130.md`).
+- **The NPU was a graph problem, not a hardware problem**: the current
+  OpenVINO vpux compiler was rejecting `gnr1_gather_el` — a node produced by
+  this repository's own GatherND repair for the *Intel GPU*. Handing it
+  `artifacts/laya-en-static-nonisnan.onnx` (both repairs, 20 nodes fewer)
+  compiles in 39 s and votes. Three units on one machine, same weights, 240
+  held-out tasks: CPU / iGPU / NPU give **identical choices on 240/240** with
+  confidence gaps of 0.0002 and 0.0003, at **17.6 / 10.0 / 8.7 decisions per
+  second** (iGPU / CPU / NPU — the NPU is not a throughput win on this model,
+  its case is efficiency per watt). Five stems, three opinions: the extra
+  silicon buys capacity, not information
+  (`tools/multi_eu_swarm_check.py`,
+  `docs/research/2026-10-15-round131.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage

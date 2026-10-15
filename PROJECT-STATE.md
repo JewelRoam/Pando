@@ -139,6 +139,10 @@ NPU) all voting in the same consensus quorum.
 | Second unit in the quorum | 4 stems, 3 opinions; the device buys capacity, not information | round 130 |
 | NPU, current OpenVINO | blocked: vpux rejects node_MatMul_215 (unbounded dims) | round 130 |
 | GPU graph fix | artifacts/laya-en-static-fixed.onnx compiles on the iGPU in 12-15 s | round 130 |
+| NPU unblocked | laya-en-static-nonisnan.onnx compiles on the NPU in 39 s | round 131 |
+| Three units, one voter | CPU / iGPU / NPU: identical choices 240/240, gaps 0.0002/0.0003 | round 131 |
+| Unit speeds (this model) | iGPU 17.6 dec/s, CPU 10.0, NPU 8.7 (53/94/112 ms median) | round 131 |
+| Cross-unit graph dialects | GPU reject: GatherND; NPU reject: the GPU's GatherElements repair | round 131 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |

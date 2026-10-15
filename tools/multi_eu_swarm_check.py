@@ -49,9 +49,12 @@ MEMBERS = [
     ("en-cpu", "english", "CPU", "artifacts/laya-en.onnx", "convaiinnovations/laya"),
     ("en-gpu", "english", "GPU", "artifacts/laya-en-static-fixed.onnx",
      "convaiinnovations/laya"),
+    ("en-npu", "english", "NPU", "artifacts/laya-en-static-nonisnan.onnx",
+     "convaiinnovations/laya"),
     ("td-cpu", "typed-decisions", "CPU", "artifacts/laya-td.onnx",
      "convaiinnovations/laya-typed-decisions"),
 ]
+UNITS = ("en-cpu", "en-gpu", "en-npu")
 PAD_TO = 256
 
 
@@ -130,10 +133,10 @@ def main() -> int:
     # fleet decision never asks two same-lineage stems the same question -
     # comparing the units has to bypass that.
     by_name = {stem.node_id: stem for stem in stems}
-    fidelity = {"en-cpu": [], "en-gpu": []}
-    print("  asking both compute units directly ...", flush=True)
+    fidelity = {name: [] for name in UNITS}
+    print("  asking every compute unit directly ...", flush=True)
     for task in tasks:
-        for name in ("en-cpu", "en-gpu"):
+        for name in UNITS:
             vote, latency = ask_stem(by_name[name], task)
             fidelity[name].append({"choice": vote["choice"],
                                    "probability": vote["probability"],
@@ -165,13 +168,18 @@ def main() -> int:
               f"latency ewma {stats.get('latency_ewma_ms')} ms  "
               f"failures {stats.get('failures')}")
 
-    cpu, gpu = fidelity["en-cpu"], fidelity["en-gpu"]
-    agree = sum(1 for left, right in zip(cpu, gpu)
-                if left["choice"] == right["choice"])
-    gaps = [abs(left["probability"] - right["probability"])
-            for left, right in zip(cpu, gpu)]
-    print(f"\n  compute units, asked directly ({len(cpu)} each):")
-    for name in ("en-cpu", "en-gpu"):
+    baseline = fidelity[UNITS[0]]
+    agreement = {}
+    for name in UNITS[1:]:
+        same = sum(1 for left, right in zip(baseline, fidelity[name])
+                   if left["choice"] == right["choice"])
+        gaps = [abs(left["probability"] - right["probability"])
+                for left, right in zip(baseline, fidelity[name])]
+        agreement[name] = {"identical": same, "compared": len(baseline),
+                           "median_confidence_gap": round(
+                               statistics.median(gaps), 4)}
+    print(f"\n  compute units, asked directly ({len(baseline)} each):")
+    for name in UNITS:
         entries = fidelity[name]
         hits = sum(1 for entry in entries
                    if entry["choice"] == entry["expected"])
@@ -179,8 +187,10 @@ def main() -> int:
         print(f"    {name:8s} accuracy {hits / len(entries):.4f}  "
               f"median latency {statistics.median(latencies):.0f} ms  "
               f"(mean {statistics.mean(latencies):.0f})")
-    print(f"    identical choices {agree}/{len(cpu)}  "
-          f"median confidence gap {statistics.median(gaps):.4f}")
+    for name, entry in agreement.items():
+        print(f"    {name} agrees with {UNITS[0]} on "
+              f"{entry['identical']}/{entry['compared']}, median confidence "
+              f"gap {entry['median_confidence_gap']}")
 
     every = [name for name, *_ in MEMBERS] + ["text"]
 
@@ -209,12 +219,13 @@ def main() -> int:
 
     print(f"  throughput per device: "
           + ", ".join(f"{name} {decisions_per_second(name):.1f} dec/s"
-                      for name in ("en-cpu", "en-gpu")))
+                      for name in UNITS))
     print(f"  fleet {'+'.join(every)}: majority accuracy "
           f"{accuracy(rows, every):.4f}")
-    print(f"  the fleet's answer cannot differ from a one-device fleet: the "
-          f"units voted identically on {agree}/{len(cpu)} rows, so the second "
-          f"device buys capacity, not information")
+    identical = all(entry["identical"] == entry["compared"]
+                    for entry in agreement.values())
+    print(f"  all units identical on every row: {identical} - the extra "
+          f"devices buy capacity, not information")
     opinions = [row["result"].get("opinions") for row in rows]
     print(f"  opinions reported per decision: "
           f"{sorted(set(opinions))} (stems: {len(every)})")
@@ -229,10 +240,8 @@ def main() -> int:
                                      / len(fidelity[name]), 4),
                    "median_latency_ms": round(statistics.median(
                        [entry["latency_ms"] for entry in fidelity[name]]), 1)}
-            for name in ("en-cpu", "en-gpu")},
-        "eu_agreement": {"identical": agree, "compared": len(cpu),
-                         "median_confidence_gap": round(
-                             statistics.median(gaps), 4)},
+            for name in UNITS},
+        "eu_agreement": agreement,
         "decisions_per_second": {name: decisions_per_second(name)
                                  for name in ("en-cpu", "en-gpu")},
         "latency_ewma_ms": {name: root.coordinator.nodes.get(name, {})

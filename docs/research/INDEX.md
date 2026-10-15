@@ -143,6 +143,7 @@ Rebuilt by tools/build_research_index.py; one row per file.
 | 2026-10-15-round128.md | 128 | Scaling is a membership problem, not a head-count |
 | 2026-10-15-round129.md | 129 | Count the opinions, not the devices |
 | 2026-10-15-round130.md | 130 | One device, several compute units, one opinion |
+| 2026-10-15-round131.md | 131 | The NPU is a graph problem, not a hardware problem |
 
 ## Files without a round number
 
