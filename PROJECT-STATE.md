@@ -1,6 +1,6 @@
 # PandoSI Project State
 
-*Last updated: 2026-10-16 (round 158; continuous research session)*
+*Last updated: 2026-10-16 (round 159; continuous research session)*
 
 ## Where we are
 
@@ -258,6 +258,10 @@ NPU) all voting in the same consensus quorum.
 | Calibration does not fix the tier | trio with T_C: auto 224 @ 0.9241, decided 0.9167 (raw: identical); ECE 0.303 -> 0.034 on C | round 158 |
 | A weak distinct member dilutes | 2-of-3 majorities auto-execute at ~0.924 where the pair escalated to a 0.926 advisor; tiers only lift above their strength | round 158 |
 | Prompt scaffold costs accuracy | candidate-only prompt on C: 0.7958 at 131 ms vs JSON 0.6542 at 444 ms | round 158 |
+| Prompt scaffold on D | candidate-only 0.8167 @ 139 ms vs JSON 0.7375 @ 442 ms (+7.9 pp, 3.2x faster) | round 159 |
+| Assent gating (offline) | auto requires the strongest member's choice: trio auto 199 @ 1.0000, decided 0.9833 | round 159 |
+| Tiered composition, first win | trio+B+assent 0.9833 > pair 0.9750, at 40 more auto rows, all correct | round 159 |
+| Next | implement --assent-checkpoint in rootd (Task 005, dispatched) + live three-tier run | round 159 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |

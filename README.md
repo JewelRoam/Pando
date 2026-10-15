@@ -657,6 +657,17 @@ devices, one mind.
   dispatched experiment (`tools/llm_decision_check.py`,
   `metrics/lan-check/combine_llm_check.py`,
   `docs/research/2026-10-16-round158.md`).
+- **Reliability-aware gating — the tiered fleet beats its core**: dropping
+  the JSON+confidence scaffold from the Mac LLM's prompt gains 7.9 points
+  and 3.2× latency on split D (0.8167 @ 139 ms); and once the gate requires
+  the *strongest* member's choice to match the aggregate before a decision
+  auto-executes, the three-tier fleet reaches **auto 199 rows, every one
+  correct, decided 0.9833** — above the two-member core's 0.9750, with 40
+  more rows auto-executed. The rule: a decision may auto-execute only when
+  the highest-accuracy member present is in the winning coalition; the gate
+  routes disagreement to the advisor and lets the trusted member hold the
+  veto (`metrics/lan-check/variant_matrix_check.py`,
+  `docs/research/2026-10-16-round159.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage
