@@ -151,6 +151,10 @@ NPU) all voting in the same consensus quorum.
 | k is reproducible, units are not | k=3 costs 2-3x in both process shapes; units add nothing | round 133 |
 | Unit rank depends on load | at 4 clients: NPU 33.2/s > CPU 24.9 > iGPU 24.0 (sequential: NPU last) | round 133 |
 | Single-host variance | the same cell measured 16.8/s and 34.1/s in two runs - 30-50% noise | round 133 |
+| `blocked` does not isolate | pick_quorum ignores it; only retire() removes a node | round 134 |
+| Per-unit numbers (isolated) | CPU 16.8/s idle, 6.0/s loaded; iGPU 171/341; NPU 268/296 | round 134 |
+| Host CPU per decision | CPU 791->1647 ms; iGPU 6.6->5.1; **NPU 1.4->1.8** (500-1000x) | round 134 |
+| Load invariance | accelerators keep serving while 8 cores are busy; the CPU stem loses 64% | round 134 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |

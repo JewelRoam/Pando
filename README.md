@@ -353,6 +353,21 @@ devices, one mind.
   machine or less host work per request, not another unit
   (`tools/process_fleet_capacity_check.py`,
   `docs/research/2026-10-15-round133.md`).
+- **The CPU is the wrong silicon to vote with**: measured with each unit in
+  true isolation and a host that is somebody's computer (eight cores burned by
+  unrelated work), the CPU stem serves 16.8 decisions/s idle and **6.0/s
+  loaded** while costing the machine **791→1647 ms of host CPU per decision**;
+  the Intel iGPU does 171→341/s at ~6 ms and the **NPU 268→296/s at
+  1.4-1.8 ms** — a factor of 500-1000 in what the unit costs the host. The
+  accelerators are not just idle capacity, they are *load-invariant*: they
+  keep serving while the CPU stem loses 64% of its throughput. The value of a
+  heterogeneous fleet on a personal computer is availability, not peak
+  throughput. (Two harness defects were found and fixed on the way:
+  `Coordinator.blocked` does not isolate a unit — only `retire()` does — and
+  the loader had been repeating one task; per-unit attributions from rounds
+  132-133 are withdrawn.)
+  (`tools/idle_silicon_check.py`,
+  `docs/research/2026-10-15-round134.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage
