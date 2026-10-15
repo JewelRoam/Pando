@@ -414,6 +414,18 @@ devices, one mind.
   swarm is cheap to grow and hard to make smarter, and both halves are now
   numbers (`tools/device_birth_check.py`,
   `docs/research/2026-10-15-round138.md`).
+- **A learned combiner beats every single member, and locates the rest of the
+  gap**: treating the quorum's votes and calibrated confidences as features
+  and fitting a regularised logistic regression on the dev split (l2 chosen
+  by five-fold CV on dev, evaluated once on the 240 wording-held-out rows)
+  gives **80.42% against the best single member's 75.42%** — the first clear
+  ensemble margin in this project. On the rows the gate accepts it sits 0.6
+  points from the oracle (90.70 vs 91.28); on the 68 rows the gate *declines*
+  it reaches **54.4% against the best member's 41.2%** with an oracle of
+  67.7% — the remaining headroom lives exactly where the swarm refuses to
+  answer, and a fitted rule recovers about three-quarters of it there
+  (`tools/learned_combiner_check.py`,
+  `docs/research/2026-10-15-round139.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage

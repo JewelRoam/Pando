@@ -172,6 +172,10 @@ NPU) all voting in the same consensus quorum.
 | Birth latency (whole artifact) | ~29 s, composed with round 106's 14.2 s transfer | round 138 |
 | What the newborn buys | nothing: k=1 26.1/s -> k=2 13.5/s (its 4 votes are the quorum working) | round 138 |
 | Spore pull gate | `sandbox_confirmed` refuses by default; the check does not assert it | round 138 |
+| Learned combiner | fitted on dev votes (l2 by 5-fold CV), scored on held-out wording | round 139 |
+| Swarm beats its best member | 80.42% vs 75.42% full coverage (+5.0) | round 139 |
+| Where the headroom is | gate's rows: 90.70% vs an oracle of 91.28%; declined rows: learned 54.41% vs member 41.18% vs oracle 67.65% | round 139 |
+| Training rows not the limit | 480 instead of 240 changes nothing (79.58 vs 80.42) | round 139 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |
