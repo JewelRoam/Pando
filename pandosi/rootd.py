@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import hmac
 import json
+import math
 import sys
 import threading
 import time
@@ -189,6 +190,19 @@ class Coordinator:
     def _bloc_of(self, checkpoint: str) -> str:
         return self.blocs.get(checkpoint, checkpoint)
 
+    @staticmethod
+    def _cost_bucket(info: dict) -> int:
+        """Coarse host-cost band for a member, cheapest first.
+
+        Ten-fold buckets: anything within an order of magnitude counts as the
+        same price, so a fleet spreads across peers of similar cost and
+        ignores the one that is orders of magnitude more expensive.
+        """
+        cost = info.get("capability", {}).get("host_ms_per_decision")
+        if cost is None:
+            return 9
+        return int(math.log10(max(float(cost), 1.0)))
+
     def _selectable_nodes(self) -> dict[str, dict]:
         live = self.live_nodes()
         now = time.monotonic()
@@ -229,6 +243,18 @@ class Coordinator:
             # what spreads concurrent decisions over equally good members
             # instead of always taking the same one.
             ranked = sorted(enumerate(members), key=lambda pair: (
+                # What the member costs the machine it lives on, in coarse
+                # buckets: members of one checkpoint group are interchangeable
+                # by definition, so the only thing separating them is price -
+                # and round 134 measured a 500-1000x spread between a CPU stem
+                # and an NPU stem on the same host. Bucketing rather than
+                # strict ordering matters: two units within a factor of ten
+                # are treated as equals and share the load (the property
+                # rounds 109-110 established), while a unit a hundred times
+                # more expensive is not woken at all while a cheap one is
+                # free. A member that reports no cost lands in the highest
+                # bucket, which keeps every earlier round's behaviour.
+                self._cost_bucket(pair[1][1]),
                 inflight.get(pair[1][0], 0),
                 int((pair[1][1]["stats"].get("latency_ewma_ms") or 0.0)
                     // LATENCY_BAND_MS),
@@ -429,8 +455,12 @@ class Coordinator:
                     lambda item: self._call_stem(item[0], item[1], payload),
                     quorum))
             votes = [vote for vote in results if vote is not None]
+            unanswered = [node_id for (node_id, _), vote in zip(quorum,
+                                                               results)
+                          if vote is None]
         else:
             votes = []
+            unanswered = []
         fanout_ms = round((time.perf_counter() - fanout_started) * 1000, 3)
         # Track the end-to-end decision time, not just the fan-out, so the
         # adaptive quorum reacts to queueing rather than to one slow voter.
@@ -510,6 +540,11 @@ class Coordinator:
         if corroboration_floor > 1:
             out["corroboration_floor"] = corroboration_floor
         out["responded"] = len(votes)
+        # "Escalate" without a reason is unreadable: a member that was picked
+        # and said nothing looks exactly like a member that was never asked.
+        # The list names the ones that dropped out (round 135).
+        if unanswered:
+            out["unanswered"] = unanswered
         out["fanout_ms"] = fanout_ms
         # Report uncalibrated voters rather than acting on them silently. The
         # tier is left alone so a synthetic test harness is unaffected; the

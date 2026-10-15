@@ -147,6 +147,7 @@ Rebuilt by tools/build_research_index.py; one row per file.
 | 2026-10-15-round132.md | 132 | Corroboration is paid for in throughput |
 | 2026-10-15-round133.md | 133 | The host is the ceiling, and one host is noisy |
 | 2026-10-15-round134.md | 134 | The CPU is the wrong silicon to vote with |
+| 2026-10-15-round135.md | 135 | The accelerators drop out under concurrency |
 
 ## Files without a round number
 

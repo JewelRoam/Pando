@@ -30,7 +30,15 @@ from .common import DecisionRequest
 from .graft import assign_role, capability
 
 
-def build_handler(backend, node_id: str):
+def host_ms_per_decision(usage: dict | None) -> float | None:
+    """Host CPU this process has spent per decision served."""
+    if not usage or not usage.get("decisions"):
+        return None
+    used = time.process_time() - usage["started"]
+    return round(1000.0 * used / usage["decisions"], 2)
+
+
+def build_handler(backend, node_id: str, usage: dict | None = None):
     class StemHandler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):  # quiet by default
             pass
@@ -46,7 +54,9 @@ def build_handler(backend, node_id: str):
         def do_GET(self):  # noqa: N802
             if self.path == "/health":
                 self._send(200, {"ok": True, "node_id": node_id,
-                                 "checkpoint": backend.checkpoint})
+                                 "checkpoint": backend.checkpoint,
+                                 "host_ms_per_decision":
+                                     host_ms_per_decision(usage)})
             elif self.path == "/graft":
                 cap = capability()
                 self._send(200, {"node_id": node_id, "capability": cap,
@@ -62,6 +72,8 @@ def build_handler(backend, node_id: str):
             req = DecisionRequest.from_json(self.rfile.read(length))
             try:
                 vote = backend.decide(req)
+                if usage is not None:
+                    usage["decisions"] += 1
                 self._send(200, {"vote": vote.to_json()})
             except Exception as exc:  # surface backend errors to root
                 self._send(500, {"error": str(exc)})
@@ -79,7 +91,14 @@ class Stem:
         self.host = host
         self.advertise_host = advertise_host or host
         self.port = port
-        self._httpd = _PandoHTTPServer((host, port), build_handler(backend, node_id))
+        # What this device costs the machine it lives on, measured rather than
+        # claimed: round 134 found the CPU unit spends 791-1647 ms of host CPU
+        # per decision against the NPU's 1.4-1.8 ms, so a fleet that picks by
+        # latency alone keeps waking the most expensive member.
+        self.usage = {"decisions": 0, "started": time.process_time()}
+        self._httpd = _PandoHTTPServer((host, port),
+                                       build_handler(backend, node_id,
+                                                     self.usage))
         self.port = self._httpd.server_address[1]
         self._thread: threading.Thread | None = None
 
@@ -92,6 +111,10 @@ class Stem:
 
     def stop(self) -> None:
         self._httpd.shutdown()
+
+    def host_ms_per_decision(self) -> float | None:
+        """Host CPU this device has spent per decision (whole process)."""
+        return host_ms_per_decision(self.usage)
 
 
 def heartbeat_loop(stem: Stem, root_url: str,
@@ -114,6 +137,15 @@ def heartbeat_loop(stem: Stem, root_url: str,
         headers["Authorization"] = f"Bearer {pairing_token}"
     payload = json.dumps(registration).encode("utf-8")
     while True:
+        # Refresh what the device costs the machine it lives on, so a root can
+        # prefer a cheap member over an expensive one (round 134). It has to be
+        # re-measured every beat: a stem that has served nothing yet has no
+        # cost to report.
+        measured = stem.host_ms_per_decision()
+        if measured is not None:
+            registration["capability"] = dict(cap,
+                                              host_ms_per_decision=measured)
+            payload = json.dumps(registration).encode("utf-8")
         try:
             with urllib.request.urlopen(
                 urllib.request.Request(f"{root_url}/register", data=payload,

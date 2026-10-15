@@ -368,6 +368,19 @@ devices, one mind.
   132-133 are withdrawn.)
   (`tools/idle_silicon_check.py`,
   `docs/research/2026-10-15-round134.md`).
+- **The accelerators drop out under concurrency — and the response now says
+  so**: stems report their measured host cost per decision on every
+  heartbeat, `pick_quorum` prefers the cheapest ten-fold cost band inside a
+  lineage group (the CPU stem's share of served decisions fell from a third
+  to zero), and the decision response gained an **`unanswered`** field naming
+  members that were picked and said nothing. That field immediately showed
+  the real problem: at four concurrent clients the OpenVINO iGPU and NPU
+  stems fail roughly half their calls while the ONNX CPU stem never does
+  (sequentially the same NPU stem answers 10/10). Round 134's accelerator
+  throughput and cost figures are **withdrawn** — they were dropouts counting
+  as speed. The next fix is what `MockBackend.serialize` already models: a
+  device should serve one decision at a time
+  (`docs/research/2026-10-15-round135.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage

@@ -155,6 +155,12 @@ NPU) all voting in the same consensus quorum.
 | Per-unit numbers (isolated) | CPU 16.8/s idle, 6.0/s loaded; iGPU 171/341; NPU 268/296 | round 134 |
 | Host CPU per decision | CPU 791->1647 ms; iGPU 6.6->5.1; **NPU 1.4->1.8** (500-1000x) | round 134 |
 | Load invariance | accelerators keep serving while 8 cores are busy; the CPU stem loses 64% | round 134 |
+| Host cost reported by stems | measured `host_ms_per_decision`, refreshed every heartbeat | round 135 |
+| Cost-band quorum picking | ten-fold bands: the expensive unit is not woken while a cheap one is free | round 135 |
+| `unanswered` in the response | names the members that were picked and said nothing | round 135 |
+| Accelerator dropout | under 4 concurrent clients the iGPU/NPU stems fail ~half their calls; the CPU stem never does | round 135 |
+| Round 134 accelerator numbers | **withdrawn** - the dropouts masqueraded as throughput | round 135 |
+| Device should serialise | the `serialize` model (one decision at a time) is the next fix | round 135 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |
