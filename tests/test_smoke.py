@@ -106,6 +106,80 @@ class TestSmoke(unittest.TestCase):
         finally:
             root.stop()
         self.assertEqual(status["assent_fallback"], "veto")
+        self.assertIsNone(status["assent_resolved"])
+
+    def test_assent_auto_registry_resolution(self):
+        """Auto-assent resolves from measured accuracy among present voters."""
+        def decide(ft_choice: str, registry_path: Path,
+                   assent_fallback: str = "advisor"):
+            coordinator = Coordinator(
+                quorum_k=3, assent_checkpoint="auto",
+                assent_fallback=assent_fallback,
+                assent_registry=registry_path)
+            stems = []
+            try:
+                members = [
+                    ("english-0", "english", "approve"),
+                    ("english-1", "english", "approve"),
+                    ("ft-v3", "ft-v3", ft_choice),
+                ]
+                for node_id, checkpoint, choice in members:
+                    stem = Stem(node_id, MockBackend(
+                        node_id, checkpoint, correct_choice=choice,
+                        agree_rate=1.0))
+                    stem.start()
+                    stems.append(stem)
+                    coordinator.register(stem.node_id, stem.url(), checkpoint)
+                return coordinator.decide(DecisionRequest(
+                    state="assent", question="approve?",
+                    candidates=["approve", "reject"]))
+            finally:
+                for stem in stems:
+                    stem.stop()
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            ft_best = root / "ft-best.json"
+            ft_best.write_text(json.dumps({
+                "members": {
+                    "english": {"accuracy": {"D": 0.20, "E": 0.30}},
+                    "ft-v3": {"accuracy": {"D": 0.90, "E": 0.95}},
+                }
+            }), encoding="utf-8")
+            auto_ft = decide("reject", ft_best)
+            self.assertEqual(auto_ft["choice"], "approve")
+            self.assertEqual(auto_ft["tier"], "verify")
+            self.assertEqual(auto_ft["assent"], "ft-v3")
+            self.assertNotIn("veto", auto_ft)
+
+            auto_veto = decide("reject", ft_best, assent_fallback="veto")
+            self.assertEqual(auto_veto["choice"], "reject")
+            self.assertEqual(auto_veto["tier"], "verify")
+            self.assertEqual(auto_veto["assent"], "ft-v3")
+            self.assertEqual(auto_veto["veto"], "ft-v3")
+
+            unknown = root / "unknown.json"
+            unknown.write_text(json.dumps({
+                "members": {
+                    "mac-llm": {"accuracy": {"D": 0.99, "E": 0.99}},
+                }
+            }), encoding="utf-8")
+            no_match = decide("reject", unknown)
+            self.assertEqual(no_match["choice"], "approve")
+            self.assertEqual(no_match["tier"], "auto")
+            self.assertNotIn("assent", no_match)
+
+            english_best = root / "english-best.json"
+            english_best.write_text(json.dumps({
+                "members": {
+                    "english": {"accuracy": {"D": 0.90, "E": 0.95}},
+                    "ft-v3": {"accuracy": {"D": 0.20, "E": 0.30}},
+                }
+            }), encoding="utf-8")
+            auto_english = decide("reject", english_best)
+            self.assertEqual(auto_english["choice"], "approve")
+            self.assertEqual(auto_english["tier"], "auto")
+            self.assertEqual(auto_english["assent"], "english")
 
     def test_openai_choice_backend_parsing_and_payload(self):
         """Variant B parsing is strict, and the request is the agreed shape."""
