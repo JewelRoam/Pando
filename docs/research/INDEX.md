@@ -155,6 +155,7 @@ Rebuilt by tools/build_research_index.py; one row per file.
 | 2026-10-15-round140.md | 140 | Ship the combiner, and keep it advisory |
 | 2026-10-15-round141.md | 141 | A third wording set, and what the text is worth |
 | 2026-10-15-round142.md | 142 | The artifact grows a text model |
+| 2026-10-15-round143.md | 143 | From nothing to a served decision in 1.5 seconds |
 
 ## Files without a round number
 

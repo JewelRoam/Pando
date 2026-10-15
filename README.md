@@ -632,6 +632,22 @@ python -m pandosi doctor                     # capability report
 python tools/dashboard.py                    # render local metrics
 ```
 
+Two commands, a real voter, nothing to download:
+
+```bash
+python -m pandosi root --combiner assets/combiner.json   # the coordinator
+python -m pandosi join --backend text --root http://127.0.0.1:8080
+```
+
+`--backend text` runs the **19 KB member shipped in `assets/`** — trained from
+the swarm's own labels, no weights to fetch and no accelerator needed — and it
+is what `join` falls back to when no ONNX graph is present (before round 143
+it fell back to a mock, which votes from a hash). `join` also loads the
+advisory combiner when the repository carries one. Measured end to end:
+**1.51 s** from launching the root to a decision served by the newcomer
+(root ready 0.56 s, member registered 0.89 s after the join command) —
+`tools/quickstart_check.py`.
+
 Installed-package form:
 
 ```bash

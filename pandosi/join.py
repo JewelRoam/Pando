@@ -25,12 +25,14 @@ from pathlib import Path
 from .common import bypass_proxy_for_lan
 from .graft import assign_role, capability, enumerate_execution_units
 from .grants import require_grant
+from .rootd import Coordinator
 
 SERVICE_TYPE = "_pandosi._tcp.local."
 ARTIFACT_CANDIDATES = [
     Path("artifacts/laya-en.int8.onnx"),
     Path("artifacts/laya-en.onnx"),
 ]
+TEXT_MODEL = Path("assets/textmodel.json")
 
 
 def lan_ip() -> str:
@@ -111,6 +113,12 @@ def pick_backend(node_id: str) -> tuple[str, dict]:
     for cand in ARTIFACT_CANDIDATES:
         if cand.exists():
             return "onnx", {"onnx_path": str(cand)}
+    # A fresh clone has no weights and would otherwise fall back to a mock,
+    # which votes from a hash and means nothing. The repository carries a
+    # 19 KB text member (round 126) trained from the swarm's own labels, so
+    # the honest zero-download default is a real voter.
+    if TEXT_MODEL.exists():
+        return "text", {"text_model": str(TEXT_MODEL)}
     return "mock", {"checkpoint": "mock"}
 
 
@@ -118,7 +126,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Join or start a PandoSI swarm")
     parser.add_argument("--node-id", default=None)
     parser.add_argument("--port", type=int, default=0)
-    parser.add_argument("--backend", default=None, choices=["mock", "onnx"])
+    parser.add_argument("--backend", default=None,
+                        choices=["mock", "onnx", "text"],
+                        help="mock (a hash, for protocol tests) | onnx (the "
+                             "Laya weights) | text (the 19 KB member shipped "
+                             "in assets/, no download)")
     parser.add_argument("--multi-eu", action="store_true",
                         help="start one stem per execution unit (iGPU + CPU on an AI PC); the main --onnx-path must be a DYNAMIC onnx (CPU stem); the GPU stem auto-uses artifacts/laya-en-static-fixed.onnx")
     parser.add_argument("--spore-url", default=None,
@@ -191,7 +203,22 @@ def main() -> None:
         scope = "LAN" if args.lan else "loopback"
         print(f"no existing root - becoming root + stem ({scope})", flush=True)
         args.pairing_token = args.pairing_token or secrets.token_urlsafe(18)
-        root = Root(host=listen_host, port=args.port or 8080)
+        # Load the advisory combiner when the repository carries one, so the
+        # one-command path runs with the swarm's best available rule
+        # (rounds 139-142) instead of the plain gate alone.
+        combiner = None
+        combiner_path = Path("assets/combiner.json")
+        if combiner_path.exists():
+            try:
+                from .combiner import Combiner
+                combiner = Combiner.load(combiner_path)
+                print(f"advisory combiner loaded from {combiner_path} "
+                      f"(spec {combiner.meta.get('rows')} training rows)",
+                      flush=True)
+            except (OSError, ValueError, KeyError) as exc:
+                print(f"[combiner] {combiner_path}: {exc}", flush=True)
+        root = Root(coordinator=Coordinator(combiner=combiner),
+                    host=listen_host, port=args.port or 8080)
         root.set_pairing_token(args.pairing_token)
         root.start()
         root_url = root.url()
@@ -325,6 +352,14 @@ def main() -> None:
         backend.artifact_digest = artifact_digest(
             Path(backend_cfg["onnx_path"]))
         print(f"artifact sha256 {backend.artifact_digest}", flush=True)
+    elif backend_name == "text":
+        from .textmodel import TextModel
+        model_path = backend_cfg.get("text_model", str(TEXT_MODEL))
+        backend = TextModel.load(model_path)
+        if args.checkpoint:
+            backend.checkpoint = args.checkpoint
+        print(f"text member loaded from {model_path}: "
+              f"{backend.summary()}", flush=True)
     else:
         backend = backend_mod.MockBackend(node_id, **backend_cfg)
 
