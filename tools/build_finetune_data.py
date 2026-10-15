@@ -34,6 +34,8 @@ SOURCES = [
     ("assets/heldout_test.jsonl",
      "metrics/ensemble-checks/ensemble-1792064900.json"),
 ]
+TRAINING_SET_C = ("assets/heldout2_test.jsonl",
+                  "metrics/ensemble-checks/ensemble-1792076803.json")
 INSTRUCTION = "Classify the intent of the message."
 
 
@@ -41,10 +43,15 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", default=str(ROOT / "rollouts"
                                              / "train_finetune_720.jsonl"))
+    parser.add_argument("--with-c", action="store_true",
+                        help="add the third wording split (960 rows). Its "
+                             "evaluation role moves to a fourth split, which "
+                             "is what round 152 measures the curve on")
     args = parser.parse_args()
 
+    sources = SOURCES + ([TRAINING_SET_C] if args.with_c else [])
     rows, contrasted, skipped = [], 0, 0
-    for suite_name, report_name in SOURCES:
+    for suite_name, report_name in sources:
         tasks = [json.loads(line) for line
                  in (ROOT / suite_name).read_text(
                      encoding="utf-8").splitlines() if line.strip()]

@@ -221,6 +221,10 @@ NPU) all voting in the same consensus quorum.
 | Gate with the new member | 189 rows auto-executed at 0.9153 | round 151 |
 | Spec-3 combiner transfers | shipped file beats a refit on half the data by 8-10 points | round 151 |
 | More rows, not more fitting | 120 rows cannot fit 35 features (rounds 137/141, again) | round 151 |
+| Fourth wording split (D) | `--cues d`, 0 of 48 cues overlapping A, A2, B, C | round 152 |
+| Loop, replicated | parent 0.7458; corpus 648: 3 samples mean 0.9292; corpus 864: 2 samples mean 0.8959 | round 152 |
+| Training variance dominates | spreads 5.0 (648) and 13.3 (864) points; ranges overlap | round 152 |
+| Admission needs a third condition | independence + capability + **replication**: one run is one draw | round 152 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |

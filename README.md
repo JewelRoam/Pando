@@ -553,6 +553,19 @@ devices, one mind.
   rows, not more fitting" lesson as rounds 137/141 arriving from a new
   direction (`tools/improved_fleet_check.py`,
   `docs/research/2026-10-16-round151.md`).
+- **The training loop works; one run of it is not a measurement**: with a
+  fourth wording split built so the evaluation never doubles as training data
+  (`--cues d`, 0 overlap with A/A2/B/C), five fine-tunes across two corpora
+  score on that split: the parent 0.7458, three samples at 648 rows averaging
+  **0.9292** (spread 5.0 points) and two at 864 rows averaging 0.8959 (spread
+  **13.3**). Every sample beats the parent by 17-22 points — the largest
+  single improvement measured in this session, and it reproduces — but the
+  second step is not measurable and the corpus ranges overlap. The practical
+  consequence: after independence and capability, an admission rule needs
+  **replication**, because a fine-tune that scored 0.83 may be the same recipe
+  as one that scored 0.96
+  (`tools/generation_curve_check.py`,
+  `docs/research/2026-10-16-round152.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage

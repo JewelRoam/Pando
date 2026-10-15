@@ -182,6 +182,11 @@ def main() -> int:
     parser.add_argument("--max-len", type=int, default=128)
     parser.add_argument("--head-max-len", type=int, default=32)
     parser.add_argument("--skip-train", action="store_true")
+    parser.add_argument("--seed", type=int, default=0,
+                        help="training seed. Two runs of the same recipe can "
+                             "differ by more than ten points of accuracy "
+                             "(round 152), so a single run is one sample of "
+                             "the loop, not a measurement of it")
     parser.add_argument("--unfreeze", action="store_true",
                         help="train the encoder too. The default freezes it, "
                              "which is what the published notebook does; "
@@ -214,6 +219,7 @@ def main() -> int:
             micro_batch=args.micro_batch,
             grad_accum=args.grad_accum,
             freeze_encoder=not args.unfreeze,
+            seed=args.seed,
             max_len=args.max_len,
             head_max_len=args.head_max_len,
             log_every=1,

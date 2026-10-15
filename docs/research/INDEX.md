@@ -164,6 +164,7 @@ Rebuilt by tools/build_research_index.py; one row per file.
 | 2026-10-15-round149.md | 149 | The shipped gate is at the optimum of its own grid |
 | 2026-10-16-round150.md | 150 | The project can build the member it was missing |
 | 2026-10-16-round151.md | 151 | The system, with the member it trained itself |
+| 2026-10-16-round152.md | 152 | The loop works; one run of it is not a measurement |
 
 ## Files without a round number
 

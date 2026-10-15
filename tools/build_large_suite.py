@@ -236,6 +236,79 @@ THIRD_CUES = {
 
 CUE_SETS["c"] = THIRD_CUES
 
+# A fourth inventory. Sets A-C are now the training corpus for the fine-tuned
+# member of rounds 150-151; this one is what its next generation is judged on
+# (round 152), so that the loop's own data-scaling curve can be measured
+# without reusing an evaluation set.
+FOURTH_CUES = {
+    "refund": [
+        "give back what I was charged",
+        "I want the amount credited back",
+        "please undo my purchase",
+        "the money has to be returned",
+        "I am requesting my funds back",
+        "I was overcharged and want it corrected",
+    ],
+    "chargeback": [
+        "I have raised a case with my bank",
+        "the card company is taking this up",
+        "I am contesting this with my provider",
+        "the payment is being reversed by the network",
+        "my issuer has been asked to claw it back",
+        "this has gone to the dispute team at my bank",
+    ],
+    "exchange": [
+        "can you send the larger variant",
+        "I want to change it for a different one",
+        "please replace it with another",
+        "I would like to trade this",
+        "send me the alternative instead",
+        "I want to switch to the other model",
+    ],
+    "complaint": [
+        "this is a shambles",
+        "the whole thing has been dreadful",
+        "I am furious",
+        "I have been let down badly",
+        "the experience has been miserable",
+        "your handling has been disgraceful",
+    ],
+    "praise": [
+        "the whole thing was flawless",
+        "you have been marvellous",
+        "what a lovely experience",
+        "I am so grateful for this",
+        "the quality is top notch",
+        "my compliments to the team",
+    ],
+    "greeting": [
+        "hello hello",
+        "hi there, how are things",
+        "morning, hope you are well",
+        "just popping in to say hello",
+        "greetings and good wishes",
+        "hellooo",
+    ],
+    "login_issue": [
+        "I am unable to log in",
+        "my password is refused",
+        "the site keeps me out",
+        "I cannot reach my profile",
+        "the verification step fails",
+        "my access has been blocked",
+    ],
+    "invoice": [
+        "please send the bill for March",
+        "I need the tax document",
+        "where is my billing paperwork",
+        "send the accounts paperwork over",
+        "I want the itemised charges",
+        "please issue the outstanding bill",
+    ],
+}
+
+CUE_SETS["d"] = FOURTH_CUES
+
 QUESTION = "intent"
 
 
