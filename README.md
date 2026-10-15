@@ -261,6 +261,17 @@ devices, one mind.
   the decision response now reports `lineages` and the floor
   (`tools/lineage_quorum_e2e_check.py`,
   `docs/research/2026-10-15-round124.md`).
+- **A device cannot mint independence from the model it holds**: reversing
+  the ballot flips **0 of 240** answers, and the quantised sibling the
+  project would ship to an NPU moves 20% of answers yet keeps the family's
+  errors (phi +0.41, no ensemble gain). The measured spectrum is monotone in
+  correlation — a fine-tuned descendant and a reversed ballot sit at
+  phi +1.000, a quantised sibling at +0.41, a different prompt rendering at
+  +0.45, and only a voter from outside the family at +0.07, which is the one
+  that pays (+4.1 points). On wording none of them has seen the trio's own
+  phi *rises* to +0.36..+0.82, so the family moves together exactly where
+  the task gets hard (`tools/same_family_voter_check.py`,
+  `docs/research/2026-10-15-round125.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage

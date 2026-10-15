@@ -115,6 +115,10 @@ NPU) all voting in the same consensus quorum.
 | Lineage rule over real HTTP | 2:1 stem majority auto -> lineage tie verify; 4 scenarios pass | round 124 |
 | Corroboration floor | `[gating] corroboration_floor`: replicas no longer auto-execute at floor 2 | round 124 |
 | Decision response observability | `lineages` + `corroboration_floor` reported when observable | round 124 |
+| Ballot order | reversed candidates flip 0/240 answers; phi +1.000 | round 125 |
+| Quantised sibling (int8 vs fp32 english) | 48/240 flips, but phi +0.413; no ensemble gain | round 125 |
+| Same-family diversity spectrum | monotone in phi: 1.000 (descendant/ballot) -> 0.41 (int8) -> 0.07 (outside family, +4.1 pt) | round 125 |
+| Trio correlation on unseen wording | phi +0.36..+0.82 (dev: +0.21..+0.53) - harder wording correlates them more | round 125 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |
