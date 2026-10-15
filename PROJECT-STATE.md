@@ -1,6 +1,6 @@
 # PandoSI Project State
 
-*Last updated: 2026-10-16 (round 155; continuous research session)*
+*Last updated: 2026-10-16 (round 156; continuous research session)*
 
 ## Where we are
 
@@ -243,6 +243,10 @@ NPU) all voting in the same consensus quorum.
 | A new opinion buys +23.3 | decided 0.7417 -> 0.9750; auto accuracy 0.8454 -> 1.0000; advisor 0.3043 -> 0.9259 | round 155 |
 | Removal pays | retiring the replica: answers identical, throughput 8.16 -> 16.07 rows/s | round 155 |
 | Predictions 4/4 exact | every ladder stage predicted to 4 dp from recorded votes before the live run | round 155 |
+| Latency-ranked seats | with a target the seat goes to the fast twin: p50 115 -> 77 ms, decided 0.9750 unchanged | round 156 |
+| k stops buying replicas | expansion oscillated 2<->3 (+40 ms per second decision); ceiling = opinion count -> k stable | round 156 |
+| Adaptive fleet, final | p50 60 ms, EWMA 50 ms under the 100 ms target, 15.64 rows/s, decided 0.9750 | round 156 |
+| Stem-side accounting | with --lineage-quorum the response's votes are opinions; /health `decisions` gives truth (igpu 240, dgpu 240, npu 1) | round 156 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |

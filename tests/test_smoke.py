@@ -872,6 +872,57 @@ class TestSmoke(unittest.TestCase):
                 stem.stop()
             root.stop()
 
+    def test_latency_target_buys_the_fast_twin(self):
+        """With a latency target set, the seat goes to the fast member.
+
+        Round 156 measured the cost-first order live: with a 100 ms target
+        the root kept the 110 ms NPU seated (cheaper per host-CPU-second)
+        while the 40 ms iGPU idled, p50 115 ms at the quorum floor. With a
+        target configured the operator has said latency outranks host cost;
+        without one, cost leads (round 134).
+        """
+        from pandosi.rootd import Coordinator
+
+        def coordinator(target):
+            coord = Coordinator(quorum_k=1, latency_target_ms=target)
+            coord.register("cheap-slow", "http://127.0.0.1:1", "english",
+                           cap={"host_ms_per_decision": 5.0})
+            coord.register("fast-pricey", "http://127.0.0.1:2", "english",
+                           cap={"host_ms_per_decision": 56.0})
+            coord.nodes["cheap-slow"]["stats"]["latency_ewma_ms"] = 110.0
+            coord.nodes["fast-pricey"]["stats"]["latency_ewma_ms"] = 40.0
+            return coord
+
+        picked = [node_id for node_id, _ in
+                  coordinator(100.0).pick_quorum(1)]
+        self.assertEqual(picked, ["fast-pricey"])
+        picked = [node_id for node_id, _ in
+                  coordinator(None).pick_quorum(1)]
+        self.assertEqual(picked, ["cheap-slow"])
+
+    def test_opinion_ceiling_under_collapse(self):
+        """A lineage-counted quorum never expands k past the opinion count.
+
+        Round 156 measured the unfixed dial live: a two-opinion fleet
+        oscillated k 2<->3 every other decision, because landing under
+        target*0.6 asked for one more voter - and the only voter left was a
+        replica the lineage had already cast. The ceiling is the number of
+        opinions, so the dial stops at 2.
+        """
+        from pandosi.rootd import Coordinator
+
+        coord = Coordinator(adaptive_quorum=True, quorum_floor=2,
+                            quorum_k=3, latency_target_ms=100.0,
+                            count_lineages=True)
+        coord.register("en-a", "http://127.0.0.1:1", "english")
+        coord.register("en-b", "http://127.0.0.1:2", "english")
+        coord.register("ft", "http://127.0.0.1:3", "ft-v3")
+        coord.quorum_k = 2
+        coord._decision_ewma_ms = 30.0  # comfortably under target*0.6
+        for _ in range(4):
+            coord._adapt_quorum("approve?")
+        self.assertEqual(coord.quorum_k, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

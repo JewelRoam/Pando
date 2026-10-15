@@ -617,6 +617,19 @@ devices, one mind.
   all four stages were predicted from recorded votes to four decimals
   before the run (`tools/growth_ladder_check.py`,
   `docs/research/2026-10-16-round155.md`).
+- **The latency target buys the fast twin, and k stops buying replicas**:
+  with a 100 ms target the adaptive fleet used to seat the NPU (cheapest
+  per host-CPU-second, ~110 ms per decision) and settle at p50 115 ms —
+  over its own target — with the 40 ms iGPU idle. The seat ranking is now
+  pressure-aware (latency first while a target is set, cost first
+  otherwise), and the adaptive quorum's ceiling counts *opinions*, not
+  stems — without that ceiling, k oscillated 2↔3 every other decision,
+  paying ~40 ms for a replica the lineage had already cast. Final live
+  state over the same 240 held-out rows: **p50 60 ms, EWMA 50 ms under
+  target, 15.64 rows/s, decided 0.9750 with all 159 auto rows correct** —
+  the configuration round 155 assembled by hand, reached by the loop
+  itself (`tools/latency_pick_check.py`,
+  `docs/research/2026-10-16-round156.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage

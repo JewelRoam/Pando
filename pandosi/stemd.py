@@ -58,6 +58,13 @@ def build_handler(backend, node_id: str, usage: dict | None = None,
             if self.path == "/health":
                 self._send(200, {"ok": True, "node_id": node_id,
                                  "checkpoint": backend.checkpoint,
+                                 # What this device was actually asked to do
+                                 # (round 156): with a lineage-counted quorum
+                                 # the response's vote list is the collapsed
+                                 # opinion set, so "who served" is only
+                                 # answerable stem-side.
+                                 "decisions": (usage or {}).get(
+                                     "decisions", 0),
                                  "host_ms_per_decision":
                                      host_ms_per_decision(usage)})
             elif self.path == "/graft":

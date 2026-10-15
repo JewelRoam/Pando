@@ -218,6 +218,39 @@ class Coordinator:
         }
         return healthy or live
 
+    def _group_rank_key(self, inflight: dict):
+        """Order members inside a checkpoint group (rounds 109/134/156).
+
+        Members of one group are interchangeable in information, so their
+        order is a spending decision. Two signals price a member: what it
+        costs the machine it lives on, in coarse ten-fold buckets (round
+        134 measured a 500-1000x spread between a CPU stem and an NPU stem
+        on one host), and a coarse latency band (25 ms) so two fast units
+        are treated as equals and share load (rounds 109-110). Least-loaded
+        members still lead, so concurrent decisions spread.
+
+        Which signal leads depends on what the operator asked for. With no
+        latency target, cost leads: a cheap member is not woken ahead of an
+        expensive one. With a target, latency leads and cost breaks ties -
+        round 156 measured the alternative live: the cost-first order kept
+        the 110 ms NPU seated at the quorum floor while the 40 ms iGPU
+        idled, 115 ms p50 against the fleet's own 100 ms target.
+        """
+        under_target = self.latency_target_ms is not None
+
+        def key(pair):
+            index, (node_id, info) = pair
+            stats = info.get("stats", {})
+            load = inflight.get(node_id, 0)
+            band = int((stats.get("latency_ewma_ms") or 0.0)
+                       // LATENCY_BAND_MS)
+            cost = self._cost_bucket(info)
+            if under_target:
+                return (load, band, cost, index)
+            return (cost, load, band, index)
+
+        return key
+
     def pick_quorum(self, k: int) -> list[tuple[str, dict]]:
         """Pick k live nodes maximizing checkpoint diversity (round-robin
         across checkpoint groups). Falls back to any live nodes.
@@ -244,27 +277,8 @@ class Coordinator:
             if len(members) > 1:
                 shift = rotation % len(members)
                 members = members[shift:] + members[:shift]
-            # Order: least loaded first; then a coarse latency band, so two
-            # fast nodes are treated as equals; then the rotation, which is
-            # what spreads concurrent decisions over equally good members
-            # instead of always taking the same one.
-            ranked = sorted(enumerate(members), key=lambda pair: (
-                # What the member costs the machine it lives on, in coarse
-                # buckets: members of one checkpoint group are interchangeable
-                # by definition, so the only thing separating them is price -
-                # and round 134 measured a 500-1000x spread between a CPU stem
-                # and an NPU stem on the same host. Bucketing rather than
-                # strict ordering matters: two units within a factor of ten
-                # are treated as equals and share the load (the property
-                # rounds 109-110 established), while a unit a hundred times
-                # more expensive is not woken at all while a cheap one is
-                # free. A member that reports no cost lands in the highest
-                # bucket, which keeps every earlier round's behaviour.
-                self._cost_bucket(pair[1][1]),
-                inflight.get(pair[1][0], 0),
-                int((pair[1][1]["stats"].get("latency_ewma_ms") or 0.0)
-                    // LATENCY_BAND_MS),
-                pair[0]))
+            ranked = sorted(enumerate(members),
+                            key=self._group_rank_key(inflight))
             groups[checkpoint] = [item for _, item in ranked]
         picked: list[tuple[str, dict]] = []
         group_iter = iter(sorted(groups))
@@ -383,13 +397,24 @@ class Coordinator:
         while loaded decisions run slow and recovers once they do not; the
         floor is per question category, so a security decision keeps its
         voters while an ordinary one may give them up for throughput.
+
+        When the quorum counts opinions, the ceiling is the number of
+        *opinions*: a k beyond that wakes a second stem of some lineage -
+        latency with no information. Round 156 measured the unfixed dial
+        live: a two-opinion fleet oscillated k 2<->3 forever, paying ~40 ms
+        on every second decision for a vote its lineage already cast.
         """
         target = self.latency_target_ms
         if target is None or self._decision_ewma_ms is None:
             return
         floor = self._category_floor(question)
-        available = len(self._selectable_nodes())
+        selectable = self._selectable_nodes()
+        available = len(selectable)
         ceiling = min(self.quorum_ceiling, max(available, 1))
+        if self._collapses():
+            opinions = len({self._bloc_of(info["checkpoint"])
+                            for info in selectable.values()})
+            ceiling = min(ceiling, max(1, opinions))
         if self.quorum_k < floor:
             self.quorum_k = floor
             return
