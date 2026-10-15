@@ -66,6 +66,8 @@ def main() -> int:
     parser.add_argument("--combiner", default=str(ROOT_DIR / "assets"
                                                   / "combiner.json"))
     parser.add_argument("--timeout", type=float, default=360.0)
+    parser.add_argument("--assent-fallback", default="advisor",
+                        choices=["advisor", "veto"])
     args = parser.parse_args()
 
     tasks = [json.loads(line) for line
@@ -79,7 +81,8 @@ def main() -> int:
         quorum_k=len(MEMBERS), call_timeout=120.0,
         initial_stem_timeout=args.timeout, timeout_multiplier=6.0,
         min_stem_timeout=30.0, combiner=Combiner.load(args.combiner),
-        assent_checkpoint="ft-v3")
+        assent_checkpoint="ft-v3",
+        assent_fallback=args.assent_fallback)
     root = Root(coordinator=coordinator)
     root.start()
     log_dir = ROOT_DIR / "metrics" / "ensemble-checks"
@@ -124,6 +127,11 @@ def main() -> int:
                 hit = body.get("choice") == task["expected"]
                 auto_hits += hit
                 decided += hit
+            elif body.get("veto"):
+                # veto fallback: the acting answer is the trusted member's
+                # choice, carried in `choice`; the suggestion is advisory
+                # only (round 161).
+                decided += body.get("choice") == task["expected"]
             elif body.get("suggested_choice"):
                 suggestion_total += 1
                 hit = body["suggested_choice"] == task["expected"]
@@ -172,6 +180,7 @@ def main() -> int:
               f"{1000 * cpu_seconds[stem] / max(1, asked or 0):7.2f} "
               f"ms CPU/decision")
     report = {"rows": len(tasks), "assent": "ft-v3",
+              "assent_fallback": args.assent_fallback,
               "members": MEMBERS, "auto": auto,
               "auto_accuracy": round(auto_hits / max(1, auto), 4),
               "suggestions": suggestion_total,

@@ -49,9 +49,11 @@ class TestSmoke(unittest.TestCase):
 
     def test_assent_gating_demotes_auto(self):
         """A named assent checkpoint can veto an otherwise-auto decision."""
-        def decide(ft_choice: str, assent_checkpoint: str | None = None):
+        def decide(ft_choice: str, assent_checkpoint: str | None = None,
+                   assent_fallback: str = "advisor"):
             coordinator = Coordinator(quorum_k=3,
-                                      assent_checkpoint=assent_checkpoint)
+                                      assent_checkpoint=assent_checkpoint,
+                                      assent_fallback=assent_fallback)
             stems = []
             try:
                 members = [
@@ -80,10 +82,30 @@ class TestSmoke(unittest.TestCase):
         split = decide("reject", "ft-v3")
         self.assertEqual(split["choice"], "approve")
         self.assertEqual(split["tier"], "verify")
+        self.assertNotIn("veto", split)
+
+        veto = decide("reject", "ft-v3", assent_fallback="veto")
+        self.assertEqual(veto["choice"], "reject")
+        self.assertEqual(veto["tier"], "verify")
+        self.assertEqual(veto["veto"], "ft-v3")
+        self.assertEqual(veto["agreement"], split["agreement"])
+        self.assertEqual(veto["mean_probability"], split["mean_probability"])
 
         control = decide("reject")
         self.assertEqual(control["choice"], "approve")
         self.assertEqual(control["tier"], "auto")
+
+        root = Root(coordinator=Coordinator(
+            quorum_k=3, assent_checkpoint="ft-v3",
+            assent_fallback="veto"))
+        root.start()
+        try:
+            with urllib.request.urlopen(f"{root.url()}/status",
+                                        timeout=2) as resp:
+                status = json.loads(resp.read())
+        finally:
+            root.stop()
+        self.assertEqual(status["assent_fallback"], "veto")
 
     def test_openai_choice_backend_parsing_and_payload(self):
         """Variant B parsing is strict, and the request is the agreed shape."""
