@@ -356,6 +356,37 @@ class TestSmoke(unittest.TestCase):
         self.assertEqual(blocked.action, "hold")
         self.assertIn("add no information", blocked.reason)
 
+        # Capacity accounting: a rollback must not remove a member the swarm
+        # depends on (round 116).
+        from pandosi.elastic import rollback_allowed
+        serving = [Member("a", "english", 40.0, 9, "127.0.0.1"),
+                   Member("b", "english", 45.0, 0, "127.0.0.1")]
+        allowed, why = rollback_allowed("a", serving, keep=1)
+        self.assertFalse(allowed)
+        self.assertIn("no other member has served any", why)
+        allowed, _ = rollback_allowed("b", serving, keep=1)
+        self.assertTrue(allowed)
+        allowed, why = rollback_allowed("a", serving, keep=2)
+        self.assertFalse(allowed)
+        self.assertIn("below keep", why)
+
+        # A rolled-back change is remembered, so the loop does not repeat it
+        # (found by running the loop long enough to oscillate).
+        remembering = ElasticSupervisor("http://127.0.0.1:1", max_members=5)
+        remembering.rolled_back[("127.0.0.1", "english")] = {
+            "at": remembering._clock(), "observed": 420.0, "before": 106.0}
+        self.assertIsNotNone(remembering._failed_before("127.0.0.1", "english"))
+        repeated = remembering.decide(
+            status(), failed_before=remembering._failed_before(
+                "127.0.0.1", "english"))
+        self.assertEqual(repeated.action, "hold")
+        self.assertIn("measured and rejected", repeated.reason)
+        # A different host is not tarred with the same brush.
+        self.assertIsNone(remembering._failed_before("10.0.0.9", "english"))
+        # ...and the memory expires.
+        remembering.bad_candidate_ttl_s = 0.0
+        self.assertIsNone(remembering._failed_before("127.0.0.1", "english"))
+
     def test_quorum_floor_is_per_category(self):
         """A security decision keeps its voters under latency pressure.
 

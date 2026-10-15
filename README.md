@@ -139,6 +139,15 @@ devices, one mind.
   checkpoint *name* (a misnamed stem silently changes the gate), and a naive
   sweep would have shipped a threshold that acts on a minority vote
   (`docs/research/2026-10-14-round100.md`).
+- **A bet judged on evidence, and a loss remembered**: a growth is now
+  judged on the *median* of three latency samples rather than one, a rollback
+  refuses to remove a member the swarm depends on (the question is "can the
+  swarm serve without it", not "is it fast"), and a rolled-back change is
+  remembered by `(host, lineage)` with a TTL so the loop stops re-proposing
+  it. Running the loop long enough exposed the oscillation: rollback alone
+  ended at 848.7 ms having grown into the same harm again; with the memory it
+  ends at **144.1 ms** with 2 reproductions instead of 3
+  (`docs/research/2026-10-14-round116.md`).
 - **Growth that knows where it is going, and can undo itself**: the
   supervisor refuses to grow a lineage onto a host that already runs one
   (same compute, no new information), and treats a growth as a bet —

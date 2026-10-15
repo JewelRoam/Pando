@@ -114,6 +114,9 @@ NPU) all voting in the same consensus quorum.
 | Cooldown/executor rule | executed actions only | an unexecuted decision starts no cooldown |
 | Host-aware growth | Member.host + max_per_host | 1 reproduction (363->126.5 ms) vs 2 (->791.8 ms) |
 | Growth rollback | bet tracked, undone under the reproduce grant | 882 -> 124 ms in two rounds |
+| Bet judged on a median | rollback_samples/rollback_window_s | both verdicts correct on one mechanism |
+| Negative memory | rolled_back[(host,checkpoint)] + TTL | no repeat: 848.7 -> 144.1 ms |
+| Capacity accounting | rollback_allowed | refuses if the swarm depends on the node |
 | Reproduce grant | grants.py action "reproduce" | operator-approved, expiring |
 
 ## What is NOT yet done

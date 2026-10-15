@@ -20,6 +20,7 @@ while a slow decision with quorum left to spend is a policy question.
 from __future__ import annotations
 
 import json
+import statistics
 import time
 import urllib.error
 import urllib.request
@@ -186,6 +187,31 @@ class Supervision:
     members: int = 0
 
 
+def rollback_allowed(target: str, members: list[Member],
+                     keep: int) -> tuple[bool, str]:
+    """Is undoing a growth safe, or has the new member become load-bearing?
+
+    Rolling back is the point of the bet, so this does not ask whether the
+    node is fast - a harmful growth can add a *fast* member that makes
+    everyone else slower. It asks whether the swarm can still serve without
+    it: not below ``keep``, and not removing the only member that has
+    answered anything (round 116).
+    """
+    remaining = [member for member in members if member.node_id != target]
+    if len(remaining) < keep:
+        return False, (f"only {len(remaining)} member(s) would remain, below "
+                       f"keep={keep}")
+    node = next((member for member in members
+                 if member.node_id == target), None)
+    if node is None:
+        return False, f"{target} is no longer a member"
+    serving = [member for member in remaining if member.decisions > 0]
+    if node.decisions > 0 and not serving:
+        return False, (f"{target} has served {node.decisions} decisions and "
+                       "no other member has served any")
+    return True, "the swarm can serve without this member"
+
+
 class ElasticSupervisor:
     """Decide whether the swarm should grow, shrink, or leave itself alone.
 
@@ -205,6 +231,8 @@ class ElasticSupervisor:
                  max_per_host: int = 1,
                  pressure_factor: float = 1.1, cooldown_s: float = 30.0,
                  rollback: bool = True, rollback_factor: float = 1.2,
+                 rollback_samples: int = 3, rollback_window_s: float = 60.0,
+                 bad_candidate_ttl_s: float = 1800.0,
                  clock=None, timeout: float = 30):
         self.root_url = root_url.rstrip("/")
         self.pairing_token = pairing_token
@@ -227,6 +255,13 @@ class ElasticSupervisor:
         # rather than wait for an operator to notice (round 115).
         self.rollback = rollback
         self.rollback_factor = rollback_factor
+        self.rollback_samples = max(1, int(rollback_samples))
+        self.rollback_window_s = rollback_window_s
+        # A rollback is evidence. Without remembering it, the loop re-proposes
+        # the change that just failed as soon as the trigger fires again - it
+        # oscillated grow/hurt/rollback/grow in one run (round 116).
+        self.bad_candidate_ttl_s = bad_candidate_ttl_s
+        self.rolled_back: dict[tuple[str, str], dict] = {}
         self._growth_bet: dict | None = None
 
     def cooling_down(self) -> float:
@@ -252,7 +287,8 @@ class ElasticSupervisor:
     def decide(self, status: dict | None = None,
                retired: list[str] | None = None,
                co_located_members: int = 0,
-               candidate: str | None = None) -> Supervision:
+               candidate: str | None = None,
+               failed_before: dict | None = None) -> Supervision:
         """One decision. ``status`` is injectable so the policy is testable."""
         status = status or self.status()
         members = int(status.get("members", 0))
@@ -298,6 +334,15 @@ class ElasticSupervisor:
                 "lineage: another would share its compute and add no "
                 "information (rounds 95, 114)",
                 latency_ms=latency, quorum_k=quorum_k, members=members)
+        if failed_before is not None:
+            return Supervision(
+                "hold",
+                f"{latency:.0f} ms is slow, but growing onto "
+                f"{candidate or 'this candidate'} was rolled back earlier "
+                f"(median {failed_before.get('observed', 0):.0f} ms against "
+                f"{failed_before.get('before', 0):.0f} ms): the same change "
+                "was measured and rejected",
+                latency_ms=latency, quorum_k=quorum_k, members=members)
         return Supervision(
             "grow",
             f"{latency:.0f} ms > {target * self.pressure_factor:.0f} ms and "
@@ -305,63 +350,131 @@ class ElasticSupervisor:
             f"{members}/{self.max_members} members",
             latency_ms=latency, quorum_k=quorum_k, members=members)
 
+    def _failed_before(self, host: str | None,
+                       checkpoint: str | None) -> dict | None:
+        """A rollback of this exact change, if it is still recent."""
+        if not host or not checkpoint:
+            return None
+        entry = self.rolled_back.get((host, checkpoint))
+        if entry is None:
+            return None
+        if self._clock() - entry["at"] > self.bad_candidate_ttl_s:
+            return None
+        return entry
+
+    def _record(self, supervision: Supervision,
+                journal: Journal | None) -> Supervision:
+        """Journal a decision that was not executed (holds and proposals)."""
+        if journal is not None:
+            journal.append(Outcome(
+                observation_id=supervision.target or "swarm",
+                tier=supervision.action, acted=False, choice=None,
+                agreement=0.0, mean_probability=0.0,
+                responded=supervision.members,
+                quorum_size=supervision.quorum_k or 0,
+                reason=supervision.reason))
+        return supervision
+
     def step(self, grow=None, retire=None,
              journal: Journal | None = None,
              candidate_host: str | None = None,
-             candidate_checkpoint: str | None = None) -> Supervision:
-        """Decide, then execute. ``grow``/``retire`` are caller callbacks."""
-        remaining = self.cooling_down()
-        if (remaining <= 0 and self._growth_bet is not None
-                and self._clock() >= self._growth_bet["due"]):
-            bet, self._growth_bet = self._growth_bet, None
-            try:
-                now = self.status().get("decision_ewma_ms")
-            except (urllib.error.URLError, urllib.error.HTTPError):
-                now = None
-            before = bet.get("latency_before")
-            if now and before and now > before * self.rollback_factor \
-                    and retire is not None:
-                reason = (f"rollback: {now:.0f} ms after growing "
-                          f"{bet['node_id']} against {before:.0f} ms before "
-                          f"it; authorised by the reproduce grant")
-                outcome = retire(bet["node_id"], reason, "reproduce")
-                supervision = Supervision(
-                    "retire", outcome.reason, target=bet["node_id"],
-                    latency_ms=now, members=self.last_action.members
-                    if self.last_action else 0)
-                if journal is not None:
-                    journal.append(Outcome(
-                        observation_id=bet["node_id"], tier="rollback",
-                        acted=bool(outcome.acted), choice=None, agreement=0.0,
-                        mean_probability=0.0, responded=supervision.members,
-                        quorum_size=0, reason=supervision.reason))
-                if outcome.acted:
-                    self.last_action = supervision
-                    self.last_action_at = self._clock()
-                    self.actions.append((self.last_action_at, "rollback",
-                                         bet["node_id"]))
-                return supervision
-        if remaining > 0 and self.last_action is not None:
-            supervision = Supervision(
-                "hold",
-                f"cooling down {remaining:.0f}s after "
-                f"{self.last_action.action} ({self.last_action.target or 'swarm'})",
-                latency_ms=self.last_action.latency_ms,
-                members=self.last_action.members)
-            if journal is not None:
-                journal.append(Outcome(
-                    observation_id="swarm", tier="hold", acted=False,
-                    choice=None, agreement=0.0, mean_probability=0.0,
-                    responded=supervision.members,
-                    quorum_size=supervision.quorum_k or 0,
-                    reason=supervision.reason))
-            return supervision
-        members = []
+             candidate_checkpoint: str | None = None,
+             status: dict | None = None) -> Supervision:
+        """Decide, then execute. ``grow``/``retire`` are caller callbacks.
+
+        ``status`` is injectable for tests; the live path reads ``/status``.
+        """
+        members: list[Member] = []
         try:
             members = Retirer(self.root_url, self.pairing_token,
                               timeout=self.timeout).members()
         except (urllib.error.URLError, urllib.error.HTTPError):
             pass
+        if status is None:
+            try:
+                status = self.status()
+            except (urllib.error.URLError, urllib.error.HTTPError):
+                status = {}
+        remaining = self.cooling_down()
+        if (remaining <= 0 and self._growth_bet is not None
+                and self._clock() >= self._growth_bet["due"]):
+            bet = self._growth_bet
+            sample = status.get("decision_ewma_ms")
+            if sample is not None:
+                bet["samples"].append(float(sample))
+            ready = (len(bet["samples"]) >= self.rollback_samples
+                     or self._clock() >= bet["due"] + self.rollback_window_s)
+            if not ready:
+                # One sample after one cooldown cannot tell a slow start from
+                # a bad change, so the bet is judged on a median (round 116).
+                return self._record(
+                    Supervision(
+                        "hold",
+                        f"evaluating growth {bet['node_id']}: sample "
+                        f"{len(bet['samples'])}/{self.rollback_samples}",
+                        latency_ms=sample, members=len(members)),
+                    journal)
+            self._growth_bet = None
+            observed = statistics.median(bet["samples"]) if bet["samples"] \
+                else None
+            before = bet.get("latency_before")
+            if (retire is None or not observed or not before
+                    or observed <= before * self.rollback_factor):
+                return self._record(
+                    Supervision(
+                        "hold",
+                        f"growth {bet['node_id']} paid off: median "
+                        f"{observed:.0f} ms vs {before:.0f} ms before it"
+                        if observed and before
+                        else f"growth {bet['node_id']}: no usable sample",
+                        latency_ms=observed, members=len(members)),
+                    journal)
+            allowed, why = rollback_allowed(bet["node_id"], members, self.keep)
+            if not allowed:
+                return self._record(
+                    Supervision(
+                        "hold",
+                        f"growth {bet['node_id']} looks bad "
+                        f"({observed:.0f} ms vs {before:.0f} ms) but {why}",
+                        target=bet["node_id"], latency_ms=observed,
+                        members=len(members)),
+                    journal)
+            reason = (f"rollback: median {observed:.0f} ms after growing "
+                      f"{bet['node_id']} against {before:.0f} ms before it "
+                      f"({len(bet['samples'])} samples); authorised by the "
+                      "reproduce grant")
+            outcome = retire(bet["node_id"], reason, "reproduce")
+            supervision = Supervision(
+                "retire", outcome.reason, target=bet["node_id"],
+                latency_ms=observed, members=len(members))
+            if outcome.acted:
+                key = (bet.get("host"), bet.get("checkpoint"))
+                if key != (None, None):
+                    self.rolled_back[key] = {
+                        "at": self._clock(), "observed": observed,
+                        "before": before, "node_id": bet["node_id"]}
+            if journal is not None:
+                journal.append(Outcome(
+                    observation_id=bet["node_id"], tier="rollback",
+                    acted=bool(outcome.acted), choice=None, agreement=0.0,
+                    mean_probability=0.0, responded=len(members),
+                    quorum_size=0, reason=supervision.reason))
+            if outcome.acted:
+                self.last_action = supervision
+                self.last_action_at = self._clock()
+                self.actions.append((self.last_action_at, "rollback",
+                                     bet["node_id"]))
+            return supervision
+        if remaining > 0 and self.last_action is not None:
+            return self._record(
+                Supervision(
+                    "hold",
+                    f"cooling down {remaining:.0f}s after "
+                    f"{self.last_action.action} "
+                    f"({self.last_action.target or 'swarm'})",
+                    latency_ms=self.last_action.latency_ms,
+                    members=self.last_action.members),
+                journal)
         slow = [member for member in members
                 if member.latency_ewma_ms is not None
                 and member.latency_ewma_ms > self.max_member_latency_ms]
@@ -378,7 +491,9 @@ class ElasticSupervisor:
                 co_located_members=len(co_located(
                     members, candidate_host, candidate_checkpoint)),
                 candidate=(f"{candidate_host}/{candidate_checkpoint}"
-                           if candidate_host else None))
+                           if candidate_host else None),
+                failed_before=self._failed_before(candidate_host,
+                                                   candidate_checkpoint))
         # A decision nobody executed must not start a cooldown or be recorded
         # as an action: a supervisor with no retire executor would otherwise
         # report the same retirement every cooldown cycle, having never
@@ -393,7 +508,10 @@ class ElasticSupervisor:
                     self._growth_bet = {
                         "node_id": str(result).split()[0],
                         "latency_before": supervision.latency_ms,
+                        "samples": [],
                         "due": self._clock() + self.cooldown_s,
+                        "host": candidate_host,
+                        "checkpoint": candidate_checkpoint,
                     }
             else:
                 supervision.reason += "; no grow executor configured"
