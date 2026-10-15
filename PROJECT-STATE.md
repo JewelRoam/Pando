@@ -262,6 +262,8 @@ NPU) all voting in the same consensus quorum.
 | Assent gating (offline) | auto requires the strongest member's choice: trio auto 199 @ 1.0000, decided 0.9833 | round 159 |
 | Tiered composition, first win | trio+B+assent 0.9833 > pair 0.9750, at 40 more auto rows, all correct | round 159 |
 | Next | implement --assent-checkpoint in rootd (Task 005, dispatched) + live three-tier run | round 159 |
+| Assent gating shipped | Coordinator/CLI/status + collapsed lookup + 3-stem test; cherry-picked to main, 22/22 smoke on both machines | round 159 |
+| Next (dispatched) | Task 006: stemd --backend openai (B-prompt, LAN API); then live three-tier run with --assent-checkpoint ft-v3 | round 159 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |
