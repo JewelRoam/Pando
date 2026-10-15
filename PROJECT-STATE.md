@@ -217,6 +217,10 @@ NPU) all voting in the same consensus quorum.
 | Error correlation with incumbents | phi +0.17..+0.28 (round 119's descendant: +1.000) | round 150 |
 | Fleet with the new member | gate full 0.7708 -> 0.8833; auto 163 -> 189; matched +1.2 | round 150 |
 | Open caveat | confidences saturated at 1.0 (228/240); needs its own calibration | round 150 |
+| System with the new member | decided 0.9083 on unseen wording (trio: 0.7708; +combiner: 0.8333) | round 151 |
+| Gate with the new member | 189 rows auto-executed at 0.9153 | round 151 |
+| Spec-3 combiner transfers | shipped file beats a refit on half the data by 8-10 points | round 151 |
+| More rows, not more fitting | 120 rows cannot fit 35 features (rounds 137/141, again) | round 151 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |

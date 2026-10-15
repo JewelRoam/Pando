@@ -543,6 +543,16 @@ devices, one mind.
   carried forward: its confidences are saturated at 1.0 and need their own
   calibration (`tools/build_finetune_data.py`,
   `docs/research/2026-10-16-round150.md`).
+- **The system, with the member the project trained itself, decides 90.83% of
+  wording it has never seen**: the gate alone reaches 0.8833 at full coverage
+  with 189 rows auto-executed at 0.9153, and the advisory combiner takes the
+  whole system to **0.9083** — against 0.8333 without the new member and
+  0.7708 for the bare trio. Spec 3's membership-agnostic combiner **transfers
+  to the four-member fleet it has never seen**: a refit on half the rows
+  scores 8–10 points *worse* than the shipped file, which is the same "more
+  rows, not more fitting" lesson as rounds 137/141 arriving from a new
+  direction (`tools/improved_fleet_check.py`,
+  `docs/research/2026-10-16-round151.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage
