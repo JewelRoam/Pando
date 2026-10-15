@@ -605,6 +605,18 @@ devices, one mind.
   split C: ECE 0.091 → 0.013, `uncalibrated_checkpoints` gone)
   (`tools/calibrated_gate_check.py`, `assets/calibration/ft-v3.json`,
   `docs/research/2026-10-16-round154.md`).
+- **The growth ladder, priced**: starting from one accelerator and growing
+  live over 240 held-out rows — english alone decides 0.7417; adding an
+  english replica changes **not one answer** and cuts throughput 56% (17.25
+  → 7.59 rows/s); adding the distinct fine-tuned opinion on the third
+  device jumps decided accuracy to **0.9750** with every auto-executed row
+  correct and the advisor at 0.9259; retiring the replica leaves the
+  answers bit-identical and nearly doubles throughput (8.16 → 16.07
+  rows/s). Elastic growth now has an exchange rate: opinions in →
+  intelligence, stems in → latency, useless stems out → throughput — and
+  all four stages were predicted from recorded votes to four decimals
+  before the run (`tools/growth_ladder_check.py`,
+  `docs/research/2026-10-16-round155.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage

@@ -167,6 +167,7 @@ Rebuilt by tools/build_research_index.py; one row per file.
 | 2026-10-16-round152.md | 152 | The loop works; one run of it is not a measurement |
 | 2026-10-16-round153.md | 153 | The admission rule meets real candidates; the fleet runs with the CPU left alone |
 | 2026-10-16-round154.md | 154 | Counting opinions, and letting the advisor see them: the system outgrows its best member |
+| 2026-10-16-round155.md | 155 | The growth ladder, priced: what each added device buys |
 
 ## Files without a round number
 

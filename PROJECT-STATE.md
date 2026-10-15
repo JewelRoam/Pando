@@ -1,6 +1,6 @@
 # PandoSI Project State
 
-*Last updated: 2026-10-16 (round 154; continuous research session)*
+*Last updated: 2026-10-16 (round 155; continuous research session)*
 
 ## Where we are
 
@@ -238,6 +238,11 @@ NPU) all voting in the same consensus quorum.
 | The advisor must see opinions | declined-row advisor accuracy 0.704 -> 0.926 (D), 0.685 -> 0.904 (C) | round 154 |
 | System outgrows its best member | live decided 0.9750 (member solo 0.9417), auto 159/240 all correct, CPU 77% free | round 154 |
 | Prediction reproduced live | offline mirror (0.9750, advisor 0.926) written first; live delivered 0.9750 / 0.9259 | round 154 |
+| Growth ladder, priced | 1 device 0.7417 -> +replica 0.7417 -> +new opinion 0.9750 -> retire replica 0.9750 | round 155 |
+| A replica spends | added english replica: answers identical, throughput 17.25 -> 7.59 rows/s | round 155 |
+| A new opinion buys +23.3 | decided 0.7417 -> 0.9750; auto accuracy 0.8454 -> 1.0000; advisor 0.3043 -> 0.9259 | round 155 |
+| Removal pays | retiring the replica: answers identical, throughput 8.16 -> 16.07 rows/s | round 155 |
+| Predictions 4/4 exact | every ladder stage predicted to 4 dp from recorded votes before the live run | round 155 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |
