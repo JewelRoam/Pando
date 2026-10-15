@@ -17,6 +17,9 @@ registers real HTTP stems into them, and asks the same question of each:
   flag on + [gating] corroboration_floor = 2, three english stems
       -> the policy answer: tier verify, because one opinion corroborated
          nothing
+  blocs, two differently-named stems declared one opinion
+      -> the round-129 rule: the group votes once, so a 2:1 stem majority
+         between the group and a distinct lineage is a 1:1 opinion tie
 
 Usage:
     python tools/lineage_quorum_e2e_check.py
@@ -60,9 +63,10 @@ def start_stem(name: str, checkpoint: str, choice: str) -> Stem:
 
 
 def scenario(label: str, members: list[Stem], count_lineages: bool,
-             state: str, gating: dict | None = None) -> dict:
+             state: str, gating: dict | None = None,
+             blocs: dict | None = None) -> dict:
     root = Root(coordinator=Coordinator(count_lineages=count_lineages,
-                                        gating=gating))
+                                        gating=gating, blocs=blocs))
     root.start()
     try:
         for stem in members:
@@ -86,6 +90,7 @@ def main() -> int:
         start_stem("en-3", "english", "approve"),
         start_stem("td-1", "typed-decisions", "reject"),
     ]
+    twin = start_stem("en-twin", "en-copy", "approve")
     mixed = [stems[0], stems[1], stems[3]]
     replicas = [stems[0], stems[1], stems[2]]
     try:
@@ -97,8 +102,11 @@ def main() -> int:
         corroborated = scenario(
             "replicas, flag on, floor 2", replicas, True, "s-b",
             {"corroboration_floor": 2})
+        bloc = scenario("english + en-copy, declared one bloc",
+                        [stems[0], twin, stems[3]], False, "s-a",
+                        None, {"en-copy": "english"})
     finally:
-        for stem in stems:
+        for stem in stems + [twin]:
             stem.stop()
 
     failures = []
@@ -113,6 +121,9 @@ def main() -> int:
     if corroborated["tier"] != "verify":
         failures.append("corroboration_floor=2 should stop a lone lineage "
                         "from auto-executing")
+    if bloc["tier"] != "verify" or bloc.get("blocs") != 2:
+        failures.append("two names declared one bloc must vote once, and a "
+                        "group against a distinct lineage is a tie")
 
     print(f"\none lineage still decides by default (tier={single['tier']} "
           f"with lineages={single.get('lineages')}), because a single device "

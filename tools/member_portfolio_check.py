@@ -233,6 +233,42 @@ def paired_delta(left: list[bool], right: list[bool], trials: int,
     }
 
 
+def build_members(trained: list[dict], holdout: list[dict]) -> dict:
+    """Fit the cheap members this round tests, word-first."""
+    members = {"shipped-words": TextModel.load(
+        ROOT / "assets" / "textmodel.json")}
+    for mode in ("chars", "mixed"):
+        model = TextModel(checkpoint=f"text-{mode}-v1", feature_mode=mode)
+        model.fit(trained)
+        members[mode] = model
+    for name, model in members.items():
+        model._temperature = fit_temperature(model, holdout)
+    centroid = Centroid()
+    centroid.fit(trained)
+    centroid._temperature = fit_temperature(centroid, holdout)
+    members["centroid"] = centroid
+    return members
+
+
+def build_rows(report: dict, tasks: dict, members: dict) -> list[dict]:
+    """One row per recorded task, with every member's calibrated vote."""
+    rows = []
+    for record in report["rows"]:
+        task = tasks[record["task_id"]]
+        row = {"expected": record["expected"],
+               "per_lineage": dict(record["per_lineage"]),
+               "confidences": dict(record["confidences"])}
+        for name, model in members.items():
+            vote = model.decide(DecisionRequest(state=task["state"],
+                                                question=task["question"],
+                                                candidates=task["candidates"]))
+            row["per_lineage"][name] = vote.choice
+            row["confidences"][name] = apply_temperature(
+                vote.probability, model._temperature)
+        rows.append(row)
+    return rows
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--report", required=True)
@@ -255,35 +291,8 @@ def main() -> int:
     report = json.loads(Path(args.report).read_text(encoding="utf-8"))
     trio = sorted(report["rows"][0]["per_lineage"])
     holdout = train[-args.holdout:]
-    fitted = train[:-args.holdout]
-
-    members = {"shipped-words": TextModel.load(
-        ROOT / "assets" / "textmodel.json")}
-    for mode in ("chars", "mixed"):
-        model = TextModel(checkpoint=f"text-{mode}-v1", feature_mode=mode)
-        model.fit(fitted)
-        members[mode] = model
-    for name, model in members.items():
-        model._temperature = fit_temperature(model, holdout)
-    centroid = Centroid()
-    centroid.fit(fitted)
-    members["centroid"] = centroid
-    members["centroid"]._temperature = fit_temperature(centroid, holdout)
-
-    rows = []
-    for record in report["rows"]:
-        task = tasks[record["task_id"]]
-        row = {"expected": record["expected"],
-               "per_lineage": dict(record["per_lineage"]),
-               "confidences": dict(record["confidences"])}
-        for name, model in members.items():
-            vote = model.decide(DecisionRequest(state=task["state"],
-                                                question=task["question"],
-                                                candidates=task["candidates"]))
-            row["per_lineage"][name] = vote.choice
-            row["confidences"][name] = apply_temperature(
-                vote.probability, model._temperature)
-        rows.append(row)
+    members = build_members(train[:-args.holdout], holdout)
+    rows = build_rows(report, tasks, members)
 
     # Competence weights from a labeled probe set the operator already has:
     # each lineage's accuracy on the dev holdout. The neural trio is scored on

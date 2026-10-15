@@ -295,6 +295,16 @@ devices, one mind.
   device is worth a seat only if it diverges from the members already seated
   (`tools/member_portfolio_check.py`, `tools/scaling_curve_check.py`,
   `docs/research/2026-10-15-round128.md`).
+- **Count the opinions, not the devices**: a playbook now declares
+  `[lineages] blocs`, groups whose errors move together, and each group
+  votes once (`aggregate(blocs=)`; floors and `corroboration_floor` count
+  opinions). Four correlated members counted by name cost the swarm 11.6
+  points; declared as one bloc, the same seven members score **77.92%**
+  against the trio's 77.08% — the family's information kept and its vote
+  count not. A fleet can therefore grow with same-family devices for
+  throughput at no cost to the decision, while growth for *intelligence*
+  still needs a new opinion
+  (`docs/research/2026-10-15-round129.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage

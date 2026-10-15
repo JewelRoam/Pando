@@ -152,7 +152,36 @@ def load_playbook(path: Path) -> Playbook:
                 raise ValueError(
                     f"[lineages.artifacts] {name!r} must be a lowercase "
                     "64-character sha256")
-        lineages = {"admit": cleaned, "artifacts": dict(artifacts)}
+        # Blocs declare which lineages are one opinion (round 128: members
+        # whose errors move together, however differently they are named).
+        # A lineage that appears in no bloc is a bloc of its own, so declaring
+        # any bloc for a lineage that is *not* correlated is the error this
+        # validation cannot detect - it can only refuse a malformed table.
+        blocs = []
+        grouped: set[str] = set()
+        for index, group in enumerate(lineages_raw.get("blocs") or []):
+            if not isinstance(group, list) or len(group) < 2:
+                raise ValueError(
+                    "[lineages].blocs entries must be lists of two or more "
+                    "lineage ids - a bloc of one is already the default")
+            cleaned_group = []
+            for name in group:
+                if not isinstance(name, str) or name.strip() not in cleaned:
+                    raise ValueError(
+                        f"[lineages].blocs[{index}] names {name!r}, which is "
+                        "not in [lineages].admit")
+                if name.strip() in grouped:
+                    raise ValueError(
+                        f"[lineages].blocs[{index}] repeats {name.strip()!r}, "
+                        "which is already in another bloc")
+                grouped.add(name.strip())
+                cleaned_group.append(name.strip())
+            if len(set(cleaned_group)) != len(cleaned_group):
+                raise ValueError(
+                    f"[lineages].blocs[{index}] repeats a lineage id")
+            blocs.append(sorted(cleaned_group))
+        lineages = {"admit": cleaned, "artifacts": dict(artifacts),
+                    "blocs": blocs}
 
     return Playbook(
         name=meta["name"],
@@ -165,6 +194,22 @@ def load_playbook(path: Path) -> Playbook:
         question_categories=categories,
         source_path=str(path),
     )
+
+
+def resolve_blocs(pb: Playbook | None) -> dict[str, str]:
+    """Map each grouped lineage to its bloc id (the group's first name).
+
+    A lineage that appears in no group maps to nothing and stays a bloc of
+    its own, so a playbook with no `blocs` produces an empty map and the
+    quorum counts lineages exactly as before.
+    """
+    if pb is None or not pb.lineages:
+        return {}
+    blocs: dict[str, str] = {}
+    for group in pb.lineages.get("blocs") or []:
+        for name in group:
+            blocs[name] = group[0]
+    return blocs
 
 
 def resolve_admitted_lineages(pb: Playbook | None) -> tuple[set[str], list[str]]:

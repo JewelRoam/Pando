@@ -85,6 +85,7 @@ class Coordinator:
                  quorum_floor: int = 1,
                  latency_target_ms: float | None = None,
                  count_lineages: bool = False,
+                 blocs: dict | None = None,
                  rollout_dir: str | Path = "rollouts"):
         self.nodes: dict[str, dict] = {}
         self._lock = threading.Lock()
@@ -99,6 +100,10 @@ class Coordinator:
         # a replicated lineage decide alone. With this on, the quorum is
         # counted over lineages and repeated stems collapse to one vote.
         self.count_lineages = count_lineages
+        # Round 128: a *group* of lineages whose errors move together is one
+        # opinion, declared by the playbook. Empty means names are the only
+        # grouping, which is the round-121 behaviour.
+        self.blocs = dict(blocs or {})
         # Adaptive quorum (round 110): a larger k means more independent
         # voters per decision and fewer decisions in parallel, so the size is
         # traded against latency under load - down to a floor, never below it.
@@ -176,6 +181,13 @@ class Coordinator:
                 copy["stats"] = stats
                 live[node_id] = copy
             return live
+
+    def _collapses(self) -> bool:
+        """Whether the quorum is counted over opinions rather than stems."""
+        return bool(self.blocs) or self.count_lineages
+
+    def _bloc_of(self, checkpoint: str) -> str:
+        return self.blocs.get(checkpoint, checkpoint)
 
     def _selectable_nodes(self) -> dict[str, dict]:
         live = self.live_nodes()
@@ -453,13 +465,16 @@ class Coordinator:
                 "auto_min_probability", 0.4)
         result = aggregate(
             calibrated_votes,
-            min_quorum=min(3, len({info["checkpoint"]
+            min_quorum=min(3, len({self._bloc_of(info["checkpoint"])
                                    for _, info in quorum})
-                           if self.count_lineages else len(quorum)),
+                           if self._collapses() else len(quorum)),
             auto_min_agreement=eff_gating.get("auto_min_agreement", 0.6),
             auto_min_probability=eff_gating.get("auto_min_probability", 0.6),
-            count_lineages=self.count_lineages)
+            count_lineages=self.count_lineages,
+            blocs=self.blocs or None)
         lineages = len({info["checkpoint"] for _, info in quorum})
+        opinions = len({self._bloc_of(info["checkpoint"])
+                        for _, info in quorum}) if self._collapses() else lineages
         # Corroboration is a policy, not a default: a lone lineage is still
         # allowed to decide (a single device has to work), but a playbook can
         # require more opinions than one. Round 119 measured what the
@@ -469,7 +484,7 @@ class Coordinator:
         # without wanting same-lineage votes collapsed.
         corroboration_floor = max(1, int(
             eff_gating.get("corroboration_floor", 1)))
-        if result.tier == "auto" and lineages < corroboration_floor:
+        if result.tier == "auto" and opinions < corroboration_floor:
             result = DecisionResult(result.choice, result.agreement,
                                     result.mean_probability, "verify",
                                     result.votes)
@@ -487,8 +502,11 @@ class Coordinator:
         # Agreement over a single lineage is vacuous, so an operator needs to
         # see how many opinions stood behind the vote (round 119: a quorum of
         # replicas is one model with extra steps).
-        if self.count_lineages or corroboration_floor > 1:
+        if self._collapses() or corroboration_floor > 1:
             out["lineages"] = lineages
+            out["opinions"] = opinions
+        if self.blocs:
+            out["blocs"] = opinions
         if corroboration_floor > 1:
             out["corroboration_floor"] = corroboration_floor
         out["responded"] = len(votes)
@@ -919,7 +937,7 @@ def main() -> None:
     if args.playbook:
         from .pb_history import verify_chain
         from .playbook import (load_verified_playbook,
-                               resolve_admitted_lineages)
+                               resolve_admitted_lineages, resolve_blocs)
         try:
             root.playbook, signature_status = load_verified_playbook(
                 Path(args.playbook), args.playbook_key,
@@ -933,6 +951,13 @@ def main() -> None:
         else:
             print(f"[playbook] {signature_status}", flush=True)
         admitted, unusable = resolve_admitted_lineages(root.playbook)
+        blocs = resolve_blocs(root.playbook)
+        if blocs:
+            root.coordinator.blocs = blocs
+            print(f"[lineages] blocs: "
+                  + ", ".join(sorted({f"{name}->{bloc}"
+                                      for name, bloc in blocs.items()})),
+                  flush=True)
         if root.playbook.lineages:
             if not admitted:
                 raise SystemExit(

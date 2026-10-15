@@ -141,6 +141,7 @@ Rebuilt by tools/build_research_index.py; one row per file.
 | 2026-10-15-round126.md | 126 | The cheap independent member, shipped |
 | 2026-10-15-round127.md | 127 | A tied quorum should answer, not go silent |
 | 2026-10-15-round128.md | 128 | Scaling is a membership problem, not a head-count |
+| 2026-10-15-round129.md | 129 | Count the opinions, not the devices |
 
 ## Files without a round number
 

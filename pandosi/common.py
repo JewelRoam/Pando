@@ -74,7 +74,8 @@ class DecisionResult:
 def aggregate(votes: list[Vote], min_quorum: int = 3,
               auto_min_agreement: float = 0.6,
               auto_min_probability: float = 0.6,
-              count_lineages: bool = False) -> DecisionResult:
+              count_lineages: bool = False,
+              blocs: dict | None = None) -> DecisionResult:
     """Aggregate votes into a gated decision.
 
     Tiers:
@@ -87,9 +88,16 @@ def aggregate(votes: list[Vote], min_quorum: int = 3,
     measured a same-lineage pair agreeing on 240 of 240 tasks, so a
     replicated lineage would otherwise outvote a distinct one 2:1 on
     evidence it does not have). min_quorum then applies to lineages too.
+
+    `blocs` generalises that from a name to a group: {checkpoint: group id}.
+    Round 128 measured four cheap members - each decorrelated from the neural
+    trio, strongly correlated with each other (phi up to +0.898) - overriding
+    a unanimous trio on 37 rows and being wrong on 32 of them, and neither
+    reweighting the choice nor counting heads fixed it. Members whose errors
+    move together are one opinion however they are named.
     """
-    if count_lineages:
-        votes = collapse_lineages(votes)
+    if blocs is not None or count_lineages:
+        votes = collapse_lineages(votes, blocs)
     if not votes:
         return DecisionResult(None, 0.0, 0.0, "escalate", [])
     if len(votes) < min_quorum:
@@ -138,27 +146,31 @@ def aggregate(votes: list[Vote], min_quorum: int = 3,
                           [v.to_json() for v in votes])
 
 
-def collapse_lineages(votes: list[Vote]) -> list[Vote]:
-    """Reduce a quorum to one vote per lineage.
+def collapse_lineages(votes: list[Vote],
+                      blocs: dict | None = None) -> list[Vote]:
+    """Reduce a quorum to one vote per lineage, or per bloc of lineages.
 
     The lineage's vote is the choice carrying the most probability mass among
     its members, at the mean probability of the members that backed it. A
     tie between equally heavy choices resolves by choice name, so the result
-    never depends on arrival order.
+    never depends on arrival order. With `blocs`, lineages that share a group
+    id are collapsed together - the operator declares which lineages are one
+    opinion, the same way the playbook declares admissions and artifacts.
     """
     groups: dict[str, list[Vote]] = {}
     for vote in votes:
-        groups.setdefault(vote.checkpoint, []).append(vote)
+        key = (blocs or {}).get(vote.checkpoint, vote.checkpoint)
+        groups.setdefault(key, []).append(vote)
 
     collapsed: list[Vote] = []
-    for checkpoint, members in sorted(groups.items()):
+    for key, members in sorted(groups.items()):
         mass: dict[str, float] = {}
         for vote in members:
             mass[vote.choice] = mass.get(vote.choice, 0.0) + vote.probability
         choice = max(sorted(mass), key=lambda name: mass[name])
         backers = [vote for vote in members if vote.choice == choice]
         collapsed.append(Vote(
-            backers[0].node_id, checkpoint, choice,
+            backers[0].node_id, key, choice,
             sum(vote.probability for vote in backers) / len(backers)))
     return collapsed
 

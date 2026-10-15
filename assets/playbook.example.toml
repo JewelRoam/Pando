@@ -17,6 +17,15 @@ lineage = "en-v1"
 # vote on an unknown confidence scale cannot justify an autonomous action.
 admit = ["english", "multilingual", "typed-decisions"]
 
+# Groups of lineages whose errors move together: the swarm counts opinions,
+# not devices. Members of a bloc vote once between them (by confidence mass),
+# so four correlated cheap models cannot outvote three independent ones
+# (round 128 measured that they can, and that it costs 11.6 points), while
+# the devices still serve as capacity. A lineage in no bloc is a bloc of its
+# own. Declaring a bloc for members that are *not* correlated throws away
+# information; declare it from measured divergence, not from intuition.
+# blocs = [["text-nb-v1", "text-chars-v1"]]
+
 # Optional attestation. Declaring a lineage is a claim; requiring an artifact
 # digest makes it checkable: a stem that registers as `english` must also
 # report the sha256 of the graph it loaded, or it is refused. Generate these

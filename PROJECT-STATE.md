@@ -130,6 +130,10 @@ NPU) all voting in the same consensus quorum.
 | Synthetic independent voters | monotone in count at every accuracy >= 0.5; six 50% members = +13 pt | round 128 |
 | Bloc override | on 152 trio-unanimous rows the 4 cheap members override 37 times, wrong 32 | round 128 |
 | Error concentration | most common wrong answer: 27-39% of a neural member's errors (uniform would be 14%) | round 128 |
+| Bloc collapse | `[lineages] blocs` + `aggregate(blocs=)` ; opinions counted, not stems | round 129 |
+| Bloc collapse measured | 4 correlated members: 65.42% (names) -> 77.92% (one bloc), +12.5 pt | round 129 |
+| Growth with replicas | same-family devices cost nothing: 77.92% vs a trio at 77.08% | round 129 |
+| Bloc representation | mass consensus loses 2.48 pt to the best member (7.3% of resamples) - open | round 129 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |
