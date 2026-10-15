@@ -530,6 +530,19 @@ devices, one mind.
   a margin**, which the playbook example now says beside the thresholds
   (`tools/tune_gate_check.py`,
   `docs/research/2026-10-15-round149.md`).
+- **The project can build the member it was missing**: with 720 labelled rows
+  and the encoder **unfrozen**, one fine-tune of the `english` lineage on the
+  3070 scores **0.9125 on a wording split it never saw** (its parent: 0.7333;
+  the best incumbent: 0.7375) and disagrees with its parent on **62 of 240**
+  decisions — where 22 contrast pairs produced a perfect copy in rounds 79-81,
+  and where freezing the encoder at 720 rows still moves 1-3 decisions. Its
+  error correlation with the incumbents is +0.17…+0.28, and the fleet it joins
+  goes from a 0.7708 gate to **0.8833** at full coverage with 26 more rows
+  auto-executed. Verified independently through the project's own
+  `TorchLayaBackend`, with 0 evaluation states in the training set. Caveat
+  carried forward: its confidences are saturated at 1.0 and need their own
+  calibration (`tools/build_finetune_data.py`,
+  `docs/research/2026-10-16-round150.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage

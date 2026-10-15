@@ -211,6 +211,12 @@ NPU) all voting in the same consensus quorum.
 | In-sample ceiling | thresholds chosen on the evaluation half: 83 rows at 0.9036 = the shipped point | round 149 |
 | Shipped gate is optimal in its grid | no tuning procedure could have won on this distribution | round 149 |
 | Load-bearing calibration error | correcting typed-decisions' T makes the gate 16 rows freer and 4 points less safe | round 149 |
+| Fine-tuning, encoder frozen | 720 rows, 1-3 epochs: 1 and 3 decisions changed in 240 | round 150 |
+| **Fine-tuning, encoder unfrozen** | **0.7333 -> 0.9125 on unseen wording; 62/240 decisions changed** | round 150 |
+| The new member, verified | re-run through TorchLayaBackend: 219/240; 0 eval states in training | round 150 |
+| Error correlation with incumbents | phi +0.17..+0.28 (round 119's descendant: +1.000) | round 150 |
+| Fleet with the new member | gate full 0.7708 -> 0.8833; auto 163 -> 189; matched +1.2 | round 150 |
+| Open caveat | confidences saturated at 1.0 (228/240); needs its own calibration | round 150 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |

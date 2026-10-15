@@ -182,6 +182,12 @@ def main() -> int:
     parser.add_argument("--max-len", type=int, default=128)
     parser.add_argument("--head-max-len", type=int, default=32)
     parser.add_argument("--skip-train", action="store_true")
+    parser.add_argument("--unfreeze", action="store_true",
+                        help="train the encoder too. The default freezes it, "
+                             "which is what the published notebook does; "
+                             "round 150 measured that a frozen encoder moves "
+                             "1 decision in 240 and an unfrozen one needs "
+                             "~6.4 GB of optimiser state for 400M parameters")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
@@ -207,7 +213,7 @@ def main() -> int:
             epochs=args.epochs,
             micro_batch=args.micro_batch,
             grad_accum=args.grad_accum,
-            freeze_encoder=True,
+            freeze_encoder=not args.unfreeze,
             max_len=args.max_len,
             head_max_len=args.head_max_len,
             log_every=1,
