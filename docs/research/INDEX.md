@@ -158,6 +158,7 @@ Rebuilt by tools/build_research_index.py; one row per file.
 | 2026-10-15-round143.md | 143 | From nothing to a served decision in 1.5 seconds |
 | 2026-10-15-round144.md | 144 | A portable combiner, and the smallest real fleet |
 | 2026-10-15-round145.md | 145 | The governance layer, verified through the file an operator writes |
+| 2026-10-15-round146.md | 146 | Growing and shrinking a fleet while it serves |
 
 ## Files without a round number
 

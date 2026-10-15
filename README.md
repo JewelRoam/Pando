@@ -482,6 +482,16 @@ devices, one mind.
   with itself at agreement 1.0**
   (`assets/playbook.example.toml`,
   `docs/research/2026-10-15-round145.md`).
+- **Growing and shrinking a fleet while it serves**: four live stages on the
+  same labelled rows — one leaf (iGPU) auto-executes 50 of 60 rows at 0.800;
+  adding **a new opinion** (the 19 KB text member) takes the quorum to two
+  opinions, drops auto-execution to 15 rows and makes those **1.000**
+  accurate; adding **a replica** (english again, on the NPU) leaves the
+  opinion count, the throughput and every answer unchanged; **retiring** it
+  changes nothing either. Trustworthy automation comes from opinions, and a
+  copy contributes none
+  (`tools/elastic_fleet_check.py`,
+  `docs/research/2026-10-15-round146.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage

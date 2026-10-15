@@ -196,6 +196,10 @@ NPU) all voting in the same consensus quorum.
 | Combiner pinned by playbook | `[combiner] path + sha256`; refused on mismatch | round 145 |
 | Governance e2e | real root + HTTP stems: admit 403, blocs, floor, pinning | round 145 |
 | Corroboration floor isolated | one opinion, agreement 1.0 -> tier verify | round 145 |
+| Live growth stages | 1 leaf -> +opinion -> +replica -> -replica, 60 labelled rows each | round 146 |
+| A new opinion | opinions 1->2; auto 50->15 rows, accuracy 0.800 -> 1.000 | round 146 |
+| A replica buys nothing | opinions stay 2, throughput and answers unchanged | round 146 |
+| Removal is free | retiring the replica changes nothing measurable | round 146 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |
