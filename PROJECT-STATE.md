@@ -82,6 +82,9 @@ NPU) all voting in the same consensus quorum.
 | Cross-device staging (CUDA+CPU) | 0.47x throughput, +50 ms latency | round 94 |
 | Activation interface size | 0.15-1.22 MB, loopback hop 1-2 ms | round 94 |
 | Ecosystem effect on votes | ONNX vs PyTorch: 27/27 agreement, conf gap 0.0028 | round 95 |
+| Ensemble vs best member (accuracy) | vote 51.9% vs members 55.6-59.3% (n=27) | round 117 |
+| Gate vs single-model confidence | 92.3% vs 100% at matched coverage | round 117 |
+| Oracle available to the trio | 74.1% - the gap is the combiner's | round 117 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |

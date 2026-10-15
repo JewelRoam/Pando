@@ -187,6 +187,15 @@ devices, one mind.
   cost of 28% throughput. An unclassified question in a categorised playbook
   fails conservative, and keywords can still only raise the floor
   (`docs/research/2026-10-14-round112.md`).
+- **The swarm's accuracy claim is unverified**: on the 27 labeled choice
+  tasks the majority vote scores **51.9%**, below every member (55.6-59.3%),
+  and the shipped gate is beaten at matched coverage by a single lineage's
+  own confidence (92.3% vs 100% on the same 13 tasks). The trio does hold
+  the answer 74.1% of the time, so the gap is in the combiner, not the
+  members — and 27 tasks cannot separate these numbers, which is why the
+  next step is a few hundred labeled tasks rather than a new combiner
+  (`tools/ensemble_value_check.py`, `tools/combiner_check.py`,
+  `docs/research/2026-10-14-round117.md`).
 - **Per-category quorum floors and retirement**: a playbook sets a
   `quorum_floor` per category, so under load an ordinary question gave up
   voters down to 2 while a security question stopped at 4 — twice the
