@@ -128,6 +128,8 @@ NPU) all voting in the same consensus quorum.
 | Four cheap additions | -11.62 pt vs the trio; two reweightings do not fix it | round 128 |
 | Cheap members resemble each other | chars x mixed phi +0.898, words x centroid +0.687; each ~0 vs the trio | round 128 |
 | Synthetic independent voters | monotone in count at every accuracy >= 0.5; six 50% members = +13 pt | round 128 |
+| Bloc override | on 152 trio-unanimous rows the 4 cheap members override 37 times, wrong 32 | round 128 |
+| Error concentration | most common wrong answer: 27-39% of a neural member's errors (uniform would be 14%) | round 128 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |
