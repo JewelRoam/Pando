@@ -176,6 +176,10 @@ NPU) all voting in the same consensus quorum.
 | Swarm beats its best member | 80.42% vs 75.42% full coverage (+5.0) | round 139 |
 | Where the headroom is | gate's rows: 90.70% vs an oracle of 91.28%; declined rows: learned 54.41% vs member 41.18% vs oracle 67.65% | round 139 |
 | Training rows not the limit | 480 instead of 240 changes nothing (79.58 vs 80.42) | round 139 |
+| Combiner shipped as an artifact | assets/combiner.json, 4 KB, fitted + CV'd by tools/train_combiner.py | round 140 |
+| Advisory by construction | `suggested_choice` only when the tier is not auto; 0/68 at auto | round 140 |
+| Artifact reproduces the claim | full 80.42%, declined rows 54.41% (gate declines them, best member 41.18%) | round 140 |
+| Candidate contract | a suggestion outside the request's candidates is refused (found live) | round 140 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |

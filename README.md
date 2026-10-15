@@ -426,6 +426,18 @@ devices, one mind.
   answer, and a fitted rule recovers about three-quarters of it there
   (`tools/learned_combiner_check.py`,
   `docs/research/2026-10-15-round139.md`).
+- **The combiner is now a shipped artifact, and it is advisory by
+  construction**: `tools/train_combiner.py` writes a **4 KB**
+  `assets/combiner.json` (fitted on the dev votes, l2 cross-validated on dev
+  alone) and `rootd --combiner <path>` attaches its answer as
+  `suggested_choice` **only where the gate does not auto-execute** — replayed
+  over the held-out rows it reproduces 80.42% full coverage and **54.41% on
+  the 68 rows the gate declines**, with 0 of its 68 suggestions landing on an
+  auto row. Wiring it live caught a contract violation the offline replay
+  could not: the model suggested a label outside the request's candidates, so
+  a suggestion is now masked to the question's options like any member's vote
+  (`pandosi/combiner.py`, `tools/combiner_artifact_check.py`,
+  `docs/research/2026-10-15-round140.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage

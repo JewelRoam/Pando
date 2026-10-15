@@ -87,6 +87,7 @@ class Coordinator:
                  latency_target_ms: float | None = None,
                  count_lineages: bool = False,
                  blocs: dict | None = None,
+                 combiner=None,
                  rollout_dir: str | Path = "rollouts"):
         self.nodes: dict[str, dict] = {}
         self._lock = threading.Lock()
@@ -105,6 +106,10 @@ class Coordinator:
         # opinion, declared by the playbook. Empty means names are the only
         # grouping, which is the round-121 behaviour.
         self.blocs = dict(blocs or {})
+        # An advisory fitted combiner (rounds 139/140): it answers where the
+        # hand-written gate declines, and it can never change a tier or an
+        # auto-executed choice.
+        self.combiner = combiner
         # Adaptive quorum (round 110): a larger k means more independent
         # voters per decision and fewer decisions in parallel, so the size is
         # traded against latency under load - down to a floor, never below it.
@@ -545,6 +550,17 @@ class Coordinator:
         # The list names the ones that dropped out (round 135).
         if unanswered:
             out["unanswered"] = unanswered
+        # Where the gate has nothing to say, offer the fitted rule's answer -
+        # as a suggestion, at the tier the gate already chose. Round 139
+        # measured 54.4% for this rule on the declined rows against 41.2% for
+        # the best member, so it improves the prior without touching safety.
+        if self.combiner is not None and result.tier != "auto" and votes:
+            suggestion = self.combiner.suggest(
+                [(vote.checkpoint, vote.choice, vote.probability)
+                 for vote in calibrated_votes], req.candidates)
+            if suggestion:
+                out["suggested_choice"] = suggestion["choice"]
+                out["suggested_probability"] = suggestion["probability"]
         out["fanout_ms"] = fanout_ms
         # Report uncalibrated voters rather than acting on them silently. The
         # tier is left alone so a synthetic test harness is unaffected; the
@@ -908,6 +924,11 @@ def main() -> None:
                         help="count the quorum over lineages, not stems: "
                              "replicated members collapse to one vote "
                              "(round 119)")
+    parser.add_argument("--combiner", default=None,
+                        help="a fitted combiner artifact (tools/"
+                             "train_combiner.py); its answer is attached as "
+                             "suggested_choice wherever the gate does not "
+                             "auto-execute (round 140)")
     parser.add_argument("--initial-stem-timeout", type=float,
                         default=INITIAL_STEM_TIMEOUT,
                         help="discovery timeout before latency is learned")
@@ -946,6 +967,15 @@ def main() -> None:
         except PermissionError as exc:
             raise SystemExit(f"[locked] {exc}")
         listen_host = "0.0.0.0"
+    combiner = None
+    if args.combiner:
+        from .combiner import Combiner
+        try:
+            combiner = Combiner.load(args.combiner)
+        except (OSError, ValueError, KeyError) as exc:
+            raise SystemExit(f"[combiner] {args.combiner}: {exc}")
+        print(f"[combiner] {args.combiner} loaded: {combiner.meta}",
+              flush=True)
     coordinator = Coordinator(
         call_timeout=args.stem_call_timeout,
         initial_stem_timeout=args.initial_stem_timeout,
@@ -954,6 +984,7 @@ def main() -> None:
         quorum_floor=args.quorum_floor,
         latency_target_ms=args.latency_target_ms,
         count_lineages=args.lineage_quorum,
+        combiner=combiner,
         rollout_dir=args.rollout_dir)
     root = Root(coordinator=coordinator, host=listen_host, port=args.port,
                 spore_files=spore_files, chunking=args.chunking)

@@ -152,6 +152,7 @@ Rebuilt by tools/build_research_index.py; one row per file.
 | 2026-10-15-round137.md | 137 | Independence is the admission test; the rest is noise |
 | 2026-10-15-round138.md | 138 | What one more device costs, and what it buys |
 | 2026-10-15-round139.md | 139 | A learned combiner earns part of the gap, and locates the rest |
+| 2026-10-15-round140.md | 140 | Ship the combiner, and keep it advisory |
 
 ## Files without a round number
 
