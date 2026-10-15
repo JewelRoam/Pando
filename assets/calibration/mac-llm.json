@@ -1,0 +1,13 @@
+{
+  "checkpoint": "mac-llm",
+  "temperature": 4.09,
+  "source": "fit_temperature on mac-llm votes, split C (Task 003 via the Mac)",
+  "n_tasks": 240,
+  "accuracy": 0.6542,
+  "raw_mean_probability": 0.9574,
+  "raw_nll": 249.744,
+  "calibrated_nll": 148.553,
+  "raw_ece": 0.3033,
+  "calibrated_ece": 0.0336,
+  "note": "B-fitted T=1.79 points the same way (ECE 0.112 -> 0.014). The calibrated scale did not change split-D outcomes; the binding constraint is the tier's accuracy (0.7375 solo), not its confidence"
+}

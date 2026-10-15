@@ -255,6 +255,9 @@ NPU) all voting in the same consensus quorum.
 | LLM tier solo on D | 0.7375 zero-shot (= untuned english), mean p 0.9586, ECE 0.2211, 100% JSON parse | round 158 |
 | Adding the raw LLM tier | pair 0.9750 -> trio decided 0.9167, but auto coverage 159 -> 225 @ 0.9244: the gate is bought by a foreign confidence scale | round 158 |
 | Next (dispatched) | mac-llm votes on C/B; temperature fitted on C, re-run on D: hold auto >= 200 and lift decided >= 0.9750 | round 158 |
+| Calibration does not fix the tier | trio with T_C: auto 224 @ 0.9241, decided 0.9167 (raw: identical); ECE 0.303 -> 0.034 on C | round 158 |
+| A weak distinct member dilutes | 2-of-3 majorities auto-execute at ~0.924 where the pair escalated to a 0.926 advisor; tiers only lift above their strength | round 158 |
+| Prompt scaffold costs accuracy | candidate-only prompt on C: 0.7958 at 131 ms vs JSON 0.6542 at 444 ms | round 158 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |
