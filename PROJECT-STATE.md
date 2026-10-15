@@ -1,6 +1,6 @@
 # PandoSI Project State
 
-*Last updated: 2026-10-16 (round 159; continuous research session)*
+*Last updated: 2026-10-16 (round 160; continuous research session)*
 
 ## Where we are
 
@@ -264,6 +264,10 @@ NPU) all voting in the same consensus quorum.
 | Next | implement --assent-checkpoint in rootd (Task 005, dispatched) + live three-tier run | round 159 |
 | Assent gating shipped | Coordinator/CLI/status + collapsed lookup + 3-stem test; cherry-picked to main, 22/22 smoke on both machines | round 159 |
 | Next (dispatched) | Task 006: stemd --backend openai (B-prompt, LAN API); then live three-tier run with --assent-checkpoint ft-v3 | round 159 |
+| OpenAI backend shipped | stemd --backend openai (B-prompt, LAN API), parse tests; cherry-picked to main, 23/23 smoke both machines | round 160 |
+| Live three-tier, run 1 | auto 195 @ 1.0000, decided 0.9833 (core 0.9750), p50 182 ms | round 160 |
+| Live three-tier, replicated | run 2 identical to the digit (195 @ 1.0000, 0.9833, p50 181 ms, 5.60 rows/s) | round 160 |
+| Prediction matched live | offline 0.9833 predicted (round 159) and delivered; auto 195 vs 199 explained by max_tokens 16 vs 64 | round 160 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |

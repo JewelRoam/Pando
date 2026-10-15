@@ -668,6 +668,15 @@ devices, one mind.
   routes disagreement to the advisor and lets the trusted member hold the
   veto (`metrics/lan-check/variant_matrix_check.py`,
   `docs/research/2026-10-16-round159.md`).
+- **Live, the three-tier fleet beats its core — the prediction held to the
+  digit**: three tiers on two machines (Intel iGPU Laya floor + RTX 3070
+  fine-tune + Mac Qwen3-4B over the LAN, Windows→Mac only), quorum 3/3,
+  `--assent-checkpoint ft-v3`: **auto 195 rows every one correct, decided
+  0.9833** — above the two-member core's live 0.9750 — and a second full run
+  reproduced it to the digit (5.60 rows/s, p50 181 ms). The offline matrix
+  predicted 0.9833 before the run; the naive seating of the same LLM tier
+  decided 0.9167 (`tools/tiered_live_check.py`,
+  `docs/research/2026-10-16-round160.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage

@@ -172,6 +172,7 @@ Rebuilt by tools/build_research_index.py; one row per file.
 | 2026-10-16-round157.md | 157 | The Mac joins as one group; and a direction: model tiers, not voter herds |
 | 2026-10-16-round158.md | 158 | The first real LLM tier: deployed, evaluated, and honestly not yet a win |
 | 2026-10-16-round159.md | 159 | Reliability-aware gating: the tiered fleet beats its core (offline) |
+| 2026-10-16-round160.md | 160 | Live, the three-tier fleet beats its core (0.9833, replicated) |
 
 ## Files without a round number
 
