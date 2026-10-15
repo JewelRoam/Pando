@@ -272,6 +272,17 @@ devices, one mind.
   phi *rises* to +0.36..+0.82, so the family moves together exactly where
   the task gets hard (`tools/same_family_voter_check.py`,
   `docs/research/2026-10-15-round125.md`).
+- **The independent member is now shipped, and it found a bug in the
+  aggregation rule**: `pandosi/textmodel.py` is a 19 KB naive Bayes
+  (`stemd --backend text`) that any device can serve, calibrated through the
+  project's own mechanism. Added as a fourth live HTTP stem it made the swarm
+  *worse* — because three members cannot tie and four can, and the shipped
+  gate answered a 2-2 split with silence, discarding exactly the information
+  the new member brought. A tied count is now broken by confidence mass at
+  the `verify` tier (a tie still can never auto-execute): the trio goes
+  73.75% → **77.08%** at full coverage and the four-member swarm
+  72.92% → **78.33%**, with the `auto` tier untouched
+  (`docs/research/2026-10-15-round126.md`, `…round127.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage

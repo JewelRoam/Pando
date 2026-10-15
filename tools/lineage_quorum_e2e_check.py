@@ -9,7 +9,9 @@ registers real HTTP stems into them, and asks the same question of each:
   flag off, three stems (english, english, typed-decisions), 2:1 split
       -> a stem majority, tier auto
   flag on, the same three stems
-      -> a 1:1 lineage tie, tier verify
+      -> a 1:1 lineage tie: tier verify, never auto (round 127 lets a tied
+         quorum return the confidence-ranked choice rather than silence, so
+         the property under test is the tier, not the absence of a choice)
   flag on, three english stems that agree
       -> the vacuity this rule exposes: agreement 1.0 from one lineage
   flag on + [gating] corroboration_floor = 2, three english stems
@@ -102,8 +104,8 @@ def main() -> int:
     failures = []
     if plain["tier"] != "auto" or plain["choice"] != "approve":
         failures.append("flag off should follow the 2:1 stem majority")
-    if lineage["tier"] != "verify" or lineage["choice"] is not None:
-        failures.append("flag on should report a lineage tie, not a decision")
+    if lineage["tier"] != "verify":
+        failures.append("a lineage tie must not auto-execute")
     if lineage.get("lineages") != 2 or plain.get("lineages") is not None:
         failures.append("only the flagged root should report lineages")
     if single["tier"] != "auto" or single.get("lineages") != 1:

@@ -106,9 +106,26 @@ def aggregate(votes: list[Vote], min_quorum: int = 3,
     agreement = top / len(votes)
     mean_probability = sum(probs[best_choice]) / len(probs[best_choice])
 
-    # Tie between the two most-voted choices is not a majority.
+    # Tie between the two most-voted choices is not a majority, and a tie is
+    # never a decision - but it is not necessarily silence either. Three
+    # members cannot tie; four can, and round 126 measured what refusing to
+    # answer costs when a weak independent member turns disagreements into
+    # 2-2 splits: accepted coverage fell and the information that member
+    # brought was discarded rather than weighed. When the confidences
+    # disagree, the weighted choice is what the count threw away, so it is
+    # returned at the verify tier - a quorum that cannot agree still cannot
+    # act alone.
     sorted_counts = sorted(counts.values(), reverse=True)
     if len(sorted_counts) > 1 and sorted_counts[0] == sorted_counts[1]:
+        mass: dict[str, float] = {}
+        for vote in votes:
+            mass[vote.choice] = mass.get(vote.choice, 0.0) + vote.probability
+        ranked_mass = sorted(mass.items(), key=lambda item: (-item[1],
+                                                             item[0]))
+        if len(ranked_mass) > 1 and ranked_mass[0][1] > ranked_mass[1][1]:
+            return DecisionResult(ranked_mass[0][0], agreement,
+                                  mean_probability, "verify",
+                                  [v.to_json() for v in votes])
         return DecisionResult(None, agreement, mean_probability, "verify",
                               [v.to_json() for v in votes])
 

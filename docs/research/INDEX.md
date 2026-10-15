@@ -138,6 +138,8 @@ Rebuilt by tools/build_research_index.py; one row per file.
 | 2026-10-15-round123.md | 123 | What the swarm is worth on wording it has never seen |
 | 2026-10-15-round124.md | 124 | The lineage rule, on the wire |
 | 2026-10-15-round125.md | 125 | What a device can and cannot do with the model it has |
+| 2026-10-15-round126.md | 126 | The cheap independent member, shipped |
+| 2026-10-15-round127.md | 127 | A tied quorum should answer, not go silent |
 
 ## Files without a round number
 

@@ -1,0 +1,10 @@
+{
+  "checkpoint": "text-nb-v1",
+  "temperature": 0.8,
+  "source": "tools/train_text_model.py holdout fit",
+  "raw_ece": null,
+  "n_tasks": 48,
+  "accuracy": 0.875,
+  "raw_log_loss": 0.1045,
+  "calibrated_log_loss": 0.1025
+}

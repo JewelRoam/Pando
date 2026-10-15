@@ -119,6 +119,11 @@ NPU) all voting in the same consensus quorum.
 | Quantised sibling (int8 vs fp32 english) | 48/240 flips, but phi +0.413; no ensemble gain | round 125 |
 | Same-family diversity spectrum | monotone in phi: 1.000 (descendant/ballot) -> 0.41 (int8) -> 0.07 (outside family, +4.1 pt) | round 125 |
 | Trio correlation on unseen wording | phi +0.36..+0.82 (dev: +0.21..+0.53) - harder wording correlates them more | round 125 |
+| Text member (naive Bayes) | pandosi/textmodel.py, 19 KB artifact, stemd --backend text | round 126 |
+| 4-member swarm, over real HTTP | trio 73.75% / +text 72.92% at full coverage - a loss | round 126 |
+| Heartbeat TTL | an un-heartbeating stem is dropped after 15 s; a check must heartbeat | round 126 |
+| Tied quorum answers | 2-2 splits ranked by confidence at verify, never auto | round 127 |
+| Tie-break measured | trio 73.75 -> 77.08; +text 72.92 -> 78.33; auto tier unchanged | round 127 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |

@@ -134,13 +134,15 @@ def main() -> None:
     parser.add_argument("--pairing-token-file", default=None,
                         help="read the pairing token from a user-owned file")
     parser.add_argument("--backend", default="mock",
-                        choices=["mock", "onnx", "laya"],
+                        choices=["mock", "onnx", "laya", "text"],
                         help="mock | onnx (ONNX Runtime/OpenVINO) | "
-                             "laya (native PyTorch)")
+                             "laya (native PyTorch) | text (naive Bayes)")
     parser.add_argument("--onnx-path", default="artifacts/laya-en.int8.onnx")
     parser.add_argument("--repo", default="convaiinnovations/laya")
     parser.add_argument("--model", default="convaiinnovations/laya",
                         help="HF id or local path for the torch (laya) backend")
+    parser.add_argument("--text-model", default="assets/textmodel.json",
+                        help="fitted TextModel for --backend text")
     parser.add_argument("--device", default="CPU")
     parser.add_argument("--delay-ms", type=float, default=0.0,
                         help="mock backend only: simulated per-decision "
@@ -184,6 +186,16 @@ def main() -> None:
                                    device=args.device,
                                    checkpoint=args.checkpoint)
         print("model loaded", flush=True)
+    elif args.backend == "text":
+        # The cheap, independent member (rounds 122-125): stdlib only, so a
+        # device that cannot hold a neural graph can still contribute a vote
+        # whose errors do not travel with the family's.
+        from .textmodel import TextModel
+        print(f"loading text model from {args.text_model} ...", flush=True)
+        backend = TextModel.load(args.text_model)
+        if args.checkpoint:
+            backend.checkpoint = args.checkpoint
+        print(f"text model loaded: {backend.summary()}", flush=True)
     else:
         backend = MockBackend(args.node_id, args.checkpoint or "mock",
                               delay_ms=args.delay_ms,
