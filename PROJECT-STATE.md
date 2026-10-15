@@ -1,6 +1,6 @@
 # PandoSI Project State
 
-*Last updated: 2026-10-16 (round 153; continuous research session)*
+*Last updated: 2026-10-16 (round 154; continuous research session)*
 
 ## Where we are
 
@@ -231,6 +231,13 @@ NPU) all voting in the same consensus quorum.
 | CPU-free live fleet | iGPU+NPU+3070 (torch ft-v3) stems, zero CPU inference: 240/240 three-vote rows, 7.2-8.4 rows/s | round 153 |
 | CPU left free | host 16-22% busy during the run; per-decision CPU: npu 5.1, dgpu 45.0, igpu 55-76 ms | round 153 |
 | Venv redirector trap | Scripts\python.exe (255 KB) runs the real interpreter as a child; pid CPU reads 0.00, measure the tree | round 153 |
+| ft-v3 calibrated | T=6.56 fitted on split C: NLL 300.1 -> 71.1, ECE 0.0909 -> 0.0127; table shipped | round 154 |
+| The trio's own tables | offline decided 0.8125 -> 0.8333; round 153's offline baseline was raw | round 154 |
+| Replicas dilute | live membership full == english solo (0.7292): two identical votes always hold the majority | round 154 |
+| Count opinions | same three devices, lineage-counted: full 0.9417, auto 160/160 correct, decided 0.9792 raw / 0.9750 cal on D | round 154 |
+| The advisor must see opinions | declined-row advisor accuracy 0.704 -> 0.926 (D), 0.685 -> 0.904 (C) | round 154 |
+| System outgrows its best member | live decided 0.9750 (member solo 0.9417), auto 159/240 all correct, CPU 77% free | round 154 |
+| Prediction reproduced live | offline mirror (0.9750, advisor 0.926) written first; live delivered 0.9750 / 0.9259 | round 154 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |

@@ -145,6 +145,11 @@ def main() -> int:
     parser.add_argument("--quorum", type=int, default=len(STEMS),
                         help="votes required per row (default: all stems)")
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--lineage-quorum", action="store_true",
+                        help="count the quorum over opinions, not stems: the "
+                             "iGPU and NPU both carry the english lineage, "
+                             "so without this the two replicas outvote the "
+                             "distinct member on every row (round 154)")
     parser.add_argument("--timeout", type=float, default=360.0,
                         help="seconds to wait for every stem to register")
     args = parser.parse_args()
@@ -163,9 +168,11 @@ def main() -> int:
     root = Root(coordinator=Coordinator(
         quorum_k=args.quorum, call_timeout=300.0,
         initial_stem_timeout=args.timeout, timeout_multiplier=6.0,
-        min_stem_timeout=30.0, combiner=combiner))
+        min_stem_timeout=30.0, combiner=combiner,
+        count_lineages=args.lineage_quorum))
     root.start()
-    print(f"root up with combiner={bool(combiner)}, quorum {args.quorum}",
+    print(f"root up with combiner={bool(combiner)}, quorum {args.quorum}, "
+          f"lineage quorum={args.lineage_quorum}",
           flush=True)
     log_dir = ROOT_DIR / "metrics" / "ensemble-checks"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -321,6 +328,7 @@ def main() -> int:
           f"(one CPU stem alone: ~2856 ms/decision, round 134)")
 
     report = {"rows": len(rows), "quorum": args.quorum,
+              "lineage_quorum": args.lineage_quorum,
               "members": {name: {"checkpoint": STEMS[name]["checkpoint"],
                                  "device": STEMS[name]["device"],
                                  "backend": STEMS[name]["backend"]}

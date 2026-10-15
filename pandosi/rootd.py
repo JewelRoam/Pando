@@ -25,7 +25,8 @@ class _PandoHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-from .common import DecisionRequest, DecisionResult, Vote, aggregate
+from .common import (DecisionRequest, DecisionResult, Vote, aggregate,
+                     collapse_lineages)
 from .spore import build_manifest, generate_signing_key
 from .rollout import RolloutRecorder
 from .calibrate import Calibrator
@@ -555,9 +556,19 @@ class Coordinator:
         # measured 54.4% for this rule on the declined rows against 41.2% for
         # the best member, so it improves the prior without touching safety.
         if self.combiner is not None and result.tier != "auto" and votes:
+            # The advice must see what the quorum counted. When the quorum is
+            # counted over opinions, hand the combiner the collapsed set: it
+            # was fitted on distinct memberships, and feeding it the stems
+            # lets a duplicated lineage swamp the rows the gate declined.
+            # Round 154, under --lineage-quorum, on the declined rows
+            # (english x2 + ft-v3): advisor accuracy 0.704 -> 0.926 (split D,
+            # 81 rows) and 0.685 -> 0.904 (split C, 73 rows); the system goes
+            # 0.9000 -> 0.9750 and 0.8583 -> 0.9250 respectively.
+            advice = (collapse_lineages(calibrated_votes, self.blocs or None)
+                      if self._collapses() else calibrated_votes)
             suggestion = self.combiner.suggest(
                 [(vote.checkpoint, vote.choice, vote.probability)
-                 for vote in calibrated_votes], req.candidates,
+                 for vote in advice], req.candidates,
                 state=req.state, question=req.question)
             if suggestion:
                 out["suggested_choice"] = suggestion["choice"]

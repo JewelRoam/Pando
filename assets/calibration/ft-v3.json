@@ -1,0 +1,13 @@
+{
+  "checkpoint": "ft-v3",
+  "temperature": 6.56,
+  "source": "tools/calibrated_gate_check.py, fitted on split C recorded votes",
+  "n_tasks": 240,
+  "saturated_at_1": 228,
+  "accuracy": 0.9125,
+  "raw_nll": 300.076,
+  "calibrated_nll": 71.084,
+  "raw_ece": 0.0909,
+  "calibrated_ece": 0.0127,
+  "note": "the fine-tune's confidences are saturated (228/240 of split C at exactly 1.0); this temperature is what makes them readable"
+}

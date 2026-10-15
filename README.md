@@ -588,6 +588,23 @@ devices, one mind.
   being measured instead of the interpreter it spawns — caught, fixed, and
   kept in the log (`tools/cpu_free_fleet_check.py`,
   `docs/research/2026-10-16-round153.md`).
+- **The system outgrows its best member, on the same idle accelerators**:
+  the live fleet's 0.8292 had a hidden ceiling — its two identical english
+  stems are a permanent 2-of-3 majority, so the stronger distinct member
+  (and its calibration) could never change an answer (aggregate full
+  0.7292 = english's solo score, exactly). Counting the quorum over
+  opinions and feeding the advisor the same counted set — the advisor was
+  fitted on distinct memberships and a duplicated lineage swamps it on
+  precisely the disputed rows (accuracy 0.704 → 0.926 on D, 0.685 → 0.904
+  on C) — took the live fleet from 0.8292 to **0.9750**: 159/240
+  auto-executed and **all correct**, 81 declined rows suggested at 0.9259,
+  host CPU still 77% free, all three devices still OpenVINO iGPU + OpenVINO
+  NPU + torch/CUDA 3070 with zero CPU inference. The offline mirror
+  predicted 0.9750/0.926 before the run and the live run reproduced it to
+  the digit. The member also got its temperature at last (T=6.56 fitted on
+  split C: ECE 0.091 → 0.013, `uncalibrated_checkpoints` gone)
+  (`tools/calibrated_gate_check.py`, `assets/calibration/ft-v3.json`,
+  `docs/research/2026-10-16-round154.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage
