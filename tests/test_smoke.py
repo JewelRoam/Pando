@@ -46,6 +46,44 @@ class TestSmoke(unittest.TestCase):
 
         self.assertEqual(aggregate(strong[:2]).tier, "escalate")
 
+    def test_assent_gating_demotes_auto(self):
+        """A named assent checkpoint can veto an otherwise-auto decision."""
+        def decide(ft_choice: str, assent_checkpoint: str | None = None):
+            coordinator = Coordinator(quorum_k=3,
+                                      assent_checkpoint=assent_checkpoint)
+            stems = []
+            try:
+                members = [
+                    ("english-0", "english", "approve"),
+                    ("english-1", "english", "approve"),
+                    ("ft-v3", "ft-v3", ft_choice),
+                ]
+                for node_id, checkpoint, choice in members:
+                    stem = Stem(node_id, MockBackend(
+                        node_id, checkpoint, correct_choice=choice,
+                        agree_rate=1.0))
+                    stem.start()
+                    stems.append(stem)
+                    coordinator.register(stem.node_id, stem.url(), checkpoint)
+                return coordinator.decide(DecisionRequest(
+                    state="assent", question="approve?",
+                    candidates=["approve", "reject"]))
+            finally:
+                for stem in stems:
+                    stem.stop()
+
+        agreed = decide("approve", "ft-v3")
+        self.assertEqual(agreed["choice"], "approve")
+        self.assertEqual(agreed["tier"], "auto")
+
+        split = decide("reject", "ft-v3")
+        self.assertEqual(split["choice"], "approve")
+        self.assertEqual(split["tier"], "verify")
+
+        control = decide("reject")
+        self.assertEqual(control["choice"], "approve")
+        self.assertEqual(control["tier"], "auto")
+
     def test_question_schema_identity_includes_option_set(self):
         first, first_options = canonical_question(
             "intent", ["refund", "complaint", "greeting"])
