@@ -1,6 +1,6 @@
 # PandoSI Project State
 
-*Last updated: 2026-10-16 (round 156; continuous research session)*
+*Last updated: 2026-10-16 (round 157; continuous research session)*
 
 ## Where we are
 
@@ -247,6 +247,10 @@ NPU) all voting in the same consensus quorum.
 | k stops buying replicas | expansion oscillated 2<->3 (+40 ms per second decision); ceiling = opinion count -> k stable | round 156 |
 | Adaptive fleet, final | p50 60 ms, EWMA 50 ms under the 100 ms target, 15.64 rows/s, decided 0.9750 | round 156 |
 | Stem-side accounting | with --lineage-quorum the response's votes are opinions; /health `decisions` gives truth (igpu 240, dgpu 240, npu 1) | round 156 |
+| Mac group attached | bridge (Windows -> Mac), one vote as text-nb-v1; registered beside win-igpu under a playbook admitting both | round 157 |
+| 24 rows, k=2 with the Mac | mac vote present 24/24; auto 6 / verify 18; decided 0.7500; p50 68 ms | round 157 |
+| Foreign confidence measured | out-of-scope refusal at 0.0 (good abstention); in-family unseen wording 0.4167 accuracy at median p 0.83 (confidently wrong) | round 157 |
+| Direction | tiering hypothesis: strongest hostable model per device, aggregate composes across tiers; Laya = floor-tier presence | round 157 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |

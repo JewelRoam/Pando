@@ -630,6 +630,20 @@ devices, one mind.
   the configuration round 155 assembled by hand, reached by the loop
   itself (`tools/latency_pick_check.py`,
   `docs/research/2026-10-16-round156.md`).
+- **A Mac joins as one remote group — the first member outside the Laya
+  family, the OS, and the architecture**: the MacBook (Apple silicon, LAN)
+  keeps its own root and the repository's naive-Bayes worker; a Windows
+  bridge exposes the whole group to the Windows root as a single vote
+  (`text-nb-v1`, admitted by playbook, never a Laya replica). Live: 24/24
+  held-out rows carried the Mac's vote in a k=2 quorum (auto 6 / verify 18,
+  decided 0.7500, p50 68 ms; bridge hop ~123 ms against 1.9 ms of Mac
+  compute). The measurements that matter for combining *different kinds of
+  models*: an out-of-scope question gets a 0.0-probability refusal (the
+  parent gate holds the line at verify), while in-family unseen wording is
+  answered at 0.4167 accuracy with median confidence 0.83 — confidence
+  scales do not transfer across model families, and the answer is model
+  tiers composed by the aggregation layer, not a herd of identical voters
+  (`tools/mac_group_check.py`, `docs/research/2026-10-16-round157.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `rootd
   --lineage-quorum`), so counting stems no longer lets a copied lineage
