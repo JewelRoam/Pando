@@ -71,3 +71,4 @@ Timestamped, sanitized snapshots of this PandoSI working session.
 | 2026-10-16T100040 | `docs/session-logs/2026-10-16T100040-session-backup.md` | 56e620e7188d | 256/1432/2595 | automatic snapshot after 53c0fda test: the 16GB tier budget - coexistence costs the tail (p95 +20%), not the mean (-0.37%) |
 | 2026-10-16T103003 | `docs/session-logs/2026-10-16T103003-session-backup.md` | f9734669857d | 257/1434/2596 | automatic snapshot after c52894b chore: session backup 2026-10-16T100040 |
 | 2026-10-16T110003 | `docs/session-logs/2026-10-16T110003-session-backup.md` | d75936f05efb | 258/1438/2601 | automatic snapshot after 987564f test: the breadth axis - the witness flips with the family; out-of-family advisor scores zero |
+| 2026-10-16T113003 | `docs/session-logs/2026-10-16T113003-session-backup.md` | 50daf7df79ef | 259/1450/2616 | automatic snapshot after 1ebc130 feat: family-aware registry v2 lands (merged); live F shows the veto scope gap, Task 015 dispatched |
