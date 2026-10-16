@@ -30,7 +30,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pandosi.spore import artifact_digest  # noqa: E402
+from pando.spore import artifact_digest  # noqa: E402
 
 GRAPH = ROOT / "artifacts" / "laya-en.onnx"
 LINEAGE = "english"
@@ -78,7 +78,7 @@ def attempt(work: Path, digest: str, expect_registered: bool,
         if sys.platform == "win32" else 0
     log = (work / f"rootd-{digest[:8]}.log").open("wb")
     procs = [subprocess.Popen(
-        [sys.executable, "-m", "pandosi.rootd", "--port", str(port),
+        [sys.executable, "-m", "pando.rootd", "--port", str(port),
          "--playbook", str(playbook), "--pairing-token", token],
         cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
         creationflags=creationflags)]
@@ -94,7 +94,7 @@ def attempt(work: Path, digest: str, expect_registered: bool,
                 time.sleep(0.2)
 
         procs.append(subprocess.Popen(
-            [sys.executable, "-m", "pandosi.stemd",
+            [sys.executable, "-m", "pando.stemd",
              "--node-id", "honest", "--root", url,
              "--pairing-token-file", str(token_file),
              "--backend", "onnx", "--onnx-path", str(GRAPH),
@@ -139,7 +139,7 @@ def main() -> int:
 
     digest = artifact_digest(GRAPH)
     print(f"{GRAPH.name} digest {digest}")
-    work = Path(tempfile.mkdtemp(prefix="pandosi-attestation-"))
+    work = Path(tempfile.mkdtemp(prefix="pando-attestation-"))
     try:
         accepted = attempt(work, digest, True, args.device)
         print(f"declared correct digest -> registered: {accepted}")

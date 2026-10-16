@@ -121,7 +121,7 @@ def main() -> int:
     server = slow_server(2.0)
     slow_url = f"http://127.0.0.1:{server.server_address[1]}"
 
-    with tempfile.TemporaryDirectory(prefix="pandosi-slowstem-") as td:
+    with tempfile.TemporaryDirectory(prefix="pando-slowstem-") as td:
         work = Path(td)
         token_file = work / "pairing.token"
         token_file.write_text(token, encoding="utf-8")
@@ -144,7 +144,7 @@ def main() -> int:
         try:
             with root_out.open("wb") as out, root_err.open("wb") as err:
                 root_process = subprocess.Popen(
-                    [sys.executable, "-m", "pandosi.rootd",
+                    [sys.executable, "-m", "pando.rootd",
                      "--port", str(root_port),
                      "--pairing-token-file", str(token_file),
                      "--initial-stem-timeout", "0.25",
@@ -155,7 +155,7 @@ def main() -> int:
             wait_root(root_url)
             for index, checkpoint in enumerate(("en", "ml", "td")):
                 processes.append(subprocess.Popen(
-                    [sys.executable, "-m", "pandosi.stemd",
+                    [sys.executable, "-m", "pando.stemd",
                      "--node-id", f"fast-{index}",
                      "--checkpoint", checkpoint,
                      "--root", root_url,

@@ -129,13 +129,13 @@ Payload = { 权重(~800MB), playbook(签名), harness(二进制/脚本) }。
 
 **Android 接入默认走 Termux 路线（v0.4 确认可行）**：Termux 的
 python-onnxruntime 包已被社区验证可用（issue #31634，仅有 import 警告）。
-TV 盒子接入即：Termux + `pip install onnxruntime zeroconf` + pandosi/ 即可运行
+TV 盒子接入即：Termux + `pip install onnxruntime zeroconf` + pando/ 即可运行
 stemd，无需安卓原生应用打包；原生 AAR 包装留作 Phase 2+ 优化。
 RK3588 类设备可选 RKNN NPU 加速（rknn-toolkit2 转换，需验证编码器
 模型的算子支持与 opset 版本）；Amlogic S905 无可用 NPU，走 CPU 路线。
 
 **局域发现选型确定（v0.4）**：python-zeroconf（纯 Python mDNS/DNS-SD）。
-服务类型 `_pandosi._tcp.local.`，TXT 记录携带
+服务类型 `_pando._tcp.local.`，TXT 记录携带
 {node_id, checkpoint, role, version}；Spore 的 SCAN 阶段即浏览该服务。
 WAN 加入仍用 heartbeat/URL 注册。
 

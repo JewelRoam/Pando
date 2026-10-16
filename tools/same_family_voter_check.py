@@ -39,9 +39,9 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 from ensemble_value_check import LINEAGES, load_backends  # noqa: E402
 from foreign_voter_check import curve, divergence, row_for  # noqa: E402
-from pandosi.backend import OnnxLayaBackend  # noqa: E402
-from pandosi.common import DecisionRequest  # noqa: E402
-from pandosi.calibrate import Calibrator  # noqa: E402
+from pando.backend import OnnxLayaBackend  # noqa: E402
+from pando.common import DecisionRequest  # noqa: E402
+from pando.calibrate import Calibrator  # noqa: E402
 
 
 def candidate_vote(backend, calibrator, task: dict,

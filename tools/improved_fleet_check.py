@@ -34,9 +34,9 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pandosi.combiner import Combiner  # noqa: E402
-from pandosi.common import Vote, aggregate  # noqa: E402
-from pandosi.textmodel import TextModel  # noqa: E402
+from pando.combiner import Combiner  # noqa: E402
+from pando.common import Vote, aggregate  # noqa: E402
+from pando.textmodel import TextModel  # noqa: E402
 
 TIER_ORDER = {"auto": 0, "verify": 1, "escalate": 2}
 NEW = "ft-v3"
@@ -102,7 +102,7 @@ def fit_combiner(train: list[dict], members: list[str],
             distribution = text_model.posterior(row["state"], row["question"],
                                                 classes)
             posterior = [distribution.get(name, 0.0) for name in classes]
-        from pandosi.combiner import features
+        from pando.combiner import features
         cells.append(features(votes, classes, posterior))
     x = np.array(cells)
     y = np.array([index[row["expected"]] for row in train])

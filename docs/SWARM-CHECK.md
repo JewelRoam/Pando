@@ -10,8 +10,8 @@ python tools/swarm_check.py --yes
 
 The checker starts independent OS processes, not in-process test doubles:
 
-- one `pandosi.rootd` HTTP coordinator;
-- five `pandosi.stemd` workers with checkpoint diversity;
+- one `pando.rootd` HTTP coordinator;
+- five `pando.stemd` workers with checkpoint diversity;
 - pairing secret read from a temporary token file;
 - root protected by the same pairing token;
 - real loopback HTTP requests for registration and consensus.

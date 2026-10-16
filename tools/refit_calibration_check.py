@@ -28,8 +28,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pandosi.calibrate import apply_temperature, load_calibration  # noqa: E402
-from pandosi.common import Vote, aggregate  # noqa: E402
+from pando.calibrate import apply_temperature, load_calibration  # noqa: E402
+from pando.common import Vote, aggregate  # noqa: E402
 
 TEMPERATURES = [0.5, 0.8, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 6.0]
 TIER_ORDER = {"auto": 0, "verify": 1, "escalate": 2}

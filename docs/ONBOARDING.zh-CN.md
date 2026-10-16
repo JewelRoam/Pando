@@ -6,8 +6,8 @@
 ## 产品原则
 
 1. **一个入口产出计划，而不是直接改系统。**
-   `python -m pandosi.doctor` 只读探测能力；`onboard --dry-run` 只输出
-   计划；`pandosi.grants` 负责记录用户显式批准的敏感能力。
+   `python -m pando.doctor` 只读探测能力；`onboard --dry-run` 只输出
+   计划；`pando.grants` 负责记录用户显式批准的敏感能力。
 2. **失败信息必须带下一步。**
    不说“NPU 不可用”，要说“缺哪个包/驱动、用户需要在哪个入口授权”。
 3. **敏感操作是授权，不是安装器副作用。**
@@ -19,7 +19,7 @@
 ## 渐进式用户旅程
 
 ```text
-Step 0  只读体检       pandosi doctor --json
+Step 0  只读体检       pando doctor --json
 Step 1  单机价值       tools/demo.py：本机 root + 多 stem/多 EU 共识
 Step 2  本机加速       用户选择安装 onnxruntime/openvino；仍无需管理员
 Step 3  显式入群       LAN 授权 + root 地址 + pairing token，stem 只服务该 root
@@ -35,14 +35,14 @@ Step 5  常驻服务       systemd --user / Windows 计划任务 / Termux sv，�
 使用本地可审计的 `grants.toml`，不要用全局“已信任”开关：
 
 ```bash
-python -m pandosi.grants grant lan_listen \
+python -m pando.grants grant lan_listen \
   --resource 0.0.0.0:8080 --scope 192.168.1.0/24 --hours 24 --yes
-python -m pandosi.grants show
-python -m pandosi.grants revoke lan_listen
+python -m pando.grants show
+python -m pando.grants revoke lan_listen
 ```
 
-账本默认写入 `~/.pandosi/grants.toml`；对应审计链是
-`~/.pandosi/grants.toml.audit.jsonl`。缺失或过期授权一律拒绝，
+账本默认写入 `~/.pando/grants.toml`；对应审计链是
+`~/.pando/grants.toml.audit.jsonl`。缺失或过期授权一律拒绝，
 审计链损坏后敏感授权也会 fail-closed。
 
 规则：
@@ -53,19 +53,19 @@ python -m pandosi.grants revoke lan_listen
 
 ## Bootstrap 脚本怎么设计
 
-推荐形态不是 `curl | sh`，而是一个可审阅的 `pandosi onboard` 流程：
+推荐形态不是 `curl | sh`，而是一个可审阅的 `pando onboard` 流程：
 
 ```text
-pandosi onboard --dry-run
+pando onboard --dry-run
   -> 输出 3 张表：已可用 / 可无提示安装 / 需要人工授权
 
-pandosi onboard --apply-nonprivileged
+pando onboard --apply-nonprivileged
   -> 只 pip/pipx 安装纯 Python 依赖、建缓存目录、写本地计划
 
-python -m pandosi.grants grant lan_listen ... --yes
+python -m pando.grants grant lan_listen ... --yes
   -> 先审阅 scope/resource/过期时间，再写入本地账本
 
-python -m pandosi.service --role root --json
+python -m pando.service --role root --json
   -> 生成可审阅的 service plan；不自动安装
 ```
 
@@ -106,9 +106,9 @@ observer，但禁止繁殖/执行载荷。
 ## 下一步实现清单
 
 1. [x] `doctor --json` 已包含 `plan`；另有只读的 `doctor --plan`。
-2. [x] `pandosi/onboard.py --dry-run` 已实现；明确拒绝安装/提权/改授权。
+2. [x] `pando/onboard.py --dry-run` 已实现；明确拒绝安装/提权/改授权。
 3. [x] root pairing token 已覆盖注册、节点、决策、playbook 和 root Spore 面。
 4. [x] `grants.toml` 读写、过期检查、hash-chain 审计已接入 join/rootd/lab。
-5. [x] `pandosi.service plan` 已生成 Windows/Linux/Termux 方案；安装保持手动。
+5. [x] `pando.service plan` 已生成 Windows/Linux/Termux 方案；安装保持手动。
 6. [x] Windows 用户级 Startup 生命周期已实机验收；Linux `systemd --user` 已接入 CI 生命周期检查；Termux 仍待真机。
-7. 发布前先补 `pip install pandosi`/PyPI 或 `pipx install git+...` 验收。
+7. 发布前先补 `pip install pando`/PyPI 或 `pipx install git+...` 验收。

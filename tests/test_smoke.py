@@ -19,17 +19,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from pandosi.backend import (MockBackend, OpenAIChoiceBackend,
+from pando.backend import (MockBackend, OpenAIChoiceBackend,
                             parse_openai_choice)
-from pandosi.common import (DecisionRequest, Vote, aggregate,
+from pando.common import (DecisionRequest, Vote, aggregate,
                             canonical_question)
-from pandosi.rootd import (Coordinator, INITIAL_STEM_TIMEOUT,
+from pando.rootd import (Coordinator, INITIAL_STEM_TIMEOUT,
                             Root, load_accuracy_registry)
-from pandosi.stemd import Stem
-from pandosi.onboard import build_plan
-from pandosi.grants import (audit_status, grant_status, require_grant,
+from pando.stemd import Stem
+from pando.onboard import build_plan
+from pando.grants import (audit_status, grant_status, require_grant,
                             save_grant)
-from pandosi.service import build_service_plan, detect_platform
+from pando.service import build_service_plan, detect_platform
 
 
 class TestSmoke(unittest.TestCase):
@@ -603,7 +603,7 @@ class TestSmoke(unittest.TestCase):
                                 and r["status"] != "active"
                                 for r in blocked["requirements"]))
 
-            save_grant("service_autostart", "user-agent/pandosi",
+            save_grant("service_autostart", "user-agent/pando",
                        "operator-host", "test",
                        (now + dt.timedelta(hours=1)).isoformat(), path=grants)
             save_grant("lan_listen", "0.0.0.0:8090", "LAN", "test",
@@ -632,8 +632,8 @@ class TestSmoke(unittest.TestCase):
         A slow decision with quorum left to spend is a policy question; slow
         at the floor with members to spare is a capacity one (round 113).
         """
-        from pandosi.elastic import ElasticSupervisor
-        from pandosi.elastic import Supervision
+        from pando.elastic import ElasticSupervisor
+        from pando.elastic import Supervision
 
         supervisor = ElasticSupervisor("http://127.0.0.1:1", max_members=5,
                                       keep=2)
@@ -678,7 +678,7 @@ class TestSmoke(unittest.TestCase):
         # Host awareness: never grow a lineage onto a machine that already
         # carries one, because that adds compute contention and no
         # information (rounds 95 and 114, measured).
-        from pandosi.elastic import Member, co_located
+        from pando.elastic import Member, co_located
         members = [
             Member("a", "english", 40.0, 5, "127.0.0.1"),
             Member("b", "english", 45.0, 5, "10.0.0.9"),
@@ -695,7 +695,7 @@ class TestSmoke(unittest.TestCase):
 
         # Capacity accounting: a rollback must not remove a member the swarm
         # depends on (round 116).
-        from pandosi.elastic import rollback_allowed
+        from pando.elastic import rollback_allowed
         serving = [Member("a", "english", 40.0, 9, "127.0.0.1"),
                    Member("b", "english", 45.0, 0, "127.0.0.1")]
         allowed, why = rollback_allowed("a", serving, keep=1)
@@ -732,9 +732,9 @@ class TestSmoke(unittest.TestCase):
         (round 111). The floor is binding even when the latency target is
         not reachable.
         """
-        from pandosi.rootd import Coordinator
+        from pando.rootd import Coordinator
 
-        from pandosi.playbook import load_playbook
+        from pando.playbook import load_playbook
 
         coordinator = Coordinator(
             adaptive_quorum=True, quorum_floor=1, quorum_k=5,
@@ -768,7 +768,7 @@ class TestSmoke(unittest.TestCase):
 
         # A declared category decides, so a question whose *text* looks
         # innocent still gets the demanding floor (round 112).
-        tmp = Path(tempfile.mkdtemp(prefix="pandosi-category-"))
+        tmp = Path(tempfile.mkdtemp(prefix="pando-category-"))
         path = tmp / "categorised.toml"
         path.write_text(
             '[meta]\nname = "categorised"\nversion = 1\n\n'
@@ -804,11 +804,11 @@ class TestSmoke(unittest.TestCase):
         """
         import hashlib
 
-        from pandosi.spore import (ChunkStore, SporeServer, artifact_digest,
+        from pando.spore import (ChunkStore, SporeServer, artifact_digest,
                                    build_manifest_cdc, chunk_spans,
                                    generate_signing_key, pull_spore)
 
-        tmp = Path(tempfile.mkdtemp(prefix="pandosi-delta-"))
+        tmp = Path(tempfile.mkdtemp(prefix="pando-delta-"))
         base = tmp / "parent"
         child_dir = tmp / "child"
         base.mkdir()
@@ -870,10 +870,10 @@ class TestSmoke(unittest.TestCase):
         """
         import secrets
 
-        from pandosi.spore import (SporeClient, SporeServer, build_manifest,
+        from pando.spore import (SporeClient, SporeServer, build_manifest,
                                    generate_signing_key, pull_spore)
 
-        tmp = Path(tempfile.mkdtemp(prefix="pandosi-batch-"))
+        tmp = Path(tempfile.mkdtemp(prefix="pando-batch-"))
         payload = tmp / "model.bin"
         # 151 chunks: several batches, with a short final chunk.
         body = secrets.token_bytes(150 * 64 * 1024 + 1234)
@@ -919,13 +919,13 @@ class TestSmoke(unittest.TestCase):
         """
         import datetime as dt
 
-        from pandosi.grants import save_grant
-        from pandosi.reproduce import Target, plan_reproduction
-        from pandosi.spore import artifact_digest
+        from pando.grants import save_grant
+        from pando.reproduce import Target, plan_reproduction
+        from pando.spore import artifact_digest
 
-        tmp = Path(tempfile.mkdtemp(prefix="pandosi-reproduce-"))
+        tmp = Path(tempfile.mkdtemp(prefix="pando-reproduce-"))
         payload = tmp / "model.onnx"
-        payload.write_bytes(b"pandosi-reproduction-policy" * 512)
+        payload.write_bytes(b"pando-reproduction-policy" * 512)
         digest = artifact_digest(payload)
         grants = tmp / "grants.toml"
         target = Target(node_id="child", command=["true"])
@@ -977,11 +977,11 @@ class TestSmoke(unittest.TestCase):
         """`join` is the replication path; it must at least parse.
 
         A local `import os` shadowed the module import and made every
-        `pandosi.join` invocation die with UnboundLocalError, which no check
+        `pando.join` invocation die with UnboundLocalError, which no check
         covered until the reproduction loop ran it (round 105).
         """
         result = subprocess.run(
-            [sys.executable, "-m", "pandosi.join", "--help"],
+            [sys.executable, "-m", "pando.join", "--help"],
             capture_output=True, text=True, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--spore", result.stdout)
@@ -995,12 +995,12 @@ class TestSmoke(unittest.TestCase):
         """
         import nacl.signing
 
-        from pandosi.playbook import (SIGNATURE_SUFFIX, load_playbook,
+        from pando.playbook import (SIGNATURE_SUFFIX, load_playbook,
                                       load_verified_playbook,
                                       sign_playbook,
                                       verify_playbook_signature)
 
-        tmp = Path(tempfile.mkdtemp(prefix="pandosi-signed-"))
+        tmp = Path(tempfile.mkdtemp(prefix="pando-signed-"))
         path = tmp / "signed.toml"
         path.write_text(
             '[meta]\nname = "signed"\nversion = 1\n\n'
@@ -1053,9 +1053,9 @@ class TestSmoke(unittest.TestCase):
         different gate (round 100). A root with no declared lineages stays
         permissive so the synthetic harnesses keep working (round 101).
         """
-        from pandosi.playbook import load_playbook, resolve_admitted_lineages
+        from pando.playbook import load_playbook, resolve_admitted_lineages
 
-        tmp = Path(tempfile.mkdtemp(prefix="pandosi-lineage-"))
+        tmp = Path(tempfile.mkdtemp(prefix="pando-lineage-"))
         playbook_path = tmp / "declared.toml"
         playbook_path.write_text(
             '[meta]\nname = "declared"\nversion = 1\n\n'
@@ -1135,7 +1135,7 @@ class TestSmoke(unittest.TestCase):
         The coordinator reports that in ``uncalibrated_checkpoints``; the
         autonomy loop must refuse to act on it (round 100).
         """
-        from pandosi.autonomy import AutonomyLoop, Observation, RootDecider
+        from pando.autonomy import AutonomyLoop, Observation, RootDecider
 
         root = Root()
         root.start()
@@ -1218,7 +1218,7 @@ class TestSmoke(unittest.TestCase):
         target configured the operator has said latency outranks host cost;
         without one, cost leads (round 134).
         """
-        from pandosi.rootd import Coordinator
+        from pando.rootd import Coordinator
 
         def coordinator(target):
             coord = Coordinator(quorum_k=1, latency_target_ms=target)
@@ -1246,7 +1246,7 @@ class TestSmoke(unittest.TestCase):
         replica the lineage had already cast. The ceiling is the number of
         opinions, so the dial stops at 2.
         """
-        from pandosi.rootd import Coordinator
+        from pando.rootd import Coordinator
 
         coord = Coordinator(adaptive_quorum=True, quorum_floor=2,
                             quorum_k=3, latency_target_ms=100.0,

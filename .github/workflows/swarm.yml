@@ -5,12 +5,12 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/swarm.yml"
-      - "pandosi/rootd.py"
-      - "pandosi/stemd.py"
-      - "pandosi/backend.py"
-      - "pandosi/common.py"
-      - "pandosi/spore.py"
-      - "pandosi/join.py"
+      - "pando/rootd.py"
+      - "pando/stemd.py"
+      - "pando/backend.py"
+      - "pando/common.py"
+      - "pando/spore.py"
+      - "pando/join.py"
       - "tools/swarm_check.py"
       - "tools/slow_stem_check.py"
       - "tools/lan_http_check.py"
@@ -19,7 +19,7 @@ on:
       - "tools/spore_chain.py"
       - "tools/spore_dag_check.py"
       - "tools/spore_root_check.py"
-      - "pandosi/autonomy.py"
+      - "pando/autonomy.py"
       - "tools/autonomy_check.py"
   workflow_dispatch:
 
@@ -37,7 +37,7 @@ jobs:
         run: |
           set -euxo pipefail
           python -S -c "import numpy" 2>/dev/null && exit 1 || true
-          python -S -c "from pandosi.backend import MockBackend; print('mock backend import without site-packages: ok')"
+          python -S -c "from pando.backend import MockBackend; print('mock backend import without site-packages: ok')"
       - name: Run isolated tokenized swarm lifecycle
         run: python tools/swarm_check.py --yes
       - name: Verify slow-stem timeout, cooldown, and retry

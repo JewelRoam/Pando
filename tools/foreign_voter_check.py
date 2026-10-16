@@ -46,7 +46,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
 from combiner_check import MEMBER_PREFIX, choice_for, ranking  # noqa: E402
-from pandosi.common import Vote, aggregate  # noqa: E402
+from pando.common import Vote, aggregate  # noqa: E402
 
 ALPHA = 1.0
 

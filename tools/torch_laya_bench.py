@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 os.environ.setdefault("HF_HOME", str(ROOT / ".hf-cache"))
 
-from pandosi.common import DecisionRequest  # noqa: E402
+from pando.common import DecisionRequest  # noqa: E402
 
 
 def main() -> int:
@@ -34,7 +34,7 @@ def main() -> int:
         print("torch not installed; skipping torch backend bench")
         return 0
 
-    from pandosi.backend import TorchLayaBackend
+    from pando.backend import TorchLayaBackend
 
     if args.device.strip().upper() == "CUDA" and not torch.cuda.is_available():
         print("CUDA unavailable; skipping torch backend bench")

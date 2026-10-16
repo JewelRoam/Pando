@@ -99,7 +99,7 @@ def main() -> int:
     summary = {"group_a": root_a, "group_b": root_b, "steps": []}
     processes: list[subprocess.Popen] = []
 
-    with tempfile.TemporaryDirectory(prefix="pandosi-two-group-") as td:
+    with tempfile.TemporaryDirectory(prefix="pando-two-group-") as td:
         work = Path(td)
         token_a_file = work / "group-a.token"
         token_b_file = work / "group-b.token"
@@ -127,11 +127,11 @@ def main() -> int:
 
         try:
             root_a_proc = spawn(
-                [sys.executable, "-m", "pandosi.rootd",
+                [sys.executable, "-m", "pando.rootd",
                  "--port", str(port_a),
                  "--pairing-token-file", str(token_a_file)])
             root_b_proc = spawn(
-                [sys.executable, "-m", "pandosi.rootd",
+                [sys.executable, "-m", "pando.rootd",
                  "--port", str(port_b),
                  "--pairing-token-file", str(token_b_file)])
             wait_root(root_a)
@@ -147,7 +147,7 @@ def main() -> int:
                     node_id = f"group-{group}-stem-{index}"
                     ids.append(node_id)
                     spawn([
-                        sys.executable, "-m", "pandosi.stemd",
+                        sys.executable, "-m", "pando.stemd",
                         "--node-id", node_id,
                         "--checkpoint", checkpoint,
                         "--root", root_url,
@@ -157,7 +157,7 @@ def main() -> int:
             summary["steps"].append({"step": "local_quorums", "code": 0})
 
             bridge = spawn([
-                sys.executable, "-m", "pandosi.bridge",
+                sys.executable, "-m", "pando.bridge",
                 "--node-id", "group-b-bridge",
                 "--local-root", root_a,
                 "--local-pairing-token-file", str(token_a_file),

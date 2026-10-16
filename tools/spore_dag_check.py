@@ -8,17 +8,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from pandosi.spore import (SporeServer, build_manifest, ensure_parent_lineage,
+from pando.spore import (SporeServer, build_manifest, ensure_parent_lineage,
                            generate_signing_key, lineage_entry, manifest_hash,
                            store_manifest, validate_cached_lineage,
                            validate_lineage_graph)
 
 
 def main() -> int:
-    with tempfile.TemporaryDirectory(prefix="pandosi-spore-dag-") as td:
+    with tempfile.TemporaryDirectory(prefix="pando-spore-dag-") as td:
         root = Path(td)
         payload = root / "model.bin"
-        payload.write_bytes(b"pandosi-reproduction-dag" * 4096)
+        payload.write_bytes(b"pando-reproduction-dag" * 4096)
         key = generate_signing_key()
 
         origin = build_manifest({"model.bin": payload}, key,

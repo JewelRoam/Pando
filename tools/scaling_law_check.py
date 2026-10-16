@@ -142,7 +142,7 @@ def main() -> int:
     token = secrets.token_urlsafe(18)
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) \
         if sys.platform == "win32" else 0
-    work = Path(tempfile.mkdtemp(prefix="pandosi-scaling-"))
+    work = Path(tempfile.mkdtemp(prefix="pando-scaling-"))
     token_file = work / "pairing.token"
     token_file.write_text(token, encoding="utf-8")
     port = free_port()
@@ -152,7 +152,7 @@ def main() -> int:
     rows: list[dict] = []
     try:
         procs.append(subprocess.Popen(
-            [sys.executable, "-m", "pandosi.rootd", "--port", str(port),
+            [sys.executable, "-m", "pando.rootd", "--port", str(port),
              "--pairing-token-file", str(token_file),
              "--rollout-dir", str(work / "rollouts"),
              *(["--quorum-k", str(args.quorum_k)]
@@ -171,7 +171,7 @@ def main() -> int:
         for target in replica_counts:
             while started < target:
                 procs.append(subprocess.Popen(
-                    [sys.executable, "-m", "pandosi.stemd",
+                    [sys.executable, "-m", "pando.stemd",
                      "--node-id", f"replica-{started}",
                      "--root", url,
                      "--pairing-token-file", str(token_file),

@@ -22,7 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pandosi.rollout import export_training_rows
+from pando.rollout import export_training_rows
 
 
 def free_port() -> int:
@@ -121,7 +121,7 @@ def main() -> int:
                "tasks": len(tasks), "steps": []}
     processes: list[subprocess.Popen] = []
 
-    with tempfile.TemporaryDirectory(prefix="pandosi-lineage-http-") as td:
+    with tempfile.TemporaryDirectory(prefix="pando-lineage-http-") as td:
         work = Path(td)
         token_file = work / "pairing.token"
         token_file.write_text(token, encoding="utf-8")
@@ -144,7 +144,7 @@ def main() -> int:
         try:
             with root_out.open("wb") as out, root_err.open("wb") as err:
                 processes.append(subprocess.Popen(
-                    [sys.executable, "-m", "pandosi.rootd",
+                    [sys.executable, "-m", "pando.rootd",
                      "--port", str(root_port),
                      "--pairing-token-file", str(token_file),
                      "--rollout-dir", str(rollout_dir)],
@@ -154,7 +154,7 @@ def main() -> int:
 
             for checkpoint, graph in graphs:
                 processes.append(subprocess.Popen(
-                    [sys.executable, "-m", "pandosi.stemd",
+                    [sys.executable, "-m", "pando.stemd",
                      "--node-id", f"lineage-{checkpoint}",
                      "--checkpoint", checkpoint,
                      "--backend", "onnx",

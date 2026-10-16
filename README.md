@@ -138,7 +138,7 @@ above is recomputed offline from the recorded votes in `assets/votes/` by
   replicas are interchangeable voters, and ensemble diversity must come from
   the checkpoint, not the runtime
   (`tools/cross_ecosystem_check.py`, `docs/research/2026-10-14-round95.md`).
-- **Topology planner**: `pandosi/topology.py` decides replicate vs stage vs
+- **Topology planner**: `pando/topology.py` decides replicate vs stage vs
   infeasible from measured device/link numbers, splitting work in proportion
   to device speed and enforcing `L < T`, memory fit, and a minimum gain over
   replication. `tools/topology_check.py` pins it to the project's own
@@ -156,7 +156,7 @@ above is recomputed offline from the recorded votes in `assets/votes/` by
 - **Autonomy, honestly bounded**: Laya's built-in act head returns 1.0 for
   every state through *both* ecosystems, so the model cannot decide whether
   to engage — the observation and the question must come from outside.
-  `pandosi/autonomy.py` drives observe → decide → act with a two-part gate
+  `pando/autonomy.py` drives observe → decide → act with a two-part gate
   (allowed tier **and** a minimum responder count), because the coordinator's
   `min(3, len(selected))` quorum lets a lone survivor report `auto` with
   agreement 1.0. `tools/autonomy_check.py` proves both behaviours end to end
@@ -310,7 +310,7 @@ above is recomputed offline from the recorded votes in `assets/votes/` by
   the task gets hard (`tools/same_family_voter_check.py`,
   `docs/research/2026-10-15-round125.md`).
 - **The independent member is now shipped, and it found a bug in the
-  aggregation rule**: `pandosi/textmodel.py` is a 19 KB naive Bayes
+  aggregation rule**: `pando/textmodel.py` is a 19 KB naive Bayes
   (`stemd --backend text`) that any device can serve, calibrated through the
   project's own mechanism. Added as a fourth live HTTP stem it made the swarm
   *worse* — because three members cannot tie and four can, and the shipped
@@ -473,7 +473,7 @@ above is recomputed offline from the recorded votes in `assets/votes/` by
   auto row. Wiring it live caught a contract violation the offline replay
   could not: the model suggested a label outside the request's candidates, so
   a suggestion is now masked to the question's options like any member's vote
-  (`pandosi/combiner.py`, `tools/combiner_artifact_check.py`,
+  (`pando/combiner.py`, `tools/combiner_artifact_check.py`,
   `docs/research/2026-10-15-round140.md`).
 - **Three disjoint wording sets, and a combiner that beats every member on
   unseen wording**: the generator now carries a third inventory
@@ -495,7 +495,7 @@ above is recomputed offline from the recorded votes in `assets/votes/` by
   — it reproduces **82.92% full coverage** (gate 77.08%, best member 73.75%)
   and **62.34% on the 77 rows the gate declines**, with 0 of its 77
   suggestions landing on an auto row
-  (`pandosi/combiner.py`, `tools/combiner_artifact_check.py`,
+  (`pando/combiner.py`, `tools/combiner_artifact_check.py`,
   `docs/research/2026-10-15-round142.md`).
 - **A portable combiner, and the smallest real fleet measured end to end**:
   spec 3 drops the per-lineage feature cells, which both makes the artifact
@@ -511,7 +511,7 @@ above is recomputed offline from the recorded votes in `assets/votes/` by
 - **The governance layer, verified through the file an operator writes**: the
   advisory combiner is now declared and digest-pinned in the playbook
   (`[combiner] path + sha256`, refused if it changed), and
-  `tools/playbook_e2e_check.py` drives a real `pandosi root --playbook` with
+  `tools/playbook_e2e_check.py` drives a real `pando root --playbook` with
   live HTTP stems to isolate four rules — an undeclared lineage gets
   `403 ... is not declared by this playbook`, a declared bloc collapses three
   stems into `opinions=2`, a tampered combiner stops the root, and
@@ -532,7 +532,7 @@ above is recomputed offline from the recorded votes in `assets/votes/` by
 - **The cross-device path, verified on a real interface**: the session has run
   everything on loopback and reported cross-device as hardware-blocked — but
   "no second machine" is not "no second network path". With the operator's
-  `lan_listen` grant, a root advertises itself and a second `pandosi join
+  `lan_listen` grant, a root advertises itself and a second `pando join
   --lan` process **discovers it with no URL** (`found existing root at
   http://192.168.31.100:56385`), registers as the second member, and a
   decision asked over the LAN address comes back `tier=auto responded=2
@@ -784,13 +784,13 @@ above is recomputed offline from the recorded votes in `assets/votes/` by
   byte-identical); end-to-end replication from ~4.5 min to **59 s**
   (`tools/spore_transfer_check.py`,
   `docs/research/2026-10-14-round106.md`).
-- **Self-replication loop**: `pandosi/reproduce.py` orders the existing
+- **Self-replication loop**: `pando/reproduce.py` orders the existing
   pieces — Spore transfer, artifact attestation, lineage admission, and an
   operator-approved `reproduce` grant — and refuses before anything moves.
   Verified end to end: the child pulled a 1.68 GB payload over the Spore
   endpoints, attested it, passed admission, and grew the quorum 1 → 2 with a
   signed lineage record. It also found four bugs that no check covered, the
-  worst being that `pandosi.join` could not start at all
+  worst being that `pando.join` could not start at all
   (`tools/reproduce_check.py`, `docs/research/2026-10-14-round105.md`).
 - **Signed playbooks**: a playbook's canonical bytes are covered by a
   detached Ed25519 signature, which includes the admitted lineages and their
@@ -832,7 +832,7 @@ above is recomputed offline from the recorded votes in `assets/votes/` by
 - **Playbook governance**: TOML strategy layer (authored offline) drives
   consensus gating; hash-chained version history; structural policy
   enforcement (score heads are informational-only — enforced).
-- **Local-first onboarding**: `python -m pandosi.join` starts a loopback
+- **Local-first onboarding**: `python -m pando.join` starts a loopback
   root+stem with zero privilege; LAN discovery/listening requires an
   explicit, expiring grant.
 
@@ -888,18 +888,18 @@ graph TB
 
 ```bash
 pip install -e ".[runtime]"                  # source checkout
-python -m pandosi doctor --plan              # safe onboarding plan
-python -m pandosi onboard --dry-run          # no install/elevation
-python -m pandosi join                       # local root + stem (loopback)
-python -m pandosi doctor                     # capability report
+python -m pando doctor --plan              # safe onboarding plan
+python -m pando onboard --dry-run          # no install/elevation
+python -m pando join                       # local root + stem (loopback)
+python -m pando doctor                     # capability report
 python tools/dashboard.py                    # render local metrics
 ```
 
 Two commands, a real voter, nothing to download:
 
 ```bash
-python -m pandosi root --combiner assets/combiner.json   # the coordinator
-python -m pandosi join --backend text --root http://127.0.0.1:8080
+python -m pando root --combiner assets/combiner.json   # the coordinator
+python -m pando join --backend text --root http://127.0.0.1:8080
 ```
 
 `--backend text` runs the **19 KB member shipped in `assets/`** — trained from
@@ -914,15 +914,15 @@ advisory combiner when the repository carries one. Measured end to end:
 Installed-package form:
 
 ```bash
-pip install "pandosi[runtime]"
-pandosi doctor --plan
+pip install "pando[runtime]"
+pando doctor --plan
 ```
 
 Directly from GitHub before the first PyPI release:
 
 ```bash
-pip install "pandosi[runtime] @ git+https://github.com/JewelRoam/PandoSI.git@main"
-pandosi doctor --plan
+pip install "pando[runtime] @ git+https://github.com/JewelRoam/PandoSI.git@main"
+pando doctor --plan
 ```
 
 The wheel includes playbook examples, small graft suites, and calibration
@@ -935,20 +935,20 @@ with wheel, sdist, and `SHA256SUMS`.
 LAN is a separate explicit grant:
 
 ```bash
-python -m pandosi grants grant lan_listen \
+python -m pando grants grant lan_listen \
   --resource 0.0.0.0:8080 --hours 24 --yes
-python -m pandosi join --lan
+python -m pando join --lan
 ```
 
 Grant creation, revocation, allowed use, and denial are recorded in a local
-hash chain; `python -m pandosi.grants audit` verifies it.
+hash chain; `python -m pando.grants audit` verifies it.
 
 Persistent services are plan-only and require a separate autostart grant:
 
 ```bash
-python -m pandosi.grants grant service_autostart   --resource user-agent/pandosi --hours 24 --yes
-python -m pandosi.service --role root --json
-python -m pandosi.service --role root
+python -m pando.grants grant service_autostart   --resource user-agent/pando --hours 24 --yes
+python -m pando.service --role root --json
+python -m pando.service --role root
 ```
 
 On a native host, verify the full lifecycle without leaving artifacts:
@@ -965,13 +965,13 @@ Termux `sv`. Tokens are read from a file, never embedded in argv; the planner
 does not install, start, or uninstall anything.
 
 Real-model mode: install `laya`, export ONNX (tools/vendor/export_onnx.py),
-then `python -m pandosi.join --backend onnx --onnx-path artifacts/laya-en.int8.onnx`.
+then `python -m pando.join --backend onnx --onnx-path artifacts/laya-en.int8.onnx`.
 
 LAN roots generate a pairing token and protect registration, `/nodes`, `/decide`, playbook, and root Spore endpoints.
 For an additional stem, pass the token printed by the root:
 
 ```bash
-python -m pandosi.stemd --node-id stem-2 --root http://ROOT_IP:8080 \
+python -m pando.stemd --node-id stem-2 --root http://ROOT_IP:8080 \
   --pairing-token TOKEN_FROM_ROOT
 ```
 

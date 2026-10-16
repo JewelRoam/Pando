@@ -38,9 +38,9 @@ sys.path.insert(0, str(ROOT_DIR / "tools"))
 
 from cpu_free_fleet_check import (STEMS, process_tree_cpu_seconds,  # noqa: E402
                                   stem_command)
-from pandosi.combiner import Combiner  # noqa: E402
-from pandosi.common import DecisionRequest  # noqa: E402
-from pandosi.rootd import Coordinator, Root  # noqa: E402
+from pando.combiner import Combiner  # noqa: E402
+from pando.common import DecisionRequest  # noqa: E402
+from pando.rootd import Coordinator, Root  # noqa: E402
 
 
 def main() -> int:

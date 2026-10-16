@@ -2,7 +2,7 @@
 
 The first member from outside the Laya family, outside Intel, outside
 Windows: a MacBook on the LAN running the repository's naive-Bayes text
-model, attached through ``pandosi.bridge`` so the Windows root sees the
+model, attached through ``pando.bridge`` so the Windows root sees the
 whole Mac group as one HTTP stem with checkpoint ``text-nb-v1``. The Mac
 keeps its own root - we do not start one there, and the bridge direction is
 Windows -> Mac, never the reverse.
@@ -133,7 +133,7 @@ def main() -> int:
 
     print("2. the Windows root and its local member", flush=True)
     spawn("win-root", [
-        sys.executable, "-m", "pandosi.rootd", "--port", str(port),
+        sys.executable, "-m", "pando.rootd", "--port", str(port),
         "--pairing-token-file", str(token_file),
         "--playbook", str(playbook),
         "--quorum-k", "2",
@@ -141,7 +141,7 @@ def main() -> int:
     wait_until(lambda: request(f"{local_root}/pairing", timeout=2)[0] == 200,
                30, "the Windows root")
     spawn("win-igpu", [
-        sys.executable, "-m", "pandosi.stemd",
+        sys.executable, "-m", "pando.stemd",
         "--node-id", "win-igpu", "--checkpoint", "english",
         "--backend", "onnx",
         "--onnx-path", "artifacts/laya-en-static-fixed.onnx",
@@ -152,7 +152,7 @@ def main() -> int:
 
     print("3. the bridge (Windows asks the Mac; never the reverse)", flush=True)
     spawn("mac-bridge", [
-        sys.executable, "-m", "pandosi.bridge",
+        sys.executable, "-m", "pando.bridge",
         "--node-id", "mac-group",
         "--upstream-root", args.mac_root,
         "--upstream-pairing-token", args.mac_token,

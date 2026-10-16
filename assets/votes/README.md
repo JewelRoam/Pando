@@ -33,5 +33,5 @@ None. The seven Windows-side files (english/ft-v3 on D, E, F; the round-150 C ve
 
 ## Headline definitions
 
-`tools/reproduce_headlines.py` uses the same `pandosi.common.aggregate` gate and `assets/combiner.json` advisor artifact as the research tools. `assent` demotes an auto row unless the trusted member agrees with the aggregate; the demoted row is then answered by the advisor or by the witness, depending on the declared fallback. `veto` means the witness answers every row the gate does not auto-execute (round 162/164/165 semantics).
+`tools/reproduce_headlines.py` uses the same `pando.common.aggregate` gate and `assets/combiner.json` advisor artifact as the research tools. `assent` demotes an auto row unless the trusted member agrees with the aggregate; the demoted row is then answered by the advisor or by the witness, depending on the declared fallback. `veto` means the witness answers every row the gate does not auto-execute (round 162/164/165 semantics).
 

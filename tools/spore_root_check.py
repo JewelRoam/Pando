@@ -25,7 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from pandosi.spore import manifest_hash, verify_manifest  # noqa: E402
+from pando.spore import manifest_hash, verify_manifest  # noqa: E402
 
 import nacl.signing  # noqa: E402
 
@@ -65,12 +65,12 @@ def main() -> int:
     os.environ.setdefault("NO_PROXY", "127.0.0.1,localhost")
     port = free_port()
     url = f"http://127.0.0.1:{port}"
-    with tempfile.TemporaryDirectory(prefix="pandosi-spore-root-") as td:
+    with tempfile.TemporaryDirectory(prefix="pando-spore-root-") as td:
         tmp = Path(td)
         payload = tmp / "payload.onnx"
         payload.write_bytes(secrets.token_bytes(300 * 1024))
         proc = subprocess.Popen(
-            [sys.executable, "-m", "pandosi.rootd",
+            [sys.executable, "-m", "pando.rootd",
              "--port", str(port),
              "--serve-spore", str(payload),
              "--pairing-token", TOKEN,

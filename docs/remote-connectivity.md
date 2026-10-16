@@ -53,9 +53,9 @@ No account, no sudo; the URL lives exactly as long as the process.
 
 ```bash
 brew install cloudflared            # or download the static binary
-nohup cloudflared tunnel --url http://127.0.0.1:8776 > ~/.pandosi/tunnel-mailbox.log 2>&1 &
-nohup cloudflared tunnel --url http://127.0.0.1:8080 > ~/.pandosi/tunnel-4b.log 2>&1 &
-nohup cloudflared tunnel --url http://127.0.0.1:8082 > ~/.pandosi/tunnel-8b.log 2>&1 &
+nohup cloudflared tunnel --url http://127.0.0.1:8776 > ~/.pando/tunnel-mailbox.log 2>&1 &
+nohup cloudflared tunnel --url http://127.0.0.1:8080 > ~/.pando/tunnel-4b.log 2>&1 &
+nohup cloudflared tunnel --url http://127.0.0.1:8082 > ~/.pando/tunnel-8b.log 2>&1 &
 # URLs appear in each log; verify each through the public URL locally.
 ```
 

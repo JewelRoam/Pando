@@ -32,8 +32,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pandosi.autonomy import Journal  # noqa: E402
-from pandosi.elastic import ElasticSupervisor  # noqa: E402
+from pando.autonomy import Journal  # noqa: E402
+from pando.elastic import ElasticSupervisor  # noqa: E402
 
 REPLICA_MS = 30.0
 TASKS = 24
@@ -112,7 +112,7 @@ def main() -> int:
     if not args.yes:
         parser.error("this starts real rootd/stemd processes; pass --yes")
 
-    work = Path(tempfile.mkdtemp(prefix="pandosi-elastic-"))
+    work = Path(tempfile.mkdtemp(prefix="pando-elastic-"))
     token = secrets.token_urlsafe(18)
     token_file = work / "pairing.token"
     token_file.write_text(token, encoding="utf-8")
@@ -127,7 +127,7 @@ def main() -> int:
         nonlocal started
         node_id = f"replica-{started}"
         procs.append(subprocess.Popen(
-            [sys.executable, "-m", "pandosi.stemd",
+            [sys.executable, "-m", "pando.stemd",
              "--node-id", node_id, "--root", url,
              "--pairing-token-file", str(token_file),
              "--backend", "mock", "--checkpoint", "mock",
@@ -140,7 +140,7 @@ def main() -> int:
     trajectory = []
     try:
         procs.append(subprocess.Popen(
-            [sys.executable, "-m", "pandosi.rootd", "--port", str(port),
+            [sys.executable, "-m", "pando.rootd", "--port", str(port),
              "--pairing-token-file", str(token_file),
              "--adaptive-quorum", "--quorum-k", "2", "--quorum-floor", "1",
              "--latency-target-ms", str(args.target_ms),

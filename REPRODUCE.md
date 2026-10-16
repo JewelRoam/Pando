@@ -23,7 +23,7 @@ python tools/demo.py
 ## 2. Capability report
 
 ```bash
-python -m pandosi.doctor
+python -m pando.doctor
 # Expected: 10-12 checks, all [ok] on a capable machine
 ```
 
@@ -64,10 +64,10 @@ python tools/postprocess_onnx.py --in artifacts/laya-en-static-fixed.onnx \
 
 ```bash
 # Terminal 1: root with playbook
-python -m pandosi.rootd --port 8098 --playbook assets/playbook.example.toml
+python -m pando.rootd --port 8098 --playbook assets/playbook.example.toml
 
 # Terminal 2: join with multi-EU
-python -m pandosi.join --node-id aipc --multi-eu --backend onnx \
+python -m pando.join --node-id aipc --multi-eu --backend onnx \
     --onnx-path artifacts/laya-ml.onnx --root http://127.0.0.1:8098
 
 # Terminal 3: send a decision

@@ -35,10 +35,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pandosi.backend import MockBackend  # noqa: E402
-from pandosi.common import DecisionRequest  # noqa: E402
-from pandosi.rootd import Coordinator, Root  # noqa: E402
-from pandosi.stemd import Stem  # noqa: E402
+from pando.backend import MockBackend  # noqa: E402
+from pando.common import DecisionRequest  # noqa: E402
+from pando.rootd import Coordinator, Root  # noqa: E402
+from pando.stemd import Stem  # noqa: E402
 
 QUESTION = "intent"
 CANDIDATES = ["approve", "reject"]

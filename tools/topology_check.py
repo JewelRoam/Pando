@@ -1,4 +1,4 @@
-"""Scenario checks for pandosi.topology against this project's measurements.
+"""Scenario checks for pando.topology against this project's measurements.
 
 Every scenario encodes a measurement from docs/research so the planner
 cannot silently drift away from the evidence.
@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pandosi.topology import Device, Link, plan_topology  # noqa: E402
+from pando.topology import Device, Link, plan_topology  # noqa: E402
 
 
 def show(title: str, plan, expect: str) -> None:

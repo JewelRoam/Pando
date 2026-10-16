@@ -1,8 +1,8 @@
-"""pandosi join: Ring-0 one-command onboarding (zero privilege).
+"""pando join: Ring-0 one-command onboarding (zero privilege).
 
 Flow:
 1. Capability probe (graft) - what can this machine do?
-2. Browse mDNS for an existing PandoSI root (_pandosi._tcp.local.).
+2. Browse mDNS for an existing PandoSI root (_pando._tcp.local.).
 3. If a root is found: join as a stem. If not: become root AND stem.
 4. Best available backend: ONNX Laya if weights exist, else mock.
 
@@ -27,7 +27,7 @@ from .graft import assign_role, capability, enumerate_execution_units
 from .grants import require_grant
 from .rootd import Coordinator
 
-SERVICE_TYPE = "_pandosi._tcp.local."
+SERVICE_TYPE = "_pando._tcp.local."
 ARTIFACT_CANDIDATES = [
     Path("artifacts/laya-en.int8.onnx"),
     Path("artifacts/laya-en.onnx"),
@@ -78,7 +78,7 @@ def advertise_root(port: int) -> threading.Event:
     from zeroconf import ServiceInfo, Zeroconf
 
     zc = Zeroconf()
-    info = ServiceInfo(SERVICE_TYPE, f"pandosi-root-{port}.{SERVICE_TYPE}",
+    info = ServiceInfo(SERVICE_TYPE, f"pando-root-{port}.{SERVICE_TYPE}",
                        addresses=[socket.inet_aton(lan_ip())], port=port,
                        properties={"version": "1", "pairing": "required"})
     zc.register_service(info)

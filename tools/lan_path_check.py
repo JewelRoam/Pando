@@ -8,7 +8,7 @@ here, and it is the part that would break on a real deployment.
 Three properties are checked, none of which loopback exercises:
 
   1. the operator's explicit grant is required before anything binds 0.0.0.0;
-  2. a root started with --lan advertises itself, and a second `pandosi join
+  2. a root started with --lan advertises itself, and a second `pando join
      --lan` process finds it **by discovery** - no URL is passed to it;
   3. a decision asked over the machine's LAN address is answered by both
      stems, so the traffic really crosses the network interface.
@@ -33,9 +33,9 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
 
-from pandosi.common import DecisionRequest  # noqa: E402
-from pandosi.grants import audit_status  # noqa: E402
-from pandosi.join import discover_root  # noqa: E402
+from pando.common import DecisionRequest  # noqa: E402
+from pando.grants import audit_status  # noqa: E402
+from pando.join import discover_root  # noqa: E402
 
 
 def lan_ip() -> str:
@@ -73,7 +73,7 @@ def main() -> int:
     before = audit_status()
     print(f"  grants before: {json.dumps(before)[:120]}", flush=True)
     granted = subprocess.run(
-        [sys.executable, "-m", "pandosi", "grants", "grant", "lan_listen",
+        [sys.executable, "-m", "pando", "grants", "grant", "lan_listen",
          "--resource", f"0.0.0.0:{port}", "--hours", "1", "--yes"],
         cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=60)
     print(f"  grant -> exit {granted.returncode} "
@@ -85,7 +85,7 @@ def main() -> int:
     host_log = open(log_dir / "lan-root.log", "w", encoding="utf-8")
     leaflog = open(log_dir / "lan-leaf.log", "w", encoding="utf-8")
     host = subprocess.Popen(
-        [sys.executable, "-m", "pandosi", "join", "--lan", "--port",
+        [sys.executable, "-m", "pando", "join", "--lan", "--port",
          str(port), "--node-id", "host"],
         cwd=str(ROOT_DIR), stdout=host_log, stderr=subprocess.STDOUT)
     leaf = None
@@ -116,7 +116,7 @@ def main() -> int:
             failures.append("no root was discoverable over mDNS")
 
         leaf = subprocess.Popen(
-            [sys.executable, "-m", "pandosi", "join", "--lan",
+            [sys.executable, "-m", "pando", "join", "--lan",
              "--node-id", "leaf", "--pairing-token", token or ""],
             cwd=str(ROOT_DIR), stdout=leaflog, stderr=subprocess.STDOUT)
         # Both processes load their model first; wait for the root to report

@@ -9,9 +9,9 @@ from pathlib import Path
 REQUIRED_SUFFIXES = (
     "pyproject.toml",
     "README.md",
-    "pandosi/__init__.py",
-    "pandosi/cli.py",
-    "pandosi/resources.py",
+    "pando/__init__.py",
+    "pando/cli.py",
+    "pando/resources.py",
     "assets/playbook.example.toml",
     "assets/graft_suite.jsonl",
     "assets/calibration/english.json",

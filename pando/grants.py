@@ -23,7 +23,7 @@ GRANT_ACTIONS = ("lan_listen", "lab_replication", "service_autostart",
 def default_path() -> Path:
     configured = os.environ.get("PANDOSI_GRANTS")
     return Path(configured) if configured else \
-        Path.home() / ".pandosi" / "grants.toml"
+        Path.home() / ".pando" / "grants.toml"
 
 
 def _now() -> dt.datetime:
@@ -92,12 +92,12 @@ def grant_status(action: str, path: Path | str | None = None,
     elif action == "lan_listen":
         resource = "0.0.0.0:8080"
     elif action == "service_autostart":
-        resource = "user-agent/pandosi"
+        resource = "user-agent/pando"
     else:
         resource = "sandbox/lab"
     result["grants_path"] = str(grant_path)
     result["next_command"] = (
-        f"python -m pandosi.grants grant {action} --resource {resource} "
+        f"python -m pando.grants grant {action} --resource {resource} "
         "--hours 24 --yes")
     if include_audit:
         result["audit"] = audit_status(default_audit_path(grant_path))
@@ -121,16 +121,16 @@ def require_grant(action: str, path: Path | str | None = None,
                 raise PermissionError(
                     f"{action} refused: grant audit unavailable ({exc})") from exc
         return status["grant"]
-    example = (f"python -m pandosi.grants grant {action} "
+    example = (f"python -m pando.grants grant {action} "
                "--resource 0.0.0.0:8080 --hours 24 --yes")
     if action == "lab_replication":
-        example = (f"python -m pandosi.grants grant {action} "
+        example = (f"python -m pando.grants grant {action} "
                    "--resource sandbox/lab --hours 4 --yes")
     elif action == "reproduce":
-        example = (f"python -m pandosi.grants grant {action} "
+        example = (f"python -m pando.grants grant {action} "
                    "--resource <target-host-or-device> --hours 1 --yes")
     elif action == "retire":
-        example = (f"python -m pandosi.grants grant {action} "
+        example = (f"python -m pando.grants grant {action} "
                    "--resource <member-to-remove> --hours 1 --yes")
     message = (f"{action} refused: {status['status']} ({status['reason']}). "
                f"Approve explicitly with: {example}")
@@ -332,7 +332,7 @@ def revoke_grant(action: str, path: Path | str | None = None) -> bool:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--path", default=None,
-                        help="grants TOML path (default: ~/.pandosi/grants.toml)")
+                        help="grants TOML path (default: ~/.pando/grants.toml)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     grant = sub.add_parser("grant", help="record one explicit grant")

@@ -96,7 +96,7 @@ def main() -> int:
     summary = {"root_url": root_url, "tasks": len(tasks), "steps": []}
     processes: list[subprocess.Popen] = []
 
-    with tempfile.TemporaryDirectory(prefix="pandosi-lineage-ab-") as td:
+    with tempfile.TemporaryDirectory(prefix="pando-lineage-ab-") as td:
         token_file = Path(td) / "pairing.token"
         token_file.write_text(token, encoding="utf-8")
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) \
@@ -114,7 +114,7 @@ def main() -> int:
 
         try:
             processes.append(subprocess.Popen(
-                [sys.executable, "-m", "pandosi.rootd",
+                [sys.executable, "-m", "pando.rootd",
                  "--port", str(root_port),
                  "--pairing-token-file", str(token_file)],
                 cwd=ROOT, stdout=subprocess.DEVNULL,
@@ -123,7 +123,7 @@ def main() -> int:
             wait_root(root_url)
 
             processes.append(subprocess.Popen(
-                [sys.executable, "-m", "pandosi.stemd",
+                [sys.executable, "-m", "pando.stemd",
                  "--node-id", "baseline-english",
                  "--checkpoint", "english",
                  "--backend", "onnx",
@@ -135,7 +135,7 @@ def main() -> int:
                 stderr=subprocess.DEVNULL,
                 creationflags=creationflags))
             processes.append(subprocess.Popen(
-                [sys.executable, "-m", "pandosi.stemd",
+                [sys.executable, "-m", "pando.stemd",
                  "--node-id", "candidate-rlcd-v7",
                  "--checkpoint", "rlcd-v7",
                  "--backend", "onnx",

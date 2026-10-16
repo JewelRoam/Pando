@@ -30,9 +30,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pandosi.autonomy import Journal  # noqa: E402
-from pandosi.elastic import Retirer, choose_retirement  # noqa: E402
-from pandosi.grants import save_grant  # noqa: E402
+from pando.autonomy import Journal  # noqa: E402
+from pando.elastic import Retirer, choose_retirement  # noqa: E402
+from pando.grants import save_grant  # noqa: E402
 
 SLOW_MS = 400.0
 FAST_MS = 20.0
@@ -95,7 +95,7 @@ def main() -> int:
     if not args.yes:
         parser.error("this starts real rootd/stemd processes; pass --yes")
 
-    work = Path(tempfile.mkdtemp(prefix="pandosi-retire-"))
+    work = Path(tempfile.mkdtemp(prefix="pando-retire-"))
     token = secrets.token_urlsafe(18)
     token_file = work / "pairing.token"
     token_file.write_text(token, encoding="utf-8")
@@ -108,7 +108,7 @@ def main() -> int:
     procs: list[subprocess.Popen] = []
     try:
         procs.append(subprocess.Popen(
-            [sys.executable, "-m", "pandosi.rootd", "--port", str(port),
+            [sys.executable, "-m", "pando.rootd", "--port", str(port),
              "--pairing-token-file", str(token_file),
              "--rollout-dir", str(work / "rollouts")],
             cwd=ROOT, stdout=subprocess.DEVNULL,
@@ -116,7 +116,7 @@ def main() -> int:
         wait_root(url)
         for index, delay in enumerate([FAST_MS, FAST_MS, FAST_MS, SLOW_MS]):
             procs.append(subprocess.Popen(
-                [sys.executable, "-m", "pandosi.stemd",
+                [sys.executable, "-m", "pando.stemd",
                  "--node-id", f"member-{index}",
                  "--root", url,
                  "--pairing-token-file", str(token_file),

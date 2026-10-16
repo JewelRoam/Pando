@@ -268,9 +268,9 @@ def main() -> int:
     parser.add_argument("--base-url-8b", default="http://127.0.0.1:8082/v1")
     parser.add_argument("--base-url-4b", default="http://127.0.0.1:8080/v1")
     parser.add_argument("--key-file-8b", type=Path,
-                        default=Path("~/.pandosi/llm-api-8b.token"))
+                        default=Path("~/.pando/llm-api-8b.token"))
     parser.add_argument("--key-file-4b", type=Path,
-                        default=Path("~/.pandosi/llm-api.token"))
+                        default=Path("~/.pando/llm-api.token"))
     parser.add_argument("--model-8b", default="qwen3-8b-instruct")
     parser.add_argument("--model-4b", default="qwen3-4b-instruct-2507")
     parser.add_argument("--timeout", type=float, default=180.0)

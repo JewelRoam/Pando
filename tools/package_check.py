@@ -21,8 +21,8 @@ def run(command: list[str], cwd: Path) -> subprocess.CompletedProcess:
 
 def installed_script(venv: Path) -> Path:
     if os.name == "nt":
-        return venv / "Scripts" / "pandosi.exe"
-    return venv / "bin" / "pandosi"
+        return venv / "Scripts" / "pando.exe"
+    return venv / "bin" / "pando"
 
 
 def main() -> int:
@@ -34,7 +34,7 @@ def main() -> int:
     parser.add_argument("--keep", action="store_true")
     args = parser.parse_args()
 
-    temp = Path(tempfile.mkdtemp(prefix="pandosi-package-check-"))
+    temp = Path(tempfile.mkdtemp(prefix="pando-package-check-"))
     venv = temp / "venv"
     report = {"temp": str(temp), "extras": args.extras,
               "source": args.source, "steps": []}
@@ -47,7 +47,7 @@ def main() -> int:
         python = venv / ("Scripts/python.exe" if os.name == "nt"
                          else "bin/python")
         if args.source == "git":
-            requirement = "pandosi"
+            requirement = "pando"
             if args.extras:
                 requirement += f"[{args.extras}]"
             target = (
@@ -73,7 +73,7 @@ def main() -> int:
         report["version"] = version.stdout.strip()
         report["steps"].append({
             "step": "version", "code": version.returncode})
-        if version.returncode or not report["version"].startswith("pandosi "):
+        if version.returncode or not report["version"].startswith("pando "):
             raise RuntimeError(f"version failed: {version.stderr}")
 
         doctor = run([str(script), "doctor", "--json"], temp)

@@ -34,9 +34,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pandosi.backend import OnnxLayaBackend  # noqa: E402
-from pandosi.calibrate import Calibrator  # noqa: E402
-from pandosi.common import DecisionRequest, Vote, aggregate  # noqa: E402
+from pando.backend import OnnxLayaBackend  # noqa: E402
+from pando.calibrate import Calibrator  # noqa: E402
+from pando.common import DecisionRequest, Vote, aggregate  # noqa: E402
 
 LINEAGES = {
     "english": ("convaiinnovations/laya", "artifacts/laya-en.onnx"),

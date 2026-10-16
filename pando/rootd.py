@@ -669,7 +669,7 @@ class Coordinator:
         if quorum:
             with ThreadPoolExecutor(
                     max_workers=len(quorum),
-                    thread_name_prefix="pandosi-quorum") as pool:
+                    thread_name_prefix="pando-quorum") as pool:
                 results = list(pool.map(
                     lambda item: self._call_stem(item[0], item[1], payload),
                     quorum))

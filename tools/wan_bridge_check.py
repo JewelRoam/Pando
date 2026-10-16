@@ -38,8 +38,8 @@ def load_island_url() -> str:
 
 def main() -> int:
     sys.path.insert(0, str(ROOT))
-    from pandosi.common import DecisionRequest
-    from pandosi.rootd import Coordinator, Root
+    from pando.common import DecisionRequest
+    from pando.rootd import Coordinator, Root
 
     island = load_island_url()
     token = (WORK / "mac-root.token").read_text(encoding="ascii").strip()
@@ -47,7 +47,7 @@ def main() -> int:
                                           initial_stem_timeout=120.0))
     parent.start()
     bridge = subprocess.Popen(
-        [sys.executable, "-m", "pandosi.bridge",
+        [sys.executable, "-m", "pando.bridge",
          "--node-id", "mac-island",
          "--upstream-root", island,
          "--upstream-pairing-token", token,

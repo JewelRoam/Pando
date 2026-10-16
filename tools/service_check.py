@@ -23,8 +23,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pandosi.grants import append_audit_entry, grant_status, save_grant
-from pandosi.service import SUPPORTED, build_service_plan, detect_platform
+from pando.grants import append_audit_entry, grant_status, save_grant
+from pando.service import SUPPORTED, build_service_plan, detect_platform
 
 
 def run(command: list[str], timeout: float = 20) -> tuple[int, str]:
@@ -98,7 +98,7 @@ def audit_grant(grants_path: Path, decision: str, reason: str) -> None:
 def check(platform: str, args: argparse.Namespace) -> tuple[dict, Path | None]:
     port = args.port or available_port()
     stamp = dt.datetime.now().strftime("%Y%m%dT%H%M%S")
-    task_name = f"pandosi-servicecheck-{stamp}-{secrets.token_hex(3)}"
+    task_name = f"pando-servicecheck-{stamp}-{secrets.token_hex(3)}"
     summary = {
         "platform": platform,
         "task_name": task_name,
@@ -109,14 +109,14 @@ def check(platform: str, args: argparse.Namespace) -> tuple[dict, Path | None]:
     keep_path: Path | None = None
 
     with tempfile.TemporaryDirectory(
-            prefix=f"pandosi-servicecheck-{platform}-") as td:
+            prefix=f"pando-servicecheck-{platform}-") as td:
         work = Path(td)
         grants_path = work / "grants.toml"
         token_path = work / "root-pairing.token"
         config_dir = work / "service-config"
         token_path.write_text(secrets.token_urlsafe(24), encoding="utf-8")
         expires = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=15)
-        save_grant("service_autostart", "user-agent/pandosi-check",
+        save_grant("service_autostart", "user-agent/pando-check",
                    "temporary-loopback-check", "service-check",
                    expires.isoformat(), path=grants_path)
         plan = build_service_plan(

@@ -14,7 +14,7 @@ This is a research repository. The bar for a change is not "it runs" - it is
    go in.
 4. **Smoke over suites.** Tests are for invariants: `python -m unittest
    discover -s tests` (29 tests, stdlib-only) plus
-   `python -m py_compile pandosi/*.py tools/*.py`. Prefer one meaningful
+   `python -m py_compile pando/*.py tools/*.py`. Prefer one meaningful
    end-to-end check over a pile of unit tests.
 
 ## Workflow

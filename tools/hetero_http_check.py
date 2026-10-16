@@ -180,7 +180,7 @@ def main() -> int:
         "steps": [],
     }
 
-    with tempfile.TemporaryDirectory(prefix="pandosi-hetero-") as td:
+    with tempfile.TemporaryDirectory(prefix="pando-hetero-") as td:
         work = Path(td)
         token = secrets.token_urlsafe(24)
         token_file = work / "pairing.token"
@@ -207,7 +207,7 @@ def main() -> int:
         try:
             with root_out.open("wb") as out, root_err.open("wb") as err:
                 root_proc = subprocess.Popen(
-                    [str(host_python), "-m", "pandosi.rootd",
+                    [str(host_python), "-m", "pando.rootd",
                      "--port", str(root_port),
                      "--pairing-token-file", str(token_file)],
                     cwd=ROOT, stdout=out, stderr=err, env=base_env,
@@ -229,7 +229,7 @@ def main() -> int:
                 err_path = work / f"{worker['node_id']}.err"
                 with out_path.open("wb") as out, err_path.open("wb") as err:
                     proc = subprocess.Popen(
-                        [str(worker["python"]), "-m", "pandosi.stemd",
+                        [str(worker["python"]), "-m", "pando.stemd",
                          "--node-id", worker["node_id"],
                          "--root", root_url,
                          "--pairing-token-file", str(token_file),

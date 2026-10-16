@@ -7,7 +7,7 @@ confound in the project's own measurement, because the shape a fleet actually
 deploys is separate `stemd` processes.
 
 This runs the same units-by-quorum phases against stems started the way
-production starts them: `python -m pandosi.stemd --root <url>` per unit, each
+production starts them: `python -m pando.stemd --root <url>` per unit, each
 with its own interpreter, its own ONNX/OpenVINO session and its own HTTP
 server, heartbeating to a root that is the only shared thing in the picture.
 
@@ -33,8 +33,8 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
 
-from pandosi.common import DecisionRequest  # noqa: E402
-from pandosi.rootd import Coordinator, Root  # noqa: E402
+from pando.common import DecisionRequest  # noqa: E402
+from pando.rootd import Coordinator, Root  # noqa: E402
 
 UNITS = [
     ("en-cpu", "CPU", "artifacts/laya-en.onnx"),
@@ -47,7 +47,7 @@ REPO = "convaiinnovations/laya"
 def spawn_unit(name: str, device: str, path: str, root_url: str,
                log_dir: Path) -> subprocess.Popen:
     command = [
-        sys.executable, "-m", "pandosi.stemd",
+        sys.executable, "-m", "pando.stemd",
         "--node-id", name,
         "--checkpoint", "english",
         "--backend", "onnx",

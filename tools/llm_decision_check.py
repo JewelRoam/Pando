@@ -9,7 +9,7 @@ Typical use from the repository root::
 
     .venv/bin/python tools/llm_decision_check.py \
         --base-url http://127.0.0.1:8080/v1 \
-        --api-key-file ~/.pandosi/llm-api.token \
+        --api-key-file ~/.pando/llm-api.token \
         --model qwen3-4b-instruct-2507
 
 The script writes ``metrics/llm-votes-d.json`` and prints a compact summary
@@ -329,7 +329,7 @@ def main() -> int:
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--base-url", default="http://127.0.0.1:8080/v1")
     parser.add_argument("--api-key-file", type=Path,
-                        default=Path("~/.pandosi/llm-api.token"))
+                        default=Path("~/.pando/llm-api.token"))
     parser.add_argument("--model", default="qwen3-4b-instruct-2507")
     parser.add_argument("--timeout", type=float, default=180.0)
     parser.add_argument("--max-tokens", type=int, default=64,

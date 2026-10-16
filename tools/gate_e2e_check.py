@@ -27,7 +27,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pandosi.autonomy import AutonomyLoop, Journal, Observation, RootDecider
+from pando.autonomy import AutonomyLoop, Journal, Observation, RootDecider
 
 LINEAGES = [
     ("english", "convaiinnovations/laya", "artifacts/laya-en.onnx"),
@@ -131,13 +131,13 @@ def main() -> int:
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) \
         if sys.platform == "win32" else 0
 
-    with tempfile.TemporaryDirectory(prefix="pandosi-gate-e2e-") as td:
+    with tempfile.TemporaryDirectory(prefix="pando-gate-e2e-") as td:
         work = Path(td)
         token_file = work / "pairing.token"
         token_file.write_text(token, encoding="utf-8")
         try:
             procs.append(subprocess.Popen(
-                [sys.executable, "-m", "pandosi.rootd",
+                [sys.executable, "-m", "pando.rootd",
                  "--port", str(port),
                  "--pairing-token-file", str(token_file),
                  "--rollout-dir", str(work / "rollouts")],
@@ -146,7 +146,7 @@ def main() -> int:
             wait_root(root_url)
             for name, repo, onnx in LINEAGES:
                 procs.append(subprocess.Popen(
-                    [sys.executable, "-m", "pandosi.stemd",
+                    [sys.executable, "-m", "pando.stemd",
                      "--node-id", name,
                      "--root", root_url,
                      "--pairing-token-file", str(token_file),

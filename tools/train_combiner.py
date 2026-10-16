@@ -1,4 +1,4 @@
-"""Fit `pandosi.combiner.Combiner` and write it as a shippable artifact.
+"""Fit `pando.combiner.Combiner` and write it as a shippable artifact.
 
 Round 139 measured the fitted combiner's value offline; this turns it into a
 file a root can load (`assets/combiner.json`), so the same rule that reached
@@ -22,8 +22,8 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pandosi.combiner import Combiner, features  # noqa: E402
-from pandosi.textmodel import TextModel  # noqa: E402
+from pando.combiner import Combiner, features  # noqa: E402
+from pando.textmodel import TextModel  # noqa: E402
 
 
 def votes_of(row: dict) -> list[tuple[str, str, float]]:

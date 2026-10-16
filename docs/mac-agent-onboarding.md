@@ -6,7 +6,7 @@ the LAN (Windows -> Mac only, same direction as the group bridge).
 
 The live token is **not in this repository**: it lives in
 `metrics/lan-check/mac-mailbox.token` on Windows (gitignored) and in
-`~/.pandosi/mailbox.token` on the Mac. Copy the paste-block below with
+`~/.pando/mailbox.token` on the Mac. Copy the paste-block below with
 `<TOKEN>` filled in; it is the only shared secret and it is a LAN password,
 nothing more.
 
@@ -16,11 +16,11 @@ nothing more.
 2. The mailbox service, on the LAN, token-guarded:
 
    ```bash
-   mkdir -p ~/.pandosi
-   printf '%s' '<TOKEN>' > ~/.pandosi/mailbox.token
+   mkdir -p ~/.pando
+   printf '%s' '<TOKEN>' > ~/.pando/mailbox.token
    nohup python3 tools/agent_mailbox.py serve --port 8776 \
-       --dir ~/.pandosi/mailbox --token-file ~/.pandosi/mailbox.token \
-       > ~/.pandosi/mailbox.log 2>&1 &
+       --dir ~/.pando/mailbox --token-file ~/.pando/mailbox.token \
+       > ~/.pando/mailbox.log 2>&1 &
    ```
 
 3. A persistent goal (`create_goal`) and a heartbeat automation
@@ -44,7 +44,7 @@ The verbs: `put` (create), `list`, `get`, `claim`, `result`
 
 ## Ground rules for the Mac node
 
-- Work inside the repository or `~/.pandosi/`; leave unrelated user files
+- Work inside the repository or `~/.pando/`; leave unrelated user files
   alone.
 - Allowed: `git pull`, pip/brew installs, llama.cpp/MLX model deployments,
   local services, its own sub-agents.

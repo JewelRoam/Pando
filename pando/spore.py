@@ -575,7 +575,7 @@ def generate_signing_key() -> nacl.signing.SigningKey:
 # Spore transfer (Phase 2): serve + pull with verify-on-arrival.
 #
 # Sandbox gate (THREAT-MODEL.md): pull_spore refuses to run unless the caller
-# passes sandbox_confirmed=True - which pandosi-lab sets only after detecting
+# passes sandbox_confirmed=True - which pando-lab sets only after detecting
 # a container runtime. The protocol itself has no exploit surface: it only
 # serves files the operator explicitly registered.
 # ---------------------------------------------------------------------------

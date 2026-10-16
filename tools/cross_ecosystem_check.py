@@ -27,8 +27,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 os.environ.setdefault("HF_HOME", str(ROOT / ".hf-cache"))
 
-from pandosi.backend import OnnxLayaBackend, TorchLayaBackend  # noqa: E402
-from pandosi.common import DecisionRequest, aggregate  # noqa: E402
+from pando.backend import OnnxLayaBackend, TorchLayaBackend  # noqa: E402
+from pando.common import DecisionRequest, aggregate  # noqa: E402
 
 
 def load_tasks(path: Path) -> list[dict]:

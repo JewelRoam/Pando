@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pandosi"
-version = "0.1.0"
+version = "0.2.0"
 description = "Elastically scalable, heterogeneous, self-replicating unified intelligence (defensive research)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -25,23 +25,23 @@ runtime = [
 ]
 
 [project.scripts]
-pandosi = "pandosi.cli:main"
+pandosi = "pando.cli:main"
 
 [project.urls]
 Repository = "https://github.com/JewelRoam/PandoSI"
 "Research log" = "https://github.com/JewelRoam/PandoSI/blob/main/docs/research/INDEX.md"
 
 [tool.setuptools]
-packages = ["pandosi"]
+packages = ["pando"]
 
 [tool.setuptools.data-files]
-"share/pandosi/assets" = [
+"share/pando/assets" = [
   "assets/*.jsonl",
   "assets/*.toml",
 ]
-"share/pandosi/assets/registry" = [
+"share/pando/assets/registry" = [
   "assets/registry/*.json",
 ]
-"share/pandosi/assets/calibration" = [
+"share/pando/assets/calibration" = [
   "assets/calibration/*.json",
 ]

@@ -19,7 +19,7 @@ def main() -> int:
     parser.add_argument("--holdout-out",
                         default=str(ROOT / "assets" / "graft_holdout.jsonl"))
     parser.add_argument("--holdout-frac", type=float, default=0.25)
-    parser.add_argument("--seed", default="pandosi-2026")
+    parser.add_argument("--seed", default="pando-2026")
     args = parser.parse_args()
 
     tasks = [

@@ -27,8 +27,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pandosi.backend import MockBackend
-from pandosi.stemd import Stem
+from pando.backend import MockBackend
+from pando.stemd import Stem
 
 
 def free_port() -> int:
@@ -154,7 +154,7 @@ def main() -> int:
     summary = {"root_url": root_url, "proxy_url": proxy_url, "steps": []}
     processes: list[subprocess.Popen] = []
 
-    with tempfile.TemporaryDirectory(prefix="pandosi-remote-latency-") as td:
+    with tempfile.TemporaryDirectory(prefix="pando-remote-latency-") as td:
         token_file = Path(td) / "pairing.token"
         token_file.write_text(token, encoding="utf-8")
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) \
@@ -177,7 +177,7 @@ def main() -> int:
         try:
             with root_out.open("wb") as out, root_err.open("wb") as err:
                 processes.append(subprocess.Popen(
-                    [sys.executable, "-m", "pandosi.rootd",
+                    [sys.executable, "-m", "pando.rootd",
                      "--port", str(root_port),
                      "--pairing-token-file", str(token_file),
                      "--initial-stem-timeout", "0.5",
@@ -188,7 +188,7 @@ def main() -> int:
 
             for index, checkpoint in enumerate(("en", "ml", "td")):
                 processes.append(subprocess.Popen(
-                    [sys.executable, "-m", "pandosi.stemd",
+                    [sys.executable, "-m", "pando.stemd",
                      "--node-id", f"fast-{index}",
                      "--checkpoint", checkpoint,
                      "--root", root_url,

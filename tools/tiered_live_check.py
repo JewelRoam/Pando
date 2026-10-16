@@ -29,9 +29,9 @@ sys.path.insert(0, str(ROOT_DIR))
 sys.path.insert(0, str(ROOT_DIR / "tools"))
 
 from cpu_free_fleet_check import process_tree_cpu_seconds  # noqa: E402
-from pandosi.combiner import Combiner  # noqa: E402
-from pandosi.common import DecisionRequest  # noqa: E402
-from pandosi.rootd import Coordinator, Root  # noqa: E402
+from pando.combiner import Combiner  # noqa: E402
+from pando.common import DecisionRequest  # noqa: E402
+from pando.rootd import Coordinator, Root  # noqa: E402
 
 MEMBERS = ["english", "ft-v3", "mac-llm"]
 
@@ -44,16 +44,16 @@ def stem_commands(root_url: str, with_8b: bool = False,
     venv = str(ROOT_DIR / ".venv-cuda" / "Scripts" / "python.exe")
     key_file = ROOT_DIR / "metrics" / "lan-check" / "llm-api.token"
     commands = {
-        "igpu": [python, "-m", "pandosi.stemd", "--node-id", "igpu",
+        "igpu": [python, "-m", "pando.stemd", "--node-id", "igpu",
                  "--checkpoint", "english", "--backend", "onnx",
                  "--onnx-path", "artifacts/laya-en-static-fixed.onnx",
                  "--repo", "convaiinnovations/laya", "--device", "GPU",
                  "--pad-to", "256", "--root", root_url],
-        "dgpu": [venv, "-m", "pandosi.stemd", "--node-id", "dgpu",
+        "dgpu": [venv, "-m", "pando.stemd", "--node-id", "dgpu",
                  "--checkpoint", "ft-v3", "--backend", "laya",
                  "--model", "artifacts/rlcd-fi-v3", "--device", "cuda",
                  "--root", root_url],
-        "macllm": [python, "-m", "pandosi.stemd", "--node-id", "mac-llm",
+        "macllm": [python, "-m", "pando.stemd", "--node-id", "mac-llm",
                    "--checkpoint", "mac-llm", "--backend", "openai",
                    "--openai-url", llm4b_url,
                    "--openai-key-file", str(key_file),
@@ -62,7 +62,7 @@ def stem_commands(root_url: str, with_8b: bool = False,
     }
     if with_8b:
         commands["macllm8b"] = [
-            python, "-m", "pandosi.stemd", "--node-id", "mac-llm-8b",
+            python, "-m", "pando.stemd", "--node-id", "mac-llm-8b",
             "--checkpoint", "mac-llm-8b", "--backend", "openai",
             "--openai-url", llm8b_url,
             "--openai-key-file",

@@ -133,7 +133,7 @@ def main() -> int:
                      "initial_stems": stem_ids[:args.initial_stems],
                      "steps": []}
 
-    with tempfile.TemporaryDirectory(prefix="pandosi-swarmcheck-") as td:
+    with tempfile.TemporaryDirectory(prefix="pando-swarmcheck-") as td:
         work = Path(td)
         token = secrets.token_urlsafe(24)
         token_file = work / "pairing.token"
@@ -163,7 +163,7 @@ def main() -> int:
             root_err = work / "rootd.err"
             with root_out.open("wb") as out, root_err.open("wb") as err:
                 root_proc = subprocess.Popen(
-                    [python, "-m", "pandosi.rootd", "--port",
+                    [python, "-m", "pando.rootd", "--port",
                      str(root_port), "--pairing-token-file",
                      str(token_file)],
                     cwd=ROOT, stdout=out, stderr=err,
@@ -183,7 +183,7 @@ def main() -> int:
             initial_checkpoints = checkpoints[:args.initial_stems]
             for stem_id, checkpoint in zip(initial_ids, initial_checkpoints):
                 stem_procs.append(subprocess.Popen(
-                    [python, "-m", "pandosi.stemd", "--node-id", stem_id,
+                    [python, "-m", "pando.stemd", "--node-id", stem_id,
                      "--checkpoint", checkpoint, "--root", root_url,
                      "--pairing-token-file", str(token_file)],
                     cwd=ROOT, stdout=subprocess.DEVNULL,
@@ -213,7 +213,7 @@ def main() -> int:
                     stem_ids[args.initial_stems:],
                     checkpoints[args.initial_stems:]):
                 stem_procs.append(subprocess.Popen(
-                    [python, "-m", "pandosi.stemd", "--node-id", stem_id,
+                    [python, "-m", "pando.stemd", "--node-id", stem_id,
                      "--checkpoint", checkpoint, "--root", root_url,
                      "--pairing-token-file", str(token_file)],
                     cwd=ROOT, stdout=subprocess.DEVNULL,

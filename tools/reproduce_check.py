@@ -9,7 +9,7 @@ its artifact digest, then runs the reproduction controller three times:
 3. with both -> the child pulls the payload over the Spore endpoints,
    attests the artifact, registers, and the quorum grows.
 
-The child is launched as ``python -m pandosi.join --spore``, which is the
+The child is launched as ``python -m pando.join --spore``, which is the
 real replication path (pull, verify, become a worker), so case 3 exercises
 transfer, attestation, lineage admission and elastic membership together.
 """
@@ -33,11 +33,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pandosi.grants import save_grant  # noqa: E402
-from pandosi.playbook import load_playbook, resolve_admitted_lineages, \
+from pando.grants import save_grant  # noqa: E402
+from pando.playbook import load_playbook, resolve_admitted_lineages, \
     sign_playbook  # noqa: E402
-from pandosi.reproduce import Target, plan_reproduction, reproduce  # noqa: E402
-from pandosi.spore import artifact_digest, generate_signing_key  # noqa: E402
+from pando.reproduce import Target, plan_reproduction, reproduce  # noqa: E402
+from pando.spore import artifact_digest, generate_signing_key  # noqa: E402
 
 LINEAGE = "english"
 
@@ -63,7 +63,7 @@ def wait_root(url: str, deadline: float = 30.0) -> None:
 
 def child_command(root_url: str, token_file: Path, node_id: str,
                   lineage: str) -> list[str]:
-    return [sys.executable, "-m", "pandosi.join",
+    return [sys.executable, "-m", "pando.join",
             "--node-id", node_id,
             "--spore", "--root", root_url,
             "--sandbox-confirmed",
@@ -85,7 +85,7 @@ def main() -> int:
 
     digest = artifact_digest(graph)
     print(f"payload {graph.name} digest {digest}")
-    work = Path(tempfile.mkdtemp(prefix="pandosi-reproduce-"))
+    work = Path(tempfile.mkdtemp(prefix="pando-reproduce-"))
     grants_path = work / "grants.toml"
     playbook_path = work / "playbook.toml"
     playbook_path.write_text(
@@ -109,7 +109,7 @@ def main() -> int:
     root_log = (work / "rootd.log").open("wb")
     # One parent voter, so the swarm exists before it reproduces.
     parent = subprocess.Popen(
-        [sys.executable, "-m", "pandosi.stemd", "--node-id", "parent",
+        [sys.executable, "-m", "pando.stemd", "--node-id", "parent",
          "--root", root_url, "--pairing-token-file", str(token_file),
          "--backend", "mock", "--checkpoint", "mock"],
         cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -117,7 +117,7 @@ def main() -> int:
     children: list[subprocess.Popen] = []
     try:
         subprocess.Popen(
-            [sys.executable, "-m", "pandosi.rootd", "--port", str(port),
+            [sys.executable, "-m", "pando.rootd", "--port", str(port),
              "--playbook", str(playbook_path),
              "--playbook-key", key.verify_key.encode().hex(),
              "--pairing-token", token,

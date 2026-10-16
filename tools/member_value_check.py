@@ -38,9 +38,9 @@ from member_portfolio_check import (  # noqa: E402
     fit_temperature,
     phi,
 )
-from pandosi.calibrate import apply_temperature  # noqa: E402
-from pandosi.common import DecisionRequest, Vote, aggregate  # noqa: E402
-from pandosi.textmodel import TextModel  # noqa: E402
+from pando.calibrate import apply_temperature  # noqa: E402
+from pando.common import DecisionRequest, Vote, aggregate  # noqa: E402
+from pando.textmodel import TextModel  # noqa: E402
 
 
 def judge(rows: list[dict], members: list[str]) -> tuple[float, int, float]:

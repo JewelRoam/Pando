@@ -1,4 +1,4 @@
-"""pandosi lab: sandbox-gated replication experiments (Ring 2).
+"""pando lab: sandbox-gated replication experiments (Ring 2).
 
 Per THREAT-MODEL.md, Spore experiments may only run where the target is
 disposable by construction: inside a container or VM. This module is the
@@ -41,7 +41,7 @@ def require_sandbox() -> dict:
     info = detect_sandbox()
     if not info["sandboxed"]:
         raise PermissionError(
-            "pandosi lab refused: no disposable sandbox detected "
+            "pando lab refused: no disposable sandbox detected "
             f"(kind={info['kind']}). Spore experiments require a container "
             "or VM - see THREAT-MODEL.md. Run inside Docker with "
             "PANDOSI_CONTAINER=1 or a WSL distro.")
@@ -60,7 +60,7 @@ def run_lab() -> dict:
                         pull_spore)
 
     key = generate_signing_key()
-    tmp = Path(tempfile.mkdtemp(prefix="pandosi-lab-"))
+    tmp = Path(tempfile.mkdtemp(prefix="pando-lab-"))
     payload = tmp / "payload.bin"
     payload.write_bytes(secrets.token_bytes(2 * 1024 * 1024))
 

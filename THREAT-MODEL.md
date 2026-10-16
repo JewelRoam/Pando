@@ -23,7 +23,7 @@ software on third-party machines.
    `/register`, `/nodes`, `/decide`, playbook reads, and root-served
    Spore endpoints fail closed unless it is presented.
 7. **Expiring capability grants**: LAN listeners and lab replication require
-   an operator-created, expiring `~/.pandosi/grants.toml` entry; missing or
+   an operator-created, expiring `~/.pando/grants.toml` entry; missing or
    expired grants fail closed.
 8. **Tamper-evident grant audit**: creation, revocation, allowed uses, and
    denials append to a local hash chain; an invalid audit chain blocks

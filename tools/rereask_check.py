@@ -36,7 +36,7 @@ from ensemble_value_check import (  # noqa: E402
     load_backends,
     run_task,
 )
-from pandosi.calibrate import Calibrator  # noqa: E402
+from pando.calibrate import Calibrator  # noqa: E402
 
 
 def plain_majority(row: dict) -> str | None:

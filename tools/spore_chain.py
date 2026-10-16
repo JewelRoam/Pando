@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from pandosi.spore import (SporeServer, append_lineage, build_manifest,
+from pando.spore import (SporeServer, append_lineage, build_manifest,
                            ensure_parent_lineage, generate_signing_key,
                            manifest_hash, pull_spore, store_manifest,
                            validate_cached_lineage, validate_reproduction,
@@ -27,7 +27,7 @@ from pandosi.spore import (SporeServer, append_lineage, build_manifest,
 
 def main() -> None:
     # 1. Create the original payload
-    tmp = Path(tempfile.mkdtemp(prefix="pandosi-chain-"))
+    tmp = Path(tempfile.mkdtemp(prefix="pando-chain-"))
     payload = tmp / "origin" / "model.bin"
     payload.parent.mkdir(parents=True, exist_ok=True)
     original_data = secrets.token_bytes(2 * 1024 * 1024)  # 2MB

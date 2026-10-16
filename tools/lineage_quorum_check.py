@@ -27,7 +27,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pandosi.common import Vote, aggregate  # noqa: E402
+from pando.common import Vote, aggregate  # noqa: E402
 
 
 def quorum(names: list[str]) -> list[tuple[str, str]]:

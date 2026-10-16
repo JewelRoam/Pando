@@ -31,7 +31,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
 from improved_fleet_check import decide  # noqa: E402
-from pandosi.combiner import Combiner  # noqa: E402
+from pando.combiner import Combiner  # noqa: E402
 
 # Two standard errors of a proportion at n=240 around p=0.9, the smallest
 # difference this evaluation can resolve on its own.

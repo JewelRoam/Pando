@@ -6,7 +6,7 @@ opinions an auto-execution needs (corroboration_floor), and now which advisory
 combiner is pinned. Each was measured in isolation, programmatically; none had
 been exercised through the file an operator actually writes.
 
-This starts `python -m pandosi root --playbook <file>` and drives real HTTP
+This starts `python -m pando root --playbook <file>` and drives real HTTP
 stems against it, checking four things at once:
 
   - a lineage that is not admitted is refused at registration;
@@ -36,8 +36,8 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
 
-from pandosi.common import DecisionRequest  # noqa: E402
-from pandosi.stemd import Stem, heartbeat_loop  # noqa: E402
+from pando.common import DecisionRequest  # noqa: E402
+from pando.stemd import Stem, heartbeat_loop  # noqa: E402
 
 
 def free_port() -> int:
@@ -101,7 +101,7 @@ def main() -> int:
     log_path = ROOT_DIR / "metrics" / "ensemble-checks"
     log = open(log_path / "playbook-root.log", "w", encoding="utf-8")
     root = subprocess.Popen(
-        [sys.executable, "-m", "pandosi", "root", "--port", str(port),
+        [sys.executable, "-m", "pando", "root", "--port", str(port),
          "--pairing-token", token, "--playbook", str(playbook)],
         cwd=str(ROOT_DIR), stdout=log, stderr=subprocess.STDOUT)
     stems: list[Stem] = []
@@ -121,7 +121,7 @@ def main() -> int:
             failures.append("an undeclared lineage was admitted")
 
         # 2. two lineages the playbook declares as one opinion, plus a third
-        from pandosi.backend import MockBackend
+        from pando.backend import MockBackend
         for name, checkpoint, choice in (
                 ("a-english", "english", "refund"),
                 ("b-multilingual", "multilingual", "complaint"),
@@ -167,7 +167,7 @@ def main() -> int:
                         .replace(digest, "0" * 64), encoding="utf-8")
     port = free_port()
     check = subprocess.run(
-        [sys.executable, "-m", "pandosi", "root", "--port", str(port),
+        [sys.executable, "-m", "pando", "root", "--port", str(port),
          "--playbook", str(tampered)],
         cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=60)
     refused = "sha256" in (check.stdout + check.stderr)
@@ -179,12 +179,12 @@ def main() -> int:
 
     # 4. corroboration_floor, isolated: one opinion agreeing with itself is
     #    agreement 1.0, so only the floor can refuse it auto-execution.
-    from pandosi.backend import MockBackend
+    from pando.backend import MockBackend
     port = free_port()
     url = f"http://127.0.0.1:{port}"
     log = open(log_path / "playbook-solo.log", "w", encoding="utf-8")
     root = subprocess.Popen(
-        [sys.executable, "-m", "pandosi", "root", "--port", str(port),
+        [sys.executable, "-m", "pando", "root", "--port", str(port),
          "--pairing-token", token, "--playbook", str(playbook)],
         cwd=str(ROOT_DIR), stdout=log, stderr=subprocess.STDOUT)
     solo = Stem("solo", MockBackend("solo", "english",

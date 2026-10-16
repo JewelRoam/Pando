@@ -17,7 +17,7 @@ import torch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pandosi.common import canonical_question
+from pando.common import canonical_question
 
 
 def labeled_choice_rows(suite_path: Path) -> list[dict]:

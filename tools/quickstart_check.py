@@ -5,8 +5,8 @@ The session's decision work ended with a swarm that beats its best member
 This measures the on-ramp those enable: two commands, no artifacts to fetch,
 no accelerator, no privileges.
 
-    python -m pandosi root --combiner assets/combiner.json
-    python -m pandosi join --backend text --root <url>
+    python -m pando root --combiner assets/combiner.json
+    python -m pando join --backend text --root <url>
 
 `join` now falls back to the text member when no ONNX weights are present
 (before this round it fell back to a mock, which votes from a hash), and it
@@ -34,7 +34,7 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
 
-from pandosi.common import DecisionRequest  # noqa: E402
+from pando.common import DecisionRequest  # noqa: E402
 
 
 def free_port() -> int:
@@ -83,7 +83,7 @@ def main() -> int:
     root_url = f"http://127.0.0.1:{port}"
     started = time.perf_counter()
     root = subprocess.Popen(
-        [sys.executable, "-m", "pandosi", "root", "--port", str(port),
+        [sys.executable, "-m", "pando", "root", "--port", str(port),
          "--pairing-token", token, "--combiner", "assets/combiner.json"],
         cwd=str(ROOT_DIR), stdout=root_log, stderr=subprocess.STDOUT)
     join = None
@@ -94,7 +94,7 @@ def main() -> int:
 
         joined = time.perf_counter()
         join = subprocess.Popen(
-            [sys.executable, "-m", "pandosi", "join", "--backend", "text",
+            [sys.executable, "-m", "pando", "join", "--backend", "text",
              "--node-id", "guest", "--root", root_url,
              "--pairing-token", token],
             cwd=str(ROOT_DIR), stdout=join_log, stderr=subprocess.STDOUT)

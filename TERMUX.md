@@ -11,10 +11,10 @@ Android; the import warning is harmless). No app packaging, no root.
 pkg update && pkg install python
 pip install pynacl zeroconf onnxruntime
 # 3. Copy the repo (from a PC on the same LAN):
-#    on PC:  scp -r D:/PandoSI/pandosi box:/data/data/com.termux/files/home/
+#    on PC:  scp -r D:/PandoSI/pando box:/data/data/com.termux/files/home/
 # 4. Join the swarm:
 cd ~/PandoSI  # or wherever
-python -m pandosi.join --node-id tvbox1 --root http://<root-ip>:8080
+python -m pando.join --node-id tvbox1 --root http://<root-ip>:8080
 ```
 
 ## What to expect

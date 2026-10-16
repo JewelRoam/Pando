@@ -210,7 +210,7 @@ def main() -> None:
     parser.add_argument("--openai-url", default="http://127.0.0.1:8080/v1",
                         help="base URL for --backend openai "
                              "(OpenAI-compatible /chat/completions)")
-    parser.add_argument("--openai-key-file", default="~/.pandosi/llm-api.token",
+    parser.add_argument("--openai-key-file", default="~/.pando/llm-api.token",
                         help="file containing the API key for --backend "
                              "openai (empty string disables auth)")
     parser.add_argument("--openai-model", default="qwen3-4b-instruct-2507",

@@ -34,7 +34,7 @@
 ## Verification
 
 ```bash
-python -m pandosi.doctor              # 10/10 on the dev box
+python -m pando.doctor              # 10/10 on the dev box
 python -m unittest discover -s tests  # 2/2 smoke
 python tools/demo.py                  # end-to-end consensus + dashboard
 ```

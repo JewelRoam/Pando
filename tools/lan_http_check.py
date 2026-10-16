@@ -26,9 +26,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pandosi.common import bypass_proxy_for_lan
-from pandosi.grants import save_grant
-from pandosi.join import lan_ip
+from pando.common import bypass_proxy_for_lan
+from pando.grants import save_grant
+from pando.join import lan_ip
 
 
 def free_port() -> int:
@@ -105,7 +105,7 @@ def main() -> int:
     }
     processes: list[subprocess.Popen] = []
 
-    with tempfile.TemporaryDirectory(prefix="pandosi-lan-http-") as td:
+    with tempfile.TemporaryDirectory(prefix="pando-lan-http-") as td:
         work = Path(td)
         grants_path = work / "grants.toml"
         token_file = work / "pairing.token"
@@ -137,7 +137,7 @@ def main() -> int:
         try:
             with root_out.open("wb") as out, root_err.open("wb") as err:
                 processes.append(subprocess.Popen(
-                    [sys.executable, "-m", "pandosi.rootd",
+                    [sys.executable, "-m", "pando.rootd",
                      "--port", str(root_port), "--lan",
                      "--pairing-token-file", str(token_file)],
                     cwd=ROOT, stdout=out, stderr=err, env=env,
@@ -145,7 +145,7 @@ def main() -> int:
             wait_root(root_loopback)
 
             loop_process = subprocess.Popen(
-                [sys.executable, "-m", "pandosi.stemd",
+                [sys.executable, "-m", "pando.stemd",
                  "--node-id", "loopback-stem",
                  "--checkpoint", "loopback",
                  "--root", root_loopback,
@@ -155,7 +155,7 @@ def main() -> int:
                 creationflags=creationflags)
             processes.append(loop_process)
             lan_process = subprocess.Popen(
-                [sys.executable, "-m", "pandosi.stemd",
+                [sys.executable, "-m", "pando.stemd",
                  "--node-id", "lan-stem",
                  "--checkpoint", "lan",
                  "--host", "0.0.0.0",

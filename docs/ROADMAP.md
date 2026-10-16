@@ -21,11 +21,11 @@
 
 ## Phase 1 ' + chr(8212) + ' Standstill Prototype (target: 2-3 weeks)
 
-> Progress 2026-10-13: pandosi package scaffolded (common/backend/graft/stemd/rootd).
+> Progress 2026-10-13: pando package scaffolded (common/backend/graft/stemd/rootd).
 > 6/6 unittests pass incl. real-HTTP e2e; multi-process smoke OK (root + 2 stems,
 > heartbeat registration, fan-out vote, conservative escalate when quorum < 3).
 > MockBackend stands in for Laya; checkpoint diversity enforced in quorum picking.
-> Progress (same day, later): pandosi/spore.py landed (Ed25519 manifest + 64KiB
+> Progress (same day, later): pando/spore.py landed (Ed25519 manifest + 64KiB
 > chunk Merkle tree, verify-on-arrival, tamper detection; CDC deferred to Phase 5).
 > PyNaCl installed. One-shot crypto smoke passed (sign/verify roundtrip, tamper
 > rejection). ssets/graft_suite.jsonl: 16-task acceptance set (choice/score/noul
@@ -48,7 +48,7 @@ Goal: self-replication in a firewalled sandbox.
 
 > Progress 2026-10-14: transfer + integrity + selective re-fetch implemented
 > (spore.py, tools/fix_gathernd.py separate); sandbox gate shipped as
-> pandosi/lab.py with Dockerfile; SPROUT/VERIFY/LIVE chain verified with
+> pando/lab.py with Dockerfile; SPROUT/VERIFY/LIVE chain verified with
 > real 571MB weights; TOFU pinning + persistent root keypair live.
 
 - [x] Spore payload builder + Ed25519 signature + per-chunk Merkle

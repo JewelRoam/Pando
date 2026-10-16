@@ -100,7 +100,7 @@ def split_graph(src: Path, out_dir: Path, cut: int,
         stage = helper.make_model(
             build(node_list, inputs, outputs, name),
             opset_imports=list(model.opset_import),
-            producer_name="pandosi-stage-split")
+            producer_name="pando-stage-split")
         stage.ir_version = model.ir_version
         target = out_dir / name
         # save_as_external_data=False keeps the original external references,

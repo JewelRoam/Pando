@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pandosi.spore import artifact_digest  # noqa: E402
+from pando.spore import artifact_digest  # noqa: E402
 
 DEFAULT_GRAPHS = [
     ("english", "artifacts/laya-en.onnx"),

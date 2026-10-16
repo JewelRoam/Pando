@@ -30,7 +30,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pandosi.spore import (CDC_AVG_SIZE, ChunkStore, SporeServer,  # noqa: E402
+from pando.spore import (CDC_AVG_SIZE, ChunkStore, SporeServer,  # noqa: E402
                            artifact_digest, artifact_files,
                            build_manifest_cdc, generate_signing_key,
                            pull_spore)
@@ -78,7 +78,7 @@ def main() -> int:
     expected = artifact_digest(child)
     server = SporeServer(child_manifest, child_files)
     server.start()
-    work = Path(tempfile.mkdtemp(prefix="pandosi-delta-"))
+    work = Path(tempfile.mkdtemp(prefix="pando-delta-"))
     results = {}
     try:
         legs = [("batched_cold", None, args.batch),

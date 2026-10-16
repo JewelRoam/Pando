@@ -30,11 +30,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pandosi.backend import OnnxLayaBackend  # noqa: E402
-from pandosi.common import DecisionRequest  # noqa: E402
-from pandosi.rootd import Coordinator, Root  # noqa: E402
-from pandosi.stemd import Stem, heartbeat_loop  # noqa: E402
-from pandosi.textmodel import TextModel  # noqa: E402
+from pando.backend import OnnxLayaBackend  # noqa: E402
+from pando.common import DecisionRequest  # noqa: E402
+from pando.rootd import Coordinator, Root  # noqa: E402
+from pando.stemd import Stem, heartbeat_loop  # noqa: E402
+from pando.textmodel import TextModel  # noqa: E402
 
 NEURAL = [
     ("english", "convaiinnovations/laya", "artifacts/laya-en.onnx"),

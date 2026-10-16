@@ -1,6 +1,6 @@
 """End to end: the swarm grows itself by replicating a real spore.
 
-The supervisor's ``grow`` action is wired to ``pandosi.reproduce`` - the real
+The supervisor's ``grow`` action is wired to ``pando.reproduce`` - the real
 path, with a served artifact, a declared lineage and digest, attestation and
 the ``reproduce`` grant - instead of a local launcher. A reproduced node has
 to transfer an artifact, start and register before it can vote, which is why
@@ -34,13 +34,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pandosi.autonomy import Journal  # noqa: E402
-from pandosi.elastic import ElasticSupervisor, Retirer  # noqa: E402
-from pandosi.playbook import load_playbook, resolve_admitted_lineages, \
+from pando.autonomy import Journal  # noqa: E402
+from pando.elastic import ElasticSupervisor, Retirer  # noqa: E402
+from pando.playbook import load_playbook, resolve_admitted_lineages, \
     sign_playbook  # noqa: E402
-from pandosi.reproduce import Target, reproduce  # noqa: E402
-from pandosi.spore import artifact_digest, generate_signing_key  # noqa: E402
-from pandosi.grants import save_grant  # noqa: E402
+from pando.reproduce import Target, reproduce  # noqa: E402
+from pando.spore import artifact_digest, generate_signing_key  # noqa: E402
+from pando.grants import save_grant  # noqa: E402
 
 LINEAGE = "english"
 SLOW_MS = 120.0
@@ -130,7 +130,7 @@ def main() -> int:
 
     digest = artifact_digest(payload)
     print(f"payload {payload.name} digest {digest[:16]}...", flush=True)
-    work = Path(tempfile.mkdtemp(prefix="pandosi-growth-"))
+    work = Path(tempfile.mkdtemp(prefix="pando-growth-"))
     token = secrets.token_urlsafe(18)
     token_file = work / "pairing.token"
     token_file.write_text(token, encoding="utf-8")
@@ -164,7 +164,7 @@ def main() -> int:
     trajectory: list[dict] = []
     try:
         procs.append(subprocess.Popen(
-            [sys.executable, "-m", "pandosi.rootd", "--port", str(port),
+            [sys.executable, "-m", "pando.rootd", "--port", str(port),
              "--pairing-token-file", str(token_file),
              "--playbook", str(playbook_path),
              "--playbook-key", key.verify_key.encode().hex(),
@@ -177,7 +177,7 @@ def main() -> int:
         wait_root(url)
         for index in range(REPLICAS):
             procs.append(subprocess.Popen(
-                [sys.executable, "-m", "pandosi.stemd",
+                [sys.executable, "-m", "pando.stemd",
                  "--node-id", f"slow-{index}", "--root", url,
                  "--pairing-token-file", str(token_file),
                  "--backend", "mock", "--checkpoint", "mock",
@@ -203,7 +203,7 @@ def main() -> int:
             node_id = f"reproduced-{grown}"
             target = Target(
                 node_id=node_id, host="localhost", cwd=str(ROOT),
-                command=[sys.executable, "-m", "pandosi.join",
+                command=[sys.executable, "-m", "pando.join",
                          "--node-id", node_id,
                          "--spore", "--root", url, "--sandbox-confirmed",
                          "--pairing-token", token,

@@ -17,8 +17,8 @@ def asset_root() -> Path:
     candidates.append(Path(__file__).resolve().parents[1] / "assets")
     data_path = sysconfig.get_path("data")
     if data_path:
-        candidates.append(Path(data_path) / "share" / "pandosi" / "assets")
-    candidates.append(Path(sys.prefix) / "share" / "pandosi" / "assets")
+        candidates.append(Path(data_path) / "share" / "pando" / "assets")
+    candidates.append(Path(sys.prefix) / "share" / "pando" / "assets")
     for candidate in candidates:
         if candidate.exists():
             return candidate

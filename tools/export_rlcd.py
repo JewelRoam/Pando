@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pandosi.rollout import export_training_rows
+from pando.rollout import export_training_rows
 
 
 def main() -> int:

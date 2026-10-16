@@ -38,9 +38,9 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
 from improved_fleet_check import decide  # noqa: E402
-from pandosi.calibrate import apply_temperature, load_calibration  # noqa: E402
-from pandosi.common import Vote, aggregate, collapse_lineages  # noqa: E402
-from pandosi.combiner import Combiner  # noqa: E402
+from pando.calibrate import apply_temperature, load_calibration  # noqa: E402
+from pando.common import Vote, aggregate, collapse_lineages  # noqa: E402
+from pando.combiner import Combiner  # noqa: E402
 
 TRIO = ["english", "multilingual", "typed-decisions"]
 NEW = "ft-v3"

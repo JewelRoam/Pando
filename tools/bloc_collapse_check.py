@@ -33,7 +33,7 @@ from member_portfolio_check import (  # noqa: E402
     build_rows,
     paired_delta,
 )
-from pandosi.common import Vote, aggregate  # noqa: E402
+from pando.common import Vote, aggregate  # noqa: E402
 
 
 def judge(rows: list[dict], members: list[str],

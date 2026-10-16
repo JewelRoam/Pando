@@ -35,7 +35,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pandosi.common import Vote, aggregate  # noqa: E402
+from pando.common import Vote, aggregate  # noqa: E402
 
 ACCURACIES = (0.5, 0.6, 0.7, 0.8, 0.9)
 COUNTS = (0, 1, 2, 3, 4, 6)

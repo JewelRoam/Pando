@@ -16,7 +16,7 @@ The task record is one JSON file per task under ``<dir>/tasks/``:
 Server (on the Mac):
 
     python3 tools/agent_mailbox.py serve --port 8766 \\
-        --dir ~/.pandosi/mailbox --token-file ~/.pandosi/mailbox.token
+        --dir ~/.pando/mailbox --token-file ~/.pando/mailbox.token
 
 Client (any machine on the LAN; --url and --token-file on every verb):
 
@@ -337,15 +337,15 @@ def main() -> int:
     server = sub.add_parser("serve", help="run the mailbox service")
     server.add_argument("--host", default="0.0.0.0")
     server.add_argument("--port", type=int, default=8766)
-    server.add_argument("--dir", default="~/.pandosi/mailbox")
-    server.add_argument("--token-file", default="~/.pandosi/mailbox.token")
+    server.add_argument("--dir", default="~/.pando/mailbox")
+    server.add_argument("--token-file", default="~/.pando/mailbox.token")
     server.set_defaults(func=serve)
 
     def client_parser(verb: str, help_text: str):
         entry = sub.add_parser(verb, help=help_text)
         entry.add_argument("--url", default="http://127.0.0.1:8766")
         entry.add_argument("--token")
-        entry.add_argument("--token-file", default="~/.pandosi/mailbox.token")
+        entry.add_argument("--token-file", default="~/.pando/mailbox.token")
         entry.add_argument("--timeout", type=float, default=15)
         entry.add_argument("--by", default="codex")
         return entry

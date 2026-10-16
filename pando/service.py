@@ -37,19 +37,19 @@ def detect_platform(explicit: str) -> str:
 def _token_path(role: str, explicit: str | None) -> Path:
     if explicit:
         return Path(explicit).expanduser()
-    return Path.home() / ".pandosi" / f"{role}-pairing.token"
+    return Path.home() / ".pando" / f"{role}-pairing.token"
 
 
 def _process_argv(role: str, platform: str, *, port: int, lan: bool,
                   root_url: str, node_id: str, token: Path,
                   working_dir: Path) -> list[str]:
     if role == "root":
-        argv = [sys.executable, "-m", "pandosi.rootd",
+        argv = [sys.executable, "-m", "pando.rootd",
                 "--port", str(port), "--pairing-token-file", str(token)]
         if lan:
             argv.append("--lan")
         return argv
-    return [sys.executable, "-m", "pandosi.stemd", "--node-id", node_id,
+    return [sys.executable, "-m", "pando.stemd", "--node-id", node_id,
             "--root", root_url, "--pairing-token-file", str(token)]
 
 
@@ -217,8 +217,8 @@ def build_service_plan(role: str = "root", *, platform: str = "auto",
     detected = detect_platform(platform)
     working = (working_dir or Path.cwd()).resolve()
     token = _token_path(role, token_path)
-    service_config_dir = config_dir or Path.home() / ".pandosi"
-    service_name = name or f"pandosi-{role}"
+    service_config_dir = config_dir or Path.home() / ".pando"
+    service_name = name or f"pando-{role}"
     autostart = grant_status("service_autostart", grants_path,
                              include_audit=False)
     lan_grant = grant_status("lan_listen", grants_path, include_audit=False)

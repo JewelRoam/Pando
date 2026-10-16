@@ -1,6 +1,6 @@
 """Fit the cheap independent member, and calibrate it like any other lineage.
 
-Trains `pandosi.textmodel.TextModel` on a labeled suite and writes the two
+Trains `pando.textmodel.TextModel` on a labeled suite and writes the two
 artifacts a swarm needs to admit it: the model itself (`assets/textmodel.json`,
 a few hundred kilobytes) and its calibration table
 (`assets/calibration/<checkpoint>.json`), fitted on rows the counts did not
@@ -22,8 +22,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pandosi.calibrate import apply_temperature  # noqa: E402
-from pandosi.textmodel import TextModel  # noqa: E402
+from pando.calibrate import apply_temperature  # noqa: E402
+from pando.textmodel import TextModel  # noqa: E402
 
 TEMPERATURES = [0.25, 0.4, 0.5, 0.65, 0.8, 1.0, 1.25, 1.6, 2.0, 2.5, 3.0,
                 4.0, 5.0, 6.0, 8.0]
@@ -97,7 +97,7 @@ def main() -> int:
 
 
 def _request(row: dict):
-    from pandosi.common import DecisionRequest
+    from pando.common import DecisionRequest
     return DecisionRequest(state=row.get("state", ""),
                            question=row.get("question", ""),
                            candidates=row.get("candidates", []))

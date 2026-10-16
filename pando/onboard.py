@@ -55,7 +55,7 @@ def build_plan(rows: list[dict] | list[tuple[str, str, str]]) -> dict:
     # A missing sandbox only blocks Ring 2. It must not make the product look
     # unusable on a machine that can already run local consensus.
     if blocking:
-        next_command = "python -m pandosi.onboard --dry-run"
+        next_command = "python -m pando.onboard --dry-run"
     else:
         next_command = "python tools/demo.py"
 

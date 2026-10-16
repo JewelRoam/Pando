@@ -9,7 +9,7 @@ Usage:
     # make a key and sign, pinning that key on the root
     python tools/sign_playbook.py --playbook assets/playbook.example.toml \
         --generate-key
-    python -m pandosi.rootd --playbook assets/playbook.example.toml \
+    python -m pando.rootd --playbook assets/playbook.example.toml \
         --playbook-key <pubkey hex>
 
 The private key is printed once and never written unless --key-out is given.
@@ -27,7 +27,7 @@ sys.path.insert(0, str(ROOT))
 
 import nacl.signing  # noqa: E402
 
-from pandosi.playbook import (SIGNATURE_SUFFIX, load_playbook,  # noqa: E402
+from pando.playbook import (SIGNATURE_SUFFIX, load_playbook,  # noqa: E402
                               sign_playbook, verify_playbook_signature)
 
 

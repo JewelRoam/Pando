@@ -5,9 +5,9 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/service.yml"
-      - "pandosi/service.py"
-      - "pandosi/rootd.py"
-      - "pandosi/grants.py"
+      - "pando/service.py"
+      - "pando/rootd.py"
+      - "pando/grants.py"
       - "tools/service_check.py"
   workflow_dispatch:
 

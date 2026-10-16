@@ -24,7 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pandosi.spore import (CHUNK_SIZE, SporeServer, artifact_digest,  # noqa: E402
+from pando.spore import (CHUNK_SIZE, SporeServer, artifact_digest,  # noqa: E402
                            artifact_files, build_manifest,
                            generate_signing_key, pull_spore)
 
@@ -38,7 +38,7 @@ def main() -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
-    work = Path(tempfile.mkdtemp(prefix="pandosi-transfer-"))
+    work = Path(tempfile.mkdtemp(prefix="pando-transfer-"))
     try:
         if args.payload:
             payload = Path(args.payload)

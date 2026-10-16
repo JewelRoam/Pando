@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from laya.onnx_agent import ONNXAgent  # noqa: E402
 
-from pandosi.backend import _make_openvino_session  # noqa: E402
+from pando.backend import _make_openvino_session  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 SUITE = ROOT / "assets" / "graft_suite.jsonl"

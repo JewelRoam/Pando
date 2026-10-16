@@ -30,11 +30,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pandosi.grants import save_grant  # noqa: E402
-from pandosi.playbook import load_playbook, resolve_admitted_lineages, \
+from pando.grants import save_grant  # noqa: E402
+from pando.playbook import load_playbook, resolve_admitted_lineages, \
     sign_playbook  # noqa: E402
-from pandosi.reproduce import Target, reproduce  # noqa: E402
-from pandosi.spore import artifact_digest, generate_signing_key  # noqa: E402
+from pando.reproduce import Target, reproduce  # noqa: E402
+from pando.spore import artifact_digest, generate_signing_key  # noqa: E402
 
 
 def free_port() -> int:
@@ -75,7 +75,7 @@ def start_root(work: Path, payload: Path, lineage: str, digest: str,
         if sys.platform == "win32" else 0
     log = (work / f"rootd-{lineage}.log").open("wb")
     process = subprocess.Popen(
-        [sys.executable, "-m", "pandosi.rootd", "--port", str(port),
+        [sys.executable, "-m", "pando.rootd", "--port", str(port),
          "--playbook", str(playbook),
          "--playbook-key", key.verify_key.encode().hex(),
          "--pairing-token", token,
@@ -104,7 +104,7 @@ def main() -> int:
         if not path.exists():
             raise SystemExit(f"missing artifact: {path}")
 
-    work = Path(tempfile.mkdtemp(prefix="pandosi-delta-repl-"))
+    work = Path(tempfile.mkdtemp(prefix="pando-delta-repl-"))
     shared_store = work / "shared-chunks"
     key = generate_signing_key()
     grants = work / "grants.toml"
@@ -127,7 +127,7 @@ def main() -> int:
             node_id = f"node-{label}"
             target = Target(
                 node_id=node_id, host="localhost", cwd=str(ROOT),
-                command=[sys.executable, "-m", "pandosi.join",
+                command=[sys.executable, "-m", "pando.join",
                          "--node-id", node_id,
                          "--spore", "--root", url,
                          "--sandbox-confirmed",

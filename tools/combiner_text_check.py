@@ -4,7 +4,7 @@ Round 139/140 left a precise remainder: on the 68 rows where the hand-written
 gate declines, the best single member is 41.2%, the fitted *vote-pattern*
 combiner is 54.4%, and the oracle is 67.7%. The combiner sees only how the
 members voted; the question's own text is the obvious missing signal, and the
-project already has a model of it (`pandosi/textmodel.py`, the cheap member of
+project already has a model of it (`pando/textmodel.py`, the cheap member of
 round 126).
 
 This measures the gain before touching the shipped feature spec: the same
@@ -34,9 +34,9 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pandosi.combiner import features as vote_features  # noqa: E402
-from pandosi.common import DecisionRequest, Vote, aggregate  # noqa: E402
-from pandosi.textmodel import TextModel  # noqa: E402
+from pando.combiner import features as vote_features  # noqa: E402
+from pando.common import DecisionRequest, Vote, aggregate  # noqa: E402
+from pando.textmodel import TextModel  # noqa: E402
 
 TIER_ORDER = {"auto": 0, "verify": 1, "escalate": 2}
 

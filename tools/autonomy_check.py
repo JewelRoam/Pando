@@ -25,7 +25,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pandosi.autonomy import AutonomyLoop, Journal, Observation, RootDecider
+from pando.autonomy import AutonomyLoop, Journal, Observation, RootDecider
 
 TTL_WAIT_S = 20.0
 
@@ -92,7 +92,7 @@ def main() -> int:
     def actuator(observation, choice, result):
         acted_log.append(f"{observation.observation_id}->{choice}")
 
-    with tempfile.TemporaryDirectory(prefix="pandosi-autonomy-") as td:
+    with tempfile.TemporaryDirectory(prefix="pando-autonomy-") as td:
         work = Path(td)
         token_file = work / "pairing.token"
         token_file.write_text(token, encoding="utf-8")
@@ -102,7 +102,7 @@ def main() -> int:
 
         def start_stem(node_id: str, checkpoint: str) -> subprocess.Popen:
             proc = subprocess.Popen(
-                [sys.executable, "-m", "pandosi.stemd",
+                [sys.executable, "-m", "pando.stemd",
                  "--node-id", node_id,
                  "--root", root_url,
                  "--pairing-token-file", str(token_file),
@@ -115,7 +115,7 @@ def main() -> int:
 
         try:
             root_proc = subprocess.Popen(
-                [sys.executable, "-m", "pandosi.rootd",
+                [sys.executable, "-m", "pando.rootd",
                  "--port", str(port),
                  "--pairing-token-file", str(token_file),
                  "--rollout-dir", str(work / "rollouts")],

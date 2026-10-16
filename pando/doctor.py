@@ -1,4 +1,4 @@
-"""pandosi doctor: capability report with exact fix commands.
+"""pando doctor: capability report with exact fix commands.
 
 Per ADOPTION.md: every line is [ok] / [miss] / [locked]; a miss always prints
 the exact next command. Never elevates, never installs anything.
@@ -128,7 +128,7 @@ def main() -> None:
         return
 
     icons = {"ok": "[ok]   ", "miss": "[miss] ", "locked": "[locked]"}
-    print("pandosi doctor")
+    print("pando doctor")
     for row in rows:
         print(f"  {icons[row['status']]} {row['item']}")
         if row["fix"]:
@@ -138,7 +138,7 @@ def main() -> None:
           + ("All Ring-0 requirements met." if not blocking
              else "Fix the [miss] items above to unlock more capability."))
     if plan["counts"]["nonprivileged"]:
-        print("Next safe step: python -m pandosi.onboard --dry-run")
+        print("Next safe step: python -m pando.onboard --dry-run")
 
 
 if __name__ == "__main__":

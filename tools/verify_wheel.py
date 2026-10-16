@@ -8,12 +8,12 @@ import zipfile
 from pathlib import Path
 
 REQUIRED_SUFFIXES = (
-    "pandosi/__init__.py",
-    "pandosi/cli.py",
-    "pandosi/resources.py",
-    "pandosi/doctor.py",
-    "share/pandosi/assets/playbook.example.toml",
-    "share/pandosi/assets/calibration/english.json",
+    "pando/__init__.py",
+    "pando/cli.py",
+    "pando/resources.py",
+    "pando/doctor.py",
+    "share/pando/assets/playbook.example.toml",
+    "share/pando/assets/calibration/english.json",
 )
 
 

@@ -43,10 +43,10 @@ from calibrated_gate_check import decide_lineage  # noqa: E402
 from cpu_free_fleet_check import (STEMS, process_tree_cpu_seconds,  # noqa: E402
                                   stem_command)
 from idle_silicon_check import host_cpu_load  # noqa: E402
-from pandosi.calibrate import load_calibration  # noqa: E402
-from pandosi.combiner import Combiner  # noqa: E402
-from pandosi.common import DecisionRequest  # noqa: E402
-from pandosi.rootd import Coordinator, Root  # noqa: E402
+from pando.calibrate import load_calibration  # noqa: E402
+from pando.combiner import Combiner  # noqa: E402
+from pando.common import DecisionRequest  # noqa: E402
+from pando.rootd import Coordinator, Root  # noqa: E402
 
 NEW = "ft-v3"
 

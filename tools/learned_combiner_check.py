@@ -31,7 +31,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pandosi.common import Vote, aggregate  # noqa: E402
+from pando.common import Vote, aggregate  # noqa: E402
 
 TIER_ORDER = {"auto": 0, "verify": 1, "escalate": 2}
 

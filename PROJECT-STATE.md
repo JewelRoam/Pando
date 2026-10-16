@@ -31,8 +31,8 @@ NPU) all voting in the same consensus quorum.
 | Stage graph splitter | tools/stage_split.py | node-boundary cut, shared external weights |
 | Pipeline measurement | tools/stage_pipeline_check.py | real HTTP 2-stage chain, latency + throughput |
 | Cross-ecosystem votes | tools/cross_ecosystem_check.py | ONNX vs PyTorch, 27/27 agreement |
-| Topology planner | pandosi/topology.py + tools/topology_check.py | replicate/stage/infeasible from measured numbers |
-| Autonomy loop | pandosi/autonomy.py + tools/autonomy_check.py | observe-decide-act, two-part gate |
+| Topology planner | pando/topology.py + tools/topology_check.py | replicate/stage/infeasible from measured numbers |
+| Autonomy loop | pando/autonomy.py + tools/autonomy_check.py | observe-decide-act, two-part gate |
 | Gate risk-coverage | tools/gating_check.py | auto 51.8% coverage at 92.9% accuracy |
 | Gate threshold tuning | tools/gate_tune.py | shipped 0.6/0.6 already optimal |
 | Gate live verification | tools/gate_e2e_check.py | live == offline, delta 0.0000 |
@@ -42,7 +42,7 @@ NPU) all voting in the same consensus quorum.
 | Remote-link degradation | tools/remote_latency_check.py | timeout -> skip -> recovery verified |
 | Runtime elastic membership | tools/swarm_check.py | live 3 -> 5 -> 4 transitions |
 | CUDA hot-plug | tools/hetero_http_check.py --hotplug-cuda | Intel 3 -> +RTX 3070 |
-| Hierarchical groups | pandosi/bridge.py + tools/two_group_check.py | remote aggregate + partition fallback |
+| Hierarchical groups | pando/bridge.py + tools/two_group_check.py | remote aggregate + partition fallback |
 | CUDA RLCD training | tools/rlcd_cuda_train.py + artifacts/rlcd-cuda-v6 | 72 updates overfit confidence, no held-out accuracy gain |
 | Deterministic suite split | tools/build_suite_split.py | 34 train / 6 holdout tasks |
 | Expanded prompt pool | tools/build_prompt_pool.py | 78 prompts, 45 contrast rows |
@@ -65,12 +65,12 @@ NPU) all voting in the same consensus quorum.
 | Spore 3-hop chain | 97 chunks, 0 integrity failures | round 62 |
 | Spore generation lineage | generation 0 -> 1 -> 2 + parent hash | round 82 |
 | Reproduction DAG | tools/spore_dag_check.py | branch validation + invalid links rejected |
-| Cached Spore lineage | pandosi/spore.py manifest cache | valid / parent-missing / invalid states |
+| Cached Spore lineage | pando/spore.py manifest cache | valid / parent-missing / invalid states |
 | Root Spore HTTP surface | tools/spore_root_check.py | pubkey/manifest/by-hash + 404/403 gates |
 | Peer-fetched parent manifest | /spore/manifests/<hash> + ensure_parent_lineage | missing parent recovered over HTTP, bad hash/signature refused |
-| Unified CLI | pandosi/cli.py + `python -m pandosi` | doctor/join/stem/grants/service/lab entry |
+| Unified CLI | pando/cli.py + `python -m pando` | doctor/join/stem/grants/service/lab entry |
 | Installable wheel | tools/package_check.py + runtime extras | console script verified outside repo |
-| Packaged assets | pandosi/resources.py + setuptools data-files | playbook + calibration found outside repo |
+| Packaged assets | pando/resources.py + setuptools data-files | playbook + calibration found outside repo |
 | Wheel integrity | tools/verify_wheel.py + CI build | 37 entries, required code/assets present |
 | Source distribution | tools/verify_sdist.py + release workflow | sdist checked, tag release prepared |
 | GitHub URL install | tools/package_check.py --source git | clone -> wheel -> console verified |
@@ -119,7 +119,7 @@ NPU) all voting in the same consensus quorum.
 | Quantised sibling (int8 vs fp32 english) | 48/240 flips, but phi +0.413; no ensemble gain | round 125 |
 | Same-family diversity spectrum | monotone in phi: 1.000 (descendant/ballot) -> 0.41 (int8) -> 0.07 (outside family, +4.1 pt) | round 125 |
 | Trio correlation on unseen wording | phi +0.36..+0.82 (dev: +0.21..+0.53) - harder wording correlates them more | round 125 |
-| Text member (naive Bayes) | pandosi/textmodel.py, 19 KB artifact, stemd --backend text | round 126 |
+| Text member (naive Bayes) | pando/textmodel.py, 19 KB artifact, stemd --backend text | round 126 |
 | 4-member swarm, over real HTTP | trio 73.75% / +text 72.92% at full coverage - a loss | round 126 |
 | Heartbeat TTL | an un-heartbeating stem is dropped after 15 s; a check must heartbeat | round 126 |
 | Tied quorum answers | 2-2 splits ranked by confidence at verify, never auto | round 127 |
@@ -342,7 +342,7 @@ NPU) all voting in the same consensus quorum.
 | Declared lineage admission | playbook [lineages].admit + /register 403 | round 102 |
 | Artifact attestation | artifact_digest + [lineages.artifacts] + 403 | round 103 |
 | Signed playbooks | sign_playbook.py + --playbook-key pin | round 104 |
-| Self-replication loop | pandosi/reproduce.py + tools/reproduce_check.py | quorum 1 -> 2, signed lineage record |
+| Self-replication loop | pando/reproduce.py + tools/reproduce_check.py | quorum 1 -> 2, signed lineage record |
 | Batched spore transfer | /spore/chunks/<name>/<start>/<count> + keep-alive | 1.68 GB in 14.2 s (8.8x) |
 | Delta replication | build_manifest_cdc + ChunkStore + /spore/blobs | 1610 MB -> 105 MB (15.3x) |
 | Packed chunk store | ChunkStore (chunks.bin + index) | delta leg 5.84 s vs 10.49 s cold |
@@ -353,7 +353,7 @@ NPU) all voting in the same consensus quorum.
 | Load-aware quorum picking | Coordinator in-flight ordering | 16-24% over blind rotation |
 | Adaptive quorum size | --adaptive-quorum/--latency-target-ms | holds k=5 idle, k=3 under load |
 | Per-category quorum floors | playbook gating quorum_floor | security k=4 vs ordinary k=2 under load |
-| Retirement | pandosi/elastic.py + POST /retire + blocklist | slow member removed, stays removed |
+| Retirement | pando/elastic.py + POST /retire + blocklist | slow member removed, stays removed |
 | Declared categories | playbook question category + conservative default | risk_check holds k=4, not k=2 |
 | Category validation | load rejects an unknown category | typo fails at load, not at decision time |
 | Elastic supervisor | GET /status + ElasticSupervisor | grew 2 -> 3 members, p50 92.8 -> 61 ms |

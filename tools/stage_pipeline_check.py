@@ -32,7 +32,7 @@ os.environ.setdefault("HF_HOME", str(ROOT / ".hf-cache"))
 
 from tools.stage_split import split_graph  # noqa: E402
 
-from pandosi.common import bypass_proxy_for_lan  # noqa: E402
+from pando.common import bypass_proxy_for_lan  # noqa: E402
 
 bypass_proxy_for_lan()  # Windows registry proxies black-hole loopback
 
