@@ -108,6 +108,70 @@ class TestSmoke(unittest.TestCase):
             root.stop()
         self.assertEqual(status["assent_fallback"], "veto")
 
+    def test_assent_veto_answers_every_declined_row(self):
+        """In veto mode the witness answers any non-auto row, not only the
+        rows where it disagreed with an auto verdict; advisor is unchanged."""
+        def decide(witness_vote, witness_present, fallback):
+            # Three voters, all at p=0.5, so agreement is 1.0 but the mean
+            # probability is below the 0.6 auto floor: the gate declines on
+            # confidence, leaving the aggregate choice intact at "verify".
+            rows = [("w-a", "http://n/a", "en", "approve"),
+                    ("w-b", "http://n/b", "en", "approve")]
+            if witness_present:
+                rows.append(("witness", "http://n/w", "witness",
+                             witness_vote))
+            else:
+                rows.append(("w-c", "http://n/c", "other", "approve"))
+            votes = {f"{url}/decide": (choice, 0.5)
+                     for _, url, _, choice in rows}
+
+            def transport(url, payload, timeout):
+                choice, prob = votes[url]
+                return json.dumps(
+                    {"vote": {"choice": choice, "probability": prob}}
+                ).encode("utf-8")
+
+            coordinator = Coordinator(
+                transport=transport, quorum_k=3,
+                assent_checkpoint="witness", assent_fallback=fallback)
+            for node_id, url, checkpoint, _ in rows:
+                coordinator.register(node_id, url, checkpoint)
+            return coordinator.decide(DecisionRequest(
+                state="assent", question="approve?",
+                candidates=["approve", "reject"]))
+
+        # The witness agrees with the majority but the row still declines on
+        # confidence: veto names the witness and adopts its (same) choice.
+        agree_veto = decide("approve", True, "veto")
+        self.assertEqual(agree_veto["tier"], "verify")
+        self.assertEqual(agree_veto["choice"], "approve")
+        self.assertEqual(agree_veto["veto"], "witness")
+
+        # Advisor keeps the aggregate choice and says nothing about a veto.
+        agree_advisor = decide("approve", True, "advisor")
+        self.assertEqual(agree_advisor["tier"], "verify")
+        self.assertEqual(agree_advisor["choice"], "approve")
+        self.assertNotIn("veto", agree_advisor)
+
+        # The witness dissents: veto answers with that dissent even though the
+        # row never reached "auto"; advisor keeps the aggregate choice.
+        dissent_veto = decide("reject", True, "veto")
+        self.assertEqual(dissent_veto["tier"], "verify")
+        self.assertEqual(dissent_veto["choice"], "reject")
+        self.assertEqual(dissent_veto["veto"], "witness")
+
+        dissent_advisor = decide("reject", True, "advisor")
+        self.assertEqual(dissent_advisor["tier"], "verify")
+        self.assertEqual(dissent_advisor["choice"], "approve")
+        self.assertNotIn("veto", dissent_advisor)
+
+        # No witness in the quorum: both modes keep the aggregate behaviour.
+        for mode in ("veto", "advisor"):
+            absent = decide("approve", False, mode)
+            self.assertEqual(absent["tier"], "verify")
+            self.assertEqual(absent["choice"], "approve")
+            self.assertNotIn("veto", absent)
+
     def test_decision_request_family_round_trip(self):
         """The optional family field survives JSON, and old payloads default."""
         req = DecisionRequest(state="s", question="q?",

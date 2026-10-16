@@ -750,7 +750,9 @@ class Coordinator:
                 if resolved_assent is None:
                     self._warn_missing_assent_family(assent_family)
                 self.assent_resolved = resolved_assent
-            elif result.tier == "auto":
+            else:
+                # An explicit witness is known up front; whether it becomes
+                # the answer on a declined row is decided below.
                 resolved_assent = self.assent_checkpoint
             if result.tier == "auto" and resolved_assent is not None:
                 assent_vote = next(
@@ -765,6 +767,26 @@ class Coordinator:
                     result = DecisionResult(choice, result.agreement,
                                             result.mean_probability, "verify",
                                             result.votes)
+            # Round 165: `veto` answers *every* declined row, not only the
+            # rows where the witness disagreed with an auto verdict. When a
+            # witness is resolved and actually present, its choice becomes
+            # the answer on any non-auto tier. Agreement, mean_probability
+            # and the tier itself are left untouched, so nothing is
+            # fabricated; the witness is named in `veto` for audit.
+            # `advisor` (the default) never reaches this branch, so its
+            # behaviour is unchanged.
+            if (self.assent_fallback == "veto"
+                    and veto_checkpoint is None
+                    and resolved_assent is not None
+                    and result.tier != "auto"):
+                witness_vote = next(
+                    (vote for vote in collapsed_assent_votes
+                     if vote.checkpoint == resolved_assent), None)
+                if witness_vote is not None:
+                    veto_checkpoint = resolved_assent
+                    result = DecisionResult(
+                        witness_vote.choice, result.agreement,
+                        result.mean_probability, result.tier, result.votes)
         self._log_decision(req, result, len(quorum), fanout_ms)
         try:
             self._recorder.record(req.request_id, req.state, req.question,
