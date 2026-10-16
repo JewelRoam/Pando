@@ -16,18 +16,27 @@ of the same group.
 
     python3 tools/seed.py export    --out <dir> [--home ~/.pandosi] \
                                      [--identity ~/.pando/identity.json] \
-                                     [--rollout-dir rollouts]
-    python3 tools/seed.py verify    --from <dir>
+                                     [--rollout-dir rollouts] \
+                                     [--passphrase-file ~/.seed-pass]
+    python3 tools/seed.py verify    --from <dir> [--passphrase-file ~/.seed-pass]
     python3 tools/seed.py rehydrate --from <dir> --home <dir> \
-                                     --identity <path> [--rollout-dir <dir>]
+                                     --identity <path> [--rollout-dir <dir>] \
+                                     [--passphrase-file ~/.seed-pass]
 
 The bundle contains a private key. Never commit it. export refuses to write
 inside a git working tree unless --force is given.
+
+A seed that travels should not travel as a plaintext key. Pass
+--passphrase-file on export and the identity payload is wrapped
+scrypt -> XSalsa20-Poly1305 (PyNaCl SecretBox); the same file is required to
+verify or rehydrate it. Everything else in the bundle stays readable so a
+digest check still means something without the passphrase.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
 import datetime as dt
 import hashlib
 import json
@@ -39,6 +48,86 @@ from pathlib import Path
 
 VERSION = 1
 MANIFEST = "manifest.json"
+
+# scrypt cost. 128 * n * r = 16 MiB, so this stays cheap enough to run on a
+# Raspberry Pi 5 while still making an offline guess of a human passphrase
+# cost something. Recorded in the bundle so a later change cannot silently
+# make an old bundle undecryptable.
+SCRYPT = {"n": 1 << 14, "r": 8, "p": 1, "dklen": 32}
+SCRYPT_MAXMEM = 64 * 1024 * 1024
+SEED_PASSPHRASE_ENV = "PANDO_SEED_PASSPHRASE"
+
+
+def _b64(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("ascii")
+
+
+def _unb64(text: str) -> bytes:
+    return base64.urlsafe_b64decode(text.encode("ascii"))
+
+
+def _derive_key(passphrase: str, salt: bytes, params: dict) -> bytes:
+    return hashlib.scrypt(passphrase.encode("utf-8"), salt=salt,
+                          n=params["n"], r=params["r"], p=params["p"],
+                          dklen=params.get("dklen", 32),
+                          maxmem=SCRYPT_MAXMEM)
+
+
+def wrap_identity(raw: bytes, passphrase: str) -> bytes:
+    """Wrap the plaintext identity JSON in scrypt + XSalsa20-Poly1305."""
+    from nacl.secret import SecretBox  # noqa: PLC0415
+    salt = os.urandom(16)
+    key = _derive_key(passphrase, salt, SCRYPT)
+    nonce = os.urandom(SecretBox.NONCE_SIZE)
+    sealed = SecretBox(key).encrypt(raw, nonce)
+    payload = {"kind": "encrypted-identity", "version": 1,
+               "cipher": "xsalsa20-poly1305",
+               "kdf": "scrypt", "salt": _b64(salt),
+               "n": SCRYPT["n"], "r": SCRYPT["r"], "p": SCRYPT["p"],
+               "dklen": SCRYPT["dklen"],
+               "nonce": _b64(sealed.nonce),
+               "ciphertext": _b64(sealed.ciphertext)}
+    return (json.dumps(payload, indent=2) + "\n").encode("utf-8")
+
+
+def unwrap_identity(blob: bytes, passphrase: str) -> bytes:
+    """Reverse wrap_identity. Raises ValueError on a wrong passphrase."""
+    from nacl.exceptions import CryptoError  # noqa: PLC0415
+    from nacl.secret import SecretBox  # noqa: PLC0415
+    try:
+        payload = json.loads(blob.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"not an encrypted identity payload: {exc}") from exc
+    if payload.get("kind") != "encrypted-identity":
+        raise ValueError("not an encrypted identity payload")
+    if payload.get("kdf") != "scrypt" or payload.get("cipher") != "xsalsa20-poly1305":
+        raise ValueError(f"unsupported wrap: {payload.get('kdf')}/{payload.get('cipher')}")
+    params = {"n": payload["n"], "r": payload["r"], "p": payload["p"],
+              "dklen": payload.get("dklen", 32)}
+    key = _derive_key(passphrase, _unb64(payload["salt"]), params)
+    try:
+        return SecretBox(key).decrypt(_unb64(payload["ciphertext"]),
+                                      _unb64(payload["nonce"]))
+    except CryptoError as exc:
+        raise ValueError("wrong passphrase, or the wrapped key was tampered "
+                         "with") from exc
+
+
+def _read_passphrase(path: str | None) -> str | None:
+    """Passphrase from a file, or from the environment. Never argv."""
+    if path:
+        text = Path(path).expanduser().read_text(encoding="utf-8")
+        if text.endswith("\r\n"):
+            text = text[:-2]
+        elif text.endswith("\n") or text.endswith("\r"):
+            text = text[:-1]
+        return text
+    env = os.environ.get(SEED_PASSPHRASE_ENV)
+    return env if env else None
+
+
+def _passphrase_from_args(args) -> str | None:
+    return _read_passphrase(getattr(args, "passphrase_file", None))
 
 
 def sha256_file(path: Path) -> str:
@@ -139,6 +228,12 @@ def cmd_export(args) -> int:
     rollout_dir = Path(args.rollout_dir).expanduser()
     out = Path(args.out).expanduser()
 
+    passphrase = _passphrase_from_args(args)
+    if passphrase == "":
+        print("refusing an empty passphrase; unset it or use a real one",
+              file=sys.stderr)
+        return 5
+
     files = collect(home, identity_path, rollout_dir)
     if not files:
         print("nothing to seed: no identity, ledger, config or mailbox found",
@@ -151,6 +246,20 @@ def cmd_export(args) -> int:
               f"risk of committing it", file=sys.stderr)
         return 3
 
+    # The identity is the only plaintext secret in the bundle. When a
+    # passphrase is given we replace its bytes with a sealed envelope, so the
+    # manifest digest describes what actually lands on disk.
+    sealed: dict[str, bytes] = {}
+    if passphrase:
+        for entry in files:
+            if entry["kind"] != "identity":
+                continue
+            blob = wrap_identity(Path(entry["_src"]).read_bytes(), passphrase)
+            sealed[entry["path"]] = blob
+            entry["sha256"] = hashlib.sha256(blob).hexdigest()
+            entry["size"] = len(blob)
+            entry["encrypted"] = "scrypt+xsalsa20-poly1305"
+
     digests = [(f["kind"], Path(f["_src"]), f["path"], f["mode"]) for f in files]
     for entry in files:
         entry.pop("_src", None)
@@ -161,6 +270,9 @@ def cmd_export(args) -> int:
             "source": {"node_fingerprint": getattr(signer, "node_fingerprint", None),
                        "pubkey": getattr(signer, "public_key", None)},
             "files": files,
+            "protection": ({"identity": "scrypt+xsalsa20-poly1305",
+                            "kdf": SCRYPT, "compare": ["node_fingerprint"]}
+                           if sealed else {"identity": "plaintext"}),
             "totals": {"files": len(files),
                        "bytes": sum(f["size"] for f in files)}}
     signature = None
@@ -178,7 +290,10 @@ def cmd_export(args) -> int:
     for _kind, src, rel, mode in digests:
         dst = out / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(src, dst)
+        if rel in sealed:
+            dst.write_bytes(sealed[rel])
+        else:
+            shutil.copyfile(src, dst)
         os.chmod(dst, int(mode, 8))
     (out / MANIFEST).write_text(json.dumps(manifest, indent=2) + "\n")
 
@@ -191,7 +306,14 @@ def cmd_export(args) -> int:
     for f in files:
         kinds[f["kind"]] = kinds.get(f["kind"], 0) + 1
     print("  contents   : " + ", ".join(f"{k}={v}" for k, v in sorted(kinds.items())))
-    print("  WARNING    : this bundle contains a PRIVATE KEY (identity/identity.json)")
+    if sealed:
+        print("  identity   : ENCRYPTED (scrypt+xsalsa20-poly1305); "
+              "keep the passphrase somewhere else")
+    else:
+        print("  identity   : PLAINTEXT - this bundle is a bare private key; "
+              "use --passphrase-file before moving it anywhere")
+        print("  WARNING    : this bundle contains an UNPROTECTED PRIVATE KEY "
+              "(identity/identity.json)")
     return 0
 
 
@@ -203,8 +325,15 @@ def load_bundle(src: Path) -> tuple[dict, Path]:
     return json.loads(path.read_text()), src
 
 
+def fingerprint_of_identity_json(raw: bytes) -> str:
+    """The same 16-hex fingerprint pando.identity derives, from raw bytes."""
+    data = json.loads(raw.decode("utf-8"))
+    return hashlib.sha256(_unb64(data["public_key"])).hexdigest()[:16]
+
+
 def cmd_verify(args) -> int:
     manifest, src = load_bundle(Path(args.from_))
+    passphrase = _passphrase_from_args(args)
     bad = []
     for entry in manifest["files"]:
         p = src / entry["path"]
@@ -212,6 +341,35 @@ def cmd_verify(args) -> int:
             bad.append(f"missing: {entry['path']}")
         elif sha256_file(p) != entry["sha256"]:
             bad.append(f"digest mismatch: {entry['path']}")
+
+    encrypted = [e for e in manifest["files"] if e.get("encrypted")]
+    identity_state = "plaintext"
+    if encrypted:
+        entry = encrypted[0]
+        path = src / entry["path"]
+        if passphrase is None:
+            identity_state = "encrypted - NOT verified (no passphrase given)"
+            bad.append("identity payload is encrypted; pass --passphrase-file "
+                       "to check that it unwraps to the key the manifest claims")
+        elif not path.exists():
+            identity_state = "encrypted - missing"
+        else:
+            expected = (manifest.get("source") or {}).get("node_fingerprint")
+            try:
+                raw = unwrap_identity(path.read_bytes(), passphrase)
+                got = fingerprint_of_identity_json(raw)
+            except ValueError as exc:
+                identity_state = "decrypt FAILED"
+                bad.append(f"identity payload: {exc}")
+            else:
+                identity_state = f"decrypted, fingerprint {got}"
+                if expected and got != expected:
+                    identity_state += f" != manifest {expected}"
+                    bad.append(f"unwrapped identity is {got} but the manifest "
+                               f"says {expected}")
+                elif not expected:
+                    identity_state += " (manifest carries no fingerprint)"
+
     mod = _identity_module()
     sig_state = "not checked"
     if manifest.get("signature") and mod is not None:
@@ -223,9 +381,11 @@ def cmd_verify(args) -> int:
             bad.append("manifest signature invalid")
     elif manifest.get("signature"):
         sig_state = "unverifiable (pando.identity unavailable)"
+
     print(f"bundle   : {src}")
     print(f"files    : {len(manifest['files'])} checked, {len(bad)} problem(s)")
     print(f"signature: {sig_state}")
+    print(f"identity : {identity_state}")
     for b in bad:
         print(f"  - {b}")
     return 0 if not bad else 1
@@ -233,7 +393,8 @@ def cmd_verify(args) -> int:
 
 def cmd_rehydrate(args) -> int:
     manifest, src = load_bundle(Path(args.from_))
-    rc = cmd_verify(argparse.Namespace(from_=args.from_))
+    passphrase = _passphrase_from_args(args)
+    rc = cmd_verify(args)
     if rc != 0:
         print("refusing to rehydrate a bundle that failed verification",
               file=sys.stderr)
@@ -259,7 +420,12 @@ def cmd_rehydrate(args) -> int:
         else:
             continue
         dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(src / rel, dst)
+        if entry.get("encrypted"):
+            # cmd_verify already proved this unwraps to the claimed key.
+            dst.write_bytes(unwrap_identity((src / rel).read_bytes(),
+                                            passphrase or ""))
+        else:
+            shutil.copyfile(src / rel, dst)
         os.chmod(dst, int(entry["mode"], 8))
         restored.append((kind, dst))
     print(f"rehydrated into {home}")
@@ -286,10 +452,15 @@ def main() -> int:
     p.add_argument("--identity", default=identity_default)
     p.add_argument("--rollout-dir", default="rollouts")
     p.add_argument("--force", action="store_true")
+    p.add_argument("--passphrase-file", default=None,
+                   help="wrap the identity with this passphrase "
+                        f"(or set ${SEED_PASSPHRASE_ENV})")
     p.set_defaults(func=cmd_export)
 
     p = sub.add_parser("verify", help="check digests and the signature")
     p.add_argument("--from", dest="from_", required=True)
+    p.add_argument("--passphrase-file", default=None,
+                   help="required when the bundle's identity is encrypted")
     p.set_defaults(func=cmd_verify)
 
     p = sub.add_parser("rehydrate", help="restore a bundle onto this machine")
@@ -297,6 +468,8 @@ def main() -> int:
     p.add_argument("--home", default=home_default)
     p.add_argument("--identity", default=identity_default)
     p.add_argument("--rollout-dir", default="rollouts")
+    p.add_argument("--passphrase-file", default=None,
+                   help="required when the bundle's identity is encrypted")
     p.set_defaults(func=cmd_rehydrate)
 
     args = parser.parse_args()

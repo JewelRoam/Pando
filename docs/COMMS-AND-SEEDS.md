@@ -55,9 +55,12 @@ anti-pattern is a privileged instance, not a stable one.
 A seed carries three things: GENES (spore: weights/state), CULTURE (playbook/policy: how decisions are
 made), and HISTORY (registry, votes, evidence, lineage). Plus the part that is easy to forget because it is
 small: the member secret key, the grants ledger and its audit chain. Implemented 2026-10-17 as
-`tools/seed.py` (export/verify/rehydrate, manifest signed by the source identity) with `tools/seed_drill.py`
-as the one-command proof - measured 47 files / 221 kB / restore 0.033 s / same key accepted 200 / fresh key
-refused 403. Limits (same physical box, bundle still on the doomed disk, no encryption) are in docs/SEED.md. Losing every strong node must not lose any of the
+`tools/seed.py` (export/verify/rehydrate, manifest signed by the source identity, identity optionally
+wrapped under a passphrase) with `tools/seed_drill.py` as the one-command proof - it runs the member cycle
+twice, plaintext and sealed; the sealed run also refuses no-passphrase, a flipped ciphertext byte, and a
+wrong passphrase. Measured 57 files / 245 kB / restore 0.059 s / same key accepted 200 / fresh key refused
+403. Remaining limits (same physical box, bundle still on the doomed disk, only the key is wrapped) are in
+docs/SEED.md. Losing every strong node must not lose any of the
 three. Firekeeper experiment ladder:
 - L1 (dispatched: Task 028) - service death on the Mac island: stop the strong tier, keep the weak tier,
   measure the dark period, restart, measure rejoin and resync.

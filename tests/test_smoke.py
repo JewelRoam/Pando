@@ -6,7 +6,10 @@ Two cases cover the contract: quorum gating semantics, and one real-HTTP
 end-to-end vote including node death and checkpoint-diverse quorum picking.
 """
 
+import argparse
+import base64
 import json
+import shutil
 import sys
 import subprocess
 import tempfile
@@ -1545,6 +1548,107 @@ class TestSmoke(unittest.TestCase):
         self.assertEqual(loop.rounds[0].outcome.action, "recruit.invite")
         # round 1 failed; memory moves the loop to member-b's proposal.
         self.assertEqual(loop.rounds[1].outcome.action, "reproduce.spawn")
+
+
+
+
+    def test_seed_travels_wrapped_and_a_wrong_passphrase_cannot_open_it(self):
+        """A seed that moves is a sealed key: the passphrase is the only door.
+
+        The three-copy plan (Mac -> Windows D: -> pi5 SD card) puts the one
+        irreplaceable artifact on the most losable medium. So export must be
+        able to wrap it, verify must refuse to bless a sealed bundle it cannot
+        open, and a wrong passphrase or a flipped ciphertext byte must fail -
+        otherwise the wrap is decoration.
+        """
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "pandosi_seed", Path(__file__).resolve().parents[1] /
+            "tools" / "seed.py")
+        seed = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(seed)
+        from pando.identity import Identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            (home / "mailbox" / "tasks").mkdir(parents=True)
+            identity_path = root / "pando" / "identity.json"
+            live = Identity.generate()
+            identity_path.parent.mkdir(parents=True, exist_ok=True)
+            identity_path.write_text(json.dumps(live.to_json(), indent=2))
+            (home / "pairing.token").write_text("tok\n")
+            pass_file = root / "pass.txt"
+            pass_file.write_text("correct horse battery staple\n")
+            wrong_file = root / "wrong.txt"
+            wrong_file.write_text("hunter2\n")
+            bundle = root / "seed"
+
+            def export(out, passphrase_file=None):
+                return seed.cmd_export(argparse.Namespace(
+                    out=str(out), home=str(home), identity=str(identity_path),
+                    rollout_dir=str(root / "rollouts"), force=True,
+                    passphrase_file=(str(passphrase_file)
+                                     if passphrase_file else None)))
+
+            def verify(src, passphrase_file=None):
+                return seed.cmd_verify(argparse.Namespace(
+                    from_=str(src),
+                    passphrase_file=(str(passphrase_file)
+                                     if passphrase_file else None)))
+
+            def rehydrate(src, out_home, passphrase_file=None):
+                return seed.cmd_rehydrate(argparse.Namespace(
+                    from_=str(src), home=str(out_home),
+                    identity=str(out_home / "pando" / "identity.json"),
+                    rollout_dir=str(out_home / "rollouts"),
+                    passphrase_file=(str(passphrase_file)
+                                     if passphrase_file else None)))
+
+            # 1. plaintext export still works, and says what it is.
+            self.assertEqual(export(root / "plain"), 0)
+            self.assertEqual(verify(root / "plain"), 0)
+            on_disk = json.loads((root / "plain" / "identity" /
+                                  "identity.json").read_text())
+            self.assertEqual(on_disk["secret_key"], live.to_json()["secret_key"])
+
+            # 2. the sealed export does not contain the secret in cleartext.
+            self.assertEqual(export(bundle, pass_file), 0)
+            raw = (bundle / "identity" / "identity.json").read_text()
+            self.assertNotIn(live.to_json()["secret_key"], raw)
+            self.assertEqual(json.loads(raw)["kind"], "encrypted-identity")
+
+            # 3. sealed bundle: no passphrase and wrong passphrase both fail.
+            self.assertEqual(verify(bundle), 1)
+            self.assertEqual(verify(bundle, wrong_file), 1)
+
+            # 4. right passphrase verifies and rehydrates the same member.
+            self.assertEqual(verify(bundle, pass_file), 0)
+            out_home = root / "restored"
+            self.assertEqual(rehydrate(bundle, out_home, pass_file), 0)
+            restored = json.loads((out_home / "pando" / "identity.json")
+                                  .read_text())
+            self.assertEqual(restored["secret_key"],
+                             live.to_json()["secret_key"])
+            self.assertNotIn("ciphertext", restored)
+
+            # 5. a flipped ciphertext byte still fails with the right
+            #    passphrase - the seal, not just the digest, is doing work.
+            tampered = root / "tampered"
+            shutil.copytree(bundle, tampered)
+            tpath = tampered / "identity" / "identity.json"
+            payload = json.loads(tpath.read_text())
+            blob = bytearray(base64.urlsafe_b64decode(payload["ciphertext"]))
+            blob[0] ^= 0x01
+            payload["ciphertext"] = base64.urlsafe_b64encode(
+                bytes(blob)).decode()
+            tpath.write_text(json.dumps(payload, indent=2))
+            self.assertEqual(verify(tampered, pass_file), 1)
+            self.assertEqual(rehydrate(tampered, root / "nope", pass_file), 1)
+            # ... and the AEAD alone rejects it, independent of the digest.
+            with self.assertRaises(ValueError):
+                seed.unwrap_identity(tpath.read_bytes(), "correct horse "
+                                                         "battery staple")
 
 
 if __name__ == "__main__":

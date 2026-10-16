@@ -13,15 +13,26 @@ If (2) succeeds, identity is not really carried by the seed and the whole
 "member survives the loss of its box" story is false. Nothing here talks to the
 live island: the drill uses its own port, home and rollout dir.
 
+The seed is going to travel (Mac -> Windows D: -> pi5 SD card), so the drill
+runs the *whole* cycle twice: once with a plaintext bundle, once with the
+identity wrapped under a passphrase. The wrapped run adds three negative
+controls, because a lock nobody tries to pick is decoration:
+
+  3. a sealed bundle with no passphrase is refused
+  4. the right passphrase, wrong bytes (a flipped ciphertext) is refused
+  5. the wrong passphrase is refused
+
     python3 tools/seed_drill.py [--keep] [--json <path>]
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
 import importlib.util
 import json
 import os
+import shutil
 import socket
 import sys
 import tempfile
@@ -32,6 +43,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
+
+PASSPHRASE = "drill passphrase, not a secret"
 
 
 def _load_seed_module():
@@ -63,6 +76,104 @@ def register(url: str, node_id: str, identity, token: str,
         return exc.code, exc.read().decode()
 
 
+def export_bundle(seed, bundle: Path, passphrase_file: Path | None) -> int:
+    return seed.cmd_export(argparse.Namespace(
+        out=str(bundle), home=str(Path.home() / ".pandosi"),
+        identity=str(Path.home() / ".pando" / "identity.json"),
+        rollout_dir=str(REPO / "rollouts"), force=True,
+        passphrase_file=(str(passphrase_file) if passphrase_file else None)))
+
+
+def rehydrate(seed, bundle: Path, work: Path, passphrase_file=None) -> int:
+    return seed.cmd_rehydrate(argparse.Namespace(
+        from_=str(bundle), home=str(work / "home"),
+        identity=str(work / "pando" / "identity.json"),
+        rollout_dir=str(work / "rollouts"),
+        passphrase_file=(str(passphrase_file) if passphrase_file else None)))
+
+
+def tamper_ciphertext(bundle: Path, out: Path) -> bool:
+    """Flip one byte of the sealed identity. Returns False if there is none."""
+    shutil.rmtree(out, ignore_errors=True)
+    shutil.copytree(bundle, out)
+    target = out / "identity" / "identity.json"
+    payload = json.loads(target.read_text())
+    if payload.get("kind") != "encrypted-identity":
+        return False
+    blob = bytearray(base64.urlsafe_b64decode(payload["ciphertext"]))
+    blob[0] ^= 0x01
+    payload["ciphertext"] = base64.urlsafe_b64encode(bytes(blob)).decode()
+    target.write_text(json.dumps(payload, indent=2))
+    return True
+
+
+def run_member_cycle(seed, bundle: Path, work: Path, report: dict,
+                     passphrase_file=None) -> None:
+    """Rehydrate one bundle into `work` and ask the two membership questions."""
+    from pando.identity import load_or_create
+    from pando.rootd import Coordinator, Root
+
+    manifest, _src = seed.load_bundle(bundle)
+    want = (manifest.get("source") or {}).get("node_fingerprint")
+
+    t0 = time.time()
+    rc = rehydrate(seed, bundle, work, passphrase_file)
+    report["rehydrate_rc"] = rc
+    if rc != 0:
+        return
+    report["restore_seconds"] = round(time.time() - t0, 3)
+
+    identity = load_or_create(work / "pando" / "identity.json")
+    report["fingerprint_expected"] = want
+    report["fingerprint_rehydrated"] = identity.node_fingerprint
+    # When the manifest carries no fingerprint (no signer at export time) the
+    # only honest check is that the key still round-trips.
+    report["identity_carried"] = (identity.node_fingerprint == want
+                                  if want else True)
+
+    token = "drill-pairing-token"
+    port = free_port()
+    coord = Coordinator(rollout_dir=work / "rollouts",
+                        identity_store=work / "rollouts" /
+                        "identity-bindings.json")
+    root = Root(coordinator=coord, host="127.0.0.1", port=port)
+    root.set_pairing_token(token)
+    root.set_require_identity(True)
+    root.start()
+    try:
+        code, _body = register(root.url(), "mac-text", identity, token)
+        report["same_key_status"] = code
+        report["same_key_accepted"] = code == 200
+
+        impostor = load_or_create(work / "pando" / "impostor.json")
+        report["impostor_fingerprint"] = impostor.node_fingerprint
+        code2, _body2 = register(root.url(), "mac-text", impostor, token)
+        report["new_key_status"] = code2
+        report["new_key_refused"] = code2 == 403
+    finally:
+        root.stop()
+
+    report["bundle_bytes"] = manifest["totals"]["bytes"]
+    report["bundle_files"] = manifest["totals"]["files"]
+    report["ok"] = bool(report.get("identity_carried")
+                        and report.get("same_key_accepted")
+                        and report.get("new_key_refused"))
+
+
+def print_cycle(label: str, report: dict) -> None:
+    print(f"[{label}]")
+    print(f"  bundle          : {report.get('bundle_files')} files, "
+          f"{report.get('bundle_bytes')} bytes")
+    print(f"  restore time    : {report.get('restore_seconds')}s")
+    print(f"  identity carried: {report.get('identity_carried')} "
+          f"({report.get('fingerprint_rehydrated')})")
+    print(f"  same key        : HTTP {report.get('same_key_status')} "
+          f"-> {'accepted' if report.get('same_key_accepted') else 'REFUSED'}")
+    print(f"  new key         : HTTP {report.get('new_key_status')} "
+          f"-> {'refused' if report.get('new_key_refused') else 'ACCEPTED (bad!)'}")
+    print(f"  verdict         : {'PASS' if report.get('ok') else 'FAIL'}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--keep", action="store_true",
@@ -70,91 +181,95 @@ def main() -> int:
     parser.add_argument("--json", default=None,
                         help="write the drill report as JSON to this path")
     parser.add_argument("--seed-src", default=None,
-                        help="use an existing seed bundle instead of exporting")
+                        help="use an existing bundle instead of exporting "
+                             "(skips the export half; the wrapped run is then "
+                             "whatever that bundle already is)")
     args = parser.parse_args()
 
     sys.path.insert(0, str(REPO))
     seed = _load_seed_module()
-    from pando.identity import load_or_create
-    from pando.rootd import Coordinator, Root
 
     work = Path(tempfile.mkdtemp(prefix="pandosi-drill."))
-    bundle = Path(args.seed_src).expanduser() if args.seed_src else work / "seed"
-    home = work / "home"
-    identity_path = work / "pando" / "identity.json"
-    rollout = work / "rollouts"
-    report: dict = {"ok": False, "workdir": str(work)}
+    report: dict = {"ok": False, "workdir": str(work), "modes": {}}
 
-    t0 = time.time()
+    # ---- mode 1: plaintext bundle, the original drill ----------------------
+    plain_dir = work / "plain"
     if not args.seed_src:
-        rc = seed.cmd_export(argparse.Namespace(
-            out=str(bundle), home=str(Path.home() / ".pandosi"),
-            identity=str(Path.home() / ".pando" / "identity.json"),
-            rollout_dir=str(REPO / "rollouts"), force=True))
+        rc = export_bundle(seed, plain_dir, None)
         if rc != 0:
-            print("export failed", file=sys.stderr)
+            print("plaintext export failed", file=sys.stderr)
             return rc
-    manifest, _src = seed.load_bundle(bundle)
-    rc = seed.cmd_rehydrate(argparse.Namespace(
-        from_=str(bundle), home=str(home), identity=str(identity_path),
-        rollout_dir=str(rollout)))
-    if rc != 0:
-        print("rehydrate failed", file=sys.stderr)
-        return rc
-    t_restore = time.time() - t0
+    else:
+        plain_dir = Path(args.seed_src).expanduser()
+    run_member_cycle(seed, plain_dir, work / "member-plain",
+                     report["modes"].setdefault("plaintext", {}))
+    print_cycle("plaintext", report["modes"]["plaintext"])
 
-    identity = load_or_create(identity_path)
-    want = manifest["source"]["node_fingerprint"]
-    report["fingerprint_expected"] = want
-    report["fingerprint_rehydrated"] = identity.node_fingerprint
-    report["identity_carried"] = identity.node_fingerprint == want
+    # ---- mode 2: sealed bundle, plus the negative controls ------------------
+    sealed = report["modes"].setdefault("sealed", {})
+    if args.seed_src:
+        sealed["skipped"] = "no export, cannot know the passphrase"
+        print("[sealed]\n  skipped: --seed-src was given, so the drill cannot "
+              "know the passphrase")
+    else:
+        enc_dir = work / "sealed"
+        pass_file = work / "passphrase.txt"
+        pass_file.write_text(PASSPHRASE + "\n")
+        rc = export_bundle(seed, enc_dir, pass_file)
+        if rc != 0:
+            print("sealed export failed", file=sys.stderr)
+            return rc
 
-    token = "drill-pairing-token"
-    port = free_port()
-    coord = Coordinator(rollout_dir=rollout,
-                        identity_store=rollout / "identity-bindings.json")
-    root = Root(coordinator=coord, host="127.0.0.1", port=port)
-    root.set_pairing_token(token)
-    root.set_require_identity(True)
-    root.start()
-    url = root.url()
-    try:
-        code, body = register(url, "mac-text", identity, token)
-        report["same_key_status"] = code
-        report["same_key_accepted"] = code == 200
+        # 3. no passphrase -> the whole run is refused before anything lands.
+        sealed["no_passphrase_rc"] = rehydrate(seed, enc_dir,
+                                               work / "member-silent")
+        sealed["no_passphrase_refused"] = sealed["no_passphrase_rc"] != 0
 
-        impostor = load_or_create(work / "pando" / "impostor.json")
-        report["impostor_fingerprint"] = impostor.node_fingerprint
-        code2, body2 = register(url, "mac-text", impostor, token)
-        report["new_key_status"] = code2
-        report["new_key_refused"] = code2 == 403
+        # 4. flipped ciphertext with the right passphrase -> refused.
+        broken = work / "sealed-tampered"
+        sealed["tampered"] = tamper_ciphertext(enc_dir, broken)
+        if sealed["tampered"]:
+            sealed["tampered_rc"] = rehydrate(seed, broken,
+                                              work / "member-tampered",
+                                              pass_file)
+            sealed["tampered_refused"] = sealed["tampered_rc"] != 0
 
-        report["restore_seconds"] = round(t_restore, 3)
-        report["bundle_bytes"] = manifest["totals"]["bytes"]
-        report["bundle_files"] = manifest["totals"]["files"]
-        report["ok"] = bool(report["identity_carried"]
-                            and report["same_key_accepted"]
-                            and report["new_key_refused"])
-    finally:
-        root.stop()
+        # 5. wrong passphrase -> refused.
+        wrong_file = work / "wrong-passphrase.txt"
+        wrong_file.write_text("not the drill passphrase\n")
+        sealed["wrong_passphrase_rc"] = rehydrate(seed, enc_dir,
+                                                  work / "member-wrong",
+                                                  wrong_file)
+        sealed["wrong_passphrase_refused"] = sealed["wrong_passphrase_rc"] != 0
 
-    print("seed drill")
-    print(f"  bundle          : {manifest['totals']['files']} files, "
-          f"{manifest['totals']['bytes']} bytes")
-    print(f"  restore time    : {report['restore_seconds']}s")
-    print(f"  identity carried: {report['identity_carried']} "
-          f"({identity.node_fingerprint})")
-    print(f"  same key        : HTTP {report['same_key_status']} "
-          f"-> {'accepted' if report['same_key_accepted'] else 'REFUSED'}")
-    print(f"  new key         : HTTP {report['new_key_status']} "
-          f"-> {'refused' if report['new_key_refused'] else 'ACCEPTED (bad!)'}")
-    print(f"  verdict         : {'PASS' if report['ok'] else 'FAIL'}")
+        # ... and the honest path still works end to end.
+        run_member_cycle(seed, enc_dir, work / "member-sealed", sealed,
+                         pass_file)
+        print_cycle("sealed", sealed)
+        print(f"  no passphrase   : rc={sealed['no_passphrase_rc']} "
+              f"-> {'refused' if sealed['no_passphrase_refused'] else 'ACCEPTED (bad!)'}")
+        if sealed.get("tampered"):
+            print(f"  tampered bytes  : rc={sealed['tampered_rc']} "
+                  f"-> {'refused' if sealed['tampered_refused'] else 'ACCEPTED (bad!)'}")
+        print(f"  wrong passphrase: rc={sealed['wrong_passphrase_rc']} "
+              f"-> {'refused' if sealed['wrong_passphrase_refused'] else 'ACCEPTED (bad!)'}")
+
+    plain_ok = bool(report["modes"]["plaintext"].get("ok"))
+    if args.seed_src:
+        sealed_ok = True  # not attempted
+    else:
+        sealed_ok = bool(sealed.get("ok")
+                         and sealed.get("no_passphrase_refused")
+                         and sealed.get("tampered_refused")
+                         and sealed.get("wrong_passphrase_refused"))
+    report["ok"] = plain_ok and sealed_ok
+    print(f"verdict: {'PASS' if report['ok'] else 'FAIL'} "
+          f"(plaintext={plain_ok}, sealed={sealed_ok})")
 
     if args.json:
         Path(args.json).write_text(json.dumps(report, indent=2) + "\n")
 
     if not args.keep:
-        import shutil
         shutil.rmtree(work, ignore_errors=True)
     return 0 if report["ok"] else 1
 

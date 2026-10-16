@@ -44,19 +44,41 @@ field order; the checker now refuses to report a pass on an empty scan.
     signed by the source identity.
   - refuses to write into a git worktree unless `--force`, because the bundle
     contains a private key.
-- `tools/seed_drill.py` — one command, no arguments needed.
+  - `--passphrase-file` (or `$PANDO_SEED_PASSPHRASE`) wraps the one plaintext
+    secret — the identity — in `scrypt -> xsalsa20-poly1305` (PyNaCl
+    `SecretBox`). Only that file is wrapped; the rest of the bundle stays
+    readable so a digest check still means something to a party who has the
+    bundle but not the passphrase. An export with no passphrase prints
+    `PLAINTEXT ... a bare private key` rather than staying quiet about it.
+- `tools/seed_drill.py` — one command, no arguments needed. Runs the full
+  member cycle **twice** (plaintext and sealed) and, in the sealed run, three
+  negative controls: no passphrase, a flipped ciphertext byte, and a wrong
+  passphrase.
 
 ## Drill result (measured, not asserted)
 
-`python3 tools/seed_drill.py`:
+`python3 tools/seed_drill.py` (2026-10-17, 57 files / 245 KB with the group
+mailbox history now included):
 
 ```
-bundle          : 47 files, 221270 bytes
-restore time    : 0.033s
-identity carried: True (bd326f4f2da58311)
-same key        : HTTP 200 -> accepted
-new key         : HTTP 403 -> refused
-verdict         : PASS
+[plaintext]
+  bundle          : 57 files, 244662 bytes
+  restore time    : 0.055s
+  identity carried: True (bd326f4f2da58311)
+  same key        : HTTP 200 -> accepted
+  new key         : HTTP 403 -> refused
+  verdict         : PASS
+[sealed]
+  bundle          : 57 files, 245003 bytes
+  restore time    : 0.059s
+  identity carried: True (bd326f4f2da58311)
+  same key        : HTTP 200 -> accepted
+  new key         : HTTP 403 -> refused
+  no passphrase   : rc=1 -> refused
+  tampered bytes  : rc=1 -> refused
+  wrong passphrase: rc=1 -> refused
+  verdict         : PASS
+verdict: PASS (plaintext=True, sealed=True)
 ```
 
 Method: export from this machine -> rehydrate into a fresh HOME -> start an
@@ -74,9 +96,15 @@ false.
    `~/.pandosi/seed`. Until the bundle physically leaves this machine
    (NAS / phone / Windows / private remote), nothing about the above changes the
    outage story. `export` only makes leaving *possible*; it does not leave.
-3. **No encryption.** The bundle is a plaintext private key at mode 600. A
-   seed that travels needs at least a passphrase-wrapped key before it touches
-   any shared channel.
+3. **Encryption is opt-in, and only the key is wrapped.** `--passphrase-file`
+   protects the identity; the ledger, config, mailbox history and bindings are
+   still cleartext inside the bundle. A bundle exported without the flag is
+   still a bare private key at mode 600, and the wrap is only as strong as the
+   passphrase — scrypt at n=2^14 costs an attacker ~16 MiB per guess, which
+   stops a casual guess and does not stop a determined one against a weak
+   passphrase. There is no key-derivation from a hardware token and no
+   multi-party recovery, so a lost passphrase loses the member exactly as a
+   lost disk would.
 4. **n=1.** One bundle, one drill, one run. Restore time 0.033s is a local
    filesystem copy; it says nothing about restore over a real link.
 5. **Culture is only partly carried - by rule, not by oversight.** The seed
@@ -96,7 +124,12 @@ false.
 | flip one byte in `ledger/grants.toml` | caught | exit 1, `digest mismatch: ledger/grants.toml` |
 | rehydrate a tampered bundle | refused | exit 1, refuses before writing |
 | forge file **and** manifest digest so hashes agree | caught | exit 1, `signature: INVALID` |
+| sealed bundle, no passphrase | refused | exit 1, `identity payload is encrypted` |
+| sealed bundle, passphrase correct, one ciphertext byte flipped | caught | exit 1, digest mismatch **and** `wrong passphrase, or ... tampered with` |
+| sealed bundle, wrong passphrase | refused | exit 1, `wrong passphrase, or ... tampered with` |
+| tampered file with the manifest digest re-aimed at it | caught | exit 1 - and the re-aimed manifest no longer verifies, so an attacker needs the signing key to make the first three agree |
 
-The last row is the one that matters: rewriting the manifest to match a
-modified file is exactly the attack a plain hash list does not stop, and the
-source-identity signature does.
+The row about rewriting the manifest is the one that matters: it is exactly the
+attack a plain hash list does not stop, and the source-identity signature does.
+The sealed rows add the second, independent lock: even given a bundle and the
+right passphrase, flipping one ciphertext byte fails to open.
