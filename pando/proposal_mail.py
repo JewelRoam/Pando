@@ -1,0 +1,109 @@
+"""Carry a signed proposal over the mailbox: the group's log, today.
+
+``docs/DESIGN-genesis.md`` §7 left one hole open by name: the signed proposal
+record is transport-agnostic, but *nothing carried it*. A live member could
+sign a proposal and no other member could receive it, so the agenda was the
+group's only inside one process.
+
+This module is the smallest wiring that closes it, over the transport the group
+already runs rather than a new one. The mailbox at :8776 is already the place
+where members leave each other messages, and it already has the two properties
+this needs: an append-only task list, and a body that can hold arbitrary text.
+
+The convention, by the same rule as ``[chat]``:
+
+- Title ``[proposal] ...`` is a **message class**, not work. Automations must
+  not claim it, exactly as they must not claim ``[chat]``.
+- The body is the JSON of the signed record from ``pando.genesis``.
+- On the way in, every record is re-verified and dropped if it is unsigned,
+  tampered with, or carrying a key other than the pinned member's. The mailbox
+  is a courier, not a source of truth: nothing here trusts what it read.
+"""
+
+from __future__ import annotations
+
+import json
+import urllib.error
+import urllib.request
+
+from .common import bypass_proxy_for_lan
+from .genesis import Proposal, proposals_from_log, sign_proposal
+
+TITLE_PREFIX = "[proposal]"
+PROPOSAL_PREFIX = TITLE_PREFIX
+
+
+def is_proposal_task(title: str) -> bool:
+    """True when a mailbox task title marks a message rather than work."""
+    return str(title).lstrip().startswith(TITLE_PREFIX)
+
+
+def _request(url: str, path: str, token: str | None, method: str,
+             payload: dict | None = None, timeout: float = 15) -> dict:
+    bypass_proxy_for_lan()
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    body = None if payload is None else json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(f"{url.rstrip('/')}{path}", data=body,
+                                     headers=headers, method=method)
+    try:
+        with opener.open(request, timeout=timeout) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")
+        return {"error": f"HTTP {exc.code}", "detail": detail}
+    except urllib.error.URLError as exc:
+        return {"error": f"unreachable: {exc}"}
+
+
+def publish_proposal(proposal: Proposal, identity, url: str,
+                     token: str | None = None, timeout: float = 15) -> dict:
+    """Sign *proposal* with *identity* and leave it on the mailbox.
+
+    Returns the mailbox's response. The title carries the author and action so
+    a human reading the feed can tell what was proposed without opening the
+    body; the body is the record itself.
+    """
+    record = sign_proposal(proposal, identity)
+    title = (f"{TITLE_PREFIX} {proposal.proposal_id} "
+             f"{proposal.action} by {proposal.author}")
+    return _request(url, "/task", token, "POST",
+                    {"from": proposal.author, "title": title,
+                     "body": json.dumps(record, sort_keys=True)},
+                    timeout=timeout)
+
+
+def fetch_proposals(url: str, token: str | None = None,
+                    pinned: dict[str, str] | None = None,
+                    status: str = "all", timeout: float = 15,
+                    max_items: int | None = None) -> list[Proposal]:
+    """Every verifiable proposal on the mailbox, in the order it was left.
+
+    Unverifiable ones are dropped rather than raising, so a mixed feed (chat,
+    work, forgeries) still yields the genuine proposals -- the same contract as
+    ``proposals_from_log``. ``pinned`` maps node_id -> public key; a proposal
+    whose author is a known member must carry that member's key.
+    """
+    listing = _request(url, f"/tasks?status={status}", token, "GET",
+                       timeout=timeout)
+    tasks = listing.get("tasks") or []
+    if max_items is not None:
+        tasks = tasks[-max_items:]
+    records = []
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        if not is_proposal_task(str(task.get("title", ""))):
+            continue
+        full = _request(url, f"/task/{task.get('id')}", token, "GET",
+                        timeout=timeout)
+        body = (full.get("task") or {}).get("body")
+        if not isinstance(body, str):
+            continue
+        try:
+            records.append(json.loads(body))
+        except json.JSONDecodeError:
+            continue
+    return proposals_from_log(records, pinned=pinned)

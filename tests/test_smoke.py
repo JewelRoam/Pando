@@ -1549,6 +1549,90 @@ class TestSmoke(unittest.TestCase):
         # round 1 failed; memory moves the loop to member-b's proposal.
         self.assertEqual(loop.rounds[1].outcome.action, "reproduce.spawn")
 
+    def test_verified_proposals_compose_with_the_log_proposer(self):
+        """fetch_proposals hands back Proposals; LogProposer must accept them.
+
+        The group-log path has two halves: carry and verify a signed record
+        (pando/proposal_mail -> proposals_from_log), then propose from what came
+        back (LogProposer). If proposals_from_log only understood raw dicts,
+        feeding it the verified output would silently empty the menu -- the
+        transport would look fine and the agenda would be blank.
+        """
+        from pando.genesis import (GenesisLoop, LogProposer, Proposal,
+                                   proposals_from_log, sign_proposal)
+        from pando.identity import Identity
+
+        member = Identity.generate()
+        proposal = Proposal(proposal_id="p1", author="member-a", goal="g",
+                            action="reproduce.spawn")
+        record = sign_proposal(proposal, member)
+
+        # A raw signed record is verified and pinned into a Proposal.
+        self.assertEqual(
+            proposals_from_log([record], pinned={"member-a": member.public_key}),
+            [proposal])
+        # An already-verified Proposal passes through unchanged...
+        self.assertEqual(proposals_from_log([proposal]), [proposal])
+        # ...and a mixed log keeps both, in order.
+        self.assertEqual(proposals_from_log([record, proposal]),
+                         [proposal, proposal])
+
+        # The composition a live member uses: verified proposals -> LogProposer.
+        loop = GenesisLoop(
+            proposer=LogProposer([proposal],
+                                 pinned={"member-a": member.public_key}),
+            actuator=lambda p: True)
+        self.assertEqual(loop.step().outcome.action, "reproduce.spawn")
+
+    def test_genesis_loop_adopts_only_what_the_swarm_allows(self):
+        """The loop does not own safety: the swarm's own tier gates adoption.
+
+        pando/autonomy.py gates its actions on Coordinator.decide; the genesis
+        loop consumes the same verdict through the same rule (pando/gate.py),
+        so "what the swarm allowed" cannot mean two different things.
+        """
+        from pando.gate import TierPolicy
+        from pando.genesis import GenesisLoop, StubProposer
+
+        def snapshot(verdict):
+            acted = []
+            loop = GenesisLoop(
+                proposer=StubProposer(["recruit.invite", "reproduce.spawn"]),
+                actuator=lambda p: (acted.append(p.action), True)[1],
+                decide=lambda rnd, proposals, hist: dict(verdict),
+                policy=TierPolicy(allowed_tiers=("auto",), min_responders=3))
+            return loop.step(), acted
+
+        base = {"tier": "auto", "choice": "p1:reproduce.spawn", "responded": 3,
+                "agreement": 1.0, "mean_probability": 0.9,
+                "uncalibrated_checkpoints": []}
+
+        # The swarm declined: hold, and record why rather than acting anyway.
+        held, acted = snapshot({**base, "tier": "escalate"})
+        self.assertFalse(held.outcome.adopted)
+        self.assertEqual(acted, [])
+        self.assertIn("escalate", held.outcome.held_reason)
+
+        # A real quorum on the auto tier: the swarm's named choice is what runs.
+        ok, acted = snapshot(base)
+        self.assertEqual(ok.outcome.action, "reproduce.spawn")
+        self.assertEqual(acted, ["reproduce.spawn"])
+        self.assertEqual([p.proposal_id for p in ok.offered],
+                         ["p1:recruit.invite", "p1:reproduce.spawn"])
+
+        # One responder is not a quorum even when it reports the auto tier.
+        lone, acted = snapshot({**base, "responded": 1})
+        self.assertFalse(lone.outcome.adopted)
+        self.assertEqual(acted, [])
+
+        # An uncalibrated voter puts the confidence scale in doubt.
+        uncal, acted = snapshot({**base, "uncalibrated_checkpoints": ["laya-en"]})
+        self.assertFalse(uncal.outcome.adopted)
+        self.assertEqual(acted, [])
+        self.assertIn("uncalibrated", uncal.outcome.held_reason)
+
+
+
 
 
 

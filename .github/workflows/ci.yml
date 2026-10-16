@@ -17,6 +17,11 @@ jobs:
         run: python tools/check_no_weights.py
       - name: Smoke tests
         run: python -m unittest discover -s tests -v
+      - name: Genesis drills (the group authors its own agenda)
+        run: |
+          python tools/genesis_check.py
+          python tools/genesis_log_check.py
+          python tools/genesis_transport_check.py
       - name: Topology planner scenarios
         run: python tools/topology_check.py
       - name: Doctor

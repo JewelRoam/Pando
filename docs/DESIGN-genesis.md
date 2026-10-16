@@ -1,7 +1,7 @@
 # The Genesis layer: how the group authors its own agenda
 
-Status: mechanism implemented with a stub proposer and a signed proposal record
-(2026-10-17); real proposer and transport wiring open. Companion to docs/COMMS-AND-SEEDS.md (roles, seed),
+Status: the mechanism, the mailbox transport, and the swarm gate are built and drilled
+(2026-10-17); the real (model) proposer is open. Companion to docs/COMMS-AND-SEEDS.md (roles, seed),
 docs/autonomy loop in `pando/autonomy.py`, and the round98/99 findings.
 
 ## 1. The gap (measured, not asserted)
@@ -90,7 +90,6 @@ Implemented 2026-10-17, in-process, no model:
   between the two loops is the memory, so the change of agenda is caused by the group's own outcome
   record — the falsifiable core, holding on a stub.
 - `tests/test_smoke.py::test_genesis_agenda_is_history_dependent` — the same property as a test.
-  Full suite: 36 tests, 1 skipped, all green.
 - `pando/genesis.py` also carries a proposal as a **signed record** (`sign_proposal` /
   `verify_proposal` / `proposals_from_log`), so it can travel between members and be checked on
   arrival — same rule as registration: the public key is the claim, the name is a label.
@@ -100,18 +99,57 @@ Implemented 2026-10-17, in-process, no model:
 - `tools/genesis_check.py` also runs a second scenario: the candidates are two members' signed
   proposals (`LogProposer`), the loop adopts member-a's, it fails, and round 2 moves to member-b's
   — the candidate set is authored by the group and pinned on the way in, not invented by the loop.
+- `pando/proposal_mail.py` — the transport that carries a signed proposal over the mailbox, and
+  `pando/gate.py` — the one tier rule both loops consume. Both are drilled below; neither existed
+  when this section was first written.
+
+### 7a. Transport: the proposal travels now
+
+`pando/proposal_mail.py` closes hole (1) over the transport the group already runs. A proposal is
+published as a mailbox item titled `[proposal] ...` — a **message class**, not work, by the same
+rule as `[chat]` (automations must not claim it) — with the signed record as the body. On the way in
+`fetch_proposals` re-verifies every record and pins the author's key, exactly as registration does:
+the mailbox is a courier, not a source of truth. `LogProposer` then proposes from what came back.
+
+`tools/genesis_transport_check.py` drives a stand-in mailbox that speaks the same three endpoints the
+real one does. Measured, 13/13: two genuine proposals round-trip and keep their order and action; a
+tampered body is dropped; a record carrying a *valid foreign* key under a member's name is dropped
+once that member is pinned, and kept when it is not — which is the whole reason pinning exists;
+`[chat]` and ordinary work are not proposals.
+
+One composition bug this drill caught, worth recording. `fetch_proposals` returns verified `Proposal`
+objects, but `LogProposer` re-ran `proposals_from_log`, which understood only raw signed dicts — so
+wiring the two together silently produced an **empty menu**: the transport looked healthy and the
+agenda was blank. `proposals_from_log` now passes `Proposal` objects through unchanged; a `Proposal`
+is already past the verification boundary and carries no key, so the pin has to bite at the fetch,
+not here. Guarded by
+`tests/test_smoke.py::test_verified_proposals_compose_with_the_log_proposer`.
+
+### 7b. Gate: the loop no longer adopts on its own authority
+
+`pando/gate.py` holds the tier rule `pando/autonomy.py` already used, in one place, so the two loops
+cannot drift. `GenesisLoop(decide=...)` hands the swarm the ranked menu of the group's own proposals
+and adopts only what `TierPolicy` allows. All three parts are needed:
+
+1. the swarm's own tier is in the allowed set;
+2. `responded >= min_responders` — the coordinator sets its quorum to `min(3, len(selected))`, so a
+   lone survivor still reports `auto` with agreement 1.0;
+3. no `uncalibrated_checkpoints` — the auto thresholds assume a known confidence scale.
+
+Measured by `tools/genesis_transport_check.py` (the gate scenario) and
+`tests/test_smoke.py::test_genesis_loop_adopts_only_what_the_swarm_allows`: `escalate` holds; `auto`
+with three calibrated responders executes the swarm's *named* proposal and records the menu it chose
+from; one responder holds; an uncalibrated voter holds. Every hold records its reason in
+`ProposalOutcome.held_reason`, so a withheld action is auditable rather than merely absent.
 
 Deliberately **not** claimed yet:
 
-1. The signed proposal is transport-agnostic, but it is **not on the group log yet**: nothing
-   carries it over the mailbox or the S2 group log, so a live member still cannot *receive* another
-   member's proposal. The record format is settled; the transport wiring is the next step — and it
-   wants to line up with S2 rather than fork a parallel convention.
-2. No model is involved. The stub is dumb on purpose; whether a real Laya / text-nb proposer beats it
-   on instrumental outcomes is unmeasured.
-3. The loop is not yet gated by the swarm tier. `pando/autonomy.py` gates its actions on
-   `Coordinator.decide`; here the stub adopts unilaterally, which is fine for a mechanism drill and
-   not fine for a live member.
+- No model is involved. The stub is dumb on purpose; whether a real Laya / text-nb proposer beats it
+  on instrumental outcomes is unmeasured. The proposer is the point of the layer, and it is the part
+  still missing.
+- The gate means the loop is *permissioned*, not *safe*: it proves the swarm's verdict is applied
+  identically in both loops, not that the verdict is right. The end-to-end wiring against a live root
+  (`SwarmProposalDecider`) has not been run against the real swarm yet.
 
 The original plan was to decouple the mechanism from model quality: if the machinery cannot turn a
 *known* proposal stream into history-dependent selection, a smarter proposer will not save it. That

@@ -21,6 +21,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from .common import bypass_proxy_for_lan
+from .gate import TierPolicy
 
 
 @dataclass
@@ -106,50 +107,33 @@ class AutonomyLoop:
                  journal: Journal | None = None):
         self.decide = decide
         self.actuator = actuator
-        self.allowed_tiers = tuple(allowed_tiers)
-        self.min_responders = min_responders
-        self.require_calibration = require_calibration
+        # Kept as attributes for callers that read them back; the rule itself
+        # lives in pando/gate.py so this loop and pando/genesis.py cannot drift.
+        self.policy = TierPolicy(allowed_tiers=allowed_tiers,
+                                 min_responders=min_responders,
+                                 require_calibration=require_calibration)
+        self.allowed_tiers = self.policy.allowed_tiers
+        self.min_responders = self.policy.min_responders
+        self.require_calibration = self.policy.require_calibration
         self.journal = journal
         self.outcomes: list[Outcome] = []
 
     def step(self, observation: Observation) -> Outcome:
         result = self.decide(observation)
-        tier = str(result.get("tier", "escalate"))
-        choice = result.get("choice")
-        responded = int(result.get("responded", 0))
-        uncalibrated = list(result.get("uncalibrated_checkpoints") or [])
-        acted = (tier in self.allowed_tiers and choice is not None
-                 and responded >= self.min_responders)
-        if acted and self.require_calibration and uncalibrated:
-            # The auto tier thresholds assume a known confidence scale; a
-            # vote with no temperature table is on an unknown scale, so the
-            # rule that let it through cannot be trusted (round 100).
-            acted = False
+        verdict = self.policy.evaluate(result)
+        acted = verdict.acted
         if acted and self.actuator is not None:
-            self.actuator(observation, choice, result)
-        if acted:
-            reason = (f"tier {tier!r} allowed with {responded} responders "
-                      f">= {self.min_responders}")
-        elif self.require_calibration and uncalibrated:
-            reason = ("uncalibrated checkpoint(s): "
-                      + ", ".join(uncalibrated))
-        elif tier not in self.allowed_tiers:
-            reason = f"tier {tier!r} not in {list(self.allowed_tiers)}"
-        elif choice is None:
-            reason = "no choice was returned"
-        else:
-            reason = (f"only {responded} responders; policy requires "
-                      f"{self.min_responders}")
+            self.actuator(observation, verdict.choice, result)
         outcome = Outcome(
             observation_id=observation.observation_id,
-            tier=tier,
+            tier=verdict.tier,
             acted=acted,
-            choice=choice,
-            agreement=float(result.get("agreement", 0.0)),
-            mean_probability=float(result.get("mean_probability", 0.0)),
-            responded=int(result.get("responded", 0)),
-            quorum_size=int(result.get("quorum_size", 0)),
-            reason=reason,
+            choice=verdict.choice,
+            agreement=verdict.agreement,
+            mean_probability=verdict.mean_probability,
+            responded=verdict.responded,
+            quorum_size=verdict.quorum_size,
+            reason=verdict.reason,
         )
         self.outcomes.append(outcome)
         if self.journal is not None:

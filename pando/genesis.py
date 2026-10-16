@@ -25,9 +25,11 @@ function of recorded outcomes. Swap in a real proposer only after that.
 from __future__ import annotations
 
 import json
+import urllib.request
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from .gate import TierPolicy
 from .identity import verify as _verify_signature
 
 
@@ -74,7 +76,13 @@ class Proposal:
 
 @dataclass
 class ProposalOutcome:
-    """What happened to one adopted proposal. ``success`` is None when not run."""
+    """What happened to one adopted proposal. ``success`` is None when not run.
+
+    ``gate_tier`` is the swarm's own verdict for the round that produced this
+    outcome (empty when no ``decide`` was wired and the loop chose alone).
+    ``detail`` carries the policy's reason whenever the loop held instead of
+    acted, so a withheld action is auditable and not merely absent.
+    """
 
     proposal_id: str
     action: str
@@ -82,6 +90,8 @@ class ProposalOutcome:
     executed: bool
     success: bool | None
     detail: str = ""
+    gate_tier: str = ""
+    held_reason: str = ""
 
 
 class ScoreBoard:
@@ -198,13 +208,15 @@ class Journal:
 
 @dataclass
 class Round:
-    """One propose -> score -> adopt -> execute -> remember cycle."""
+    """One propose -> score -> offer -> adopt -> execute -> remember cycle."""
 
     round_no: int
     proposals: list[Proposal]
     feasible: list[Proposal]
     adopted: Proposal | None
     outcome: ProposalOutcome
+    offered: list[Proposal] = field(default_factory=list)
+    verdict: dict | None = None
 
 
 class GenesisLoop:
@@ -226,12 +238,20 @@ class GenesisLoop:
 
     def __init__(self, proposer, actuator, scoreboard: ScoreBoard | None = None,
                  action_space: dict[str, str] | None = None,
-                 journal: Journal | None = None):
+                 journal: Journal | None = None, decide=None,
+                 policy: TierPolicy | None = None, max_candidates: int | None = None):
         self.proposer = proposer
         self.actuator = actuator
         self.scoreboard = scoreboard if scoreboard is not None else ScoreBoard()
         self.action_space = dict(action_space or ACTION_SPACE)
         self.journal = journal
+        # ``decide`` is the swarm, in the shape ``pando/autonomy.py`` already
+        # uses: a callable returning Coordinator.decide's dict. ``None`` keeps
+        # the mechanism-only mode the drills run (adopt unilaterally), which is
+        # fine to measure the gradient and not fine for a live member.
+        self.decide = decide
+        self.policy = policy if policy is not None else TierPolicy()
+        self.max_candidates = max_candidates
         self.proposals: list[Proposal] = []
         self.outcomes: list[ProposalOutcome] = []
         self.rounds: list[Round] = []
@@ -251,13 +271,38 @@ class GenesisLoop:
         # tie-break is deterministic and reproducible.
         ranked = sorted(feasible,
                         key=lambda p: (-self.scoreboard.score(p.action), p.action))
-        adopted = ranked[0] if ranked else None
+
+        offered: list[Proposal] = []
+        verdict: dict | None = None
+        adopted: Proposal | None = ranked[0] if ranked else None
+        held_reason = ""
+
+        if self.decide is not None and ranked:
+            # The menu handed to the swarm is the group's own ranked proposals;
+            # the swarm names one by proposal_id, and the policy decides whether
+            # that verdict is enough to act on. A hold is a recorded outcome,
+            # not an absence of one.
+            offered = (ranked[:self.max_candidates]
+                       if self.max_candidates else ranked)
+            verdict = self.decide(round_no, offered, self.history())
+            decision = self.policy.evaluate(verdict)
+            chosen_id = str(verdict.get("choice") or "")
+            picked = next((p for p in offered
+                           if p.proposal_id == chosen_id), None)
+            if decision.acted and picked is not None:
+                adopted = picked
+            else:
+                adopted = None
+                held_reason = (decision.reason if picked is not None else
+                               f"swarm chose {chosen_id!r}, not on the menu")
 
         success: bool | None = None
         detail = "no feasible proposal"
         if adopted is not None:
             success = bool(self.actuator(adopted))
             detail = "actuator reported " + ("success" if success else "failure")
+        elif held_reason:
+            detail = "held: " + held_reason
         outcome = ProposalOutcome(
             proposal_id=adopted.proposal_id if adopted else "",
             action=adopted.action if adopted else "",
@@ -265,6 +310,8 @@ class GenesisLoop:
             executed=adopted is not None,
             success=success,
             detail=detail,
+            gate_tier=str((verdict or {}).get("tier", "")),
+            held_reason=held_reason,
         )
 
         self.proposals.extend(raw)
@@ -273,7 +320,8 @@ class GenesisLoop:
         if self.journal is not None:
             self.journal.append(outcome)
         round_result = Round(round_no=round_no, proposals=raw, feasible=feasible,
-                             adopted=adopted, outcome=outcome)
+                             adopted=adopted, outcome=outcome,
+                             offered=offered, verdict=verdict)
         self.rounds.append(round_result)
         return round_result
 
@@ -348,14 +396,31 @@ def verify_proposal(record, expected_pubkey: str | None = None) -> Proposal | No
 
 def proposals_from_log(entries, pinned: dict[str, str] | None = None
                        ) -> list[Proposal]:
-    """Every verifiable proposal in a mixed log, in order; invalid ones dropped.
+    """Every verifiable proposal in a mixed log, in order; the rest dropped.
 
-    ``pinned`` maps node_id -> public key. When given, a proposal whose author
-    is a known member must carry that member's key, so a different key cannot
-    speak under a member's name.
+    Two shapes are accepted per entry, and the difference between them is the
+    trust boundary, not a convenience:
+
+    - a **signed record** (a dict): the untrusted transport form. Its signature
+      is checked here, and when ``pinned`` maps its author to a key the record
+      must carry exactly that key -- a different key cannot speak under a
+      member's name.
+    - a ``Proposal``: already past the verification boundary. It was either
+      built in this process by a trusted proposer or returned by
+      ``pando.proposal_mail.fetch_proposals``, which enforced the pin on the
+      way in. A ``Proposal`` carries no key, so ``pinned`` cannot apply to it
+      and does not -- which is exactly why the pin has to bite at the fetch.
+
+    Passing ``Proposal`` objects through is what lets the two halves compose:
+    ``LogProposer(source=lambda: fetch_proposals(url, pinned=pin))`` is the
+    live wiring, and re-verifying an object that has no signature to check
+    would silently empty the menu.
     """
     found: list[Proposal] = []
     for entry in entries:
+        if isinstance(entry, Proposal):
+            found.append(entry)
+            continue
         expected = None
         if pinned and isinstance(entry, dict):
             payload = entry.get("payload")
@@ -366,3 +431,55 @@ def proposals_from_log(entries, pinned: dict[str, str] | None = None
         if proposal is not None:
             found.append(proposal)
     return found
+
+
+class SwarmProposalDecider:
+    """Ask a live root which of the group's own proposals to adopt.
+
+    The menu handed to the models is the loop's ranked proposals. A stem
+    answers with one token, so the question has to carry the meaning: a bare
+    proposal_id would be unanswerable, and a numbered menu would put the loop's
+    own ordering back in charge. So every candidate is ``proposal_id`` and the
+    question names, for each, what the action actually is and who authored it.
+
+    The reply is the coordinator's verdict dict, unchanged -- ``tier``,
+    ``choice``, ``responded``, ``agreement``, ``uncalibrated_checkpoints`` --
+    so the same ``TierPolicy`` that gates ``pando/autonomy.py`` gates this.
+    """
+
+    def __init__(self, root_url: str, pairing_token: str | None = None,
+                 timeout: float = 120, max_menu: int = 8):
+        from .common import bypass_proxy_for_lan
+
+        bypass_proxy_for_lan()
+        urllib.request.install_opener(
+            urllib.request.build_opener(urllib.request.ProxyHandler({})))
+        self.root_url = root_url.rstrip("/")
+        self.timeout = timeout
+        self.max_menu = max(1, int(max_menu))
+        self._headers = {"Content-Type": "application/json"}
+        if pairing_token:
+            self._headers["Authorization"] = f"Bearer {pairing_token}"
+
+    def render_menu(self, proposals: list[Proposal]) -> tuple[list[str], str]:
+        menu = list(proposals)[:self.max_menu]
+        lines = [f"{p.proposal_id} = {p.action} (by {p.author})"
+                 for p in menu]
+        question = ("Which of the group's own proposals should be adopted? "
+                    "Answer with one proposal id. Menu: " + "; ".join(lines))
+        return [p.proposal_id for p in menu], question
+
+    def __call__(self, round_no: int, proposals: list[Proposal],
+                 history: dict) -> dict:
+        candidates, question = self.render_menu(proposals)
+        body = json.dumps({
+            "state": f"genesis-round-{round_no}",
+            "question": question,
+            "candidates": candidates,
+            "request_id": f"genesis-r{round_no}",
+        })
+        request = urllib.request.Request(
+            f"{self.root_url}/decide", data=body.encode("utf-8"),
+            headers=self._headers, method="POST")
+        with urllib.request.urlopen(request, timeout=self.timeout) as resp:
+            return json.loads(resp.read())
