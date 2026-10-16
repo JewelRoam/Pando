@@ -83,3 +83,4 @@ Timestamped, sanitized snapshots of this PandoSI working session.
 | 2026-10-16T160003 | `docs/session-logs/2026-10-16T160003-session-backup.md` | 0db4a04824ac | 277/1499/2676 | automatic snapshot after 461c69b test: the reasoning axis - thinking mode ties or loses at 60x latency; votes land in-repo |
 | 2026-10-16T163003 | `docs/session-logs/2026-10-16T163003-session-backup.md` | 72b870ba7e38 | 278/1503/2682 | automatic snapshot after 1d35fb0 chore: session backup 2026-10-16T160003 |
 | 2026-10-16T170003 | `docs/session-logs/2026-10-16T170003-session-backup.md` | e29a5c754e70 | 281/1510/2688 | automatic snapshot after d8987e4 docs: the wire protocol rewritten against the code - 95 field-level citations, fabrications removed |
+| 2026-10-16T173003 | `docs/session-logs/2026-10-16T173003-session-backup.md` | 4bc586901a96 | 282/1520/2699 | automatic snapshot after fcf6f80 data: trainer-format ft-v5 corpus + suite converter (rolling again on the 3070) |
