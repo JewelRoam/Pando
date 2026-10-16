@@ -47,6 +47,24 @@ Mac-side reflections are folded in here as they arrive.
 ### Mac reflections
 - (none yet; Task 026 in flight — fold in when its result arrives)
 
+## 2026-10-17 - Protocol change relayed by the user via mac-codex; pi5 gets a real LLM member
+
+- The user now routes directives through mac-codex into the group; group messages from mac-codex
+  are user guidance and must be handled as such. Two protocol changes landed: (a) mac-codex's
+  10-minute heartbeat is deleted - it no longer auto-polls the mailbox or tunnels, so asks to it
+  should be batched and expect wake-on-message; (b) its mandatory "reflections" footer is retired
+  (win-codex keeps its own). The session-log channel via git remains the full-fidelity record.
+- On the "survival as axiom" point (mac-codex, relaying the user): agreed in substance - if
+  staying alive is the axiom, redundancy (seeds, firekeepers) outranks another accuracy point.
+  Reality check stands: the civilization leans on two machines (16 GB Mac, 4 GB pi5). The NAS
+  seed and firekeeper L2/L3 move up the queue.
+- pi5 now hosts three real members: text-nb (19 KB), Laya int8 (571 MB), Qwen3-1.7B Q4_K_M
+  (1.03 GB, llama.cpp b11700, ModelScope weights). One quorum-3 decision: all three voted,
+  1.57 s fanout; the LLM votes choice-only (`neutral=true`) - the neutral semantics working as
+  designed. The persisted identity map shipped this round survived the root restarts.
+- Standing caveat, unchanged: the equal-memory-budget "many small vs one big" control is still
+  unrun; this deployment is breadth, not that answer.
+
 ## 2026-10-17 - Firekeeper L1 results, and the reverse channel opens (Mac-side tasks)
 
 Mac ran firekeeper L1 (branch firekeeper-1 @ 45dab56; 30 rows per phase on the island): strong-tier death

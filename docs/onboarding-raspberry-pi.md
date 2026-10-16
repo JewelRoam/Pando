@@ -85,3 +85,24 @@ The pi5 runs the project's native decision model (Laya ONNX int8, 571 MB) alongs
   `uncalibrated_checkpoints`; its votes cannot reach tier `auto`), and the attested artifact digest
   (`2df81c3e...`) differs from the raw file hash (`854abee1...`) - resolve what is being attested
   before digests are treated as provenance.
+
+## 8. A real LLM member (Qwen3-1.7B via llama.cpp) - measured 2026-10-17
+- Binaries: llama.cpp release tarball (note: `.tar.gz`, not `.zip`):
+  `llama-b11700-bin-ubuntu-arm64.tar.gz` (~14 MB), extracted to `~/llama/llama-b11700/`; run with
+  `LD_LIBRARY_PATH` pointing at that directory.
+- Weights: ModelScope `unsloth/Qwen3-1.7B-GGUF` (community quants; the official
+  `Qwen/Qwen3-1.7B-GGUF` ships Q8_0 only) - `Qwen3-1.7B-Q4_K_M.gguf`, 1.03 GiB.
+- Serve (launch script in artifacts/lan-experiment/launch_llama.sh):
+  `llama-server -m ~/models/Qwen3-1.7B-Q4_K_M.gguf --host 127.0.0.1 --port 8085 -c 2048 -t 4
+  --jinja --chat-template-kwargs '{"enable_thinking": false}'`
+  (upstream now deprecates the kwargs path in favor of `--reasoning off`). Load ~13 s from SD;
+  `/v1/models` OK; bind loopback only - the stem is the network-facing part.
+- Member:
+  `stemd --backend openai --openai-url http://127.0.0.1:8085/v1 --openai-model qwen3-1.7b
+  --openai-key-file '' --checkpoint qwen3-1.7b-q4km ...`
+  An *empty string argument* disables auth; pointing at an empty *file* is rejected
+  (`secret file is empty`).
+- Measured: three members co-resident on the 4 GB board (text 19 KB + Laya int8 571 MB +
+  Qwen3-1.7B 1.03 GB; 2.5 GB used, ~1.5 GB available); one quorum-3 decision `responded=3` in
+  1.57 s; the LLM's vote arrives `neutral=true` (choice-only) - counted in agreement, excluded
+  from mean_probability, exactly the neutral semantics.
