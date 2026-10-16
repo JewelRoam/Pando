@@ -1,6 +1,7 @@
 # Plan: groups — how the fabric forms and keeps a shared conversation
 
-Status: implementation plan, 2026-10-17. Inputs: docs/SURVEY-decentralized-comms.md (stack),
+Status: implementation plan, 2026-10-17. Vocabulary is fixed by docs/IDENTITY-SPEC.md
+(actors: host / intelligence / session / operator). Inputs: docs/SURVEY-decentralized-comms.md (stack),
 the mac-codex consultation (task t-20261017-001001-f790), docs/COMMS-AND-SEEDS.md (functions).
 
 ## The model (decided)
