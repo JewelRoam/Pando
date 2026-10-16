@@ -101,6 +101,24 @@ def main() -> int:
               f"body={data[:200]!r} vram_peak={sampler.peak} MiB")
     print(f"health after in-bounds: {health(base)}")
 
+    # Prompt fits, but prompt+max_tokens asks for more than the window:
+    # generation must stop cleanly at the edge (finish_reason=length).
+    edge = FILLER * 400 + "\nCount from 1 to 300, one number per line."
+    code, dt, data = post(base, edge, max_tokens=512)
+    edge_ok = False
+    if isinstance(data, dict):
+        usage = data.get("usage", {})
+        finish = data["choices"][0].get("finish_reason")
+        edge_ok = code == 200 and finish == "length"
+        print(f"context edge (prompt+max_tokens over the window): "
+              f"HTTP {code} in {dt:.1f}s "
+              f"prompt_tokens={usage.get('prompt_tokens')} "
+              f"completion_tokens={usage.get('completion_tokens')} "
+              f"finish={finish}")
+    else:
+        print(f"context edge: HTTP {code} in {dt:.1f}s body={data[:200]!r}")
+    print(f"health after edge: {health(base)}")
+
     over = FILLER * 600 + "\nReply with exactly: OK"
     code, dt, data = post(base, over)
     detail = data if isinstance(data, str) else json.dumps(data)[:160]
@@ -108,7 +126,7 @@ def main() -> int:
     status_after = health(base)
     print(f"health after over-context: {status_after} | vram now {vram_used()} MiB")
 
-    passed = code == 400 and status_after == "ok"
+    passed = code == 400 and status_after == "ok" and edge_ok
     print("RESULT:", "PASS" if passed else "FAIL")
     return 0 if passed else 1
 
