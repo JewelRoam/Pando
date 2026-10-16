@@ -1,0 +1,14 @@
+cff-version: 1.2.0
+message: "If you use or reference this research, cite it as below."
+title: "PandoSI: elastically scalable, heterogeneous, self-replicating unified intelligence"
+authors:
+  - name: "JewelRoam"
+version: 0.1.0
+date-released: 2026-10-16
+license: Apache-2.0
+repository-code: "https://github.com/JewelRoam/PandoSI"
+abstract: >-
+  A heterogeneous decision ensemble that composes floor-tier neural models,
+  self-trained fine-tunes, and remote LLM tiers into one gated system across
+  machines, operating systems, and NAT boundaries. Every headline number is
+  traceable to a recorded run in the research log.

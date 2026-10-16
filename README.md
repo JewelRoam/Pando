@@ -11,6 +11,41 @@ devices, one mind.
   Latin: *I spread*.
 - **SI** — Super Intelligence.
 
+## Headline results (all measured; each has a run behind it)
+
+| result | number | round |
+|---|---|---|
+| live three-tier fleet, held-out wording (split D) | **0.9833 decided**; 195/240 auto-executed, **every one correct** | 160 |
+| same discipline on a brand-new intent family (F) | 0.9833; auto 99 @ 0.9899 with the 8B tier + neutral confidences | 164-165 |
+| the project trained its own best member | 0.7333 -> 0.9125 on wording it had never seen | 150 |
+| a replica member | bought nothing (identical answers), then cost 56% of throughput | 146/155 |
+| cross-NAT member (Mac, Cloudflare tunnels) | correctness preserved; p50 329 -> 1236 ms - the price, priced | 164 |
+
+**The rules the measurements produced:** opinions buy intelligence; stems
+spend latency (155) · auto-execution requires the measured-strongest
+member's assent (159-160) · the trusted witness is per *family*, and a
+fitted advisor scores zero outside its family (164) · a choice-only member
+never prices confidence (165) · on 16 GB, one resident LLM tier per role -
+co-residency costs the tail, not the mean (163).
+
+## Quickstart
+
+```bash
+git clone https://github.com/JewelRoam/PandoSI && cd PandoSI
+pip install -e .[runtime]
+python -m unittest discover -s tests   # 29 smoke tests, stdlib-only
+python tools/demo.py                   # live two-group swarm demo, no GPU needed
+```
+
+**Docs map:** [research log](docs/research/INDEX.md) (175 rounds) ·
+[project state](PROJECT-STATE.md) · [wire contract](docs/STEM-PROTOCOL.md) ·
+[cross-NAT connectivity](docs/remote-connectivity.md) ·
+[Mac execution node](docs/mac-agent-onboarding.md)
+
+*Research preview: interfaces move; the numbers do not.* Recorded votes and
+an offline reproduction tool are landing under `assets/votes/` and
+`tools/reproduce_headlines.py` (round 166).
+
 ## What works today (all verified on real hardware/software)
 
 - **Decision-model swarm**: 3 Laya lineages (421M/322M, Apache-2.0,

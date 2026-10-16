@@ -1,42 +1,34 @@
-# Contributing to PandoSI
+# Contributing
 
-## Getting started
+This is a research repository. The bar for a change is not "it runs" - it is
+"the claim is traceable".
 
-```bash
-git clone https://github.com/JewelRoam/PandoSI.git
-cd PandoSI
-pip install pynacl zeroconf          # minimum deps
-python tools/demo.py                  # verify everything works
-python -m pandosi.doctor             # check your capabilities
-```
+## Ground rules
 
-## Development principles
+1. **Prediction first.** Write the expected number down (in the task, the
+   PR, or the research file) before running the experiment.
+2. **Replication discipline.** One run is one draw. Anything that will be
+   quoted in a document needs either a second run or an explicit caveat.
+3. **No inferred values.** Every number in `docs/` must come from a run, a
+   recorded-votes file, or a named tool. If it cannot be traced, it does not
+   go in.
+4. **Smoke over suites.** Tests are for invariants: `python -m unittest
+   discover -s tests` (29 tests, stdlib-only) plus
+   `python -m py_compile pandosi/*.py tools/*.py`. Prefer one meaningful
+   end-to-end check over a pile of unit tests.
 
-1. **Minimal mocks**: only the decision backend is mocked; everything else
-   (HTTP, registry, quorum, aggregation) runs real code.
-2. **Smoke over unit tests**: one smoke file (tests/test_smoke.py, 2 cases).
-   Run at milestones, not per-edit. Static analysis (py_compile/ruff) is
-   the default check.
-3. **Honest negatives**: if something doesn't work, document it with data.
-   A refuted hypothesis is as valuable as a confirmed one.
-4. **Evidence-backed claims**: every number in the docs should trace to a
-   research round (docs/research/) or a measurable experiment.
-5. **No telemetry**: metrics and rollouts stay on the operator's disk.
+## Workflow
 
-## Areas that need contribution
+- Fork or branch (`feat/`/`codex/` prefixes are fine); keep PRs small and
+  single-idea.
+- Wire changes: update `docs/STEM-PROTOCOL.md` in the same PR.
+- Research work: add `docs/research/YYYY-MM-DD-roundNNN.md` and regenerate
+  `docs/research/INDEX.md` via `python tools/build_research_index.py`.
+- CI (`.github/workflows/ci.yml`) runs static analysis, the smoke suite,
+  the demo, and distribution verification on every push - it must be green.
 
-- **Termux/TV box testing**: run the graft suite on a real TV box and
-  publish the numbers (first public Amlogic S905 data would be valuable)
-- **NPU graph surgery**: IsNaN(30x) + other op-level fixes for the vpux
-  compiler; requires ONNX graph manipulation skills
-- **RLCD training**: run the actual training loop with accumulated
-  disagreement data; laya-rs or laya.train both work
-- **Dashboard**: lineage graph rendering, playbook A/B comparison view
-- **Multi-bucket auto-discovery**: join --multi-eu already globs static
-  exports; extend to multiple checkpoint families
+## Reporting results
 
-## Code of conduct
-
-- All replication experiments must run in sandboxes (see THREAT-MODEL.md)
-- No telemetry, no data exfiltration
-- Honest reporting: negative results are contributions
+State configuration, split, sample size, and the exact tool used. Recorded
+votes belong under `assets/votes/` with provenance in its README; the
+offline reproduction lives in `tools/reproduce_headlines.py`.
