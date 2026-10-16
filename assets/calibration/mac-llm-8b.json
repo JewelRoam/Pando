@@ -1,0 +1,8 @@
+{
+  "checkpoint": "mac-llm-8b",
+  "temperature": 1.0,
+  "source": "declaration only: the B prompt is choice-only and the backend reports a constant p=0.5, so the confidence is identity by construction",
+  "n_tasks": 480,
+  "accuracy": 0.8917,
+  "note": "identity temperature is honest here - there is no varying confidence to calibrate; the member's information rides entirely in its choice"
+}

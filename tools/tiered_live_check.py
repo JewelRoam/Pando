@@ -36,11 +36,11 @@ from pandosi.rootd import Coordinator, Root  # noqa: E402
 MEMBERS = ["english", "ft-v3", "mac-llm"]
 
 
-def stem_commands(root_url: str) -> dict[str, list[str]]:
+def stem_commands(root_url: str, with_8b: bool = False) -> dict[str, list[str]]:
     python = sys.executable
     venv = str(ROOT_DIR / ".venv-cuda" / "Scripts" / "python.exe")
     key_file = ROOT_DIR / "metrics" / "lan-check" / "llm-api.token"
-    return {
+    commands = {
         "igpu": [python, "-m", "pandosi.stemd", "--node-id", "igpu",
                  "--checkpoint", "english", "--backend", "onnx",
                  "--onnx-path", "artifacts/laya-en-static-fixed.onnx",
@@ -57,6 +57,16 @@ def stem_commands(root_url: str) -> dict[str, list[str]]:
                    "--openai-model", "qwen3-4b-instruct-2507",
                    "--openai-probability", "0.5", "--root", root_url],
     }
+    if with_8b:
+        commands["macllm8b"] = [
+            python, "-m", "pandosi.stemd", "--node-id", "mac-llm-8b",
+            "--checkpoint", "mac-llm-8b", "--backend", "openai",
+            "--openai-url", "http://192.168.31.41:8082/v1",
+            "--openai-key-file",
+            str(ROOT_DIR / "metrics" / "lan-check" / "llm-api-8b.token"),
+            "--openai-model", "qwen3-8b-instruct",
+            "--openai-probability", "0.5", "--root", root_url]
+    return commands
 
 
 def main() -> int:
@@ -71,6 +81,8 @@ def main() -> int:
     parser.add_argument("--assent-checkpoint", default="ft-v3",
                         help="explicit checkpoint name, or 'auto' for the "
                              "measured-accuracy registry")
+    parser.add_argument("--with-8b", action="store_true",
+                        help="add the Mac's Qwen3-8B tier as a fourth stem")
     args = parser.parse_args()
 
     tasks = [json.loads(line) for line
@@ -80,8 +92,9 @@ def main() -> int:
           f"rows all correct, mac tier ~139 ms/row. {len(tasks)} rows.",
           flush=True)
 
+    members = MEMBERS + (["mac-llm-8b"] if args.with_8b else [])
     coordinator = Coordinator(
-        quorum_k=len(MEMBERS), call_timeout=120.0,
+        quorum_k=len(members), call_timeout=120.0,
         initial_stem_timeout=args.timeout, timeout_multiplier=6.0,
         min_stem_timeout=30.0, combiner=Combiner.load(args.combiner),
         assent_checkpoint=args.assent_checkpoint,
@@ -91,7 +104,8 @@ def main() -> int:
     log_dir = ROOT_DIR / "metrics" / "ensemble-checks"
     logs, processes = {}, {}
     try:
-        for name, command in stem_commands(root.url()).items():
+        for name, command in stem_commands(root.url(),
+                                           args.with_8b).items():
             print(f"  starting {name} ...", flush=True)
             log = open(log_dir / f"tiered-{name}.log", "w", encoding="utf-8")
             logs[name] = log
@@ -100,9 +114,9 @@ def main() -> int:
                 stderr=subprocess.STDOUT, creationflags=0x08000000)
         deadline = time.monotonic() + args.timeout
         while time.monotonic() < deadline and \
-                len(coordinator.live_nodes()) < len(MEMBERS):
+                len(coordinator.live_nodes()) < len(members):
             time.sleep(1.0)
-        if len(coordinator.live_nodes()) < len(MEMBERS):
+        if len(coordinator.live_nodes()) < len(members):
             raise SystemExit("stems did not all register in time")
         for node_id, info in sorted(coordinator.live_nodes().items()):
             print(f"  live: {node_id} checkpoint={info.get('checkpoint')}")
@@ -177,6 +191,8 @@ def main() -> int:
     print(f"  wall {elapsed:.1f}s, {len(tasks) / elapsed:.2f} rows/s, "
           f"p50 {statistics.median(latencies):.0f} ms")
     stems_of = {"english": "igpu", "ft-v3": "dgpu", "mac-llm": "macllm"}
+    if args.with_8b:
+        stems_of["mac-llm-8b"] = "macllm8b"
     for member, stem in stems_of.items():
         asked = health.get(stem, {}).get("decisions")
         print(f"  {member:7s} asked {asked} times, "
@@ -184,7 +200,7 @@ def main() -> int:
               f"ms CPU/decision")
     report = {"rows": len(tasks), "assent": args.assent_checkpoint,
               "assent_fallback": args.assent_fallback,
-              "members": MEMBERS, "auto": auto,
+              "members": members, "auto": auto,
               "auto_accuracy": round(auto_hits / max(1, auto), 4),
               "suggestions": suggestion_total,
               "suggestion_accuracy": round(suggestion_hits

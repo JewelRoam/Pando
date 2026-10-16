@@ -283,6 +283,8 @@ NPU) all voting in the same consensus quorum.
 | Precision invariant | every tier configuration on both splits: auto accuracy 1.0000 under assent | round 162 |
 | Weak-tier stacking dilutes | 4B+8B together automate fewer rows than 8B alone (221 vs 233 on E) | round 162 |
 | Registry updated | mac-llm-8b entry added; assent seat still ft-v3 (0.967 mean) | round 162 |
+| Live four-tier (E) | auto 221 @ 1.0000 (matches offline), decided 0.9792, p50 435 ms, 2.25 rows/s | round 162 |
+| 8B live role | coverage, not accuracy; slower than three-tier (slowest tier sets the pace) | round 162 |
 | Speed-proportional split (measured) | 0.66x / 0.74x vs quorum-1 replication; prediction falsified | round 97 |
 | Hop cost under load (loopback) | 1.9-11.1 ms vs 1.2 ms idle | round 97 |
 | Staging ceiling (5.9x slower partner) | 1.17x theoretical maximum | round 97 |
