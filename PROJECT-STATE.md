@@ -302,6 +302,9 @@ NPU) all voting in the same consensus quorum.
 | Distill corpus landed | set G: 1040 rows, 0 cue overlap with A-F; dual-teacher filter kept 918 (88.3% agreement); tools in repo | round 168 |
 | Mac two-tier island | Mac root :8765 now {mac-text, mac-llm-8b-local}; island quorum_k=1; endpoint updated | round 168 |
 | ft-v5 first turn started | holdout 91 teacher-labeled rows: english 0.8352, ft-v3 0.9451; training on 827 rows (unfrozen) on the 3070 | round 168 |
+| RSI turn 1 measured | ft-v5: holdout fidelity 1.0000 (same generation), but D 0.9208 / E 0.8708 / F 0.8500 vs ft-v3's 0.9417/0.9917/0.8667 - **refused** by the admission rule | round 168 |
+| Confidences fixed | ft-v5 arrives un-saturated (0.13-0.998) - the one strict improvement | round 168 |
+| Next knob | mix corpora (G + 720 human-labeled) and/or replicate seeds; admission machinery already knows how to judge | round 168 |
 | Second LLM tier deployed | Qwen3-8B Q4_K_M on Mac :8082, ~25.5 tok/s; 4B+8B coexist | round 162 |
 | 8B solo | D 0.8583 / E 0.9250 (4B: 0.8167 / 0.9167) | round 162 |
 | Strength axis | stronger weak-tier buys coverage: E auto 233 @ 1.0000 (core 199; 4B 227); decided set by the fallback | round 162 |

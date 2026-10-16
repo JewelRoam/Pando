@@ -1,0 +1,726 @@
+{
+  "model": "artifacts/rlcd-fi-v5",
+  "suite": "heldout5_test.jsonl",
+  "rows": [
+    {
+      "task_id": "big7-0001",
+      "expected": "billing_clarify",
+      "choice": "billing_clarify",
+      "probability": 0.9969
+    },
+    {
+      "task_id": "big7-0002",
+      "expected": "content_appeal",
+      "choice": "content_appeal",
+      "probability": 0.9969
+    },
+    {
+      "task_id": "big7-0003",
+      "expected": "data_export",
+      "choice": "content_appeal",
+      "probability": 0.9723
+    },
+    {
+      "task_id": "big7-0004",
+      "expected": "device_triage",
+      "choice": "device_triage",
+      "probability": 0.9961
+    },
+    {
+      "task_id": "big7-0005",
+      "expected": "permission_escalation",
+      "choice": "permission_escalation",
+      "probability": 0.9909
+    },
+    {
+      "task_id": "big7-0006",
+      "expected": "reschedule",
+      "choice": "reschedule",
+      "probability": 0.998
+    },
+    {
+      "task_id": "big7-0007",
+      "expected": "billing_clarify",
+      "choice": "billing_clarify",
+      "probability": 0.9973
+    },
+    {
+      "task_id": "big7-0008",
+      "expected": "content_appeal",
+      "choice": "content_appeal",
+      "probability": 0.9974
+    },
+    {
+      "task_id": "big7-0009",
+      "expected": "data_export",
+      "choice": "data_export",
+      "probability": 0.9969
+    },
+    {
+      "task_id": "big7-0010",
+      "expected": "device_triage",
+      "choice": "device_triage",
+      "probability": 0.8857
+    },
+    {
+      "task_id": "big7-0011",
+      "expected": "permission_escalation",
+      "choice": "permission_escalation",
+      "probability": 0.9981
+    },
+    {
+      "task_id": "big7-0012",
+      "expected": "reschedule",
+      "choice": "reschedule",
+      "probability": 0.9973
+    },
+    {
+      "task_id": "big7-0013",
+      "expected": "billing_clarify",
+      "choice": "billing_clarify",
+      "probability": 0.8808
+    },
+    {
+      "task_id": "big7-0014",
+      "expected": "content_appeal",
+      "choice": "content_appeal",
+      "probability": 0.2693
+    },
+    {
+      "task_id": "big7-0015",
+      "expected": "data_export",
+      "choice": "data_export",
+      "probability": 0.997
+    },
+    {
+      "task_id": "big7-0016",
+      "expected": "device_triage",
+      "choice": "device_triage",
+      "probability": 0.998
+    },
+    {
+      "task_id": "big7-0017",
+      "expected": "permission_escalation",
+      "choice": "permission_escalation",
+      "probability": 0.9974
+    },
+    {
+      "task_id": "big7-0018",
+      "expected": "reschedule",
+      "choice": "reschedule",
+      "probability": 0.9971
+    },
+    {
+      "task_id": "big7-0019",
+      "expected": "billing_clarify",
+      "choice": "billing_clarify",
+      "probability": 0.9955
+    },
+    {
+      "task_id": "big7-0020",
+      "expected": "content_appeal",
+      "choice": "reschedule",
+      "probability": 0.3752
+    },
+    {
+      "task_id": "big7-0021",
+      "expected": "data_export",
+      "choice": "data_export",
+      "probability": 0.9964
+    },
+    {
+      "task_id": "big7-0022",
+      "expected": "device_triage",
+      "choice": "device_triage",
+      "probability": 0.9952
+    },
+    {
+      "task_id": "big7-0023",
+      "expected": "permission_escalation",
+      "choice": "permission_escalation",
+      "probability": 0.7816
+    },
+    {
+      "task_id": "big7-0024",
+      "expected": "reschedule",
+      "choice": "reschedule",
+      "probability": 0.9969
+    },
+    {
+      "task_id": "big7-0025",
+      "expected": "billing_clarify",
+      "choice": "billing_clarify",
+      "probability": 0.9039
+    },
+    {
+      "task_id": "big7-0026",
+      "expected": "content_appeal",
+      "choice": "content_appeal",
+      "probability": 0.9959
+    },
+    {
+      "task_id": "big7-0027",
+      "expected": "data_export",
+      "choice": "data_export",
+      "probability": 0.3758
+    },
+    {
+      "task_id": "big7-0028",
+      "expected": "device_triage",
+      "choice": "device_triage",
+      "probability": 0.9949
+    },
+    {
+      "task_id": "big7-0029",
+      "expected": "permission_escalation",
+      "choice": "permission_escalation",
+      "probability": 0.3344
+    },
+    {
+      "task_id": "big7-0030",
+      "expected": "reschedule",
+      "choice": "reschedule",
+      "probability": 0.9969
+    },
+    {
+      "task_id": "big7-0031",
+      "expected": "billing_clarify",
+      "choice": "billing_clarify",
+      "probability": 0.5072
+    },
+    {
+      "task_id": "big7-0032",
+      "expected": "content_appeal",
+      "choice": "content_appeal",
+      "probability": 0.4116
+    },
+    {
+      "task_id": "big7-0033",
+      "expected": "data_export",
+      "choice": "data_export",
+      "probability": 0.9967
+    },
+    {
+      "task_id": "big7-0034",
+      "expected": "device_triage",
+      "choice": "content_appeal",
+      "probability": 0.9937
+    },
+    {
+      "task_id": "big7-0035",
+      "expected": "permission_escalation",
+      "choice": "permission_escalation",
+      "probability": 0.9969
+    },
+    {
+      "task_id": "big7-0036",
+      "expected": "reschedule",
+      "choice": "reschedule",
+      "probability": 0.9968
+    },
+    {
+      "task_id": "big7-0037",
+      "expected": "billing_clarify",
+      "choice": "billing_clarify",
+      "probability": 0.6789
+    },
+    {
+      "task_id": "big7-0038",
+      "expected": "content_appeal",
+      "choice": "refund",
+      "probability": 0.9966
+    },
+    {
+      "task_id": "big7-0039",
+      "expected": "data_export",
+      "choice": "data_export",
+      "probability": 0.691
+    },
+    {
+      "task_id": "big7-0040",
+      "expected": "device_triage",
+      "choice": "device_triage",
+      "probability": 0.5285
+    },
+    {
+      "task_id": "big7-0041",
+      "expected": "permission_escalation",
+      "choice": "permission_escalation",
+      "probability": 0.9981
+    },
+    {
+      "task_id": "big7-0042",
+      "expected": "reschedule",
+      "choice": "reschedule",
+      "probability": 0.9974
+    },
+    {
+      "task_id": "big7-0043",
+      "expected": "billing_clarify",
+      "choice": "billing_clarify",
+      "probability": 0.9968
+    },
+    {
+      "task_id": "big7-0044",
+      "expected": "content_appeal",
+      "choice": "permission_escalation",
+      "probability": 0.6873
+    },
+    {
+      "task_id": "big7-0045",
+      "expected": "data_export",
+      "choice": "data_export",
+      "probability": 0.998
+    },
+    {
+      "task_id": "big7-0046",
+      "expected": "device_triage",
+      "choice": "billing_clarify",
+      "probability": 0.9872
+    },
+    {
+      "task_id": "big7-0047",
+      "expected": "permission_escalation",
+      "choice": "permission_escalation",
+      "probability": 0.9969
+    },
+    {
+      "task_id": "big7-0048",
+      "expected": "reschedule",
+      "choice": "reschedule",
+      "probability": 0.997
+    },
+    {
+      "task_id": "big7-0049",
+      "expected": "billing_clarify",
+      "choice": "login_issue",
+      "probability": 0.9938
+    },
+    {
+      "task_id": "big7-0050",
+      "expected": "content_appeal",
+      "choice": "reschedule",
+      "probability": 0.3324
+    },
+    {
+      "task_id": "big7-0051",
+      "expected": "data_export",
+      "choice": "data_export",
+      "probability": 0.9962
+    },
+    {
+      "task_id": "big7-0052",
+      "expected": "device_triage",
+      "choice": "device_triage",
+      "probability": 0.9557
+    },
+    {
+      "task_id": "big7-0053",
+      "expected": "permission_escalation",
+      "choice": "permission_escalation",
+      "probability": 0.997
+    },
+    {
+      "task_id": "big7-0054",
+      "expected": "reschedule",
+      "choice": "reschedule",
+      "probability": 0.9972
+    },
+    {
+      "task_id": "big7-0055",
+      "expected": "billing_clarify",
+      "choice": "billing_clarify",
+      "probability": 0.9966
+    },
+    {
+      "task_id": "big7-0056",
+      "expected": "content_appeal",
+      "choice": "content_appeal",
+      "probability": 0.9955
+    },
+    {
+      "task_id": "big7-0057",
+      "expected": "data_export",
+      "choice": "data_export",
+      "probability": 0.996
+    },
+    {
+      "task_id": "big7-0058",
+      "expected": "device_triage",
+      "choice": "device_triage",
+      "probability": 0.996
+    },
+    {
+      "task_id": "big7-0059",
+      "expected": "permission_escalation",
+      "choice": "permission_escalation",
+      "probability": 0.9966
+    },
+    {
+      "task_id": "big7-0060",
+      "expected": "reschedule",
+      "choice": "reschedule",
+      "probability": 0.9973
+    },
+    {
+      "task_id": "big7-0061",
+      "expected": "billing_clarify",
+      "choice": "billing_clarify",
+      "probability": 0.9948
+    },
+    {
+      "task_id": "big7-0062",
+      "expected": "content_appeal",
+      "choice": "content_appeal",
+      "probability": 0.9966
+    },
+    {
+      "task_id": "big7-0063",
+      "expected": "data_export",
+      "choice": "data_export",
+      "probability": 0.998
+    },
+    {
+      "task_id": "big7-0064",
+      "expected": "device_triage",
+      "choice": "device_triage",
+      "probability": 0.8445
+    },
+    {
+      "task_id": "big7-0065",
+      "expected": "permission_escalation",
+      "choice": "permission_escalation",
+      "probability": 0.9967
+    },
+    {
+      "task_id": "big7-0066",
+      "expected": "reschedule",
+      "choice": "reschedule",
+      "probability": 0.9973
+    },
+    {
+      "task_id": "big7-0067",
+      "expected": "billing_clarify",
+      "choice": "praise",
+      "probability": 0.5727
+    },
+    {
+      "task_id": "big7-0068",
+      "expected": "content_appeal",
+      "choice": "reschedule",
+      "probability": 0.6388
+    },
+    {
+      "task_id": "big7-0069",
+      "expected": "data_export",
+      "choice": "data_export",
+      "probability": 0.9964
+    },
+    {
+      "task_id": "big7-0070",
+      "expected": "device_triage",
+      "choice": "praise",
+      "probability": 0.3892
+    },
+    {
+      "task_id": "big7-0071",
+      "expected": "permission_escalation",
+      "choice": "permission_escalation",
+      "probability": 0.9964
+    },
+    {
+      "task_id": "big7-0072",
+      "expected": "reschedule",
+      "choice": "reschedule",
+      "probability": 0.997
+    },
+    {
+      "task_id": "big7-0073",
+      "expected": "billing_clarify",
+      "choice": "billing_clarify",
+      "probability": 0.9961
+    },
+    {
+      "task_id": "big7-0074",
+      "expected": "content_appeal",
+      "choice": "content_appeal",
+      "probability": 0.9973
+    },
+    {
+      "task_id": "big7-0075",
+      "expected": "data_export",
+      "choice": "data_export",
+      "probability": 0.8814
+    },
+    {
+      "task_id": "big7-0076",
+      "expected": "device_triage",
+      "choice": "login_issue",
+      "probability": 0.4548
+    },
+    {
+      "task_id": "big7-0077",
+      "expected": "permission_escalation",
+      "choice": "permission_escalation",
+      "probability": 0.9942
+    },
+    {
+      "task_id": "big7-0078",
+      "expected": "reschedule",
+      "choice": "reschedule",
+      "probability": 0.9969
+    },
+    {
+      "task_id": "big7-0079",
+      "expected": "billing_clarify",
+      "choice": "billing_clarify",
+      "probability": 0.996
+    },
+    {
+      "task_id": "big7-0080",
+      "expected": "content_appeal",
+      "choice": "content_appeal",
+      "probability": 0.9652
+    },
+    {
+      "task_id": "big7-0081",
+      "expected": "data_export",
+      "choice": "content_appeal",
+      "probability": 0.4399
+    },
+    {
+      "task_id": "big7-0082",
+      "expected": "device_triage",
+      "choice": "device_triage",
+      "probability": 0.9889
+    },
+    {
+      "task_id": "big7-0083",
+      "expected": "permission_escalation",
+      "choice": "exchange",
+      "probability": 0.9964
+    },
+    {
+      "task_id": "big7-0084",
+      "expected": "reschedule",
+      "choice": "reschedule",
+      "probability": 0.9981
+    },
+    {
+      "task_id": "big7-0085",
+      "expected": "billing_clarify",
+      "choice": "billing_clarify",
+      "probability": 0.9936
+    },
+    {
+      "task_id": "big7-0086",
+      "expected": "content_appeal",
+      "choice": "content_appeal",
+      "probability": 0.997
+    },
+    {
+      "task_id": "big7-0087",
+      "expected": "data_export",
+      "choice": "data_export",
+      "probability": 0.6695
+    },
+    {
+      "task_id": "big7-0088",
+      "expected": "device_triage",
+      "choice": "device_triage",
+      "probability": 0.9822
+    },
+    {
+      "task_id": "big7-0089",
+      "expected": "permission_escalation",
+      "choice": "permission_escalation",
+      "probability": 0.6746
+    },
+    {
+      "task_id": "big7-0090",
+      "expected": "reschedule",
+      "choice": "reschedule",
+      "probability": 0.9938
+    },
+    {
+      "task_id": "big7-0091",
+      "expected": "billing_clarify",
+      "choice": "billing_clarify",
+      "probability": 0.998
+    },
+    {
+      "task_id": "big7-0092",
+      "expected": "content_appeal",
+      "choice": "content_appeal",
+      "probability": 0.7879
+    },
+    {
+      "task_id": "big7-0093",
+      "expected": "data_export",
+      "choice": "data_export",
+      "probability": 0.9963
+    },
+    {
+      "task_id": "big7-0094",
+      "expected": "device_triage",
+      "choice": "device_triage",
+      "probability": 0.9969
+    },
+    {
+      "task_id": "big7-0095",
+      "expected": "permission_escalation",
+      "choice": "permission_escalation",
+      "probability": 0.9965
+    },
+    {
+      "task_id": "big7-0096",
+      "expected": "reschedule",
+      "choice": "reschedule",
+      "probability": 0.9973
+    },
+    {
+      "task_id": "big7-0097",
+      "expected": "billing_clarify",
+      "choice": "content_appeal",
+      "probability": 0.3801
+    },
+    {
+      "task_id": "big7-0098",
+      "expected": "content_appeal",
+      "choice": "content_appeal",
+      "probability": 0.9904
+    },
+    {
+      "task_id": "big7-0099",
+      "expected": "data_export",
+      "choice": "content_appeal",
+      "probability": 0.5193
+    },
+    {
+      "task_id": "big7-0100",
+      "expected": "device_triage",
+      "choice": "device_triage",
+      "probability": 0.9943
+    },
+    {
+      "task_id": "big7-0101",
+      "expected": "permission_escalation",
+      "choice": "permission_escalation",
+      "probability": 0.9977
+    },
+    {
+      "task_id": "big7-0102",
+      "expected": "reschedule",
+      "choice": "reschedule",
+      "probability": 0.9972
+    },
+    {
+      "task_id": "big7-0103",
+      "expected": "billing_clarify",
+      "choice": "billing_clarify",
+      "probability": 0.9979
+    },
+    {
+      "task_id": "big7-0104",
+      "expected": "content_appeal",
+      "choice": "content_appeal",
+      "probability": 0.9952
+    },
+    {
+      "task_id": "big7-0105",
+      "expected": "data_export",
+      "choice": "data_export",
+      "probability": 0.9972
+    },
+    {
+      "task_id": "big7-0106",
+      "expected": "device_triage",
+      "choice": "device_triage",
+      "probability": 0.9964
+    },
+    {
+      "task_id": "big7-0107",
+      "expected": "permission_escalation",
+      "choice": "permission_escalation",
+      "probability": 0.9957
+    },
+    {
+      "task_id": "big7-0108",
+      "expected": "reschedule",
+      "choice": "reschedule",
+      "probability": 0.9967
+    },
+    {
+      "task_id": "big7-0109",
+      "expected": "billing_clarify",
+      "choice": "chargeback",
+      "probability": 0.5294
+    },
+    {
+      "task_id": "big7-0110",
+      "expected": "content_appeal",
+      "choice": "content_appeal",
+      "probability": 0.8673
+    },
+    {
+      "task_id": "big7-0111",
+      "expected": "data_export",
+      "choice": "data_export",
+      "probability": 0.8773
+    },
+    {
+      "task_id": "big7-0112",
+      "expected": "device_triage",
+      "choice": "device_triage",
+      "probability": 0.994
+    },
+    {
+      "task_id": "big7-0113",
+      "expected": "permission_escalation",
+      "choice": "permission_escalation",
+      "probability": 0.998
+    },
+    {
+      "task_id": "big7-0114",
+      "expected": "reschedule",
+      "choice": "reschedule",
+      "probability": 0.997
+    },
+    {
+      "task_id": "big7-0115",
+      "expected": "billing_clarify",
+      "choice": "content_appeal",
+      "probability": 0.9915
+    },
+    {
+      "task_id": "big7-0116",
+      "expected": "content_appeal",
+      "choice": "content_appeal",
+      "probability": 0.9958
+    },
+    {
+      "task_id": "big7-0117",
+      "expected": "data_export",
+      "choice": "data_export",
+      "probability": 0.9981
+    },
+    {
+      "task_id": "big7-0118",
+      "expected": "device_triage",
+      "choice": "device_triage",
+      "probability": 0.998
+    },
+    {
+      "task_id": "big7-0119",
+      "expected": "permission_escalation",
+      "choice": "permission_escalation",
+      "probability": 0.9967
+    },
+    {
+      "task_id": "big7-0120",
+      "expected": "reschedule",
+      "choice": "reschedule",
+      "probability": 0.9971
+    }
+  ]
+}

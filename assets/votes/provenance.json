@@ -256,6 +256,62 @@
       "note": "qwen3-8b-instruct with enable_thinking=true, B prompt, max_tokens 512; reasoning share ~97%",
       "suite": "heldout5_test.jsonl",
       "model": "qwen3-8b-instruct (thinking)"
+    },
+    {
+      "file": "ft-v5-holdout.json",
+      "split": "G-holdout",
+      "member": "ft-v5",
+      "rows": 91,
+      "accuracy": 1.0,
+      "sha256": "ed3d6821fcd39f329cd8fb95263ae70be07a3d82bafd8a9b8a1284e9912e6ae9",
+      "source_path": "Windows workspace metrics/lan-check/holdout-votes-ft-v5.json",
+      "branch": "local (Windows); round 168",
+      "round": "round 168",
+      "note": "teacher-labeled holdout agreement measurement",
+      "suite": "distill_ft5_holdout.jsonl",
+      "model": "ft-v5 (distilled from 8B+4B dual-teacher corpus)"
+    },
+    {
+      "file": "ft-v5-votes-d.json",
+      "split": "D",
+      "member": "ft-v5",
+      "rows": 240,
+      "accuracy": 0.9208,
+      "sha256": "740a6b1d747c48828893e3a180ab7fd56fa6fc9e8699673e0e1663b447944eca",
+      "source_path": "Windows workspace metrics/lan-check/d-votes-ft-v5.json",
+      "branch": "local (Windows); round 168",
+      "round": "round 168",
+      "note": "evaluation",
+      "suite": "heldout3_test.jsonl",
+      "model": "ft-v5 (distilled from 8B+4B dual-teacher corpus)"
+    },
+    {
+      "file": "ft-v5-votes-e.json",
+      "split": "E",
+      "member": "ft-v5",
+      "rows": 240,
+      "accuracy": 0.8708,
+      "sha256": "a145155c53e87682499194aba6800934bd619ffb9c4091a9f16e11c22ad32489",
+      "source_path": "Windows workspace metrics/lan-check/e-votes-ft-v5.json",
+      "branch": "local (Windows); round 168",
+      "round": "round 168",
+      "note": "evaluation",
+      "suite": "heldout4_test.jsonl",
+      "model": "ft-v5 (distilled from 8B+4B dual-teacher corpus)"
+    },
+    {
+      "file": "ft-v5-votes-f.json",
+      "split": "F",
+      "member": "ft-v5",
+      "rows": 120,
+      "accuracy": 0.85,
+      "sha256": "b60efa82d315c5cc1a412ada988aca97382e9efce5b020557ca2ebf846b13f11",
+      "source_path": "Windows workspace metrics/lan-check/f-votes-ft-v5.json",
+      "branch": "local (Windows); round 168",
+      "round": "round 168",
+      "note": "evaluation",
+      "suite": "heldout5_test.jsonl",
+      "model": "ft-v5 (distilled from 8B+4B dual-teacher corpus)"
     }
   ],
   "missing": [

@@ -179,6 +179,7 @@ Rebuilt by tools/build_research_index.py; one row per file.
 | 2026-10-16-round164.md | 164 | The breadth axis: the witness flips with the family |
 | 2026-10-16-round165.md | 165 | The neutral channel: choice-only members shouldn't price confidence |
 | 2026-10-16-round167.md | 167 | The reasoning axis: thinking buys nothing here |
+| 2026-10-16-round168.md | 168 | The loop's first full turn: a teacher, a student, and an island |
 
 ## Files without a round number
 
