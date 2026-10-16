@@ -1,6 +1,7 @@
 # The Genesis layer: how the group authors its own agenda
 
-Status: design proposal, 2026-10-17. Companion to docs/COMMS-AND-SEEDS.md (roles, seed),
+Status: mechanism implemented with a stub proposer (2026-10-17); real proposer and
+group-log wiring open. Companion to docs/COMMS-AND-SEEDS.md (roles, seed),
 docs/autonomy loop in `pando/autonomy.py`, and the round98/99 findings.
 
 ## 1. The gap (measured, not asserted)
@@ -75,22 +76,35 @@ are slow or sparse, selection has almost no signal and proposals degenerate into
 The design risk is **signal sparsity**, not the philosophy. First job: make instrumental outcomes
 frequent and comparable.
 
-## 7. Minimal first step: decouple the mechanism from model quality
+## 7. Status: the mechanism is built; the proposer is not
 
-Build the *mechanism* with a trivial proposer first, prove the loop closes, then swap in models.
+Implemented 2026-10-17, in-process, no model:
 
-1. Add a `proposal` message type to the group log (signed, structured).
-2. A deterministic **stub proposer** — recombines the last N proposals + outcomes, no model. Proves
-   propose→score→adopt→execute→remember closes.
-3. `tools/genesis_check.py` — an end-to-end drill on an isolated root: proposals generate, get
-   scored, one is adopted, its outcome feeds back, and **the second round differs from the first
-   because of the first's outcome**. That last clause is the falsifiable core: the loop must show
-   history-dependent behavior.
-4. Only then plug a real local model (Laya / text-nb) in as a proposer and measure whether it beats
-   the stub on instrumental outcomes.
+- `pando/genesis.py` — `Proposal`, `ProposalOutcome`, `ScoreBoard` (Beta-smoothed instrumental
+  gain), `NullScoreBoard` (amnesiac control), `StubProposer` (deterministic; holds the candidate set
+  constant), `GenesisLoop` (propose → score → adopt → execute → remember), `Journal`,
+  and the `ACTION_SPACE` from §5.
+- `tools/genesis_check.py` — the drill. Two loops, identical proposer / candidates / actuator; one
+  remembers, one does not. Measured: the remembered loop round 1 adopts `recruit.invite` (fails) and
+  round 2 moves to `reproduce.spawn`; the amnesiac loop repeats `recruit.invite`. The only difference
+  between the two loops is the memory, so the change of agenda is caused by the group's own outcome
+  record — the falsifiable core, holding on a stub.
+- `tests/test_smoke.py::test_genesis_agenda_is_history_dependent` — the same property as a test.
+  Full suite: 34 tests, 1 skipped, all green.
 
-Step 2 is the point. If the machinery cannot turn a *known* proposal stream into history-dependent
-selection, a smarter proposer will not save it. Isolate the two questions.
+Deliberately **not** claimed yet:
+
+1. The `proposal` is not a signed group-log message — today it lives in-process. Wiring it to the
+   mailbox / group log is the next step.
+2. No model is involved. The stub is dumb on purpose; whether a real Laya / text-nb proposer beats it
+   on instrumental outcomes is unmeasured.
+3. The loop is not yet gated by the swarm tier. `pando/autonomy.py` gates its actions on
+   `Coordinator.decide`; here the stub adopts unilaterally, which is fine for a mechanism drill and
+   not fine for a live member.
+
+The original plan was to decouple the mechanism from model quality: if the machinery cannot turn a
+*known* proposal stream into history-dependent selection, a smarter proposer will not save it. That
+separation now exists; the two questions are isolated.
 
 ## 8. What this does NOT claim
 

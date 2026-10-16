@@ -1460,5 +1460,34 @@ class TestSmoke(unittest.TestCase):
             self.assertEqual(auto_english["tier"], "auto")
             self.assertEqual(auto_english["assent"], "english")
 
+    def test_genesis_agenda_is_history_dependent(self):
+        """The group's own outcome record moves its next choice (docs/DESIGN-genesis.md)."""
+        from pando.genesis import GenesisLoop, NullScoreBoard, StubProposer
+
+        candidates = ["recruit.invite", "reproduce.spawn", "resource.rebalance"]
+
+        def actuator(proposal):
+            return proposal.action != "recruit.invite"
+
+        def run(scoreboard):
+            loop = GenesisLoop(proposer=StubProposer(candidates),
+                               actuator=actuator, scoreboard=scoreboard)
+            loop.run(2)
+            return loop
+
+        remembered = run(None)
+        amnesiac = run(NullScoreBoard())
+        # Same proposer, same candidate set, same actuator: only memory differs.
+        self.assertEqual([x.action for x in remembered.rounds[0].proposals],
+                         [x.action for x in remembered.rounds[1].proposals])
+        self.assertEqual(remembered.rounds[0].outcome.action, "recruit.invite")
+        self.assertFalse(remembered.rounds[0].outcome.success)
+        self.assertNotEqual(remembered.rounds[1].outcome.action, "recruit.invite")
+        # The control that forgets repeats itself; the memory moved the choice.
+        self.assertEqual(amnesiac.rounds[1].outcome.action, "recruit.invite")
+        self.assertNotEqual(remembered.summary()["adopted"],
+                            amnesiac.summary()["adopted"])
+
+
 if __name__ == "__main__":
     unittest.main()
