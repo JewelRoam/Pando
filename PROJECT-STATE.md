@@ -292,6 +292,8 @@ NPU) all voting in the same consensus quorum.
 | Tunnel latency cost | p50 329 ms (LAN) -> 1205 ms (quick tunnel); Tailscale documented for when it matters | round 164 |
 | Neutral-channel measured | excluding choice-only (p=0.5) votes from mean: auto D +2 / E +2 / F +5, precision flat | round 165 |
 | Next (dispatched) | Task 016: explicit `neutral` on the vote wire; OpenAI backend marks itself; aggregate keeps counts | round 165 |
+| Neutral votes shipped | Vote.neutral + aggregate split (counts yes, mean no); all-neutral can never auto; cherry-picked, 29/29 smoke | round 165 |
+| Neutral live on F | auto 94->99 @ 0.9899, decided 0.9833 unchanged - coverage gained, precision held | round 165 |
 | Second LLM tier deployed | Qwen3-8B Q4_K_M on Mac :8082, ~25.5 tok/s; 4B+8B coexist | round 162 |
 | 8B solo | D 0.8583 / E 0.9250 (4B: 0.8167 / 0.9167) | round 162 |
 | Strength axis | stronger weak-tier buys coverage: E auto 233 @ 1.0000 (core 199; 4B 227); decided set by the fallback | round 162 |
