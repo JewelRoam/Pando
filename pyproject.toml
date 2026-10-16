@@ -29,7 +29,7 @@ pandosi = "pandosi.cli:main"
 
 [project.urls]
 Repository = "https://github.com/JewelRoam/PandoSI"
-Research log = "https://github.com/JewelRoam/PandoSI/blob/main/docs/research/INDEX.md"
+"Research log" = "https://github.com/JewelRoam/PandoSI/blob/main/docs/research/INDEX.md"
 
 [tool.setuptools]
 packages = ["pandosi"]
