@@ -60,6 +60,22 @@ def mailbox(path: str, method: str = "GET", payload: dict | None = None) -> dict
 
 
 def llm(system: str, user: str, max_tokens: int = 400) -> str:
+    # A long group message must never overflow the server's context window
+    # (4096 on the 3070). llama-server rejects oversized prompts with a clean
+    # HTTP 400 instead of crashing; halve the text and retry so long messages
+    # still get an answer instead of being silently dropped.
+    while True:
+        try:
+            return _llm_once(system, user, max_tokens)
+        except urllib.error.HTTPError as exc:
+            if exc.code != 400 or len(user) < 600:
+                raise
+            user = user[: max(600, len(user) // 2)] + "\n[truncated by win_worker]"
+            print(f"[worker] over-context 400; retrying with {len(user)} chars",
+                  flush=True)
+
+
+def _llm_once(system: str, user: str, max_tokens: int) -> str:
     payload = {"model": MODEL,
                "messages": [{"role": "system", "content": system},
                             {"role": "user", "content": user}],

@@ -16,7 +16,8 @@ if (-not (Test-Path $dummyKey)) {
 
 $llamaExe = 'D:\pando-models\llama-cuda\llama-server.exe'
 $llamaArgs = @('-m', 'D:\pando-models\gemma-4-12b-it-Q4_K_M.gguf', '-ngl', '99',
-  '-c', '2048', '--jinja', '--reasoning', 'off', '--host', '0.0.0.0',
+  '-c', '4096', '-fa', 'on', '-ctk', 'q8_0', '-ctv', 'q8_0', '--parallel', '1',
+  '--jinja', '--reasoning', 'off', '--host', '0.0.0.0',
   '--port', '8086', '-t', '8', '--alias', 'gemma-4-12b-it-Q4_K_M')
 $gemmaArgs = @('-m', 'pando.stemd', '--node-id', 'win-gemma-12b', '--backend',
   'openai', '--openai-url', 'http://127.0.0.1:8086/v1', '--openai-model',
