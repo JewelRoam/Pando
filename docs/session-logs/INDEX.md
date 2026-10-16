@@ -91,3 +91,4 @@ Timestamped, sanitized snapshots of this PandoSI working session.
 | 2026-10-16T200003 | `docs/session-logs/2026-10-16T200003-session-backup.md` | 3c606821ec8d | 287/1534/2719 | automatic snapshot after 4ac4c8a test: ft-v7 - the first student to beat the incumbent on an evaluator (D +3.75); seed replication running |
 | 2026-10-16T203003 | `docs/session-logs/2026-10-16T203003-session-backup.md` | 7f1cb9d6620b | 288/1536/2721 | automatic snapshot after e5409d4 chore: session backup 2026-10-16T200003 |
 | 2026-10-16T210003 | `docs/session-logs/2026-10-16T210003-session-backup.md` | ce142be5903d | 289/1538/2724 | automatic snapshot after 45b20c8 chore: session backup 2026-10-16T203003 |
+| 2026-10-16T213003 | `docs/session-logs/2026-10-16T213003-session-backup.md` | 1ccfb0d29590 | 290/1545/2732 | automatic snapshot after 50c8c4a test: the fresh judge splits the seeds; a two-seed committee with incumbent tiebreak hits 0.9958 at full coverage |
