@@ -1,0 +1,74 @@
+{
+  "pilot": "equal-budget-pilot-001",
+  "task": "t-20261017-035259-bce2",
+  "date": "2026-10-17",
+  "host": {
+    "machine": "Apple arm64, 10 cpu, 16 GiB (17179869184 bytes, 16384-byte pages)",
+    "note": "swap in use during the run: 20516 MB of 21504 MB. Resident footprint is therefore not a stable budget measure on this host."
+  },
+  "suites": [
+    {"path": "assets/heldout4_test.jsonl", "family": "big6", "rows": 240, "sha256": "fad4bdf844b55d208ddf35e737be0e6f4821417bc919d5647edb3e40531db7ff"},
+    {"path": "assets/heldout5_test.jsonl", "family": "big7", "rows": 120, "sha256": "2b9613c7504febfa6df63295bc775b68798350182c3cbe70df535cabfb247048"}
+  ],
+  "arm_a": {
+    "role": "one big model, alone",
+    "members": [
+      {
+        "stem": "http://127.0.0.1:8768",
+        "node_id": "mac-llm-8b-local",
+        "checkpoint": "mac-llm-8b-q6",
+        "backend": "openai (llama-server, /v1/chat/completions)",
+        "model_file": "~/.pandosi/models/Qwen3-8B-GGUF/Qwen3-8B-Q5_K_M.gguf",
+        "model_sha256": "068bae163faa96ad48032daf4e071a6a28fe67d8dcc95367609c2ff165e52738",
+        "weight_bytes": 5851112224,
+        "weight_gib": 5.449,
+        "server_pid": 81146,
+        "llama_server_port": 8086,
+        "measured_phys_footprint_mb": 2723,
+        "measured_phys_footprint_peak_mb": 2759,
+        "vote_is_neutral": true,
+        "probability_reported": 0.5
+      }
+    ],
+    "total_weight_gib": 5.449
+  },
+  "arm_b": {
+    "role": "the small committee this host can actually field",
+    "combiner": "pando.common.aggregate (the live root's own gate), min_quorum=2",
+    "members": [
+      {
+        "stem": "http://127.0.0.1:8767",
+        "node_id": "mac-llm-4b-local",
+        "checkpoint": "mac-llm-4b",
+        "backend": "openai (llama-server, /v1/chat/completions)",
+        "model_file": "~/.pandosi/models/Qwen3-4B-Instruct-2507-GGUF/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+        "model_sha256": "3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597",
+        "weight_bytes": 2497281120,
+        "weight_gib": 2.326,
+        "server_pid": 84296,
+        "llama_server_port": 8081,
+        "measured_phys_footprint_mb": 2346,
+        "measured_phys_footprint_peak_mb": 2381,
+        "vote_is_neutral": true,
+        "probability_reported": 0.5
+      },
+      {
+        "stem": "http://127.0.0.1:8766",
+        "node_id": "mac-text",
+        "checkpoint": "text-nb-v1",
+        "backend": "text (multinomial naive Bayes over word unigrams + adjacent pairs, stdlib only)",
+        "model_file": "assets/textmodel.json",
+        "weight_bytes": null,
+        "note": "the only probability-bearing member of arm B; its raw probability is the entire confidence signal the gate sees",
+        "vote_is_neutral": false
+      }
+    ],
+    "total_weight_gib": 2.326
+  },
+  "budget_ratio_a_over_b": 2.343,
+  "pre_registered_rule": "d = (rows B right & A wrong) - (rows A right & B wrong), over rows both arms answered. d <= 0 -> claim not supported; d > 0 and |d| > 1.96*SE(d) -> many-small ahead beyond noise; else inconclusive at this n.",
+  "git_commit_at_run": "5491fcb99f0455c8d47595475fb5c3325e610231",
+  "raw_votes": "assets/votes/equal-budget-pilot-001.raw.json",
+  "scored_report": "assets/votes/equal-budget-pilot-001.json",
+  "provenance": "harvested by tools/equal_budget_check.py against the live stems on 2026-10-17; one request per row per member, sequential, timeout 120 s. Arm B is scored through pando.common.aggregate, not a hand-rolled majority."
+}
