@@ -1,0 +1,184 @@
+{
+  "schema": 1,
+  "files": [
+    {
+      "file": "llm-votes-b.json",
+      "split": "B",
+      "member": "mac-llm",
+      "rows": 240,
+      "accuracy": 0.85,
+      "sha256": "f5f9b4198acce5e4010ffef2a721dfebc71d0e23ddecc2bd84557ae48b631b77",
+      "source_path": "/private/tmp/pandosi-task-008/metrics/llm-votes-b.json",
+      "branch": "mac-llm-votes",
+      "commit": "8242803",
+      "round": "round 158 / Task 003",
+      "note": "B-prompt calibration split; qwen3-4b-instruct-2507",
+      "suite": "heldout_test.jsonl",
+      "model": "qwen3-4b-instruct-2507"
+    },
+    {
+      "file": "llm-votes-c.json",
+      "split": "C",
+      "member": "mac-llm",
+      "rows": 240,
+      "accuracy": 0.6542,
+      "sha256": "af28361422d1a342f84f2199017529d3876a501393b227dd3d644a0bf3c638ac",
+      "source_path": "/private/tmp/pandosi-task-008/metrics/llm-votes-c.json",
+      "branch": "mac-llm-votes",
+      "commit": "8242803",
+      "round": "round 158 / Task 003",
+      "note": "C split used to fit calibration; qwen3-4b-instruct-2507",
+      "suite": "heldout2_test.jsonl",
+      "model": "qwen3-4b-instruct-2507"
+    },
+    {
+      "file": "llm-votes-d-b-only.json",
+      "split": "D",
+      "member": "mac-llm",
+      "rows": 240,
+      "accuracy": 0.8167,
+      "sha256": "96a167eb09a8c3267ed8f214b14a834a81a515477274d4443bbd382c19da4869",
+      "source_path": "/private/tmp/pandosi-task-008/metrics/llm-votes-d-b-only.json",
+      "branch": "mac-llm-votes-3",
+      "commit": "0484840",
+      "round": "round 159 / Task 004",
+      "note": "incumbent B-prompt 4B member; choice-only p=0.5",
+      "suite": "heldout3_test.jsonl",
+      "model": "qwen3-4b-instruct-2507"
+    },
+    {
+      "file": "llm-votes-d.json",
+      "split": "D",
+      "member": "mac-llm-a",
+      "rows": 240,
+      "accuracy": 0.7375,
+      "sha256": "bcdba53e5e423fdbeec14522b1d0418a1dc577be11587031e8592a63fb5c6844",
+      "source_path": "/private/tmp/pandosi-task-008/metrics/llm-votes-d.json",
+      "branch": "mac-llm-votes",
+      "commit": "8242803",
+      "round": "round 158 / Task 003",
+      "note": "A-prompt 4B baseline; acknowledged p=0.5 placeholder",
+      "suite": "heldout3_test.jsonl",
+      "model": "qwen3-4b-instruct-2507"
+    },
+    {
+      "file": "llm-votes-d-8b.json",
+      "split": "D",
+      "member": "mac-llm-8b",
+      "rows": 240,
+      "accuracy": 0.8583,
+      "sha256": "29e855c72bc34ed43535b4854af296cace0f64042da12268482d2b93c67eeb2a",
+      "source_path": "/private/tmp/pandosi-task-012/metrics/llm-votes-d-8b.json",
+      "branch": "mac-llm-8b",
+      "commit": "26a2b7d",
+      "round": "round 162 / Task 010",
+      "note": "non-thinking 8B comparison member",
+      "suite": "heldout3_test.jsonl",
+      "model": "qwen3-8b-instruct"
+    },
+    {
+      "file": "llm-votes-e.json",
+      "split": "E",
+      "member": "mac-llm",
+      "rows": 240,
+      "accuracy": 0.9167,
+      "sha256": "f6ba53c21ae1a004e5317b688847d420a7d6e21c4edd0e070b68a229a48d6d9e",
+      "source_path": "/private/tmp/pandosi-split-e/metrics/llm-votes-e.json",
+      "branch": "split-e",
+      "commit": "a6eb045",
+      "round": "round 161 / Task 008",
+      "note": "B-prompt 4B member on fresh split E",
+      "suite": "heldout4_test.jsonl",
+      "model": "qwen3-4b-instruct-2507"
+    },
+    {
+      "file": "llm-votes-e-8b.json",
+      "split": "E",
+      "member": "mac-llm-8b",
+      "rows": 240,
+      "accuracy": 0.925,
+      "sha256": "66da8b0c4d3ade92d032d1a57d89200dc306b58eee8c9240b57a0a52347ad565",
+      "source_path": "/private/tmp/pandosi-task-012/metrics/llm-votes-e-8b.json",
+      "branch": "mac-llm-8b",
+      "commit": "26a2b7d",
+      "round": "round 162 / Task 010",
+      "note": "non-thinking 8B comparison member",
+      "suite": "heldout4_test.jsonl",
+      "model": "qwen3-8b-instruct"
+    },
+    {
+      "file": "llm-votes-f-4b.json",
+      "split": "F",
+      "member": "mac-llm",
+      "rows": 120,
+      "accuracy": 0.9333,
+      "sha256": "a271baf3272d06bf43dddfe31cbcba0bf794c61d38629bb7db2f6e8d09a6320b",
+      "source_path": "/private/tmp/pandosi-task-013/metrics/llm-votes-f-4b.json",
+      "branch": "split-f",
+      "commit": "aef5f01",
+      "round": "round 164 / Task 013",
+      "note": "zero-shot 4B member on new intent family F",
+      "suite": "heldout5_test.jsonl",
+      "model": "qwen3-4b-instruct-2507"
+    },
+    {
+      "file": "llm-votes-f-8b.json",
+      "split": "F",
+      "member": "mac-llm-8b",
+      "rows": 120,
+      "accuracy": 0.9833,
+      "sha256": "237c124d5ba9b6692f85ef281c178202ae15043f3ae29e101d4f6a31d3a577c2",
+      "source_path": "/private/tmp/pandosi-task-013/metrics/llm-votes-f-8b.json",
+      "branch": "split-f",
+      "commit": "aef5f01",
+      "round": "round 164 / Task 013",
+      "note": "zero-shot non-thinking 8B witness on F",
+      "suite": "heldout5_test.jsonl",
+      "model": "qwen3-8b-instruct"
+    }
+  ],
+  "missing": [
+    {
+      "member": "english",
+      "split": "D",
+      "expected_file": "votes-d-seated-english.json",
+      "source": "assets/registry/accuracies.json"
+    },
+    {
+      "member": "ft-v3",
+      "split": "D",
+      "expected_file": "votes-d-ft-v3.json",
+      "source": "assets/registry/accuracies.json"
+    },
+    {
+      "member": "english",
+      "split": "E",
+      "expected_file": "e-votes-english.json",
+      "source": "assets/registry/accuracies.json"
+    },
+    {
+      "member": "ft-v3",
+      "split": "E",
+      "expected_file": "e-votes-ft-v3.json",
+      "source": "assets/registry/accuracies.json"
+    },
+    {
+      "member": "english",
+      "split": "F",
+      "expected_file": "f-votes-english.json",
+      "source": "assets/registry/accuracies.json"
+    },
+    {
+      "member": "ft-v3",
+      "split": "F",
+      "expected_file": "f-votes-ft-v3.json",
+      "source": "assets/registry/accuracies.json"
+    },
+    {
+      "member": "ft-v3",
+      "split": "C",
+      "expected_file": "finetuned-votes.json",
+      "source": "docs/research/2026-10-16-round150.md"
+    }
+  ]
+}
