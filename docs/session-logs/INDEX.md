@@ -65,3 +65,4 @@ Timestamped, sanitized snapshots of this PandoSI working session.
 | 2026-10-16T070003 | `docs/session-logs/2026-10-16T070003-session-backup.md` | bb0d32a0a5ad | 250/1402/2558 | automatic snapshot after 8d4d35f chore: session backup 2026-10-16T063004 |
 | 2026-10-16T073003 | `docs/session-logs/2026-10-16T073003-session-backup.md` | 3ad271aadd0d | 251/1415/2577 | automatic snapshot after 820aef2 feat: assent=auto - the gating seat resolves from measured accuracy; live E matches the explicit run |
 | 2026-10-16T080003 | `docs/session-logs/2026-10-16T080003-session-backup.md` | c432df4de5b7 | 252/1417/2579 | automatic snapshot after f7e82fd chore: session backup 2026-10-16T073004 |
+| 2026-10-16T083003 | `docs/session-logs/2026-10-16T083003-session-backup.md` | faa932025578 | 253/1423/2585 | automatic snapshot after bb9ffc4 test: strength axis - 8B buys coverage, precision stays 1.0000; weak-tier stacking dilutes |
