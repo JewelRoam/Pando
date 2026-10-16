@@ -549,6 +549,99 @@ class TestSmoke(unittest.TestCase):
         finally:
             root.stop()
 
+    def test_node_identity_roundtrip_and_tamper(self):
+        import tempfile
+        from pathlib import Path as _P
+        from pando.identity import load_or_create, verify
+        with tempfile.TemporaryDirectory() as td:
+            first = load_or_create(_P(td) / "identity.json")
+            again = load_or_create(_P(td) / "identity.json")
+            self.assertEqual(first.node_fingerprint,
+                             again.node_fingerprint)
+            payload = {"node_id": "a", "url": "http://127.0.0.1:1",
+                       "checkpoint": "mock"}
+            proof = first.proof(payload)
+            self.assertTrue(verify(proof["pubkey"], payload,
+                                   proof["sig"]))
+            tampered = dict(payload, url="http://127.0.0.1:2")
+            self.assertFalse(verify(proof["pubkey"], tampered,
+                                    proof["sig"]))
+            stranger = load_or_create(_P(td) / "stranger.json")
+            self.assertFalse(verify(stranger.public_key, payload,
+                                    proof["sig"]))
+
+    @staticmethod
+    def _signed_registration(identity, node_id, token):
+        registration = {"node_id": node_id, "url": "http://127.0.0.1:1",
+                        "checkpoint": "mock", "pairing_token": token}
+        registration["identity"] = identity.proof(dict(registration))
+        return json.dumps(registration).encode()
+
+    @staticmethod
+    def _post_register(url, payload):
+        request = urllib.request.Request(
+            f"{url}/register", data=payload,
+            headers={"Content-Type": "application/json"})
+        return urllib.request.urlopen(request, timeout=2)
+
+    def test_signed_registration_binds_identity(self):
+        import tempfile
+        from pathlib import Path as _P
+        from pando.identity import load_or_create
+        root = Root()
+        root.set_pairing_token("pairing-secret")
+        root.start()
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                member = load_or_create(_P(td) / "member.json")
+                body = self._signed_registration(member, "member",
+                                                 "pairing-secret")
+                with self._post_register(root.url(), body) as resp:
+                    self.assertTrue(json.loads(resp.read())["ok"])
+                headers = {"Authorization": "Bearer pairing-secret"}
+                with urllib.request.urlopen(
+                        urllib.request.Request(f"{root.url()}/nodes",
+                                               headers=headers),
+                        timeout=2) as resp:
+                    nodes = json.loads(resp.read())["nodes"]
+                self.assertEqual(nodes["member"]["pubkey"],
+                                 member.public_key)
+                with self._post_register(root.url(), body) as resp:
+                    self.assertTrue(json.loads(resp.read())["ok"])
+                impostor = load_or_create(_P(td) / "impostor.json")
+                bad = self._signed_registration(impostor, "member",
+                                                "pairing-secret")
+                with self.assertRaises(urllib.error.HTTPError) as caught:
+                    self._post_register(root.url(), bad)
+                self.assertEqual(caught.exception.code, 403)
+        finally:
+            root.stop()
+
+    def test_require_identity_rejects_unsigned_registration(self):
+        import tempfile
+        from pathlib import Path as _P
+        from pando.identity import load_or_create
+        root = Root()
+        root.set_pairing_token("pairing-secret")
+        root.set_require_identity(True)
+        root.start()
+        try:
+            unsigned = json.dumps({
+                "node_id": "plain", "url": "http://127.0.0.1:1",
+                "checkpoint": "mock", "pairing_token": "pairing-secret"
+            }).encode()
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                self._post_register(root.url(), unsigned)
+            self.assertEqual(caught.exception.code, 403)
+            with tempfile.TemporaryDirectory() as td:
+                member = load_or_create(_P(td) / "member.json")
+                body = self._signed_registration(member, "plain",
+                                                 "pairing-secret")
+                with self._post_register(root.url(), body) as resp:
+                    self.assertTrue(json.loads(resp.read())["ok"])
+        finally:
+            root.stop()
+
     def test_grant_ledger_expires_and_fails_closed(self):
         import datetime as dt
         import tempfile

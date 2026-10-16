@@ -146,6 +146,12 @@ def heartbeat_loop(stem: Stem, root_url: str,
                    pairing_token: str | None = None,
                    interval: float = 5.0) -> None:
     """Register with root and heartbeat until the process exits."""
+    node_identity = None
+    try:
+        from .identity import load_or_create
+        node_identity = load_or_create()
+    except Exception as exc:  # identity is an upgrade, not a startup blocker
+        print(f"[identity] disabled: {exc}", flush=True)
     cap = capability()
     registration = {"node_id": stem.node_id, "url": stem.url(),
                     "checkpoint": stem.backend.checkpoint,
@@ -160,7 +166,15 @@ def heartbeat_loop(stem: Stem, root_url: str,
     if pairing_token:
         registration["pairing_token"] = pairing_token
         headers["Authorization"] = f"Bearer {pairing_token}"
-    payload = json.dumps(registration).encode("utf-8")
+
+    def signed_payload() -> bytes:
+        # The signature covers exactly what travels, minus the proof itself,
+        # so it is recomputed after any field changes (every beat).
+        body = dict(registration)
+        if node_identity is not None:
+            body["identity"] = node_identity.proof(dict(registration))
+        return json.dumps(body).encode("utf-8")
+
     while True:
         # Refresh what the device costs the machine it lives on, so a root can
         # prefer a cheap member over an expensive one (round 134). It has to be
@@ -170,10 +184,10 @@ def heartbeat_loop(stem: Stem, root_url: str,
         if measured is not None:
             registration["capability"] = dict(cap,
                                               host_ms_per_decision=measured)
-            payload = json.dumps(registration).encode("utf-8")
         try:
             with urllib.request.urlopen(
-                urllib.request.Request(f"{root_url}/register", data=payload,
+                urllib.request.Request(f"{root_url}/register",
+                                       data=signed_payload(),
                                        headers=headers),
                 timeout=3) as resp:
                 resp.read()

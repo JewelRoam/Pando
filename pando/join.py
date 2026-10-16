@@ -25,6 +25,7 @@ from pathlib import Path
 from .common import bypass_proxy_for_lan
 from .graft import assign_role, capability, enumerate_execution_units
 from .grants import require_grant
+from .identity import load_or_create
 from .resources import asset_path
 from .rootd import Coordinator
 
@@ -429,10 +430,22 @@ def main() -> None:
     if args.pairing_token:
         for reg in registrations:
             reg["pairing_token"] = args.pairing_token
+    try:
+        node_identity = load_or_create()
+    except Exception as exc:  # identity is an upgrade, not a startup blocker
+        print(f"[identity] disabled: {exc}", flush=True)
+        node_identity = None
+
+    def signed_reg(reg: dict) -> bytes:
+        body = {**reg, "capability": cap}
+        if node_identity is not None:
+            body["identity"] = node_identity.proof(dict(body))
+        return json.dumps(body).encode()
+
     while True:
         try:
             for reg in registrations:
-                payload = json.dumps({**reg, "capability": cap}).encode()
+                payload = signed_reg(reg)
                 urllib.request.urlopen(
                     urllib.request.Request(f"{root_url}/register",
                                            data=payload,
@@ -453,7 +466,7 @@ def main() -> None:
             time.sleep(5)
             try:
                 for reg in registrations:
-                    payload = json.dumps({**reg, "capability": cap}).encode()
+                    payload = signed_reg(reg)
                     urllib.request.urlopen(
                         urllib.request.Request(
                             f"{root_url}/register", data=payload,

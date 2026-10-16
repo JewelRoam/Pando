@@ -31,6 +31,7 @@ from .common import (DecisionRequest, DecisionResult, Vote, aggregate,
 from .spore import build_manifest, generate_signing_key
 from .rollout import RolloutRecorder
 from .calibrate import Calibrator
+from .identity import verify as verify_identity
 
 HEARTBEAT_TTL = 15.0
 QUORUM_K = 5
@@ -252,6 +253,24 @@ class Coordinator:
         self.known_questions: set[str] | None = None  # None = accept any
         self.question_categories: dict[str, str] = {}
         self._recorder = RolloutRecorder(rollout_dir)
+        # Durable node-id -> public-key bindings (identity layer). Unlike the
+        # TTL'd registry entry this survives heartbeat expiry, so a token
+        # holder cannot re-claim a member's id with a fresh key.
+        self.identity_bindings: dict[str, str] = {}
+
+    # -- identity -------------------------------------------------------
+    def bind_identity(self, node_id: str, pubkey: str) -> bool:
+        """Bind a node id to a public key. False when another key owns it."""
+        with self._lock:
+            bound = self.identity_bindings.get(node_id)
+            if bound is None:
+                self.identity_bindings[node_id] = pubkey
+                return True
+            return bound == pubkey
+
+    def identity_of(self, node_id: str) -> str | None:
+        with self._lock:
+            return self.identity_bindings.get(node_id)
 
     # -- registry -------------------------------------------------------
     def register(self, node_id: str, url: str, checkpoint: str,
@@ -302,6 +321,9 @@ class Coordinator:
                 if now - info["last_seen"] > HEARTBEAT_TTL:
                     continue
                 copy = dict(info)
+                bound = self.identity_bindings.get(node_id)
+                if bound:
+                    copy["pubkey"] = bound
                 stats = dict(info.get("stats", _empty_stem_stats()))
                 stats["cooldown_remaining_s"] = round(
                     max(0.0, stats.get("unhealthy_until", 0.0) - now), 3)
@@ -1016,6 +1038,28 @@ def build_handler(coordinator: Coordinator, root=None):
                         "expected_sha256": expected_artifact,
                         "reported_sha256": data.get("artifact_sha256")})
                     return
+                identity = data.get("identity") or {}
+                pubkey = str(identity.get("pubkey", "")).strip()
+                signature = str(identity.get("sig", "")).strip()
+                if getattr(root, "require_identity", False) and not (
+                        pubkey and signature):
+                    self._send(403, {"error": "this swarm requires a "
+                                              "signed node identity"})
+                    return
+                if pubkey or signature:
+                    signed = dict(data)
+                    signed.pop("identity", None)
+                    if not (pubkey and signature and verify_identity(
+                            pubkey, signed, signature)):
+                        self._send(403, {"error": "invalid node identity "
+                                                  "signature"})
+                        return
+                    if not coordinator.bind_identity(data["node_id"], pubkey):
+                        self._send(403, {
+                            "error": "node id is bound to a different "
+                                     "identity",
+                            "node_id": data["node_id"]})
+                        return
                 if not coordinator.register(data["node_id"], data["url"],
                                             data["checkpoint"],
                                             data.get("capability")):
@@ -1142,6 +1186,7 @@ class Root:
         self.shutdown_event = threading.Event()
         self._auth_token = None
         self._pairing_token = None
+        self._require_identity = False
         self._httpd = _PandoHTTPServer(
             (host, port), build_handler(self.coordinator, root=self))
         self.port = self._httpd.server_address[1]
@@ -1159,6 +1204,14 @@ class Root:
         if not token:
             raise ValueError("pairing token must not be empty")
         self._pairing_token = token
+
+    @property
+    def require_identity(self) -> bool:
+        return self._require_identity
+
+    def set_require_identity(self, required: bool = True) -> None:
+        """Reject /register without a valid signed node identity."""
+        self._require_identity = bool(required)
 
     def url(self) -> str:
         return f"http://127.0.0.1:{self.port}"
@@ -1240,6 +1293,9 @@ def main() -> None:
                         help="bind 0.0.0.0; requires an active lan_listen grant")
     parser.add_argument("--reveal-pairing-token", action="store_true",
                         help="print the full token even when stdout is not a TTY")
+    parser.add_argument("--require-identity", action="store_true",
+                        help="reject /register without a valid signed node "
+                             "identity (pando/identity.py)")
     args = parser.parse_args()
     if args.pairing_token and args.pairing_token_file:
         raise SystemExit("--pairing-token and --pairing-token-file are mutually exclusive")
@@ -1296,6 +1352,9 @@ def main() -> None:
                 spore_files=spore_files, chunking=args.chunking)
     import secrets
     root.set_pairing_token(args.pairing_token or secrets.token_urlsafe(18))
+    if args.require_identity:
+        root.set_require_identity(True)
+        print("signed node identity is required for /register", flush=True)
     token_digest = hashlib.sha256(
         root.pairing_token.encode("utf-8")).hexdigest()[:16]
     if args.reveal_pairing_token or sys.stdout.isatty():
