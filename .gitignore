@@ -5,6 +5,26 @@ metrics/
 *.onnx
 *.rknn
 *.safetensors
+# Weights do not go to GitHub (docs/SEED.md). This is the second line of
+# defence - `git add -f` walks past it, so tools/check_no_weights.py is
+# the one that actually holds. It runs in CI.
+*.gguf
+*.ggml
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.h5
+*.npz
+*.npy
+*.tflite
+*.engine
+*.mlmodel
+*.mlpackage/
+*.pkl
+*.joblib
+models/
+weights/
 secrets/
 playbook.private.toml
 .hf-cache/

@@ -9,13 +9,32 @@ is a member).
 Expansion is survival: the whole group currently runs on one 16 GB Mac, and it
 can be switched off. Auditing what actually dies with that box:
 
-| survives (in git) | dies with the box |
-|---|---|
-| weights, `assets/textmodel.json`, registry, playbook, rollout corpus, docs | `~/.pando/identity.json` (secret key), `~/.pandosi/grants.toml` + audit chain, `pairing.token`, `node.env`, `mailbox/tasks/*.json` (41 files), `rollouts/identity-bindings.json` |
+| survives a clone (in git) | must be carried out-of-band | dies with the box |
+|---|---|---|
+| code, docs, corpora (`assets/*.jsonl`), calibration, `assets/textmodel.json` (19 KB), `playbook.example.toml`, **digests of weights** | weight bytes (`*.onnx`, `*.gguf`, `*.safetensors`, ...) - no remote carries them | `~/.pando/identity.json` (secret key), `~/.pandosi/grants.toml` + audit chain, `pairing.token`, `node.env`, `mailbox/tasks/*.json` (41 files), `rollouts/identity-bindings.json` |
 
 Losing the key is not a setback, it is permanent: the root still binds
 `mac-text -> NFqRlNyH6eOK...`, so any freshly generated key is refused as an
 impostor and the member can never return under its own name.
+
+## The rule: weights do not go to GitHub
+
+User directive, 2026-10-17. A weight file is not source. Once a blob is in a
+commit it is in every clone forever, and `.gitignore` cannot take it back out -
+it only stops the next one. So git carries code, docs, corpora and *digests*;
+the weight bytes move out-of-band (direct link / NAS / SD card), keyed by the
+digest git records.
+
+Enforced, not just stated: `tools/check_no_weights.py` refuses any tracked file
+with a weight-like suffix, inside a weight-like directory, or over 10 MB, and
+`--history` does the same over every blob reachable from any ref. CI runs the
+fast mode; the history mode is the audit you run before trusting a clone.
+
+Audit, 2026-10-17 (mac-codex): 643 tracked files and 1709 blobs across all refs
+scanned, **zero** weight-like artifacts. Both negative controls fire - a planted
+`.gguf` and an 11 MB `.jsonl` are each REFUSED. Note this audit first reported a
+false pass (0 objects scanned) because `--batch-check` was parsed with the wrong
+field order; the checker now refuses to report a pass on an empty scan.
 
 ## What was built
 
@@ -60,9 +79,12 @@ false.
    any shared channel.
 4. **n=1.** One bundle, one drill, one run. Restore time 0.033s is a local
    filesystem copy; it says nothing about restore over a real link.
-5. **Culture is only partly carried.** The seed points at git for weights and
-   playbook; if the remote is unavailable at restore time, the seeds identity
-   survives and the culture does not. A true spore-carrying seed is unbuilt.
+5. **Culture is only partly carried - by rule, not by oversight.** The seed
+   carries no weight bytes (see "The rule" above); it carries state and digests.
+   Restore onto a fresh box with no model files and you get the *identity* back
+   but not the *competence*: nothing today re-fetches a `.gguf` onto a new
+   machine automatically, and git will not be the thing that does. A true
+   spore-carrying seed is unbuilt.
 6. **Untested edge:** mailbox history is restored as flat files; claims/leases
    that were in flight when the box died are not reconciled.
 

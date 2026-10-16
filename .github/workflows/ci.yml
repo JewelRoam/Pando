@@ -13,6 +13,8 @@ jobs:
         run: pip install pynacl zeroconf onnxruntime onnx
       - name: Static analysis
         run: python -m py_compile pando/*.py tools/*.py
+      - name: No weight artifacts in git
+        run: python tools/check_no_weights.py
       - name: Smoke tests
         run: python -m unittest discover -s tests -v
       - name: Topology planner scenarios
