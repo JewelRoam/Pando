@@ -34,6 +34,17 @@
         "D": "llm-votes-d-b-only.json",
         "E": "llm-votes-e.json"
       }
+    },
+    "mac-llm-8b": {
+      "accuracy": {
+        "D": 0.8583,
+        "E": 0.9250
+      },
+      "updated": "2026-10-16",
+      "source": {
+        "D": "metrics/lan-check/llm-votes-d-8b.json (branch mac-llm-8b @ 26a2b7d)",
+        "E": "metrics/lan-check/llm-votes-e-8b.json (branch mac-llm-8b @ 26a2b7d)"
+      }
     }
   }
 }
