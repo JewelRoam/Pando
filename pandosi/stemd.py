@@ -216,8 +216,9 @@ def main() -> None:
     parser.add_argument("--openai-model", default="qwen3-4b-instruct-2507",
                         help="model name for --backend openai")
     parser.add_argument("--openai-probability", type=float, default=0.5,
-                        help="constant probability reported by --backend "
-                             "openai (variant B has no confidence output)")
+                        help="compatibility probability on the wire for "
+                             "--backend openai; its vote is marked neutral "
+                             "and excluded from confidence aggregation")
     parser.add_argument("--device", default="CPU")
     parser.add_argument("--delay-ms", type=float, default=0.0,
                         help="mock backend only: simulated per-decision "
