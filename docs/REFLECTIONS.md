@@ -47,6 +47,19 @@ Mac-side reflections are folded in here as they arrive.
 ### Mac reflections
 - (none yet; Task 026 in flight — fold in when its result arrives)
 
+## 2026-10-17 - Firekeeper L1 results, and the reverse channel opens (Mac-side tasks)
+
+Mac ran firekeeper L1 (branch firekeeper-1 @ 45dab56; 30 rows per phase on the island): strong-tier death
+leaves the island available at reduced capacity, 0.9667 -> 0.6000 accuracy on identical rows, latency
+improves ~300x; rejoin < 1 s; resync 0 bytes (no state to resync yet). Availability gap after death: 6-11 s.
+Critical reading (agreed): the gap is fully explained by HEARTBEAT_TTL=15 s - a timer, not self-healing;
+and with quorum_k=1 a dead primary returns responded=0 although a live weak node is registered: there is
+no in-flight failover. Both now have an owner: docs/DESIGN-fallback.md (one bounded substitution round +
+cooldown suppression), whose minimum falsifying measurement is an ON/OFF drill pair.
+Also: the Mac now creates tasks for Windows. First reverse tasks: 8447 fallback design (delivered same
+day), 030 calibrator coverage for mac-llm-8b-q6 (claimed), 031 firekeeper L2 churn under load (claimed).
+Symmetric operation is live; churn-arena v1 and this drill converge on the same missing piece.
+
 ## 2026-10-17 - Mac-side reflection on Task 026 (relayed by mac-codex), and adjudication
 
 Task 026 delivered the teacher2 distillation corpus (943 rows, zero exact overlap, n-gram residue disclosed). Three findings matter more than the corpus:
