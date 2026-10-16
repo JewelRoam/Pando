@@ -73,3 +73,4 @@ Timestamped, sanitized snapshots of this PandoSI working session.
 | 2026-10-16T110003 | `docs/session-logs/2026-10-16T110003-session-backup.md` | d75936f05efb | 258/1438/2601 | automatic snapshot after 987564f test: the breadth axis - the witness flips with the family; out-of-family advisor scores zero |
 | 2026-10-16T113003 | `docs/session-logs/2026-10-16T113003-session-backup.md` | 50daf7df79ef | 259/1450/2616 | automatic snapshot after 1ebc130 feat: family-aware registry v2 lands (merged); live F shows the veto scope gap, Task 015 dispatched |
 | 2026-10-16T120002 | `docs/session-logs/2026-10-16T120002-session-backup.md` | 98e124bfda66 | 260/1452/2618 | automatic snapshot after da1b525 chore: session backup 2026-10-16T113003 |
+| 2026-10-16T123003 | `docs/session-logs/2026-10-16T123003-session-backup.md` | 1cfc2bb437a9 | 261/1453/2620 | automatic snapshot after 6d89a20 chore: session backup 2026-10-16T120003 |
