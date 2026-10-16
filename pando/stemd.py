@@ -31,6 +31,7 @@ from .backend import (MockBackend, OnnxLayaBackend,
                      OpenAIChoiceBackend, TorchLayaBackend)
 from .common import DecisionRequest
 from .graft import assign_role, capability
+from .resources import asset_path
 
 
 def host_ms_per_decision(usage: dict | None) -> float | None:
@@ -205,7 +206,7 @@ def main() -> None:
     parser.add_argument("--repo", default="convaiinnovations/laya")
     parser.add_argument("--model", default="convaiinnovations/laya",
                         help="HF id or local path for the torch (laya) backend")
-    parser.add_argument("--text-model", default="assets/textmodel.json",
+    parser.add_argument("--text-model", default=str(asset_path("textmodel.json")),
                         help="fitted TextModel for --backend text")
     parser.add_argument("--openai-url", default="http://127.0.0.1:8080/v1",
                         help="base URL for --backend openai "

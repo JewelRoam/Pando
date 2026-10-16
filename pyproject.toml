@@ -38,6 +38,7 @@ packages = ["pando"]
 "share/pando/assets" = [
   "assets/*.jsonl",
   "assets/*.toml",
+  "assets/*.json",
 ]
 "share/pando/assets/registry" = [
   "assets/registry/*.json",

@@ -25,6 +25,7 @@ from pathlib import Path
 from .common import bypass_proxy_for_lan
 from .graft import assign_role, capability, enumerate_execution_units
 from .grants import require_grant
+from .resources import asset_path
 from .rootd import Coordinator
 
 SERVICE_TYPE = "_pando._tcp.local."
@@ -32,7 +33,17 @@ ARTIFACT_CANDIDATES = [
     Path("artifacts/laya-en.int8.onnx"),
     Path("artifacts/laya-en.onnx"),
 ]
-TEXT_MODEL = Path("assets/textmodel.json")
+
+
+def _resolve_text_model() -> Path:
+    """The packaged asset when installed; the source-checkout path otherwise."""
+    packaged = asset_path("textmodel.json")
+    if packaged.exists():
+        return packaged
+    return Path("assets/textmodel.json")
+
+
+TEXT_MODEL = _resolve_text_model()
 
 
 def lan_ip() -> str:
