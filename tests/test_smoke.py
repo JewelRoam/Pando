@@ -1520,5 +1520,32 @@ class TestSmoke(unittest.TestCase):
         self.assertEqual(kept, [proposal])
 
 
+    def test_genesis_loop_adopts_from_signed_member_proposals(self):
+        """The loop's candidates are other members' signed, verified proposals."""
+        from pando.genesis import (GenesisLoop, LogProposer, Proposal,
+                                   sign_proposal)
+        from pando.identity import Identity
+
+        member_a, member_b = Identity.generate(), Identity.generate()
+        rec_a = sign_proposal(Proposal(proposal_id="pa", author="member-a",
+                                       goal="g", action="recruit.invite"),
+                              member_a)
+        rec_b = sign_proposal(Proposal(proposal_id="pb", author="member-b",
+                                       goal="g", action="reproduce.spawn"),
+                              member_b)
+        log_proposer = LogProposer(
+            [rec_a, rec_b],
+            pinned={"member-a": member_a.public_key,
+                    "member-b": member_b.public_key})
+        loop = GenesisLoop(proposer=log_proposer,
+                           actuator=lambda p: p.action != "recruit.invite")
+        loop.run(2)
+        self.assertEqual([p.author for p in loop.rounds[0].proposals],
+                         ["member-a", "member-b"])
+        self.assertEqual(loop.rounds[0].outcome.action, "recruit.invite")
+        # round 1 failed; memory moves the loop to member-b's proposal.
+        self.assertEqual(loop.rounds[1].outcome.action, "reproduce.spawn")
+
+
 if __name__ == "__main__":
     unittest.main()

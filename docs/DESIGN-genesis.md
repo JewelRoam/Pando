@@ -82,7 +82,7 @@ Implemented 2026-10-17, in-process, no model:
 
 - `pando/genesis.py` — `Proposal`, `ProposalOutcome`, `ScoreBoard` (Beta-smoothed instrumental
   gain), `NullScoreBoard` (amnesiac control), `StubProposer` (deterministic; holds the candidate set
-  constant), `GenesisLoop` (propose → score → adopt → execute → remember), `Journal`,
+  constant), `LogProposer` (candidates from signed group-log proposals), `GenesisLoop` (propose → score → adopt → execute → remember), `Journal`,
   and the `ACTION_SPACE` from §5.
 - `tools/genesis_check.py` — the drill. Two loops, identical proposer / candidates / actuator; one
   remembers, one does not. Measured: the remembered loop round 1 adopts `recruit.invite` (fails) and
@@ -90,13 +90,16 @@ Implemented 2026-10-17, in-process, no model:
   between the two loops is the memory, so the change of agenda is caused by the group's own outcome
   record — the falsifiable core, holding on a stub.
 - `tests/test_smoke.py::test_genesis_agenda_is_history_dependent` — the same property as a test.
-  Full suite: 35 tests, 1 skipped, all green.
+  Full suite: 36 tests, 1 skipped, all green.
 - `pando/genesis.py` also carries a proposal as a **signed record** (`sign_proposal` /
   `verify_proposal` / `proposals_from_log`), so it can travel between members and be checked on
   arrival — same rule as registration: the public key is the claim, the name is a label.
   `tools/genesis_log_check.py` is the negative-control drill (clean passes; tampered / unsigned /
   wrong-kind / foreign-key records are dropped; only the pinned author's proposal survives a mixed
   log). `tests/test_smoke.py::test_signed_proposal_round_trips_and_rejects_tampering` is the test.
+- `tools/genesis_check.py` also runs a second scenario: the candidates are two members' signed
+  proposals (`LogProposer`), the loop adopts member-a's, it fails, and round 2 moves to member-b's
+  — the candidate set is authored by the group and pinned on the way in, not invented by the loop.
 
 Deliberately **not** claimed yet:
 

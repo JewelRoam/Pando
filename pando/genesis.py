@@ -164,6 +164,26 @@ class StubProposer:
         ]
 
 
+class LogProposer:
+    """Propose from the group log: candidates are other members' proposals.
+
+    This is the difference between "the loop is clever" and "the agenda is the
+    group's". The candidates are not invented by the loop; they are the signed
+    proposals members put on the log, verified and pinned on the way in (see
+    ``proposals_from_log``). ``source`` is a list of records or a zero-arg
+    callable returning one, so a live log that grows between rounds is just
+    ``lambda: fetch_recent()``.
+    """
+
+    def __init__(self, source, pinned: dict[str, str] | None = None):
+        self._source = source
+        self.pinned = dict(pinned) if pinned else None
+
+    def propose(self, round_no: int, history: dict) -> list[Proposal]:
+        records = self._source() if callable(self._source) else self._source
+        return proposals_from_log(records, pinned=self.pinned)
+
+
 class Journal:
     """Append-only record of every proposed outcome, acted or not."""
 
