@@ -32,6 +32,7 @@ class DecisionRequest:
     question: str
     candidates: list[str] = field(default_factory=list)
     request_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
+    family: str | None = None
 
     def to_json(self) -> bytes:
         return json.dumps(asdict(self)).encode("utf-8")
@@ -44,6 +45,7 @@ class DecisionRequest:
             question=data["question"],
             candidates=data.get("candidates", []),
             request_id=data.get("request_id", ""),
+            family=data.get("family"),
         )
 
 

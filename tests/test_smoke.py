@@ -23,7 +23,8 @@ from pandosi.backend import (MockBackend, OpenAIChoiceBackend,
                             parse_openai_choice)
 from pandosi.common import (DecisionRequest, Vote, aggregate,
                             canonical_question)
-from pandosi.rootd import Coordinator, INITIAL_STEM_TIMEOUT, Root
+from pandosi.rootd import (Coordinator, INITIAL_STEM_TIMEOUT,
+                            Root, load_accuracy_registry)
 from pandosi.stemd import Stem
 from pandosi.onboard import build_plan
 from pandosi.grants import (audit_status, grant_status, require_grant,
@@ -174,6 +175,138 @@ class TestSmoke(unittest.TestCase):
             self.assertEqual(auto_english["choice"], "approve")
             self.assertEqual(auto_english["tier"], "auto")
             self.assertEqual(auto_english["assent"], "english")
+
+    def test_decision_request_family_round_trip(self):
+        """The optional family field survives JSON, and old payloads default."""
+        req = DecisionRequest(state="s", question="q?",
+                              candidates=["a", "b"], family="general")
+        restored = DecisionRequest.from_json(req.to_json())
+        self.assertEqual(restored.family, "general")
+        legacy = DecisionRequest.from_json(json.dumps({
+            "state": "s", "question": "q?", "candidates": ["a", "b"],
+        }).encode("utf-8"))
+        self.assertIsNone(legacy.family)
+
+    def test_accuracy_registry_v1_migrates_to_known_family(self):
+        """A schema-v1 accuracy map loads as the known family, unchanged."""
+        v1 = {
+            "schema_version": 1,
+            "members": {
+                "ft-v3": {"accuracy": {"D": 0.90, "E": 0.95}},
+                "mac-llm": {"accuracy": {"D": 0.80, "E": 0.90}},
+            },
+        }
+        self.assertEqual(load_accuracy_registry(v1), {
+            "ft-v3": {"known": {"D": 0.90, "E": 0.95}},
+            "mac-llm": {"known": {"D": 0.80, "E": 0.90}},
+        })
+        # Compact v1-shaped maps migrate the same way.
+        self.assertEqual(
+            load_accuracy_registry({"english": {"D": 0.1, "E": 0.2}}),
+            {"english": {"known": {"D": 0.1, "E": 0.2}}})
+        # An explicit families block wins and no legacy split leaks in.
+        v2 = {"members": {"m": {
+            "accuracy": {"D": 0.10},
+            "families": {"general": {"accuracy": {"F": 0.50}}}}}}
+        self.assertEqual(load_accuracy_registry(v2),
+                         {"m": {"general": {"F": 0.50}}})
+
+    def test_assent_auto_is_family_aware(self):
+        """auto vetoes with the best measured member *inside* the family."""
+        registry = {
+            "schema_version": 2,
+            "members": {
+                "english": {"families": {
+                    "known": {"accuracy": {"D": 0.7292, "E": 0.8375}},
+                    "general": {"accuracy": {"F": 0.8417}}}},
+                "ft-v3": {"families": {
+                    "known": {"accuracy": {"D": 0.9417, "E": 0.9917}},
+                    "general": {"accuracy": {"F": 0.8667}}}},
+                "mac-llm": {"families": {
+                    "known": {"accuracy": {"D": 0.8167, "E": 0.9167}},
+                    "general": {"accuracy": {"F": 0.9333}}}},
+                "mac-llm-8b": {"families": {
+                    "known": {"accuracy": {"D": 0.8583, "E": 0.925}},
+                    "general": {"accuracy": {"F": 0.9833}}}},
+            },
+        }
+
+        def decide(registry_obj, dissent=None, family=None, categories=None):
+            with tempfile.TemporaryDirectory() as td:
+                path = Path(td) / "reg.json"
+                path.write_text(json.dumps(registry_obj), encoding="utf-8")
+                coordinator = Coordinator(
+                    quorum_k=5, assent_checkpoint="auto",
+                    assent_registry=path)
+                coordinator.question_categories = dict(categories or {})
+                stems = []
+                try:
+                    for node_id, checkpoint in [
+                            ("english-0", "english"),
+                            ("english-1", "english"),
+                            ("ft-v3", "ft-v3"),
+                            ("mac-llm", "mac-llm"),
+                            ("mac-llm-8b", "mac-llm-8b")]:
+                        choice = "reject" if checkpoint == dissent else "approve"
+                        stem = Stem(node_id, MockBackend(
+                            node_id, checkpoint, correct_choice=choice,
+                            agree_rate=1.0))
+                        stem.start()
+                        stems.append(stem)
+                        coordinator.register(
+                            stem.node_id, stem.url(), checkpoint)
+                    return coordinator.decide(DecisionRequest(
+                        state="assent", question="approve?",
+                        candidates=["approve", "reject"], family=family))
+                finally:
+                    for stem in stems:
+                        stem.stop()
+
+        # Default family is "known": ft-v3 has the best measured mean.
+        known = decide(registry, dissent="ft-v3")
+        self.assertEqual(known["assent_family"], "known")
+        self.assertEqual(known["assent"], "ft-v3")
+        self.assertEqual(known["tier"], "verify")
+
+        # Explicit family="general" resolves to the 8B member.
+        general = decide(registry, dissent="mac-llm-8b", family="general")
+        self.assertEqual(general["assent_family"], "general")
+        self.assertEqual(general["assent"], "mac-llm-8b")
+        self.assertEqual(general["tier"], "verify")
+
+        # Dissent from the *other* family does not veto under general.
+        other = decide(registry, dissent="ft-v3", family="general")
+        self.assertEqual(other["assent"], "mac-llm-8b")
+        self.assertEqual(other["tier"], "auto")
+
+        # A playbook category naming a registry family is honoured ...
+        by_category = decide(registry, dissent="mac-llm-8b",
+                             categories={"approve?": "general"})
+        self.assertEqual(by_category["assent_family"], "general")
+        self.assertEqual(by_category["assent"], "mac-llm-8b")
+
+        # ... but an explicit request field wins over the category.
+        explicit = decide(registry, dissent="ft-v3", family="known",
+                          categories={"approve?": "general"})
+        self.assertEqual(explicit["assent_family"], "known")
+        self.assertEqual(explicit["assent"], "ft-v3")
+
+        # A gating-only category that is not a registry family is ignored.
+        gating = decide(registry, categories={"approve?": "security"})
+        self.assertEqual(gating["assent_family"], "known")
+        self.assertEqual(gating["assent"], "ft-v3")
+
+        # No present member has the family -> no assent, no downgrade.
+        only_known = {"members": {
+            "english": {"families": {"known": {
+                "accuracy": {"D": 0.7292, "E": 0.8375}}}},
+            "ft-v3": {"families": {"known": {
+                "accuracy": {"D": 0.9417, "E": 0.9917}}}},
+        }}
+        missing = decide(only_known, family="general")
+        self.assertEqual(missing["assent_family"], "general")
+        self.assertNotIn("assent", missing)
+        self.assertEqual(missing["tier"], "auto")
 
     def test_openai_choice_backend_parsing_and_payload(self):
         """Variant B parsing is strict, and the request is the agreed shape."""

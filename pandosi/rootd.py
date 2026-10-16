@@ -53,9 +53,29 @@ ASSENT_REGISTRY_ENV = "PANDOSI_ASSENT_REGISTRY"
 ASSENT_REGISTRY_DEFAULT = ("registry", "accuracies.json")
 
 
+DEFAULT_ASSENT_FAMILY = "known"
+
+
+def _parse_accuracy_map(accuracy: dict) -> dict[str, float]:
+    """Return finite numeric split accuracies from one registry record."""
+    parsed: dict[str, float] = {}
+    for split, raw in accuracy.items():
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+            continue
+        value = float(raw)
+        if math.isfinite(value):
+            parsed[str(split)] = value
+    return parsed
+
+
 def load_accuracy_registry(
-        source: str | Path | dict | None = None) -> dict[str, dict[str, float]]:
-    """Load per-checkpoint measured accuracy, keyed by split.
+        source: str | Path | dict | None = None
+) -> dict[str, dict[str, dict[str, float]]]:
+    """Load per-checkpoint, per-family measured accuracy.
+
+    The returned shape is ``checkpoint -> family -> split -> accuracy``.
+    Schema v1 records are migrated in memory by wrapping their ``accuracy``
+    mapping in the ``known`` family, so an old registry remains readable.
 
     ``source`` may be a registry path, an already-parsed payload, or ``None``
     for the checked-in ``assets/registry/accuracies.json`` (overridable with
@@ -90,22 +110,33 @@ def load_accuracy_registry(
     if not isinstance(members, dict):
         return {}
 
-    registry: dict[str, dict[str, float]] = {}
+    registry: dict[str, dict[str, dict[str, float]]] = {}
     for checkpoint, record in members.items():
         if not isinstance(checkpoint, str) or not isinstance(record, dict):
             continue
-        accuracy = record.get("accuracy", record)
-        if not isinstance(accuracy, dict):
-            continue
-        known: dict[str, float] = {}
-        for split, raw in accuracy.items():
-            if isinstance(raw, bool) or not isinstance(raw, (int, float)):
-                continue
-            value = float(raw)
-            if math.isfinite(value):
-                known[str(split)] = value
-        if known:
-            registry[checkpoint] = known
+        families: dict[str, dict[str, float]] = {}
+        raw_families = record.get("families")
+        if isinstance(raw_families, dict):
+            for family, family_record in raw_families.items():
+                if (not isinstance(family, str)
+                        or not isinstance(family_record, dict)):
+                    continue
+                accuracy = family_record.get("accuracy", family_record)
+                if not isinstance(accuracy, dict):
+                    continue
+                parsed = _parse_accuracy_map(accuracy)
+                if parsed:
+                    families[family] = parsed
+        if not families:
+            # Schema v1 (and compact v1-shaped payloads) have no family
+            # dimension. Their measured splits belong to the known family.
+            accuracy = record.get("accuracy", record)
+            if isinstance(accuracy, dict):
+                parsed = _parse_accuracy_map(accuracy)
+                if parsed:
+                    families[DEFAULT_ASSENT_FAMILY] = parsed
+        if families:
+            registry[checkpoint] = families
     return registry
 
 
@@ -200,6 +231,7 @@ class Coordinator:
         self.assent_accuracies = self.assent_registry
         self.assent_resolved: str | None = None
         self._assent_warning_emitted = False
+        self._assent_family_warnings: set[str] = set()
         self.call_timeout = call_timeout
         self.initial_stem_timeout = initial_stem_timeout
         self.min_stem_timeout = min_stem_timeout
@@ -299,16 +331,53 @@ class Coordinator:
         print("[assent] measured accuracy registry is missing or empty; "
               "auto assent disabled", flush=True)
 
-    def _resolve_assent_checkpoint(self,
-                                   votes: list[Vote]) -> str | None:
-        """Choose the highest mean measured accuracy among present votes.
+    def _registry_families(self) -> set[str]:
+        """Every evidence family named by any member in the registry."""
+        return {
+            family
+            for member in self.assent_registry.values()
+            for family in member
+        }
 
-        Only checkpoints named in the registry are eligible. Ties resolve by
-        checkpoint name so a decision is reproducible across runs.
+    def _assent_family_for(self, req: DecisionRequest) -> str:
+        """Resolve the evidence family for this request.
+
+        An explicit request field wins. Otherwise a playbook category is
+        honoured only when it names a family present in the registry; current
+        categories such as ``ordinary`` and ``security`` are gating policy,
+        not evidence families, so they fall through to ``known``.
+        """
+        if req.family is not None:
+            requested = str(req.family).strip()
+            if requested:
+                return requested
+        declared = (self.question_categories or {}).get(req.question)
+        if declared in self._registry_families():
+            return declared
+        return DEFAULT_ASSENT_FAMILY
+
+    def _warn_missing_assent_family(self, family: str) -> None:
+        """Warn once when no present member has data for this family."""
+        if not self.assent_registry or family in self._assent_family_warnings:
+            return
+        self._assent_family_warnings.add(family)
+        print(f"[assent] no present member has measured accuracy for family "
+              f"{family!r}; auto assent disabled for this decision",
+              flush=True)
+
+    def _resolve_assent_checkpoint(self, votes: list[Vote],
+                                   family: str = DEFAULT_ASSENT_FAMILY
+                                   ) -> str | None:
+        """Choose the best mean accuracy for one family among present votes.
+
+        Only checkpoints with measured data in this family are eligible;
+        members measured in another family do not participate. Ties resolve
+        by checkpoint name so a decision is reproducible across runs.
         """
         ranked: list[tuple[float, str]] = []
         for vote in votes:
-            accuracies = self.assent_registry.get(vote.checkpoint)
+            families = self.assent_registry.get(vote.checkpoint) or {}
+            accuracies = families.get(family)
             if not accuracies:
                 continue
             ranked.append((sum(accuracies.values()) / len(accuracies),
@@ -660,14 +729,18 @@ class Coordinator:
                                     result.mean_probability, "verify",
                                     result.votes)
         resolved_assent = None
+        assent_family: str | None = None
         collapsed_assent_votes: list[Vote] = []
         if self.assent_checkpoint is not None:
             collapsed_assent_votes = (
                 collapse_lineages(calibrated_votes, self.blocs or None)
                 if self._collapses() else calibrated_votes)
             if self.assent_checkpoint == "auto":
+                assent_family = self._assent_family_for(req)
                 resolved_assent = self._resolve_assent_checkpoint(
-                    collapsed_assent_votes)
+                    collapsed_assent_votes, assent_family)
+                if resolved_assent is None:
+                    self._warn_missing_assent_family(assent_family)
                 self.assent_resolved = resolved_assent
             elif result.tier == "auto":
                 resolved_assent = self.assent_checkpoint
@@ -729,8 +802,10 @@ class Coordinator:
             if suggestion:
                 out["suggested_choice"] = suggestion["choice"]
                 out["suggested_probability"] = suggestion["probability"]
-        if self.assent_checkpoint == "auto" and resolved_assent is not None:
-            out["assent"] = resolved_assent
+        if self.assent_checkpoint == "auto":
+            out["assent_family"] = assent_family
+            if resolved_assent is not None:
+                out["assent"] = resolved_assent
         out["fanout_ms"] = fanout_ms
         # Report uncalibrated voters rather than acting on them silently. The
         # tier is left alone so a synthetic test harness is unaffected; the
