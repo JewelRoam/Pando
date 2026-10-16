@@ -52,7 +52,11 @@ from tools import build_large_suite as bls  # noqa: E402
 # variant "b" - the one task 004 found wins on held-out wording.
 VARIANT_B_SYSTEM = "只输出候选词本身，不要 JSON、不要置信度，不要任何其他文字。"
 
+# Mirrors tools/distill_to_finetune.py, so the two writers agree.
+LAYA_INSTRUCTION = "Classify the intent of the message."
+
 F_SUITE = ROOT / "assets" / "heldout5_test.jsonl"
+H_SUITE = ROOT / "assets" / "heldout6_test.jsonl"
 
 
 def load_tasks(path: Path) -> list[dict]:
@@ -141,16 +145,18 @@ def cue_strings(table: dict) -> set:
     return {cue.lower() for group in table.values() for cue in group}
 
 
-def f_cue_strings() -> set:
-    """Recover F's cue phrasings from the states it produced.
+def suite_cue_strings(path: Path) -> set:
+    """Recover a suite's cue phrasings from the states it produced.
 
-    ``assets/heldout5_test.jsonl`` is the only F artifact on main (the builder
-    lives on the ``split-f`` branch), but every F state is
-    ``<prefix><cue>`` optionally followed by ``. <filler>``, so the cue is the
-    text between the prefix and the first sentence break.
+    Both heldout5 (F) and heldout6 (H) encode every state as ``<prefix><cue>``
+    optionally followed by ``. <filler>``, so the cue is the text between the
+    prefix and the first sentence break.  The builders for those two suites
+    live on the ``split-f`` / ``split-h`` branches rather than on main, so
+    recovering the phrasings from the artifact is the only way to audit them
+    from a main-based worktree.
     """
     cues: set[str] = set()
-    for row in load_tasks(F_SUITE):
+    for row in load_tasks(path):
         state = row["state"]
         for prefix in ("User says: ", "Message: "):
             if state.startswith(prefix):
@@ -162,14 +168,28 @@ def f_cue_strings() -> set:
     return cues
 
 
+def f_cue_strings() -> set:
+    return suite_cue_strings(F_SUITE)
+
+
+def h_cue_strings() -> set:
+    return suite_cue_strings(H_SUITE)
+
+
 def audit_overlap(g_name: str = "g") -> dict:
-    """Exact-string overlap of set G against every earlier inventory."""
+    """Exact-string overlap of the target inventory vs every other wording set.
+
+    Covers the cue tables that live in ``tools/build_large_suite.py`` plus the
+    two evaluator suites whose builders live on other branches (F =
+    ``assets/heldout5_test.jsonl``, H = ``assets/heldout6_test.jsonl``).
+    """
     target = cue_strings(bls.CUE_SETS[g_name])
     tables = {name: cue_strings(table)
               for name, table in bls.CUE_SETS.items() if name != g_name}
     # A2 is not a separate inventory: big2 reuses cue set A, so the exact
     # string set is identical and needs no separate comparison.
     tables["f"] = f_cue_strings()
+    tables["h"] = h_cue_strings()
     overlaps = {name: sorted(target & strings)
                 for name, strings in sorted(tables.items())}
     report = {
@@ -181,7 +201,7 @@ def audit_overlap(g_name: str = "g") -> dict:
         "examples": {name: hits[:5] for name, hits in overlaps.items()
                      if hits},
     }
-    for name in ("a", "b", "c", "d", "e", "f"):
+    for name in ("a", "b", "c", "d", "e", "f", "h"):
         report.setdefault("per_set_overlap", {})[name] = \
             report["per_set_overlap"].get(name, 0)
     return report
@@ -256,6 +276,9 @@ def discarded_examples(rows: list[dict], limit: int = 5) -> list[dict]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--cue-set", default="i",
+                        help="which cue inventory the suite was built "
+                             "from (audit target)")
     parser.add_argument("--suite", type=Path,
                         default=ROOT / "assets" / "big8_g.jsonl")
     parser.add_argument("--out-train", type=Path,
@@ -263,15 +286,17 @@ def main() -> int:
     parser.add_argument("--out-stats", type=Path,
                         default=ROOT / "rollouts" / "distill_stats.json")
     parser.add_argument("--raw-out", type=Path,
-                        default=ROOT / "rollouts" / "distill_raw.jsonl",
+                        default=ROOT / "rollouts" / "distill_v2_raw.jsonl",
                         help="per-row teacher votes, streamed for resume")
-    parser.add_argument("--base-url-8b", default="http://127.0.0.1:8082/v1")
+    parser.add_argument("--base-url-8b", default="http://127.0.0.1:8087/v1",
+                        help="labeler; default is the teacher2 tier "
+                             "(Qwen3-8B Q5_K_M, task 025)")
     parser.add_argument("--base-url-4b", default="http://127.0.0.1:8080/v1")
     parser.add_argument("--key-file-8b", type=Path,
-                        default=Path("~/.pando/llm-api-8b.token"))
+                        default=Path("~/.pandosi/llm-api-8b-q6.token"))
     parser.add_argument("--key-file-4b", type=Path,
-                        default=Path("~/.pando/llm-api.token"))
-    parser.add_argument("--model-8b", default="qwen3-8b-instruct")
+                        default=Path("~/.pandosi/llm-api.token"))
+    parser.add_argument("--model-8b", default="qwen3-8b-q5km-instruct")
     parser.add_argument("--model-4b", default="qwen3-4b-instruct-2507")
     parser.add_argument("--timeout", type=float, default=180.0)
     parser.add_argument("--limit", type=int, default=0)
@@ -280,9 +305,20 @@ def main() -> int:
     parser.add_argument("--progress-every", type=int, default=25)
     parser.add_argument("--audit-only", action="store_true",
                         help="run the overlap audit and stop")
+    parser.add_argument("--out-laya", type=Path,
+                        default=ROOT / "rollouts" / "distill_v2_train_laya.jsonl",
+                        help="same rows in the laya trainer format")
+    parser.add_argument("--base-url-old8b", default="http://127.0.0.1:8082/v1",
+                        help="second opinion for the teacher-swap check")
+    parser.add_argument("--key-file-old8b", type=Path,
+                        default=Path("~/.pandosi/llm-api-8b.token"))
+    parser.add_argument("--model-old8b", default="qwen3-8b-instruct")
+    parser.add_argument("--agreement-sample", type=int, default=0,
+                        help="ask the previous 8B the same first N rows and "
+                             "report teacher agreement")
     args = parser.parse_args()
 
-    report = audit_overlap("g")
+    report = audit_overlap(args.cue_set)
     print("overlap audit: " + json.dumps(report, ensure_ascii=False),
           flush=True)
     if report["total_overlap"] != 0:
@@ -351,6 +387,11 @@ def main() -> int:
         "filter": {"model": args.model_4b, "base_url": args.base_url_4b,
                    "prompt": "variant b (candidate only)"},
     }
+    stats["confidence_note"] = (
+        "variant b asks for the candidate word only, so no per-row "
+        "probability exists; every kept row carries probability 0.5 by "
+        "construction when it reaches a vote record.  The only confidence "
+        "signal the corpus has is dual-teacher agreement.")
     stats["overlap_audit"] = report
     stats["discarded_examples"] = discarded_examples(rows, 5)
 
@@ -369,6 +410,59 @@ def main() -> int:
                     "expected": row["teacher_8b"],
                     "teacher_agreement": True,
                 }, ensure_ascii=False) + "\n")
+    kept_rows = [row for row in rows
+                 if row["teacher_8b"] and row["teacher_4b"]
+                 and row["teacher_8b"] == row["teacher_4b"]]
+
+    # Same rows in the laya trainer format.  The mapping mirrors
+    # tools/distill_to_finetune.py exactly (one alternative becomes
+    # ``rejected``), so the Windows side can drop this file straight into the
+    # fine-tune that produces ft-v9.
+    args.out_laya.parent.mkdir(parents=True, exist_ok=True)
+    with args.out_laya.open("w", encoding="utf-8") as handle:
+        for row in kept_rows:
+            expected = row["teacher_8b"]
+            alternative = next(name for name in sorted(row["candidates"])
+                               if name != expected)
+            handle.write(json.dumps({
+                "state": row["state"],
+                "questions": {"intent": {
+                    "type": "choice",
+                    "instructions": LAYA_INSTRUCTION,
+                    "criteria": list(row["candidates"])}},
+                "expected": {"intent": expected},
+                "rejected": {"intent": alternative},
+                "source": args.suite.name,
+            }, ensure_ascii=False) + "\n")
+    print(f"wrote {args.out_laya} ({len(kept_rows)} rows)", flush=True)
+
+    if args.agreement_sample:
+        sample = rows[:args.agreement_sample]
+        key_old = load_api_key(args.key_file_old8b)
+        agree = 0
+        compared = 0
+        old_choices: dict[str, int] = {}
+        for row in sample:
+            task = next(t for t in tasks if t["task_id"] == row["task_id"])
+            vote = ask_teacher(args.base_url_old8b, args.model_old8b, key_old,
+                               task, args.timeout)
+            if vote["choice"]:
+                old_choices[vote["choice"]] = \
+                    old_choices.get(vote["choice"], 0) + 1
+            compared += 1
+            if vote["choice"] and vote["choice"] == row["teacher_8b"]:
+                agree += 1
+        stats["teacher_swap_check"] = {
+            "rows": compared,
+            "labeler": args.model_8b,
+            "second_opinion": args.model_old8b,
+            "agreement": agree,
+            "agreement_rate": (agree / compared) if compared else 0.0,
+            "second_opinion_choices": dict(sorted(old_choices.items())),
+        }
+        print("TEACHER_SWAP " + json.dumps(
+            stats["teacher_swap_check"], ensure_ascii=False), flush=True)
+
     args.out_stats.write_text(
         json.dumps(stats, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8")

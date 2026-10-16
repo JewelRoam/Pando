@@ -1,0 +1,105 @@
+{
+  "total_generated": 1040,
+  "kept": 943,
+  "discarded": 97,
+  "teacher_agreement_rate": 0.9067307692307692,
+  "by_agreed_label": {
+    "chargeback": 129,
+    "complaint": 118,
+    "exchange": 122,
+    "greeting": 130,
+    "invoice": 91,
+    "login_issue": 99,
+    "praise": 128,
+    "refund": 126
+  },
+  "by_cue_label": {
+    "chargeback": 137,
+    "complaint": 117,
+    "exchange": 124,
+    "greeting": 130,
+    "invoice": 127,
+    "login_issue": 137,
+    "praise": 131,
+    "refund": 137
+  },
+  "parse_failures_8b": 0,
+  "parse_failures_4b": 0,
+  "latency_8b_ms": {
+    "mean": 318.68663586232844,
+    "p50": 309.273624967318,
+    "p95": 399.96362500824034
+  },
+  "latency_4b_ms": {
+    "mean": 195.52309842631354,
+    "p50": 191.87774998135865,
+    "p95": 267.59095798479393
+  },
+  "suite": "big9_i.jsonl",
+  "teachers": {
+    "labeler": {
+      "model": "qwen3-8b-q5km-instruct",
+      "base_url": "http://127.0.0.1:8087/v1",
+      "prompt": "variant b (candidate only)"
+    },
+    "filter": {
+      "model": "qwen3-4b-instruct-2507",
+      "base_url": "http://127.0.0.1:8080/v1",
+      "prompt": "variant b (candidate only)"
+    }
+  },
+  "confidence_note": "variant b asks for the candidate word only, so no per-row probability exists; every kept row carries probability 0.5 by construction when it reaches a vote record.  The only confidence signal the corpus has is dual-teacher agreement.",
+  "overlap_audit": {
+    "target": "i",
+    "cues": 48,
+    "per_set_overlap": {
+      "a": 0,
+      "b": 0,
+      "c": 0,
+      "d": 0,
+      "e": 0,
+      "f": 0,
+      "g": 0,
+      "h": 0
+    },
+    "total_overlap": 0,
+    "examples": {}
+  },
+  "discarded_examples": [
+    {
+      "task_id": "big91-0004",
+      "state": "User says: where is the statement for my order. This is my first message about it.",
+      "cue_label": "invoice",
+      "teacher_8b": "invoice",
+      "teacher_4b": "complaint"
+    },
+    {
+      "task_id": "big91-0015",
+      "state": "User says: where is the statement for my order. I am writing from my phone.",
+      "cue_label": "invoice",
+      "teacher_8b": "invoice",
+      "teacher_4b": "refund"
+    },
+    {
+      "task_id": "big91-0033",
+      "state": "User says: my profile seems to be suspended. I am not sure this is the right place to ask.",
+      "cue_label": "login_issue",
+      "teacher_8b": "login_issue",
+      "teacher_4b": "complaint"
+    },
+    {
+      "task_id": "big91-0046",
+      "state": "Message: the verification text is not arriving. Let me know what you need from me.",
+      "cue_label": "login_issue",
+      "teacher_8b": "login_issue",
+      "teacher_4b": "complaint"
+    },
+    {
+      "task_id": "big91-0054",
+      "state": "Message: where is the statement for my order. It is quite urgent.",
+      "cue_label": "invoice",
+      "teacher_8b": "invoice",
+      "teacher_4b": "complaint"
+    }
+  ]
+}

@@ -349,7 +349,7 @@ FIFTH_CUES = {
     ],
     "praise": [
         "the assistance I got was outstanding",
-        "I am delighted with how this turned out",
+        "what a lovely experience from start to finish",
         "your representative handled everything perfectly",
         "this was an excellent piece of support",
         "many thanks for the great help",
@@ -458,6 +458,82 @@ SIXTH_CUES = {
 }
 
 CUE_SETS["g"] = SIXTH_CUES
+
+
+# A seventh inventory (set I, task 026): the eight original intents again,
+# 48 phrasings that appear in no earlier inventory.  Task 025 deployed a
+# stronger teacher (Qwen3-8B Q5_K_M, :8087); this inventory feeds the
+# teacher2 distillation corpus that trains ft-v9.  As with set G the point is
+# that the fine-tuned lineage has never seen this wording, so the teacher
+# cannot be rewarded for memorised phrasing.
+SEVENTH_CUES = {
+    "refund": [
+        "kindly return the amount I was charged",
+        "the money I paid should come back to me",
+        "put the payment back on my card",
+        "refund the full sum to me please",
+        "I want the charge undone",
+        "send the money back my way",
+    ],
+    "chargeback": [
+        "my bank has been asked to reverse this",
+        "I filed a chargeback for this transaction",
+        "the issuer is disputing the charge on my behalf",
+        "this payment is under formal challenge by my bank",
+        "I have escalated this to my card network as a dispute",
+        "the transaction is being recalled by my provider",
+    ],
+    "exchange": [
+        "could I swap this over for another model",
+        "I would prefer to receive a different model",
+        "swap this unit for the other variant please",
+        "can I send this back and take the newer version",
+        "arrange a replacement with a different item",
+        "I want a different product instead of this",
+    ],
+    "complaint": [
+        "this whole thing has been deeply frustrating",
+        "I am not at all satisfied with what happened",
+        "the handling of my case was disappointing",
+        "the experience left a bad taste",
+        "your service fell well short here",
+        "I expected far better from you",
+    ],
+    "praise": [
+        "the support I received was outstanding",
+        "I am delighted with how this turned out",
+        "your colleague went above and beyond",
+        "what a smooth and pleasant process",
+        "thanks for such attentive support",
+        "this exceeded everything I hoped for",
+    ],
+    "greeting": [
+        "hey there, hope you are having a good one",
+        "salutations, wishing you a pleasant day",
+        "just saying hi to you",
+        "morning, all the best to you",
+        "hello again, hope things are well",
+        "greetings from my end",
+    ],
+    "login_issue": [
+        "my credentials are being rejected",
+        "I am unable to reach my profile",
+        "the sign-in keeps looping back",
+        "the verification text is not arriving",
+        "my profile seems to be suspended",
+        "access to my account is blocked",
+    ],
+    "invoice": [
+        "could you issue the receipt for my purchase",
+        "I would like documentation of what I paid",
+        "send over the billing record please",
+        "where is the statement for my order",
+        "I would like the itemised breakdown of charges",
+        "please send the financial document for my purchase",
+    ],
+}
+
+CUE_SETS["i"] = SEVENTH_CUES
 
 QUESTION = "intent"
 
@@ -616,7 +692,8 @@ def main() -> int:
                              "appear in no earlier split (round 122); "
                              "c/d: later held-out inventories; "
                              "e: fresh inventory for split E (task 007); "
-                             "g: distillation inventory (task 020)")
+                             "g: distillation inventory (task 020); "
+                             "i: teacher2 distillation inventory (task 026)")
     args = parser.parse_args()
 
     assert_fillers_are_neutral()
@@ -635,8 +712,8 @@ def main() -> int:
         overlap_report()
     if args.cues == "e":
         cross_inventory_report("e")
-    if args.cues == "g":
-        cross_inventory_report("g")
+    if args.cues in ("g", "i"):
+        cross_inventory_report(args.cues)
     return 0
 
 
