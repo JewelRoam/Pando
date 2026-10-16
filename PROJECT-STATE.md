@@ -309,6 +309,9 @@ NPU) all voting in the same consensus quorum.
 | ft-v7 bet (running) | mixed corpus x 2 epochs, seed 5: D/E/F all up, holdout <= 1.0 | round 169 |
 | Island root on the wire | :8765 exposed on a fourth tunnel; island_root_url published on mac-endpoint (Task 023) | round 169 |
 | First WAN bridge | Windows parent <- bridge <- tunnel <- island root; 6/6 round trips, ~1.2 s steady, 5/6 correct | round 170 |
+| ft-v7 first win | D 0.9792 vs incumbent 0.9417 (+3.75) - first student to beat ft-v3 on an evaluator | round 171 |
+| Still refused | E 4.2 and F 3.3 behind; single run = one draw (round 152) - replicate seeds before admitting | round 171 |
+| ft-v8 replication running | seed 6, same recipe (mixed, 2 epochs); recipe mean is the admission argument | round 171 |
 | Second LLM tier deployed | Qwen3-8B Q4_K_M on Mac :8082, ~25.5 tok/s; 4B+8B coexist | round 162 |
 | 8B solo | D 0.8583 / E 0.9250 (4B: 0.8167 / 0.9167) | round 162 |
 | Strength axis | stronger weak-tier buys coverage: E auto 233 @ 1.0000 (core 199; 4B 227); decided set by the fallback | round 162 |

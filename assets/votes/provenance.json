@@ -368,6 +368,62 @@
       "note": "evaluation",
       "suite": "heldout5_test.jsonl",
       "model": "ft-v6 (mixed: 827 distill + 720 human-labeled)"
+    },
+    {
+      "file": "ft-v7-holdout.json",
+      "split": "G-holdout",
+      "member": "ft-v7",
+      "rows": 91,
+      "accuracy": 1.0,
+      "sha256": "14c6cb3929efd12233c6c1d46052b2f85dd90e17bcc124d10dc0e7b826184274",
+      "source_path": "Windows workspace metrics/lan-check/holdout-votes-ft-v7.json",
+      "branch": "local (Windows); round 171",
+      "round": "round 171",
+      "note": "teacher-labeled holdout agreement",
+      "suite": "distill_ft5_holdout.jsonl",
+      "model": "ft-v7 (mixed corpus, unfrozen, 2 epochs, seed 5)"
+    },
+    {
+      "file": "ft-v7-votes-d.json",
+      "split": "D",
+      "member": "ft-v7",
+      "rows": 240,
+      "accuracy": 0.9792,
+      "sha256": "2ece2cd5dcb39d540775b23689bde3176fbd02f90b23cf93c84e3db377b05fc1",
+      "source_path": "Windows workspace metrics/lan-check/d-votes-ft-v7.json",
+      "branch": "local (Windows); round 171",
+      "round": "round 171",
+      "note": "evaluation",
+      "suite": "heldout3_test.jsonl",
+      "model": "ft-v7 (mixed corpus, unfrozen, 2 epochs, seed 5)"
+    },
+    {
+      "file": "ft-v7-votes-e.json",
+      "split": "E",
+      "member": "ft-v7",
+      "rows": 240,
+      "accuracy": 0.95,
+      "sha256": "f4c72f6e59204606cb2011d0b22070344aabd7dd96b7b0bdc8ec1a269220c7b8",
+      "source_path": "Windows workspace metrics/lan-check/e-votes-ft-v7.json",
+      "branch": "local (Windows); round 171",
+      "round": "round 171",
+      "note": "evaluation",
+      "suite": "heldout4_test.jsonl",
+      "model": "ft-v7 (mixed corpus, unfrozen, 2 epochs, seed 5)"
+    },
+    {
+      "file": "ft-v7-votes-f.json",
+      "split": "F",
+      "member": "ft-v7",
+      "rows": 120,
+      "accuracy": 0.8333,
+      "sha256": "96ebb2f29274c96cf83fb2983eb4de391240be63dcdcae7396ec1586b290a78c",
+      "source_path": "Windows workspace metrics/lan-check/f-votes-ft-v7.json",
+      "branch": "local (Windows); round 171",
+      "round": "round 171",
+      "note": "evaluation",
+      "suite": "heldout5_test.jsonl",
+      "model": "ft-v7 (mixed corpus, unfrozen, 2 epochs, seed 5)"
     }
   ],
   "missing": [
