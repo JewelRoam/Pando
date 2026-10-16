@@ -64,3 +64,24 @@ On the Pi:
 - A short record (docs/ or metrics/ brief): what worked, what needed a human, which consent prompts the
   device displayed, and what the root measured.
 - Standing rule: enrollment is consent-based on devices we own or have explicit permission to use.
+
+## 7. A real neural member (Laya, int8 CPU) - measured 2026-10-17
+The pi5 runs the project's native decision model (Laya ONNX int8, 571 MB) alongside the text member:
+- `pip install onnxruntime`, then `pip install --no-deps laya` and `pip install transformers`
+  (tokenizer only). The laya package imports torch in `laya.common` even on the ONNX path, so:
+  `pip install torch --index-url https://download.pytorch.org/whl/cpu` (aarch64 CPU wheel, ~80 MB;
+  never the CUDA stack). PyPI's default index did not serve an aarch64 torch wheel - the CPU index did.
+- Ship `laya-en.int8.onnx` (sha256 854abee1...) plus the small repo files
+  (`rl_agent_config.json`, `tokenizer/{tokenizer.json,tokenizer_config.json}`, `encoder/config.json`)
+  into `~/models/laya-repo/`, and pass `--repo ~/models/laya-repo` so nothing touches HuggingFace.
+- Start:
+  `python -m pando.stemd --node-id <host>-laya --backend onnx --onnx-path ~/models/laya-en.int8.onnx`
+  ` --repo ~/models/laya-repo --checkpoint laya-en --root http://<root>:8790`
+  ` --pairing-token-file ~/.pando/pairing.token --host 0.0.0.0 --advertise-host <ip>`
+- Measured on the pi5: model load ~40 s; RAM after load ~1.2 GB used / 2.8 GB available;
+  one quorum-2 decision (text + Laya on the same device, one device key signing both members):
+  `responded = 2`, Laya `199 ms` with p=0.9606, text member `49 ms`; total fanout 200 ms.
+- Honest flags: `laya-en` has no temperature table yet (the decision output lists it under
+  `uncalibrated_checkpoints`; its votes cannot reach tier `auto`), and the attested artifact digest
+  (`2df81c3e...`) differs from the raw file hash (`854abee1...`) - resolve what is being attested
+  before digests are treated as provenance.
