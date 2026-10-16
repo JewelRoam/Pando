@@ -48,11 +48,13 @@ COMPOSITIONS = [
      0.9750, False),
     ("D trio + assent/advisor", "D",
      ("english", "ft-v3", "mac-llm"), "advisor", "ft-v3", 0.9833, False),
-    ("E trio + assent/veto", "E",
-     ("english", "ft-v3", "mac-llm-8b"), "veto", "mac-llm-8b",
-     0.9875, False),
-    ("E trio + assent/veto (neutral)", "E",
-     ("english", "ft-v3", "mac-llm-8b"), "veto", "mac-llm-8b",
+    # Assent + veto has an identity worth knowing: every row's answer ends
+    # up being the witness's choice (agreement keeps the majority, which
+    # includes the witness; dissent demotes to the witness). decided is
+    # therefore exactly the witness's own accuracy - here ft-v3, the
+    # registry's selected witness for the known family (E 0.9917).
+    ("E trio + assent/veto (witness ft-v3)", "E",
+     ("english", "ft-v3", "mac-llm-8b"), "veto", "ft-v3",
      0.9917, True),
     ("F core + 8B witness/veto", "F",
      ("english", "ft-v3", "mac-llm-8b"), "veto", "mac-llm-8b",

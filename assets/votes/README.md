@@ -6,6 +6,13 @@ This directory contains the vote files that were still present on the machine wh
 
 | file | split | member | rows | accuracy | provenance |
 |---|---:|---|---:|---:|---|
+| `votes-d-seated-english.json` | D | `english` | 240 | 0.7292 | rounds 122-160 seated english lineage votes (canonical file used by the admission and calibration rounds); sha256 `66a88241ee31…` |
+| `votes-d-ft-v3.json` | D | `ft-v3` | 240 | 0.9417 | torch/CUDA fine-tune (round 150-153) on split D; tools/finetuned_votes.py; sha256 `74b07f936aec…` |
+| `e-votes-english.json` | E | `english` | 240 | 0.8375 | recorded by metrics/lan-check/record_english.py (static ONNX graph, iGPU, pad-to 256) for round 161; sha256 `f90a0b884f8a…` |
+| `e-votes-ft-v3.json` | E | `ft-v3` | 240 | 0.9917 | recorded by tools/finetuned_votes.py (torch/CUDA) for round 161; sha256 `eb70044200cc…` |
+| `f-votes-english.json` | F | `english` | 120 | 0.8417 | recorded by record_english.py for round 164 (new intent family); sha256 `c5e9ce968899…` |
+| `f-votes-ft-v3.json` | F | `ft-v3` | 120 | 0.8667 | recorded by tools/finetuned_votes.py for round 164; sha256 `b1aba5ab67ad…` |
+| `finetuned-votes.json` | C | `ft-v3` | 240 | 0.9125 | round 150 verification of the fine-tune on split C; tools/finetuned_votes.py; sha256 `93650577a091…` |
 | `llm-votes-b.json` | B | `mac-llm` | 240 | 0.8500 | round 158 / Task 003; branch `mac-llm-votes` @ `8242803`; `qwen3-4b-instruct-2507`; sha256 `f5f9b4198acc…` |
 | `llm-votes-c.json` | C | `mac-llm` | 240 | 0.6542 | round 158 / Task 003; branch `mac-llm-votes` @ `8242803`; `qwen3-4b-instruct-2507`; sha256 `af28361422d1…` |
 | `llm-votes-d-b-only.json` | D | `mac-llm` | 240 | 0.8167 | round 159 / Task 004; branch `mac-llm-votes-3` @ `0484840`; `qwen3-4b-instruct-2507`; sha256 `96a167eb09a8…` |
@@ -20,19 +27,7 @@ Accuracy is the fraction of rows where `choice == expected`. The source paths in
 
 ## Missing source files
 
-The following files are referenced by `assets/registry/accuracies.json` or the research record but were not present in any local or remote branch searched by this task. They are deliberately not synthesized: a placeholder vote would make a headline reproduction look stronger than the evidence allows.
-
-| expected file | member | split | documented source |
-|---|---:|---:|---|
-| `votes-d-seated-english.json` | `english` | D | assets/registry/accuracies.json |
-| `votes-d-ft-v3.json` | `ft-v3` | D | assets/registry/accuracies.json |
-| `e-votes-english.json` | `english` | E | assets/registry/accuracies.json |
-| `e-votes-ft-v3.json` | `ft-v3` | E | assets/registry/accuracies.json |
-| `f-votes-english.json` | `english` | F | assets/registry/accuracies.json |
-| `f-votes-ft-v3.json` | `ft-v3` | F | assets/registry/accuracies.json |
-| `finetuned-votes.json` | `ft-v3` | C | docs/research/2026-10-16-round150.md |
-
-Consequences: the solo accuracy rows for `english` and `ft-v3`, and the core-dependent composition rows on D/E/F, cannot be recomputed from this directory alone. The scripts report those rows as `MISSING` rather than inventing a vote. The available LLM solo rows and the F 8B witness-alone diagnostic are recomputed.
+None. The seven Windows-side files (english/ft-v3 on D, E, F; the round-150 C verification) landed in the round-166 update with provenance entries above, and every headline row now reproduces offline.
 
 ## Headline definitions
 

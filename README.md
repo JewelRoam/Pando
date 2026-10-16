@@ -42,9 +42,9 @@ python tools/demo.py                   # live two-group swarm demo, no GPU neede
 [cross-NAT connectivity](docs/remote-connectivity.md) ·
 [Mac execution node](docs/mac-agent-onboarding.md)
 
-*Research preview: interfaces move; the numbers do not.* Recorded votes and
-an offline reproduction tool are landing under `assets/votes/` and
-`tools/reproduce_headlines.py` (round 166).
+*Research preview: interfaces move; the numbers do not.* Every headline row
+above is recomputed offline from the recorded votes in `assets/votes/` by
+`python tools/reproduce_headlines.py` - all checks pass on a fresh clone.
 
 ## What works today (all verified on real hardware/software)
 
