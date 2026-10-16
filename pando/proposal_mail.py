@@ -69,10 +69,29 @@ def publish_proposal(proposal: Proposal, identity, url: str,
     record = sign_proposal(proposal, identity)
     title = (f"{TITLE_PREFIX} {proposal.proposal_id} "
              f"{proposal.action} by {proposal.author}")
-    return _request(url, "/task", token, "POST",
-                    {"from": proposal.author, "title": title,
-                     "body": json.dumps(record, sort_keys=True)},
-                    timeout=timeout)
+    posted = _request(url, "/task", token, "POST",
+                      {"from": proposal.author, "title": title,
+                       "body": json.dumps(record, sort_keys=True)},
+                      timeout=timeout)
+    # A proposal is a message class, not work. Left open it would sit in the
+    # same queue a claim-handling automation drains, and the convention "do not
+    # claim [proposal]" would be the only thing standing between the agenda and
+    # being executed as a task. So claim it as its author, the way
+    # tools/agent_chat.py claims a chat message, and say so loudly if the claim
+    # does not take -- a silent failure here is a proposal that looks like work.
+    task = posted.get("task") if isinstance(posted, dict) else None
+    task_id = task.get("id") if isinstance(task, dict) else None
+    if task_id:
+        claimed = _request(url, "/claim", token, "POST",
+                           {"id": task_id, "by": proposal.author},
+                           timeout=timeout)
+        took = isinstance(claimed, dict) and "task" in claimed
+        posted["claimed"] = took
+        if not took:
+            posted["claim_warning"] = (
+                f"sent {task_id} but the claim failed ({claimed}); it may be "
+                f"read as a task - claim or close it manually")
+    return posted
 
 
 def fetch_proposals(url: str, token: str | None = None,

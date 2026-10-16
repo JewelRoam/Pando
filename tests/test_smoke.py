@@ -1625,6 +1625,13 @@ class TestSmoke(unittest.TestCase):
         self.assertFalse(lone.outcome.adopted)
         self.assertEqual(acted, [])
 
+        # A swarm that answers nothing is not a vote to act -- and the record
+        # should say so, not quote an empty choice back as if it were one.
+        silent, acted = snapshot({**base, "choice": None, "responded": 0})
+        self.assertFalse(silent.outcome.adopted)
+        self.assertEqual(acted, [])
+        self.assertIn("no choice", silent.outcome.held_reason)
+
         # An uncalibrated voter puts the confidence scale in doubt.
         uncal, acted = snapshot({**base, "uncalibrated_checkpoints": ["laya-en"]})
         self.assertFalse(uncal.outcome.adopted)

@@ -293,8 +293,15 @@ class GenesisLoop:
                 adopted = picked
             else:
                 adopted = None
-                held_reason = (decision.reason if picked is not None else
-                               f"swarm chose {chosen_id!r}, not on the menu")
+                if picked is not None:
+                    held_reason = decision.reason
+                elif not chosen_id:
+                    # No answer at all (e.g. the swarm timed out, responded=0).
+                    # Say that, rather than quoting an empty choice back.
+                    held_reason = "the swarm returned no choice"
+                else:
+                    held_reason = (f"swarm chose {chosen_id!r}, "
+                                   f"not on the menu")
 
         success: bool | None = None
         detail = "no feasible proposal"

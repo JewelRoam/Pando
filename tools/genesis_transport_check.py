@@ -6,9 +6,11 @@ Two claims are checked here, both of which docs/DESIGN-genesis.md §7 listed as
 
 1. **Transport.** ``pando/proposal_mail.py`` puts a signed proposal on the
    mailbox and takes it back off. The drill drives a stand-in mailbox that
-   speaks the same three endpoints the real one does (``POST /task``,
-   ``GET /tasks``, ``GET /task/<id>``), publishes a mixed feed and asserts that
-   only the genuine, pinned proposals survive the round trip.
+   speaks the same four endpoints the real one does (``POST /task``,
+   ``GET /tasks``, ``GET /task/<id>``, ``POST /claim``), publishes a mixed feed
+   and asserts both that only the genuine, pinned proposals survive the round
+   trip and that publishing does not leave the item sitting in the open queue
+   -- a ``[proposal]`` is a message class, not work.
 2. **The tier gate.** ``GenesisLoop(decide=...)`` must not adopt on its own
    authority: the swarm's own verdict decides. The drill runs the same loop
    twice against the same fetched proposals with the same actuator, changing
@@ -45,7 +47,7 @@ from pando.proposal_mail import (fetch_proposals,       # noqa: E402
 
 
 class StandInMailbox:
-    """The three endpoints the real mailbox serves, in memory.
+    """The four endpoints the real mailbox serves, in memory.
 
     Deliberately dumb: it stores titles and bodies and hands them back. It does
     no verification of its own, which is the point -- if the drill passes, the
@@ -92,7 +94,25 @@ class StandInMailbox:
             def do_POST(self):
                 length = int(self.headers.get("Content-Length", 0))
                 payload = json.loads(self.rfile.read(length) or b"{}")
-                if self.path.split("?", 1)[0] != "/task":
+                path = self.path.split("?", 1)[0]
+                if path == "/claim":
+                    task = box.tasks.get(str(payload.get("id", "")))
+                    if task is None:
+                        self._send(404, {"error": "no such task"})
+                        return
+                    by = str(payload.get("by", "?"))
+                    if task["status"] == "claimed" and task.get("claimed_by") != by:
+                        self._send(409, {"error": f"already claimed by "
+                                                  f"{task['claimed_by']}"})
+                        return
+                    if task["status"] != "open" and task["status"] != "claimed":
+                        self._send(409, {"error": f"task already {task['status']}"})
+                        return
+                    task["status"] = "claimed"
+                    task["claimed_by"] = by
+                    self._send(200, {"task": task})
+                    return
+                if path != "/task":
                     self._send(404, {"error": "not found"})
                     return
                 box._n += 1
@@ -100,7 +120,8 @@ class StandInMailbox:
                 task = {"id": task_id, "from": payload.get("from", "?"),
                         "title": payload.get("title", ""),
                         "body": payload.get("body", ""),
-                        "status": "open", "created_at": "2026-10-17T00:00:00"}
+                        "status": "open", "claimed_by": None,
+                        "created_at": "2026-10-17T00:00:00"}
                 box.tasks[task_id] = task
                 self._send(200, {"task": task})
 
@@ -123,6 +144,7 @@ class StandInMailbox:
         task_id = f"t-{self._n:04d}"
         self.tasks[task_id] = {"id": task_id, "from": sender, "title": title,
                                "body": body, "status": "open",
+                               "claimed_by": None,
                                "created_at": "2026-10-17T00:00:00"}
         return task_id
 
@@ -148,8 +170,23 @@ def scenario_transport():
                      goal="do not die with one box",
                      action="seed.replicate", cost=0.1)
     with StandInMailbox() as box:
-        publish_proposal(p_mac, mac, box.url)
+        posted = publish_proposal(p_mac, mac, box.url)
         publish_proposal(p_pi5, pi5, box.url)
+
+        # Publishing is a *message* act. If the item is left open it lands in
+        # the same queue a claim-handling automation drains, and the only thing
+        # between the agenda and being executed as work is a naming convention.
+        # So the publisher must claim its own item -- and say so if it cannot.
+        check("a published proposal is claimed, not left open",
+              posted.get("claimed") is True
+              and "claim_warning" not in posted,
+              f"published -> {posted.get('claimed')!r}")
+        still_open = [t for t in box.tasks.values()
+                      if t["title"].startswith("[proposal]")
+                      and t["status"] == "open"]
+        check("no [proposal] item is left in the open queue",
+              still_open == [],
+              f"open: {[t['id'] for t in still_open]}")
 
         # --- negative controls, planted directly on the same feed ----------
         box.plant("win-codex", "[chat] @all: hello, this is not a proposal",
