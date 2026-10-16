@@ -183,6 +183,7 @@ Rebuilt by tools/build_research_index.py; one row per file.
 | 2026-10-16-round169.md | 169 | The student climbs: mixing helps, the incumbent holds |
 | 2026-10-16-round170.md | 170 | The far group is real: first WAN bridge into the island |
 | 2026-10-16-round171.md | 171 | The student wins a split: ft-v7 beats the incumbent on D |
+| 2026-10-16-round172.md | 172 | The recipe replicates; generation 2 is the incumbent's peer |
 
 ## Files without a round number
 
