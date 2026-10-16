@@ -1,49 +1,97 @@
 {
-  "schema_version": 1,
-  "provenance": "Each accuracy value is the measured member accuracy on the named recorded-votes file for that split; no values are inferred.",
+  "schema_version": 2,
+  "provenance": "Each accuracy value is the measured member accuracy on the named recorded-votes file for that split. Values are stored per split and per evidence family; the resolver averages the splits inside the family it is asked for. No value is inferred.",
   "members": {
     "english": {
-      "accuracy": {
-        "D": 0.7292,
-        "E": 0.8375
-      },
       "updated": "2026-10-16",
-      "source": {
-        "D": "votes-d-seated-english.json",
-        "E": "metrics/lan-check/e-votes-english.json"
+      "families": {
+        "known": {
+          "accuracy": {
+            "D": 0.7292,
+            "E": 0.8375
+          },
+          "source": {
+            "D": "votes-d-seated-english.json",
+            "E": "metrics/lan-check/e-votes-english.json"
+          }
+        },
+        "general": {
+          "accuracy": {
+            "F": 0.8417
+          },
+          "source": {
+            "F": "metrics/lan-check/f-votes-english.json"
+          }
+        }
       }
     },
     "ft-v3": {
-      "accuracy": {
-        "D": 0.9417,
-        "E": 0.9917
-      },
       "updated": "2026-10-16",
-      "source": {
-        "D": "votes-d-ft-v3.json",
-        "E": "metrics/lan-check/e-votes-ft-v3.json"
+      "families": {
+        "known": {
+          "accuracy": {
+            "D": 0.9417,
+            "E": 0.9917
+          },
+          "source": {
+            "D": "votes-d-ft-v3.json",
+            "E": "metrics/lan-check/e-votes-ft-v3.json"
+          }
+        },
+        "general": {
+          "accuracy": {
+            "F": 0.8667
+          },
+          "source": {
+            "F": "metrics/lan-check/f-votes-ft-v3.json"
+          }
+        }
       }
     },
     "mac-llm": {
-      "accuracy": {
-        "D": 0.8167,
-        "E": 0.9167
-      },
       "updated": "2026-10-16",
-      "source": {
-        "D": "llm-votes-d-b-only.json",
-        "E": "llm-votes-e.json"
+      "families": {
+        "known": {
+          "accuracy": {
+            "D": 0.8167,
+            "E": 0.9167
+          },
+          "source": {
+            "D": "llm-votes-d-b-only.json",
+            "E": "llm-votes-e.json"
+          }
+        },
+        "general": {
+          "accuracy": {
+            "F": 0.9333
+          },
+          "source": {
+            "F": "metrics/llm-votes-f-4b.json"
+          }
+        }
       }
     },
     "mac-llm-8b": {
-      "accuracy": {
-        "D": 0.8583,
-        "E": 0.9250
-      },
       "updated": "2026-10-16",
-      "source": {
-        "D": "metrics/lan-check/llm-votes-d-8b.json (branch mac-llm-8b @ 26a2b7d)",
-        "E": "metrics/lan-check/llm-votes-e-8b.json (branch mac-llm-8b @ 26a2b7d)"
+      "families": {
+        "known": {
+          "accuracy": {
+            "D": 0.8583,
+            "E": 0.925
+          },
+          "source": {
+            "D": "metrics/llm-votes-d-8b.json",
+            "E": "metrics/llm-votes-e-8b.json"
+          }
+        },
+        "general": {
+          "accuracy": {
+            "F": 0.9833
+          },
+          "source": {
+            "F": "metrics/llm-votes-f-8b.json"
+          }
+        }
       }
     }
   }

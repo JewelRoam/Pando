@@ -283,6 +283,9 @@ NPU) all voting in the same consensus quorum.
 | Out-of-family advisor is zero | combiner suggestions 0/23 on F declined rows; veto fallback carried 0.7667 -> 0.9833 | round 164 |
 | Best cross-family system | core + 8B, assent=8B veto: auto 94 @ 0.9894, decided 0.9833 (strongest member's ceiling, precision premium) | round 164 |
 | Next (dispatched) | Task 014: registry v2, per-family accuracy + family-aware assent=auto | round 164 |
+| Family-aware auto live | F set: 120/120 rows `assent=mac-llm-8b, family=general`; auto 94 @ 0.9894 (offline match) | round 164 |
+| Live gap root-caused | 21 declined rows bypassed the witness (13 dragged by constant p=0.5 mean, 8 unsuggested); veto covered only its own 5 dissent rows | round 164 |
+| Next (dispatched) | Task 015: veto = witness answers every non-auto row (veto-all-declined) | round 164 |
 | Second LLM tier deployed | Qwen3-8B Q4_K_M on Mac :8082, ~25.5 tok/s; 4B+8B coexist | round 162 |
 | 8B solo | D 0.8583 / E 0.9250 (4B: 0.8167 / 0.9167) | round 162 |
 | Strength axis | stronger weak-tier buys coverage: E auto 233 @ 1.0000 (core 199; 4B 227); decided set by the fallback | round 162 |

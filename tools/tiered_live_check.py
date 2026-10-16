@@ -83,6 +83,10 @@ def main() -> int:
                              "measured-accuracy registry")
     parser.add_argument("--with-8b", action="store_true",
                         help="add the Mac's Qwen3-8B tier as a fourth stem")
+    parser.add_argument("--skip-4b", action="store_true",
+                        help="do not start the 4B stem (for 8B-only fleets)")
+    parser.add_argument("--family", default=None,
+                        help="DecisionRequest.family for family-aware assent")
     args = parser.parse_args()
 
     tasks = [json.loads(line) for line
@@ -92,7 +96,9 @@ def main() -> int:
           f"rows all correct, mac tier ~139 ms/row. {len(tasks)} rows.",
           flush=True)
 
-    members = MEMBERS + (["mac-llm-8b"] if args.with_8b else [])
+    members = [m for m in MEMBERS if not (args.skip_4b and m == "mac-llm")]
+    if args.with_8b:
+        members.append("mac-llm-8b")
     coordinator = Coordinator(
         quorum_k=len(members), call_timeout=120.0,
         initial_stem_timeout=args.timeout, timeout_multiplier=6.0,
@@ -104,8 +110,10 @@ def main() -> int:
     log_dir = ROOT_DIR / "metrics" / "ensemble-checks"
     logs, processes = {}, {}
     try:
-        for name, command in stem_commands(root.url(),
-                                           args.with_8b).items():
+        commands = stem_commands(root.url(), args.with_8b)
+        if args.skip_4b:
+            commands.pop("macllm", None)
+        for name, command in commands.items():
             print(f"  starting {name} ...", flush=True)
             log = open(log_dir / f"tiered-{name}.log", "w", encoding="utf-8")
             logs[name] = log
@@ -126,11 +134,13 @@ def main() -> int:
         auto = auto_hits = decided = 0
         suggestion_total = suggestion_hits = 0
         latencies = []
+        detail = []
         started = time.perf_counter()
         for index, task in enumerate(tasks, start=1):
             request = DecisionRequest(state=task["state"],
                                       question=task["question"],
-                                      candidates=task["candidates"])
+                                      candidates=task["candidates"],
+                                      family=args.family)
             row_started = time.perf_counter()
             with urllib.request.urlopen(
                     urllib.request.Request(
@@ -139,6 +149,12 @@ def main() -> int:
                     timeout=120) as response:
                 body = json.loads(response.read())
             latencies.append((time.perf_counter() - row_started) * 1000)
+            detail.append({
+                "task_id": task["task_id"], "expected": task["expected"],
+                "tier": body.get("tier"), "choice": body.get("choice"),
+                "veto": body.get("veto"), "assent": body.get("assent"),
+                "assent_family": body.get("assent_family"),
+                "suggested": body.get("suggested_choice")})
             if body.get("tier") == "auto":
                 auto += 1
                 hit = body.get("choice") == task["expected"]
@@ -193,6 +209,8 @@ def main() -> int:
     stems_of = {"english": "igpu", "ft-v3": "dgpu", "mac-llm": "macllm"}
     if args.with_8b:
         stems_of["mac-llm-8b"] = "macllm8b"
+    stems_of = {member: stem for member, stem in stems_of.items()
+                if stem in processes or stem in cpu_seconds}
     for member, stem in stems_of.items():
         asked = health.get(stem, {}).get("decisions")
         print(f"  {member:7s} asked {asked} times, "
@@ -212,6 +230,8 @@ def main() -> int:
                         for member, stem in stems_of.items()}}
     out = log_dir / "tiered-live.json"
     out.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    (log_dir / "tiered-live-rows.json").write_text(
+        json.dumps(detail, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"report: {out}")
     return 0
 
