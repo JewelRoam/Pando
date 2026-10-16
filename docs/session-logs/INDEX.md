@@ -64,3 +64,4 @@ Timestamped, sanitized snapshots of this PandoSI working session.
 | 2026-10-16T063003 | `docs/session-logs/2026-10-16T063003-session-backup.md` | 7703e1af9299 | 249/1400/2556 | automatic snapshot after c274ddf feat: --assent-fallback advisor\|veto lands; live veto on E decides 0.9750 at 227/227 correct auto |
 | 2026-10-16T070003 | `docs/session-logs/2026-10-16T070003-session-backup.md` | bb0d32a0a5ad | 250/1402/2558 | automatic snapshot after 8d4d35f chore: session backup 2026-10-16T063004 |
 | 2026-10-16T073003 | `docs/session-logs/2026-10-16T073003-session-backup.md` | 3ad271aadd0d | 251/1415/2577 | automatic snapshot after 820aef2 feat: assent=auto - the gating seat resolves from measured accuracy; live E matches the explicit run |
+| 2026-10-16T080003 | `docs/session-logs/2026-10-16T080003-session-backup.md` | c432df4de5b7 | 252/1417/2579 | automatic snapshot after f7e82fd chore: session backup 2026-10-16T073004 |
