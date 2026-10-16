@@ -1,0 +1,1451 @@
+{
+  "model": "qwen3-8b-instruct",
+  "suite": "heldout4_test.jsonl",
+  "prompt": {
+    "variant": "b",
+    "system": "只输出候选词本身，不要 JSON、不要置信度，不要任何其他文字。"
+  },
+  "rows": [
+    {
+      "task_id": "big6-0001",
+      "expected": "greeting",
+      "choice": "greeting",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0002",
+      "expected": "greeting",
+      "choice": "greeting",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0003",
+      "expected": "chargeback",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0004",
+      "expected": "refund",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0005",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0006",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0007",
+      "expected": "greeting",
+      "choice": "greeting",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0008",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0009",
+      "expected": "refund",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0010",
+      "expected": "exchange",
+      "choice": "exchange",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0011",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0012",
+      "expected": "refund",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0013",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0014",
+      "expected": "refund",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0015",
+      "expected": "refund",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0016",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0017",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0018",
+      "expected": "greeting",
+      "choice": "greeting",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0019",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0020",
+      "expected": "refund",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0021",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0022",
+      "expected": "exchange",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0023",
+      "expected": "invoice",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0024",
+      "expected": "refund",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0025",
+      "expected": "chargeback",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0026",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0027",
+      "expected": "exchange",
+      "choice": "exchange",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0028",
+      "expected": "chargeback",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0029",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0030",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0031",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0032",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0033",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0034",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0035",
+      "expected": "greeting",
+      "choice": "greeting",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0036",
+      "expected": "greeting",
+      "choice": "greeting",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0037",
+      "expected": "chargeback",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0038",
+      "expected": "invoice",
+      "choice": "invoice",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0039",
+      "expected": "invoice",
+      "choice": "invoice",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0040",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0041",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0042",
+      "expected": "invoice",
+      "choice": "invoice",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0043",
+      "expected": "invoice",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0044",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0045",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0046",
+      "expected": "invoice",
+      "choice": "invoice",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0047",
+      "expected": "exchange",
+      "choice": "exchange",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0048",
+      "expected": "chargeback",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0049",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0050",
+      "expected": "chargeback",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0051",
+      "expected": "chargeback",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0052",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0053",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0054",
+      "expected": "chargeback",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0055",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0056",
+      "expected": "refund",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0057",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0058",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0059",
+      "expected": "exchange",
+      "choice": "exchange",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0060",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0061",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0062",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0063",
+      "expected": "invoice",
+      "choice": "invoice",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0064",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0065",
+      "expected": "refund",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0066",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0067",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0068",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0069",
+      "expected": "chargeback",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0070",
+      "expected": "refund",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0071",
+      "expected": "chargeback",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0072",
+      "expected": "refund",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0073",
+      "expected": "chargeback",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0074",
+      "expected": "exchange",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0075",
+      "expected": "chargeback",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0076",
+      "expected": "greeting",
+      "choice": "greeting",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0077",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0078",
+      "expected": "invoice",
+      "choice": "invoice",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0079",
+      "expected": "refund",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0080",
+      "expected": "exchange",
+      "choice": "exchange",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0081",
+      "expected": "exchange",
+      "choice": "exchange",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0082",
+      "expected": "chargeback",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0083",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0084",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0085",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0086",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0087",
+      "expected": "greeting",
+      "choice": "greeting",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0088",
+      "expected": "refund",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0089",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0090",
+      "expected": "invoice",
+      "choice": "invoice",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0091",
+      "expected": "greeting",
+      "choice": "greeting",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0092",
+      "expected": "chargeback",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0093",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0094",
+      "expected": "chargeback",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0095",
+      "expected": "greeting",
+      "choice": "greeting",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0096",
+      "expected": "praise",
+      "choice": "greeting",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0097",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0098",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0099",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0100",
+      "expected": "greeting",
+      "choice": "greeting",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0101",
+      "expected": "refund",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0102",
+      "expected": "refund",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0103",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0104",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0105",
+      "expected": "refund",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0106",
+      "expected": "invoice",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0107",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0108",
+      "expected": "greeting",
+      "choice": "greeting",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0109",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0110",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0111",
+      "expected": "refund",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0112",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0113",
+      "expected": "refund",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0114",
+      "expected": "refund",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0115",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0116",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0117",
+      "expected": "exchange",
+      "choice": "exchange",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0118",
+      "expected": "greeting",
+      "choice": "greeting",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0119",
+      "expected": "refund",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0120",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0121",
+      "expected": "refund",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0122",
+      "expected": "exchange",
+      "choice": "exchange",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0123",
+      "expected": "exchange",
+      "choice": "exchange",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0124",
+      "expected": "refund",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0125",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0126",
+      "expected": "chargeback",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0127",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0128",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0129",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0130",
+      "expected": "complaint",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0131",
+      "expected": "greeting",
+      "choice": "greeting",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0132",
+      "expected": "refund",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0133",
+      "expected": "chargeback",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0134",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0135",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0136",
+      "expected": "chargeback",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0137",
+      "expected": "invoice",
+      "choice": "invoice",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0138",
+      "expected": "chargeback",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0139",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0140",
+      "expected": "invoice",
+      "choice": "invoice",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0141",
+      "expected": "invoice",
+      "choice": "invoice",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0142",
+      "expected": "greeting",
+      "choice": "greeting",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0143",
+      "expected": "invoice",
+      "choice": "invoice",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0144",
+      "expected": "exchange",
+      "choice": "exchange",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0145",
+      "expected": "exchange",
+      "choice": "exchange",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0146",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0147",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0148",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0149",
+      "expected": "refund",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0150",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0151",
+      "expected": "greeting",
+      "choice": "greeting",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0152",
+      "expected": "chargeback",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0153",
+      "expected": "chargeback",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0154",
+      "expected": "invoice",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0155",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0156",
+      "expected": "chargeback",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0157",
+      "expected": "invoice",
+      "choice": "invoice",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0158",
+      "expected": "exchange",
+      "choice": "exchange",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0159",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0160",
+      "expected": "greeting",
+      "choice": "greeting",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0161",
+      "expected": "exchange",
+      "choice": "exchange",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0162",
+      "expected": "exchange",
+      "choice": "exchange",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0163",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0164",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0165",
+      "expected": "greeting",
+      "choice": "greeting",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0166",
+      "expected": "chargeback",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0167",
+      "expected": "refund",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0168",
+      "expected": "refund",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0169",
+      "expected": "greeting",
+      "choice": "greeting",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0170",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0171",
+      "expected": "invoice",
+      "choice": "invoice",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0172",
+      "expected": "refund",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0173",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0174",
+      "expected": "invoice",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0175",
+      "expected": "exchange",
+      "choice": "exchange",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0176",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0177",
+      "expected": "refund",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0178",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0179",
+      "expected": "invoice",
+      "choice": "invoice",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0180",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0181",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0182",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0183",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0184",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0185",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0186",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0187",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0188",
+      "expected": "refund",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0189",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0190",
+      "expected": "invoice",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0191",
+      "expected": "chargeback",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0192",
+      "expected": "chargeback",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0193",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0194",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0195",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0196",
+      "expected": "exchange",
+      "choice": "exchange",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0197",
+      "expected": "greeting",
+      "choice": "greeting",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0198",
+      "expected": "exchange",
+      "choice": "exchange",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0199",
+      "expected": "invoice",
+      "choice": "invoice",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0200",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0201",
+      "expected": "exchange",
+      "choice": "exchange",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0202",
+      "expected": "greeting",
+      "choice": "greeting",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0203",
+      "expected": "greeting",
+      "choice": "greeting",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0204",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0205",
+      "expected": "exchange",
+      "choice": "exchange",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0206",
+      "expected": "exchange",
+      "choice": "exchange",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0207",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0208",
+      "expected": "exchange",
+      "choice": "exchange",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0209",
+      "expected": "exchange",
+      "choice": "exchange",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0210",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0211",
+      "expected": "refund",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0212",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0213",
+      "expected": "invoice",
+      "choice": "invoice",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0214",
+      "expected": "chargeback",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0215",
+      "expected": "refund",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0216",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0217",
+      "expected": "exchange",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0218",
+      "expected": "chargeback",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0219",
+      "expected": "refund",
+      "choice": "refund",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0220",
+      "expected": "invoice",
+      "choice": "invoice",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0221",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0222",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0223",
+      "expected": "greeting",
+      "choice": "greeting",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0224",
+      "expected": "exchange",
+      "choice": "exchange",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0225",
+      "expected": "greeting",
+      "choice": "greeting",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0226",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0227",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0228",
+      "expected": "chargeback",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0229",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0230",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0231",
+      "expected": "greeting",
+      "choice": "greeting",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0232",
+      "expected": "greeting",
+      "choice": "greeting",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0233",
+      "expected": "greeting",
+      "choice": "greeting",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0234",
+      "expected": "exchange",
+      "choice": "exchange",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0235",
+      "expected": "greeting",
+      "choice": "greeting",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0236",
+      "expected": "invoice",
+      "choice": "chargeback",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0237",
+      "expected": "login_issue",
+      "choice": "login_issue",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0238",
+      "expected": "praise",
+      "choice": "praise",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0239",
+      "expected": "complaint",
+      "choice": "complaint",
+      "probability": 0.5
+    },
+    {
+      "task_id": "big6-0240",
+      "expected": "chargeback",
+      "choice": "chargeback",
+      "probability": 0.5
+    }
+  ],
+  "probability_note": "variant b (candidate-only prompt) emits no confidence; probability recorded as 0.5 for every row"
+}
