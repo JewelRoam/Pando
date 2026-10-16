@@ -67,3 +67,4 @@ Timestamped, sanitized snapshots of this PandoSI working session.
 | 2026-10-16T080003 | `docs/session-logs/2026-10-16T080003-session-backup.md` | c432df4de5b7 | 252/1417/2579 | automatic snapshot after f7e82fd chore: session backup 2026-10-16T073004 |
 | 2026-10-16T083003 | `docs/session-logs/2026-10-16T083003-session-backup.md` | faa932025578 | 253/1423/2585 | automatic snapshot after bb9ffc4 test: strength axis - 8B buys coverage, precision stays 1.0000; weak-tier stacking dilutes |
 | 2026-10-16T090003 | `docs/session-logs/2026-10-16T090003-session-backup.md` | b575cdcfeb1e | 254/1426/2590 | automatic snapshot after 9e953cc feat: live four-tier fleet on E - auto 221 all correct, decided 0.9792; the 8B tier buys coverage, not accuracy |
+| 2026-10-16T093003 | `docs/session-logs/2026-10-16T093003-session-backup.md` | 404f583b8118 | 255/1428/2592 | automatic snapshot after b9cdb57 chore: session backup 2026-10-16T090004 |
