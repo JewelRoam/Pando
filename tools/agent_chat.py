@@ -85,7 +85,11 @@ def cmd_send(args) -> int:
     if "task" not in result:
         print(json.dumps(result, ensure_ascii=False), file=sys.stderr)
         return 1
-    print(f"sent {result['task'].get('id')} -> @{args.to}")
+    task_id = result["task"].get("id")
+    # Chat messages must never linger in the open queue: a claim-handling
+    # automation would otherwise treat them as work. Claim it as the sender.
+    _request(args, "POST", "/claim", {"id": task_id, "by": args.sender})
+    print(f"sent {task_id} -> @{args.to}")
     return 0
 
 
