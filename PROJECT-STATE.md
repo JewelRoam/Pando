@@ -308,6 +308,7 @@ NPU) all voting in the same consensus quorum.
 | ft-v6 mixed corpus | E 0.9083 (+3.8 vs ft-v5), F 0.8917 (+4.2), D flat; still refused (incumbent holds D/E) | round 169 |
 | ft-v7 bet (running) | mixed corpus x 2 epochs, seed 5: D/E/F all up, holdout <= 1.0 | round 169 |
 | Island root on the wire | :8765 exposed on a fourth tunnel; island_root_url published on mac-endpoint (Task 023) | round 169 |
+| First WAN bridge | Windows parent <- bridge <- tunnel <- island root; 6/6 round trips, ~1.2 s steady, 5/6 correct | round 170 |
 | Second LLM tier deployed | Qwen3-8B Q4_K_M on Mac :8082, ~25.5 tok/s; 4B+8B coexist | round 162 |
 | 8B solo | D 0.8583 / E 0.9250 (4B: 0.8167 / 0.9167) | round 162 |
 | Strength axis | stronger weak-tier buys coverage: E auto 233 @ 1.0000 (core 199; 4B 227); decided set by the fallback | round 162 |

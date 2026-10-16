@@ -181,6 +181,7 @@ Rebuilt by tools/build_research_index.py; one row per file.
 | 2026-10-16-round167.md | 167 | The reasoning axis: thinking buys nothing here |
 | 2026-10-16-round168.md | 168 | The loop's first full turn: a teacher, a student, and an island |
 | 2026-10-16-round169.md | 169 | The student climbs: mixing helps, the incumbent holds |
+| 2026-10-16-round170.md | 170 | The far group is real: first WAN bridge into the island |
 
 ## Files without a round number
 
