@@ -51,12 +51,18 @@ class DecisionRequest:
 
 @dataclass
 class Vote:
-    """One replica's answer to a DecisionRequest."""
+    """One replica's answer to a DecisionRequest.
+
+    ``neutral`` marks a choice-only vote that carries no confidence signal.
+    Its choice still counts toward agreement and quorum, but its compatibility
+    probability is excluded from confidence aggregation and calibration.
+    """
 
     node_id: str
     checkpoint: str
     choice: str
     probability: float
+    neutral: bool = False
 
     def to_json(self) -> dict:
         return asdict(self)
@@ -109,12 +115,17 @@ def aggregate(votes: list[Vote], min_quorum: int = 3,
     probs: dict[str, list[float]] = {}
     for v in votes:
         counts[v.choice] = counts.get(v.choice, 0) + 1
-        probs.setdefault(v.choice, []).append(v.probability)
+        if not v.neutral:
+            probs.setdefault(v.choice, []).append(v.probability)
 
     best_choice = max(counts, key=counts.get)
     top = counts[best_choice]
     agreement = top / len(votes)
-    mean_probability = sum(probs[best_choice]) / len(probs[best_choice])
+    backing_probs = probs.get(best_choice, [])
+    # A choice backed only by neutral votes has no reported confidence. Treat
+    # that as unsafe for auto rather than inventing a value for the gate.
+    mean_probability = (sum(backing_probs) / len(backing_probs)
+                        if backing_probs else 0.0)
 
     # Tie between the two most-voted choices is not a majority, and a tie is
     # never a decision - but it is not necessarily silence either. Three
@@ -129,6 +140,8 @@ def aggregate(votes: list[Vote], min_quorum: int = 3,
     if len(sorted_counts) > 1 and sorted_counts[0] == sorted_counts[1]:
         mass: dict[str, float] = {}
         for vote in votes:
+            if vote.neutral:
+                continue
             mass[vote.choice] = mass.get(vote.choice, 0.0) + vote.probability
         ranked_mass = sorted(mass.items(), key=lambda item: (-item[1],
                                                              item[0]))
@@ -166,11 +179,21 @@ def collapse_lineages(votes: list[Vote],
 
     collapsed: list[Vote] = []
     for key, members in sorted(groups.items()):
+        confident = [vote for vote in members if not vote.neutral]
+        if not confident:
+            counts: dict[str, int] = {}
+            for vote in members:
+                counts[vote.choice] = counts.get(vote.choice, 0) + 1
+            choice = max(sorted(counts), key=lambda name: counts[name])
+            collapsed.append(Vote(
+                members[0].node_id, key, choice, 0.5, neutral=True))
+            continue
+
         mass: dict[str, float] = {}
-        for vote in members:
+        for vote in confident:
             mass[vote.choice] = mass.get(vote.choice, 0.0) + vote.probability
         choice = max(sorted(mass), key=lambda name: mass[name])
-        backers = [vote for vote in members if vote.choice == choice]
+        backers = [vote for vote in confident if vote.choice == choice]
         collapsed.append(Vote(
             backers[0].node_id, key, choice,
             sum(vote.probability for vote in backers) / len(backers)))

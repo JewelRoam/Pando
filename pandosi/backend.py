@@ -275,7 +275,9 @@ class OpenAIChoiceBackend:
     prompt is Task 004's variant B, validated on the held-out suite: ask for
     the candidate word only, no JSON and no confidence, which cut latency and
     parse errors while improving accuracy. There is no calibrated probability
-    in that response, so the backend reports a fixed, configurable constant.
+    in that response. Votes are marked neutral; the configurable probability
+    remains on the wire only for compatibility with older readers and is
+    excluded from confidence aggregation.
     """
 
     SYSTEM_PROMPT = (
@@ -360,7 +362,7 @@ class OpenAIChoiceBackend:
         choice = parse_openai_choice(
             _openai_completion_text(response), req.candidates)
         return Vote(self.node_id, self.checkpoint, choice,
-                    round(self.probability, 4))
+                    round(self.probability, 4), neutral=True)
 
 
 class _OVLazySession:

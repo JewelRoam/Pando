@@ -48,6 +48,45 @@ class TestSmoke(unittest.TestCase):
 
         self.assertEqual(aggregate(strong[:2]).tier, "escalate")
 
+    def test_neutral_votes_do_not_spoof_confidence(self):
+        """Neutral votes count for agreement but never enter confidence."""
+        votes = [
+            Vote("n0", "en", "yes", 0.9),
+            Vote("n1", "ml", "yes", 0.7),
+            Vote("n2", "choice-only", "no", 0.5, neutral=True),
+        ]
+        result = aggregate(votes)
+        self.assertEqual(result.choice, "yes")
+        self.assertAlmostEqual(result.agreement, 2 / 3)
+        self.assertAlmostEqual(result.mean_probability, 0.8)
+        self.assertEqual(result.tier, "auto")
+        self.assertTrue(result.votes[2]["neutral"])
+
+        legacy = [Vote("n0", "en", "yes", 0.9),
+                  Vote("n1", "ml", "yes", 0.7),
+                  Vote("n2", "choice-only", "yes", 0.5)]
+        legacy_result = aggregate(legacy)
+        self.assertEqual(legacy_result.choice, "yes")
+        self.assertEqual(legacy_result.agreement, 1.0)
+        self.assertAlmostEqual(legacy_result.mean_probability, 0.7)
+        self.assertEqual(legacy_result.tier, "auto")
+
+        neutral_only = aggregate([
+            Vote("n0", "en", "yes", 0.5, neutral=True),
+            Vote("n1", "ml", "yes", 0.5, neutral=True),
+            Vote("n2", "choice-only", "yes", 0.5, neutral=True),
+        ])
+        self.assertEqual(neutral_only.choice, "yes")
+        self.assertEqual(neutral_only.agreement, 1.0)
+        self.assertEqual(neutral_only.mean_probability, 0.0)
+        self.assertEqual(neutral_only.tier, "verify")
+
+        wire = json.loads(json.dumps(
+            Vote("n3", "choice-only", "yes", 0.5, neutral=True).to_json()))
+        self.assertTrue(wire["neutral"])
+        self.assertTrue(Vote("n4", "en", "yes", 0.9).to_json()["neutral"]
+                        is False)
+
     def test_assent_gating_demotes_auto(self):
         """A named assent checkpoint can veto an otherwise-auto decision."""
         def decide(ft_choice: str, assent_checkpoint: str | None = None,
@@ -268,6 +307,7 @@ class TestSmoke(unittest.TestCase):
             state="state", question="what?", candidates=candidates))
         self.assertEqual(vote.choice, "escalate")
         self.assertEqual(vote.probability, 0.6)
+        self.assertTrue(vote.neutral)
         self.assertEqual(seen["url"],
                          "http://127.0.0.1:9999/v1/chat/completions")
         self.assertEqual(seen["api_key"], "secret")

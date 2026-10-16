@@ -636,9 +636,11 @@ class Coordinator:
             raw = self._transport(f"{info['url']}/decide", payload,
                                   timeout)
             data = json.loads(raw)
+            wire_vote = data["vote"]
             vote = Vote(node_id, info["checkpoint"],
-                        data["vote"]["choice"],
-                        float(data["vote"]["probability"]))
+                        wire_vote["choice"],
+                        float(wire_vote["probability"]),
+                        bool(wire_vote.get("neutral", False)))
             self._record_stem_call(
                 node_id, True, (time.perf_counter() - started) * 1000)
             return vote
@@ -693,6 +695,13 @@ class Coordinator:
         calibrated_votes = []
         uncalibrated: set[str] = set()
         for v in votes:
+            if v.neutral:
+                # No confidence was reported, so there is nothing to
+                # temperature-scale and no calibration warning to raise.
+                calibrated_votes.append(Vote(
+                    v.node_id, v.checkpoint, v.choice, v.probability,
+                    neutral=True))
+                continue
             cp, is_calibrated = self._calibrator.calibrate(
                 v.checkpoint, v.probability)
             if not is_calibrated:
