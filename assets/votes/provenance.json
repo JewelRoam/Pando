@@ -226,6 +226,36 @@
       "round": "round 150 verification of the fine-tune on split C; tools/finetuned_votes.py",
       "suite": "heldout2_test.jsonl",
       "model": "ft-v3 torch/CUDA (3070)"
+    },
+    {
+      "file": "llm-votes-e-8b-think.json",
+      "split": "E",
+      "member": "mac-llm-8b-think",
+      "rows": 240,
+      "accuracy": 0.925,
+      "sha256": "b5fee99f2ff62106b049f2068e813d1933fb3b1042d84fb3f0f27c49da04aba4",
+      "source_path": "branch mac-llm-8b-think @ 34de70b metrics/llm-votes-e-8b-think.json",
+      "branch": "mac-llm-8b-think",
+      "commit": "34de70b",
+      "round": "round 167 / Task 018",
+      "note": "qwen3-8b-instruct with enable_thinking=true, B prompt, max_tokens 512; reasoning share ~97%",
+      "suite": "heldout4_test.jsonl",
+      "model": "qwen3-8b-instruct (thinking)"
+    },
+    {
+      "file": "llm-votes-f-8b-think.json",
+      "split": "F",
+      "member": "mac-llm-8b-think",
+      "rows": 120,
+      "accuracy": 0.975,
+      "sha256": "83a495a531156db585daccc645d97f25c351e54e2d1fe6e9ed7e34dea171a408",
+      "source_path": "branch mac-llm-8b-think @ 34de70b metrics/llm-votes-f-8b-think.json",
+      "branch": "mac-llm-8b-think",
+      "commit": "34de70b",
+      "round": "round 167 / Task 018",
+      "note": "qwen3-8b-instruct with enable_thinking=true, B prompt, max_tokens 512; reasoning share ~97%",
+      "suite": "heldout5_test.jsonl",
+      "model": "qwen3-8b-instruct (thinking)"
     }
   ],
   "missing": [

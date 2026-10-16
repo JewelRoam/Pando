@@ -297,6 +297,8 @@ NPU) all voting in the same consensus quorum.
 | Reproducibility landed | assets/votes/ (16 files + provenance manifest) + tools/reproduce_headlines.py; all 16 checks pass offline | round 166 |
 | The witness identity | under assent+veto, decided == the witness's own accuracy - every row resolves to the witness's choice | round 166 |
 | recommend_fallback shipped | offline advisor-vs-veto recommender from recorded votes | round 166 |
+| Reasoning axis (8B thinking) | E tied 0.9250, F 0.9750 vs 0.9833; ~7.8-9.4 s/row, ~97% reasoning tokens - not worth it | round 167 |
+| Four tiering axes measured | strength (162), breadth (164), confidence (165), reasoning (167) - only family-appropriate ones pay | round 167 |
 | Second LLM tier deployed | Qwen3-8B Q4_K_M on Mac :8082, ~25.5 tok/s; 4B+8B coexist | round 162 |
 | 8B solo | D 0.8583 / E 0.9250 (4B: 0.8167 / 0.9167) | round 162 |
 | Strength axis | stronger weak-tier buys coverage: E auto 233 @ 1.0000 (core 199; 4B 227); decided set by the fallback | round 162 |

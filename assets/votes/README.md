@@ -13,6 +13,8 @@ This directory contains the vote files that were still present on the machine wh
 | `f-votes-english.json` | F | `english` | 120 | 0.8417 | recorded by record_english.py for round 164 (new intent family); sha256 `c5e9ce968899…` |
 | `f-votes-ft-v3.json` | F | `ft-v3` | 120 | 0.8667 | recorded by tools/finetuned_votes.py for round 164; sha256 `b1aba5ab67ad…` |
 | `finetuned-votes.json` | C | `ft-v3` | 240 | 0.9125 | round 150 verification of the fine-tune on split C; tools/finetuned_votes.py; sha256 `93650577a091…` |
+| `llm-votes-e-8b-think.json` | E | `mac-llm-8b-think` | 240 | 0.9250 | round 167 / Task 018; branch `mac-llm-8b-think` @ `34de70b`; sha256 `b5fee99f2ff6…` |
+| `llm-votes-f-8b-think.json` | F | `mac-llm-8b-think` | 120 | 0.9750 | round 167 / Task 018; branch `mac-llm-8b-think` @ `34de70b`; sha256 `83a495a53115…` |
 | `llm-votes-b.json` | B | `mac-llm` | 240 | 0.8500 | round 158 / Task 003; branch `mac-llm-votes` @ `8242803`; `qwen3-4b-instruct-2507`; sha256 `f5f9b4198acc…` |
 | `llm-votes-c.json` | C | `mac-llm` | 240 | 0.6542 | round 158 / Task 003; branch `mac-llm-votes` @ `8242803`; `qwen3-4b-instruct-2507`; sha256 `af28361422d1…` |
 | `llm-votes-d-b-only.json` | D | `mac-llm` | 240 | 0.8167 | round 159 / Task 004; branch `mac-llm-votes-3` @ `0484840`; `qwen3-4b-instruct-2507`; sha256 `96a167eb09a8…` |

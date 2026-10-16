@@ -25,8 +25,10 @@ devices, one mind.
 spend latency (155) · auto-execution requires the measured-strongest
 member's assent (159-160) · the trusted witness is per *family*, and a
 fitted advisor scores zero outside its family (164) · a choice-only member
-never prices confidence (165) · on 16 GB, one resident LLM tier per role -
-co-residency costs the tail, not the mean (163).
+never prices confidence (165) · reasoning tokens are not a tier: thinking
+mode tied or lost to standard at ~60x latency here (167) · on 16 GB, one
+resident LLM tier per role - co-residency costs the tail, not the mean
+(163).
 
 ## Quickstart
 
