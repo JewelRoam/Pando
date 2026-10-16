@@ -189,15 +189,22 @@ def run_one(args, task: dict, api_key: str) -> dict:
             {"role": "user", "content": user_prompt},
         ],
         "temperature": 0.0,
-        "max_tokens": 64,
+        "max_tokens": getattr(args, "max_tokens", 64),
         "stream": False,
     }
+    if getattr(args, "thinking", False):
+        payload["chat_template_kwargs"] = {"enable_thinking": True}
 
     started = time.perf_counter()
     response = post_json(args.base_url.rstrip("/") + "/chat/completions",
                          payload, api_key, args.timeout)
     latency_ms = (time.perf_counter() - started) * 1000.0
     content = completion_text(response)
+    choices = response.get("choices") or []
+    message = (choices[0].get("message") or {}) if choices else {}
+    reasoning_content = message.get("reasoning_content", "")
+    if not isinstance(reasoning_content, str):
+        reasoning_content = str(reasoning_content or "")
     if variant == "b":
         choice = candidate_match(content, candidates)
         answer = {
@@ -219,6 +226,13 @@ def run_one(args, task: dict, api_key: str) -> dict:
     else:
         tokens_per_second = None
 
+    reasoning_tokens = None
+    reasoning_share = None
+    generated_chars = len(content) + len(reasoning_content)
+    if completion_tokens is not None and generated_chars:
+        reasoning_share = len(reasoning_content) / generated_chars
+        reasoning_tokens = round(completion_tokens * reasoning_share)
+
     return {
         "task_id": task["task_id"],
         "expected": task["expected"],
@@ -226,6 +240,9 @@ def run_one(args, task: dict, api_key: str) -> dict:
         "probability": answer["probability"],
         "parse_mode": answer["parse_mode"],
         "content": content,
+        "reasoning_content": reasoning_content,
+        "reasoning_tokens_est": reasoning_tokens,
+        "reasoning_token_share_est": reasoning_share,
         "latency_ms": latency_ms,
         "prompt_tokens": number(usage.get("prompt_tokens")),
         "completion_tokens": completion_tokens,
@@ -253,6 +270,10 @@ def summarize(rows: list[dict]) -> dict:
                  if row.get("latency_ms") is not None]
     throughputs = [row["tokens_per_second"] for row in rows
                    if row.get("tokens_per_second") is not None]
+    completion_tokens = [row["completion_tokens"] for row in rows
+                         if row.get("completion_tokens") is not None]
+    reasoning_shares = [row["reasoning_token_share_est"] for row in rows
+                        if row.get("reasoning_token_share_est") is not None]
     probabilities = [float(row["probability"]) for row in rows
                      if row.get("probability") is not None]
     bins = []
@@ -290,6 +311,11 @@ def summarize(rows: list[dict]) -> dict:
         "p95_latency_ms": percentile(latencies, 0.95),
         "avg_tokens_per_second": (statistics.fmean(throughputs)
                                   if throughputs else 0.0),
+        "total_completion_tokens": sum(completion_tokens),
+        "avg_completion_tokens": (statistics.fmean(completion_tokens)
+                                 if completion_tokens else 0.0),
+        "reasoning_token_share_est": (statistics.fmean(reasoning_shares)
+                                     if reasoning_shares else 0.0),
         "probability_mean": (statistics.fmean(probabilities)
                              if probabilities else 0.0),
         "ece_5bin": ece,
@@ -306,6 +332,11 @@ def main() -> int:
                         default=Path("~/.pandosi/llm-api.token"))
     parser.add_argument("--model", default="qwen3-4b-instruct-2507")
     parser.add_argument("--timeout", type=float, default=180.0)
+    parser.add_argument("--max-tokens", type=int, default=64,
+                        help="maximum generated tokens per row (default: 64)")
+    parser.add_argument("--thinking", action="store_true",
+                        help="request llama.cpp thinking mode with "
+                             "chat_template_kwargs.enable_thinking=true")
     parser.add_argument("--limit", type=int, default=0,
                         help="run only the first N rows for a smoke test")
     parser.add_argument("--summary-out", type=Path, default=None,
@@ -326,7 +357,9 @@ def main() -> int:
     api_key = load_api_key(args.api_key_file)
 
     print(f"suite={args.suite} rows={len(tasks)} model={args.model} "
-          f"variant={getattr(args, 'variant', 'a')}", flush=True)
+          f"variant={getattr(args, 'variant', 'a')} "
+          f"thinking={args.thinking} max_tokens={args.max_tokens}",
+          flush=True)
     rows: list[dict] = []
     started = time.perf_counter()
     for index, task in enumerate(tasks, start=1):
@@ -362,8 +395,13 @@ def main() -> int:
         "suite": args.suite.name,
         "prompt": {"variant": variant,
                    "system": PROMPT_VARIANTS[variant]},
+        "generation": {"temperature": 0.0, "max_tokens": args.max_tokens,
+                       "thinking": args.thinking},
         "rows": vote_rows,
     }
+    if args.thinking:
+        record["generation"]["chat_template_kwargs"] = {
+            "enable_thinking": True}
     if variant == "b":
         record["probability_note"] = VARIANT_B_PROBABILITY_NOTE
     out.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n",
