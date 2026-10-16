@@ -35,12 +35,14 @@ everything else is closed.
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import secrets
 import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -262,6 +264,24 @@ def serve(args) -> int:
     return 0
 
 
+def _open(request: urllib.request.Request, timeout: float):
+    """Open `request`, bypassing any system proxy for local targets.
+
+    LAN and Tailscale (100.64.0.0/10) addresses are not routable through a
+    local HTTP proxy - it answers 502 (seen live 2026-10-17 on Windows).
+    Public hosts keep using the system proxy.
+    """
+    host = urllib.parse.urlsplit(request.full_url).hostname or ""
+    try:
+        direct = not ipaddress.ip_address(host).is_global
+    except ValueError:
+        direct = host == "localhost"
+    if not direct:
+        return urllib.request.urlopen(request, timeout=timeout)
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    return opener.open(request, timeout=timeout)
+
+
 def _request(args, method: str, path: str, payload: dict | None = None):
     token_file = getattr(args, "token_file", None)
     token = args.token or (Path(token_file).expanduser()
@@ -274,7 +294,7 @@ def _request(args, method: str, path: str, payload: dict | None = None):
     request = urllib.request.Request(f"{args.url.rstrip('/')}{path}",
                                      data=body, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(request, timeout=args.timeout) as response:
+        with _open(request, args.timeout) as response:
             return json.loads(response.read())
     except urllib.error.HTTPError as exc:
         return {"error": f"HTTP {exc.code}", "detail": exc.read().decode(

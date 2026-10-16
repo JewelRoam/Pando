@@ -14,15 +14,37 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 DEFAULT_URL = "https://without-belongs-disks-committed.trycloudflare.com"
 DEFAULT_TOKEN_FILE = "metrics/lan-check/mac-mailbox.token"
+
+
+def _open(request: urllib.request.Request, timeout: float):
+    """Open `request`, bypassing any system proxy for local targets.
+
+    LAN and Tailscale (100.64.0.0/10) addresses are not routable through a
+    local HTTP proxy - it answers 502 (seen live 2026-10-17: the Windows
+    system proxy 127.0.0.1:54056 has 192.168.* and 127.* in ProxyOverride
+    but not the 100.* tailnet range). Public hosts (the Cloudflare tunnel)
+    keep using the system proxy; some networks need it to reach the tunnel.
+    """
+    host = urllib.parse.urlsplit(request.full_url).hostname or ""
+    try:
+        direct = not ipaddress.ip_address(host).is_global
+    except ValueError:
+        direct = host == "localhost"
+    if not direct:
+        return urllib.request.urlopen(request, timeout=timeout)
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    return opener.open(request, timeout=timeout)
 
 
 def _request(args, method: str, path: str,
@@ -38,7 +60,7 @@ def _request(args, method: str, path: str,
                                      data=body, headers=headers,
                                      method=method)
     try:
-        with urllib.request.urlopen(request, timeout=args.timeout) as resp:
+        with _open(request, args.timeout) as resp:
             return json.loads(resp.read())
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")
@@ -111,28 +133,41 @@ def cmd_history(args) -> int:
 
 
 def cmd_tail(args) -> int:
-    tasks = fetch_tasks(args)
-    seen = {task["id"] for task in tasks}
-    for task in tasks[-args.backlog:]:
-        line = render(task, args.mentions)
-        if line:
-            print(line)
-    if args.once:
-        return 0
+    seen: set[str] = set()
+    failing = False
+    backlog_pending = True
+
     while True:
-        time.sleep(args.interval)
         try:
             tasks = fetch_tasks(args)
         except RuntimeError as exc:
-            print(f"# {exc}", flush=True)
+            if args.once:
+                print(f"# {exc}", file=sys.stderr)
+                return 1
+            # A flaky path must not flood the feed with one line per poll:
+            # print the outage once, back off 4x, announce the recovery.
+            if not failing:
+                failing = True
+                print(f"# offline: {exc} (quiet until it recovers)",
+                      flush=True)
+            time.sleep(args.interval * 4)
             continue
-        for task in tasks:
-            if task["id"] in seen:
-                continue
-            seen.add(task["id"])
+        if failing:
+            failing = False
+            print("# back online", flush=True)
+        fresh = [task for task in tasks if task["id"] not in seen]
+        seen.update(task["id"] for task in tasks)
+        # First successful poll shows the recent backlog; after that only
+        # newly arrived items stream in.
+        batch = tasks[-args.backlog:] if backlog_pending else fresh
+        backlog_pending = False
+        for task in batch:
             line = render(task, args.mentions)
             if line:
                 print(line, flush=True)
+        if args.once:
+            return 0
+        time.sleep(args.interval)
 
 
 def main() -> int:
