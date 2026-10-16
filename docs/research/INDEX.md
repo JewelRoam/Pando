@@ -177,6 +177,7 @@ Rebuilt by tools/build_research_index.py; one row per file.
 | 2026-10-16-round162.md | 162 | The strength axis: 8B buys coverage; precision is the invariant |
 | 2026-10-16-round163.md | 163 | The 16GB tier budget: coexistence costs the tail, not the mean |
 | 2026-10-16-round164.md | 164 | The breadth axis: the witness flips with the family |
+| 2026-10-16-round165.md | 165 | The neutral channel: choice-only members shouldn't price confidence |
 
 ## Files without a round number
 
