@@ -508,6 +508,62 @@
       "note": "teacher votes on the fresh evaluator H",
       "suite": "heldout6_test.jsonl",
       "model": "qwen3-4b-instruct-2507"
+    },
+    {
+      "file": "h-votes-english.json",
+      "split": "H",
+      "member": "english",
+      "rows": 240,
+      "accuracy": 0.8333,
+      "sha256": "aab3946b481bb025783aa25bfdff2ee6a73ffb7e0803c7c906eeffcdea35834b",
+      "source_path": "Windows workspace metrics/lan-check/h-votes-english.json",
+      "branch": "local (Windows); round 173",
+      "round": "round 173",
+      "note": "fresh judge H (48 new cues; nothing in the loop saw it)",
+      "suite": "heldout6_test.jsonl",
+      "model": "english"
+    },
+    {
+      "file": "h-votes-ft-v3.json",
+      "split": "H",
+      "member": "ft-v3",
+      "rows": 240,
+      "accuracy": 0.95,
+      "sha256": "a819ee730554db7b3d3ad64b61c0c457bfc50d835937df0b207fcc11790d0bd5",
+      "source_path": "Windows workspace metrics/lan-check/h-votes-ft-v3.json",
+      "branch": "local (Windows); round 173",
+      "round": "round 173",
+      "note": "fresh judge H (48 new cues; nothing in the loop saw it)",
+      "suite": "heldout6_test.jsonl",
+      "model": "ft-v3"
+    },
+    {
+      "file": "h-votes-ft-v7.json",
+      "split": "H",
+      "member": "ft-v7",
+      "rows": 240,
+      "accuracy": 0.9958,
+      "sha256": "034aecffcc7b81b99431bfdc9cae860cde7418fbf688a6ebb1c479e359d6160c",
+      "source_path": "Windows workspace metrics/lan-check/h-votes-ft-v7.json",
+      "branch": "local (Windows); round 173",
+      "round": "round 173",
+      "note": "fresh judge H (48 new cues; nothing in the loop saw it)",
+      "suite": "heldout6_test.jsonl",
+      "model": "ft-v7"
+    },
+    {
+      "file": "h-votes-ft-v8.json",
+      "split": "H",
+      "member": "ft-v8",
+      "rows": 240,
+      "accuracy": 0.9458,
+      "sha256": "e21faa4d41a5c9e41fea2db32bc921a641d795b268d3e30efbdfb57fa4164c74",
+      "source_path": "Windows workspace metrics/lan-check/h-votes-ft-v8.json",
+      "branch": "local (Windows); round 173",
+      "round": "round 173",
+      "note": "fresh judge H (48 new cues; nothing in the loop saw it)",
+      "suite": "heldout6_test.jsonl",
+      "model": "ft-v8"
     }
   ],
   "missing": [

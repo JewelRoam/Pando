@@ -316,6 +316,9 @@ NPU) all voting in the same consensus quorum.
 | Still no seat change | E -3.75, F -3.75; registry near-tie 0.9698 vs 0.9667 (0.3 = noise) keeps ft-v3 seated | round 172 |
 | Cheap knobs spent | next step must change information (stronger teacher/labels/coverage), not schedule | round 172 |
 | Fresh judge: split H | 240 rows, 48 new cues, zero overlap A-G; 4B/8B teacher votes in repo (Task 024) | round 172 |
+| Fresh judge verdict | ft-v7 0.9958 (beats incumbent +4.6 and teacher +6.2); ft-v8 0.9458 - the seed axis reappears on H | round 173 |
+| Seed committee + tiebreak | seeds agree 94.2% (226/226 correct agreed rows); incumbent wins 13/14 ties -> 0.9958 at full coverage | round 173 |
+| Next (dispatched) | Task 025: stronger teacher candidate deployed + H physical exam (no corpus yet) | round 173 |
 | Second LLM tier deployed | Qwen3-8B Q4_K_M on Mac :8082, ~25.5 tok/s; 4B+8B coexist | round 162 |
 | 8B solo | D 0.8583 / E 0.9250 (4B: 0.8167 / 0.9167) | round 162 |
 | Strength axis | stronger weak-tier buys coverage: E auto 233 @ 1.0000 (core 199; 4B 227); decided set by the fallback | round 162 |
