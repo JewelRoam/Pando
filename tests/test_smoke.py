@@ -573,7 +573,8 @@ class TestSmoke(unittest.TestCase):
     @staticmethod
     def _signed_registration(identity, node_id, token):
         registration = {"node_id": node_id, "url": "http://127.0.0.1:1",
-                        "checkpoint": "mock", "pairing_token": token}
+                        "checkpoint": "mock", "pairing_token": token,
+                        "artifact_sha256": "deadbeef"}
         registration["identity"] = identity.proof(dict(registration))
         return json.dumps(registration).encode()
 
@@ -606,6 +607,8 @@ class TestSmoke(unittest.TestCase):
                     nodes = json.loads(resp.read())["nodes"]
                 self.assertEqual(nodes["member"]["pubkey"],
                                  member.public_key)
+                self.assertEqual(nodes["member"]["artifact_sha256"],
+                                 "deadbeef")
                 with self._post_register(root.url(), body) as resp:
                     self.assertTrue(json.loads(resp.read())["ok"])
                 impostor = load_or_create(_P(td) / "impostor.json")
@@ -641,6 +644,19 @@ class TestSmoke(unittest.TestCase):
                     self.assertTrue(json.loads(resp.read())["ok"])
         finally:
             root.stop()
+
+    def test_identity_bindings_survive_restart(self):
+        import tempfile
+        from pathlib import Path as _P
+        from pando.rootd import Coordinator
+        with tempfile.TemporaryDirectory() as td:
+            store = _P(td) / "identity-bindings.json"
+            first = Coordinator(identity_store=store)
+            self.assertTrue(first.bind_identity("m", "key-a"))
+            self.assertFalse(first.bind_identity("m", "key-b"))
+            second = Coordinator(identity_store=store)
+            self.assertFalse(second.bind_identity("m", "key-b"))
+            self.assertTrue(second.bind_identity("m", "key-a"))
 
     def test_grant_ledger_expires_and_fails_closed(self):
         import datetime as dt

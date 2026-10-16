@@ -55,10 +55,15 @@ id.
   observable behavior plus grants already cover it.
 - Numbered "laws" R1-R7: replaced by the three invariants above.
 
-## 7. Compatibility
-`node_id` stays as the session label; registrations already carry `checkpoint` and
-`artifact_sha256`. Invariant 1 (dedupe) is the only new behavior and ships small in S1.5. S2's
-group log records `(checkpoint, sha256, device)` tuples.
+## 7. Compatibility and known limits
+`node_id` stays as the session label. Registrations carry `checkpoint` and `artifact_sha256`, and
+the root's registry stores both (invariant 1's dedupe reads `(checkpoint, artifact_sha256)` in
+S1.5); the existing `host` field stays a *ranking* hint (same host + same lineage shares compute,
+round 115) - identity dedupe outranks capacity ranking when they disagree. Identity bindings are
+persisted beside the rollout dir (`identity-bindings.json`), so a root restart no longer forgets
+them (round 033). Known scope limit: the signature covers the `/register` payload (and heartbeat
+refreshes) only, not individual inference calls; it proves who held the key at registration, not
+who answered a later request. Per-request signing is a future item.
 
 ## 8. The discipline this file exists to enforce
 Every future abstraction must cite the concrete failure it prevents, as section 2 does. If it

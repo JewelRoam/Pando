@@ -22,8 +22,19 @@ GRANT_ACTIONS = ("lan_listen", "lab_replication", "service_autostart",
 
 def default_path() -> Path:
     configured = os.environ.get("PANDOSI_GRANTS")
-    return Path(configured) if configured else \
-        Path.home() / ".pando" / "grants.toml"
+    if configured:
+        return Path(configured)
+    primary = Path.home() / ".pando" / "grants.toml"
+    if not primary.exists():
+        # Rename shim: ledgers written before the pandosi -> pando rename live
+        # in ~/.pandosi/. Resolve to the legacy file (reads AND writes, so the
+        # audit chain stays with its ledger) until something creates the
+        # canonical path. Measured cost of the alternative: a 2 minute root
+        # outage on the first host that upgraded (round 033).
+        legacy = Path.home() / ".pandosi" / "grants.toml"
+        if legacy.exists():
+            return legacy
+    return primary
 
 
 def _now() -> dt.datetime:

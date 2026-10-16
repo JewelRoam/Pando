@@ -188,7 +188,8 @@ class Coordinator:
                  assent_checkpoint: str | None = None,
                  assent_fallback: str = "advisor",
                  assent_registry: str | Path | dict | None = None,
-                 assent_registry_path: str | Path | None = None):
+                 assent_registry_path: str | Path | None = None,
+                 identity_store: str | Path | None = None):
         self.nodes: dict[str, dict] = {}
         self._lock = threading.Lock()
         self._pick_rotation = 0
@@ -255,16 +256,43 @@ class Coordinator:
         self._recorder = RolloutRecorder(rollout_dir)
         # Durable node-id -> public-key bindings (identity layer). Unlike the
         # TTL'd registry entry this survives heartbeat expiry, so a token
-        # holder cannot re-claim a member's id with a fresh key.
+        # holder cannot re-claim a member's id with a fresh key. With an
+        # identity_store file it also survives root restarts (round 033).
         self.identity_bindings: dict[str, str] = {}
+        self.identity_store: Path | None = (
+            Path(identity_store).expanduser() if identity_store else None)
+        if self.identity_store and self.identity_store.exists():
+            try:
+                loaded = json.loads(
+                    self.identity_store.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    self.identity_bindings.update(
+                        {str(k): str(v) for k, v in loaded.items()})
+            except (OSError, json.JSONDecodeError):
+                pass
 
     # -- identity -------------------------------------------------------
+    def _save_identity_bindings(self) -> None:
+        """Best-effort write-through; durability must never block a join."""
+        if not self.identity_store:
+            return
+        try:
+            self.identity_store.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.identity_store.with_name(
+                self.identity_store.name + ".tmp")
+            tmp.write_text(json.dumps(self.identity_bindings, indent=2),
+                           encoding="utf-8")
+            os.replace(tmp, self.identity_store)
+        except OSError:
+            pass
+
     def bind_identity(self, node_id: str, pubkey: str) -> bool:
         """Bind a node id to a public key. False when another key owns it."""
         with self._lock:
             bound = self.identity_bindings.get(node_id)
             if bound is None:
                 self.identity_bindings[node_id] = pubkey
+                self._save_identity_bindings()
                 return True
             return bound == pubkey
 
@@ -274,7 +302,8 @@ class Coordinator:
 
     # -- registry -------------------------------------------------------
     def register(self, node_id: str, url: str, checkpoint: str,
-                 cap: dict | None = None) -> bool:
+                 cap: dict | None = None,
+                 artifact_sha256: str | None = None) -> bool:
         """Add or refresh a node. Returns False for a retired node."""
         with self._lock:
             if node_id in self.blocked:
@@ -298,6 +327,8 @@ class Coordinator:
                 # information, so growth decisions need to see it (round 115).
                 "host": _host_of(url),
                 "checkpoint": checkpoint,
+                **({"artifact_sha256": artifact_sha256}
+                   if artifact_sha256 else {}),
                 "capability": cap or {},
                 "last_seen": time.monotonic(),
                 "stats": stats or _empty_stem_stats(),
@@ -1062,7 +1093,8 @@ def build_handler(coordinator: Coordinator, root=None):
                         return
                 if not coordinator.register(data["node_id"], data["url"],
                                             data["checkpoint"],
-                                            data.get("capability")):
+                                            data.get("capability"),
+                                            data.get("artifact_sha256")):
                     self._send(403, {
                         "error": f"node {data['node_id']!r} was retired by "
                                  "this swarm",
@@ -1347,7 +1379,8 @@ def main() -> None:
         combiner=combiner,
         rollout_dir=args.rollout_dir,
         assent_checkpoint=args.assent_checkpoint,
-        assent_fallback=args.assent_fallback)
+        assent_fallback=args.assent_fallback,
+        identity_store=Path(args.rollout_dir) / "identity-bindings.json")
     root = Root(coordinator=coordinator, host=listen_host, port=args.port,
                 spore_files=spore_files, chunking=args.chunking)
     import secrets

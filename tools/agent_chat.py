@@ -87,8 +87,16 @@ def cmd_send(args) -> int:
         return 1
     task_id = result["task"].get("id")
     # Chat messages must never linger in the open queue: a claim-handling
-    # automation would otherwise treat them as work. Claim it as the sender.
-    _request(args, "POST", "/claim", {"id": task_id, "by": args.sender})
+    # automation would otherwise treat them as work. Claim it as the sender,
+    # and fail loudly when the claim does not take (a silent failure here made
+    # a message look like a task - round 033).
+    claim = _request(args, "POST", "/claim",
+                     {"id": task_id, "by": args.sender})
+    if "task" not in claim:
+        print(f"warning: sent {task_id} but claim failed ({claim}); it may "
+              f"be read as a task - claim or close it manually",
+              file=sys.stderr)
+        return 1
     print(f"sent {task_id} -> @{args.to}")
     return 0
 
