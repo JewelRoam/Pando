@@ -92,7 +92,7 @@ The pi5 runs the project's native decision model (Laya ONNX int8, 571 MB) alongs
   `LD_LIBRARY_PATH` pointing at that directory.
 - Weights: ModelScope `unsloth/Qwen3-1.7B-GGUF` (community quants; the official
   `Qwen/Qwen3-1.7B-GGUF` ships Q8_0 only) - `Qwen3-1.7B-Q4_K_M.gguf`, 1.03 GiB.
-- Serve (launch script in artifacts/lan-experiment/launch_llama.sh):
+- Serve (tracked launch script: `tools/pi5_llm_member.sh serve`, env-overridable):
   `llama-server -m ~/models/Qwen3-1.7B-Q4_K_M.gguf --host 127.0.0.1 --port 8085 -c 2048 -t 4
   --jinja --chat-template-kwargs '{"enable_thinking": false}'`
   (upstream now deprecates the kwargs path in favor of `--reasoning off`). Load ~13 s from SD;
