@@ -75,3 +75,4 @@ Timestamped, sanitized snapshots of this PandoSI working session.
 | 2026-10-16T120002 | `docs/session-logs/2026-10-16T120002-session-backup.md` | 98e124bfda66 | 260/1452/2618 | automatic snapshot after da1b525 chore: session backup 2026-10-16T113003 |
 | 2026-10-16T123003 | `docs/session-logs/2026-10-16T123003-session-backup.md` | 1cfc2bb437a9 | 261/1453/2620 | automatic snapshot after 6d89a20 chore: session backup 2026-10-16T120003 |
 | 2026-10-16T130003 | `docs/session-logs/2026-10-16T130003-session-backup.md` | d08426f1f19a | 264/1457/2623 | automatic snapshot after 00de556 docs: remote connectivity - git branch as control plane, tunnel/overlay as data plane |
+| 2026-10-16T133003 | `docs/session-logs/2026-10-16T133003-session-backup.md` | f0dc01231b24 | 267/1467/2635 | automatic snapshot after 37735ca feat: cross-NAT live verification - veto-all-declined closes the F gap (decided 0.9833, matching offline to the digit) |
