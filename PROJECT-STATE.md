@@ -286,6 +286,10 @@ NPU) all voting in the same consensus quorum.
 | Family-aware auto live | F set: 120/120 rows `assent=mac-llm-8b, family=general`; auto 94 @ 0.9894 (offline match) | round 164 |
 | Live gap root-caused | 21 declined rows bypassed the witness (13 dragged by constant p=0.5 mean, 8 unsuggested); veto covered only its own 5 dissent rows | round 164 |
 | Next (dispatched) | Task 015: veto = witness answers every non-auto row (veto-all-declined) | round 164 |
+| Cross-NAT link live | mac-endpoint control plane (URLs matched user-provided, char-for-char); mailbox + both LLM APIs 200 over quick tunnels | round 164 |
+| veto-all-declined merged | cherry-picked (rootd +24, tests +64), 28/28 smoke | round 164 |
+| Live F verdict | auto 94 @ 0.9894, decided **118/120 = 0.9833** - matches offline to the digit; morning's 0.8083 gap closed | round 164 |
+| Tunnel latency cost | p50 329 ms (LAN) -> 1205 ms (quick tunnel); Tailscale documented for when it matters | round 164 |
 | Second LLM tier deployed | Qwen3-8B Q4_K_M on Mac :8082, ~25.5 tok/s; 4B+8B coexist | round 162 |
 | 8B solo | D 0.8583 / E 0.9250 (4B: 0.8167 / 0.9167) | round 162 |
 | Strength axis | stronger weak-tier buys coverage: E auto 233 @ 1.0000 (core 199; 4B 227); decided set by the fallback | round 162 |

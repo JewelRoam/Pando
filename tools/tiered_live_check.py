@@ -36,7 +36,10 @@ from pandosi.rootd import Coordinator, Root  # noqa: E402
 MEMBERS = ["english", "ft-v3", "mac-llm"]
 
 
-def stem_commands(root_url: str, with_8b: bool = False) -> dict[str, list[str]]:
+def stem_commands(root_url: str, with_8b: bool = False,
+                  llm4b_url: str = "http://192.168.31.41:8080/v1",
+                  llm8b_url: str = "http://192.168.31.41:8082/v1"
+                  ) -> dict[str, list[str]]:
     python = sys.executable
     venv = str(ROOT_DIR / ".venv-cuda" / "Scripts" / "python.exe")
     key_file = ROOT_DIR / "metrics" / "lan-check" / "llm-api.token"
@@ -52,7 +55,7 @@ def stem_commands(root_url: str, with_8b: bool = False) -> dict[str, list[str]]:
                  "--root", root_url],
         "macllm": [python, "-m", "pandosi.stemd", "--node-id", "mac-llm",
                    "--checkpoint", "mac-llm", "--backend", "openai",
-                   "--openai-url", "http://192.168.31.41:8080/v1",
+                   "--openai-url", llm4b_url,
                    "--openai-key-file", str(key_file),
                    "--openai-model", "qwen3-4b-instruct-2507",
                    "--openai-probability", "0.5", "--root", root_url],
@@ -61,7 +64,7 @@ def stem_commands(root_url: str, with_8b: bool = False) -> dict[str, list[str]]:
         commands["macllm8b"] = [
             python, "-m", "pandosi.stemd", "--node-id", "mac-llm-8b",
             "--checkpoint", "mac-llm-8b", "--backend", "openai",
-            "--openai-url", "http://192.168.31.41:8082/v1",
+            "--openai-url", llm8b_url,
             "--openai-key-file",
             str(ROOT_DIR / "metrics" / "lan-check" / "llm-api-8b.token"),
             "--openai-model", "qwen3-8b-instruct",
@@ -87,6 +90,8 @@ def main() -> int:
                         help="do not start the 4B stem (for 8B-only fleets)")
     parser.add_argument("--family", default=None,
                         help="DecisionRequest.family for family-aware assent")
+    parser.add_argument("--llm4b-url", default="http://192.168.31.41:8080/v1")
+    parser.add_argument("--llm8b-url", default="http://192.168.31.41:8082/v1")
     args = parser.parse_args()
 
     tasks = [json.loads(line) for line
@@ -110,7 +115,8 @@ def main() -> int:
     log_dir = ROOT_DIR / "metrics" / "ensemble-checks"
     logs, processes = {}, {}
     try:
-        commands = stem_commands(root.url(), args.with_8b)
+        commands = stem_commands(root.url(), args.with_8b,
+                                 args.llm4b_url, args.llm8b_url)
         if args.skip_4b:
             commands.pop("macllm", None)
         for name, command in commands.items():
