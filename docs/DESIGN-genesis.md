@@ -1,7 +1,7 @@
 # The Genesis layer: how the group authors its own agenda
 
-Status: mechanism implemented with a stub proposer (2026-10-17); real proposer and
-group-log wiring open. Companion to docs/COMMS-AND-SEEDS.md (roles, seed),
+Status: mechanism implemented with a stub proposer and a signed proposal record
+(2026-10-17); real proposer and transport wiring open. Companion to docs/COMMS-AND-SEEDS.md (roles, seed),
 docs/autonomy loop in `pando/autonomy.py`, and the round98/99 findings.
 
 ## 1. The gap (measured, not asserted)
@@ -90,12 +90,20 @@ Implemented 2026-10-17, in-process, no model:
   between the two loops is the memory, so the change of agenda is caused by the group's own outcome
   record — the falsifiable core, holding on a stub.
 - `tests/test_smoke.py::test_genesis_agenda_is_history_dependent` — the same property as a test.
-  Full suite: 34 tests, 1 skipped, all green.
+  Full suite: 35 tests, 1 skipped, all green.
+- `pando/genesis.py` also carries a proposal as a **signed record** (`sign_proposal` /
+  `verify_proposal` / `proposals_from_log`), so it can travel between members and be checked on
+  arrival — same rule as registration: the public key is the claim, the name is a label.
+  `tools/genesis_log_check.py` is the negative-control drill (clean passes; tampered / unsigned /
+  wrong-kind / foreign-key records are dropped; only the pinned author's proposal survives a mixed
+  log). `tests/test_smoke.py::test_signed_proposal_round_trips_and_rejects_tampering` is the test.
 
 Deliberately **not** claimed yet:
 
-1. The `proposal` is not a signed group-log message — today it lives in-process. Wiring it to the
-   mailbox / group log is the next step.
+1. The signed proposal is transport-agnostic, but it is **not on the group log yet**: nothing
+   carries it over the mailbox or the S2 group log, so a live member still cannot *receive* another
+   member's proposal. The record format is settled; the transport wiring is the next step — and it
+   wants to line up with S2 rather than fork a parallel convention.
 2. No model is involved. The stub is dumb on purpose; whether a real Laya / text-nb proposer beats it
    on instrumental outcomes is unmeasured.
 3. The loop is not yet gated by the swarm tier. `pando/autonomy.py` gates its actions on

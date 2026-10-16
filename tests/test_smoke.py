@@ -1489,5 +1489,36 @@ class TestSmoke(unittest.TestCase):
                             amnesiac.summary()["adopted"])
 
 
+    def test_signed_proposal_round_trips_and_rejects_tampering(self):
+        """A proposal is accepted only if signed by the pinned member key."""
+        import copy
+        from pando.genesis import (Proposal, proposals_from_log,
+                                   sign_proposal, verify_proposal)
+        from pando.identity import Identity
+
+        author = Identity.generate()
+        forger = Identity.generate()
+        proposal = Proposal(proposal_id="p1", author="mac-codex",
+                            goal="copy ourselves", action="reproduce.spawn")
+        record = sign_proposal(proposal, author)
+        self.assertEqual(verify_proposal(record), proposal)
+
+        tampered = copy.deepcopy(record)
+        tampered["payload"]["action"] = "recruit.invite"
+        self.assertIsNone(verify_proposal(tampered))
+
+        forged = copy.deepcopy(record)
+        forged.update(forger.proof(forged["payload"]))
+        # Valid signature over a foreign key: refused only once the member
+        # key is pinned (the name is a label, the key is the claim).
+        self.assertIsNotNone(verify_proposal(forged))
+        self.assertIsNone(verify_proposal(forged,
+                                          expected_pubkey=author.public_key))
+
+        kept = proposals_from_log([record, tampered, forged],
+                                  pinned={"mac-codex": author.public_key})
+        self.assertEqual(kept, [proposal])
+
+
 if __name__ == "__main__":
     unittest.main()

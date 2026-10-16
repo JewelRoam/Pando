@@ -28,6 +28,8 @@ import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from .identity import verify as _verify_signature
+
 
 # The group's action space: the primitives the swarm actually controls.
 # A proposal is a composition and parameterisation of these. If an action is
@@ -56,6 +58,18 @@ class Proposal:
     expected_effect: str = ""
     cost: float = 0.0
     cites: list[str] = field(default_factory=list)
+
+    def payload(self) -> dict:
+        """The content a signature covers (everything but the proof)."""
+        return {
+            "proposal_id": self.proposal_id,
+            "author": self.author,
+            "goal": self.goal,
+            "action": self.action,
+            "expected_effect": self.expected_effect,
+            "cost": self.cost,
+            "cites": list(self.cites),
+        }
 
 
 @dataclass
@@ -253,3 +267,82 @@ class GenesisLoop:
             "successes": sum(1 for r in self.rounds if r.outcome.success),
             "scoreboard": self.scoreboard.table(),
         }
+
+
+# --------------------------------------------------------------------------
+# Transport: a proposal as a signed, self-describing record.
+#
+# GenesisLoop works on in-process Proposal objects. For the agenda to be the
+# *group's*, a proposal must travel between members and survive without a
+# trusted middleman, by the same rule as registration: the public key is the
+# claim, the node name is only a label (docs/IDENTITY-SPEC.md). These helpers
+# turn a Proposal into a record any transport can carry -- the mailbox today,
+# the S2 group log when it lands -- and back, with the signature checked on the
+# way in.
+# --------------------------------------------------------------------------
+
+PROPOSAL_KIND = "proposal"
+
+
+def sign_proposal(proposal: Proposal, identity) -> dict:
+    """A transferable, signed proposal record: payload + author's proof."""
+    payload = proposal.payload()
+    return {"kind": PROPOSAL_KIND, "version": 1, "payload": payload,
+            **identity.proof(payload)}
+
+
+def verify_proposal(record, expected_pubkey: str | None = None) -> Proposal | None:
+    """Return the Proposal if *record* is a well-formed, signed proposal.
+
+    Returns None (never raises) on anything malformed, unsigned, or tampered
+    with, so a caller can filter a mixed log without try/except per entry.
+
+    ``expected_pubkey`` is the pin: when given, the record must carry exactly
+    that key. Signature validity alone only proves *someone* signed it; it does
+    not prove the author is a member, because anyone can sign under their own
+    key. Pinning the member's key is what makes the author name meaningful.
+    """
+    if not isinstance(record, dict) or record.get("kind") != PROPOSAL_KIND:
+        return None
+    payload = record.get("payload")
+    if not isinstance(payload, dict):
+        return None
+    pubkey = str(record.get("pubkey", ""))
+    if expected_pubkey is not None and pubkey != expected_pubkey:
+        return None
+    if not _verify_signature(pubkey, payload, str(record.get("sig", ""))):
+        return None
+    try:
+        return Proposal(
+            proposal_id=str(payload["proposal_id"]),
+            author=str(payload["author"]),
+            goal=str(payload["goal"]),
+            action=str(payload["action"]),
+            expected_effect=str(payload.get("expected_effect", "")),
+            cost=float(payload.get("cost", 0.0)),
+            cites=list(payload.get("cites", [])),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def proposals_from_log(entries, pinned: dict[str, str] | None = None
+                       ) -> list[Proposal]:
+    """Every verifiable proposal in a mixed log, in order; invalid ones dropped.
+
+    ``pinned`` maps node_id -> public key. When given, a proposal whose author
+    is a known member must carry that member's key, so a different key cannot
+    speak under a member's name.
+    """
+    found: list[Proposal] = []
+    for entry in entries:
+        expected = None
+        if pinned and isinstance(entry, dict):
+            payload = entry.get("payload")
+            author = payload.get("author") if isinstance(payload, dict) else None
+            if isinstance(author, str):
+                expected = pinned.get(author)
+        proposal = verify_proposal(entry, expected_pubkey=expected)
+        if proposal is not None:
+            found.append(proposal)
+    return found
