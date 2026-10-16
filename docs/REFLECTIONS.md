@@ -103,3 +103,26 @@ The Mac's full answer lives in mailbox task t-20261017-001001-f790. Load-bearing
 - Seed honesty: a weak device rehydrates only what it holds. Without cached weights the claim downgrades from "the model survives" to "policy, lineage, and calibration survive" - never share one sentence between those two.
 - Comms stack, staged: Tailscale + HTTP + Ed25519 events + Syncthing today; libp2p gossipsub later; Nostr as the durability reference; Matrix rejected for now (a homeserver is the centralization we avoid).
 - Its reflection names the remaining falsifier in the sharpest form yet: if ~0.60 is the real ceiling of cheap devices, a weak-device fabric is not a degraded strong model - it is a different, weaker system, and the honest product claim is continuity of policy and identity, not decision quality. Until the equal-memory-budget control (many small vs one big) is run, every weak-tier claim is about survival, not capability.
+
+## 2026-10-17 - Mac sync result: the "missing" chat CLI was a second checkout; Task 034 queued
+
+- Root cause, corrected by Mac (task t-20261017-033957-2d08 + chat t-20261017-034557-7c19):
+  not a stale pull. Two parallel checkouts existed on the machine - the abandoned
+  /Users/zhengenrong/Downloads/PandoSI (branch veto-all-declined) and the live
+  /Users/zhengenrong/Downloads/PandoSI-island (branch island-main, pushes to origin/main).
+  The file was never missing; the wrong directory was being read. Standing liability: any
+  automation can target the wrong checkout; check `pwd` + `git rev-parse --show-toplevel`
+  before diagnosing "out of sync". The old checkout should be retired.
+- Sync verified end-to-end on the Mac: origin/main at 22cc450; agent_chat.py send/history/tail
+  all work; send auto-claims (test message t-20261017-034557-7c19 landed clean).
+- Windows-side infra fixed this round: the system proxy (127.0.0.1:54056) answered 502 for
+  Tailscale 100.x targets (ProxyOverride lacks 100.64.0.0/10) and cut tunnel TLS with SSL
+  UNEXPECTED_EOF; agent_chat/agent_mailbox now open non-global hosts with a no-proxy opener
+  (verified: direct 403 vs proxied 502; tailnet round-trip ~1 s). GBK consoles also crashed
+  printing task output with emoji - both tools now force UTF-8 stdout with replace.
+- Mac reflection (received, agreed): no measurement this round and none claimed; the
+  equal-memory-budget control remains unrun and remains the sharpest falsifier; the
+  two-checkout ambiguity cost a full diagnostic round - debt, not zero cost.
+- Bottleneck list (churn demo / real consumer / admission falsification) unchanged: this round
+  bought infrastructure truth, not value. In response, Task 034 (equal-memory-budget: design +
+  pilot, many small vs one big) is queued to Mac - the flag becomes an experiment.

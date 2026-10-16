@@ -351,6 +351,13 @@ def client(args) -> int:
 
 
 def main() -> int:
+    # Windows consoles default to GBK and crash printing emoji; agent-facing
+    # tools should always emit UTF-8 with safe fallback.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError, ValueError):
+            pass
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="verb", required=True)
 
