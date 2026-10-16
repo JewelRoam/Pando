@@ -459,6 +459,81 @@ SIXTH_CUES = {
 
 CUE_SETS["g"] = SIXTH_CUES
 
+
+# A seventh inventory (set H), for the fresh evaluator of task 024.  The
+# distillation loop has been scored against D/E/F for several generations, so
+# its selection pressure is compounding; H is a new 48-phrasing inventory over
+# the same eight original intents, again overlapping no earlier split
+# verbatim, so that admission is measured on wording no member has seen.
+SEVENTH_CUES = {
+    "refund": [
+        "I want the money I paid returned",
+        "give me my cash back for this order",
+        "send the amount I was charged back to me",
+        "I would like my outlay refunded in full",
+        "put the sum back onto my card",
+        "kindly restore the funds you took",
+    ],
+    "chargeback": [
+        "my bank is pulling the payment back",
+        "I have asked my card company to reverse this",
+        "this charge is being disputed by my issuer",
+        "the card scheme is clawing the money back",
+        "I filed a dispute over this charge with my bank",
+        "my issuer has opened a case against this transaction",
+    ],
+    "exchange": [
+        "can I get this swapped for the larger one",
+        "I would rather have a different item",
+        "send a replacement for what arrived",
+        "I want to trade this for the newer version",
+        "could you substitute the one I got",
+        "let me pick a different variant of this",
+    ],
+    "complaint": [
+        "this has been a rotten experience",
+        "your people handled this dreadfully",
+        "I am livid at how long this took",
+        "the service was appalling from start to finish",
+        "what a disappointing outcome",
+        "nobody appeared to care for my case",
+    ],
+    "praise": [
+        "the agent did a splendid job",
+        "I am over the moon with this",
+        "what a fantastic result",
+        "your team deserves a lot of credit",
+        "this went brilliantly from start to finish",
+        "thanks a million for the superb work",
+    ],
+    "greeting": [
+        "howdy from Texas",
+        "good evening over there",
+        "hi, just saying a quick hello",
+        "hey, I hope this finds you well",
+        "greetings from my corner of the world",
+        "just a friendly hello to start",
+    ],
+    "login_issue": [
+        "I am shut out of my account",
+        "the sign-in screen will not let me through",
+        "my password is being denied",
+        "I keep failing the two-factor step",
+        "the app says my session is invalid",
+        "I cannot reach my profile at all",
+    ],
+    "invoice": [
+        "send me the bill for this order",
+        "I need the tax paperwork for my accounts",
+        "where is the receipt for the purchase",
+        "could I get an itemised list of charges",
+        "send the billing summary over",
+        "I require the VAT record",
+    ],
+}
+
+CUE_SETS["h"] = SEVENTH_CUES
+
 QUESTION = "intent"
 
 
@@ -616,7 +691,8 @@ def main() -> int:
                              "appear in no earlier split (round 122); "
                              "c/d: later held-out inventories; "
                              "e: fresh inventory for split E (task 007); "
-                             "g: distillation inventory (task 020)")
+                             "g: distillation inventory (task 020); "
+                             "h: fresh evaluator for split H (task 024)")
     args = parser.parse_args()
 
     assert_fillers_are_neutral()
@@ -637,6 +713,8 @@ def main() -> int:
         cross_inventory_report("e")
     if args.cues == "g":
         cross_inventory_report("g")
+    if args.cues == "h":
+        cross_inventory_report("h")
     return 0
 
 
