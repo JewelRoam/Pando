@@ -383,6 +383,82 @@ FIFTH_CUES = {
 
 CUE_SETS["e"] = FIFTH_CUES
 
+
+# A sixth inventory (set G), for the distillation round (task 020): the eight
+# original intents again, with 48 phrasings that appear in no earlier
+# inventory.  The cluster's strongest zero-shot member (8B) labels rows drawn
+# from this set and the 4B filters them by agreement, so the phrasings have to
+# be new to the fine-tuned lineage or the teacher would be rewarded for
+# memorised wording.
+SIXTH_CUES = {
+    "refund": [
+        "I would like the amount put back",
+        "please reverse the payment I made",
+        "the fee needs to be returned to me",
+        "give me back the money I spent",
+        "I want to be made whole for this charge",
+        "credit the payment back to my account",
+    ],
+    "chargeback": [
+        "I have opened a dispute with my bank over this",
+        "my card issuer is taking the money back",
+        "the payment is being reversed through the dispute process",
+        "I asked my bank to challenge the charge",
+        "this is now a formal dispute with my provider",
+        "the network is forcing a reversal of this transaction",
+    ],
+    "exchange": [
+        "I would like to swap it for the newer one",
+        "please send me the other model instead",
+        "can this be traded for a different variant",
+        "I want to replace this with another version",
+        "let me exchange it for the model I wanted",
+        "send out a substitute unit please",
+    ],
+    "complaint": [
+        "this has been a truly awful experience",
+        "I am extremely unhappy with the service",
+        "the way this was handled was poor",
+        "I have had a terrible time with this",
+        "your team let me down badly",
+        "this is far below the standard I expect",
+    ],
+    "praise": [
+        "your support was absolutely brilliant",
+        "I am thrilled with how this went",
+        "the team did a wonderful job",
+        "this is easily the best service I have had",
+        "many thanks, you were superb",
+        "everything in this was excellent",
+    ],
+    "greeting": [
+        "hello, I hope your day is going well",
+        "good morning from my side",
+        "just dropping a line to say hello",
+        "hi there, nice to meet you",
+        "greetings, hope all is well with you",
+        "hey, just a quick hello",
+    ],
+    "login_issue": [
+        "I cannot get into my account at all",
+        "the password I set is not accepted",
+        "I keep getting thrown back to the sign-in page",
+        "my account appears to be locked",
+        "the one-time code never turns up",
+        "signing in fails no matter what I try",
+    ],
+    "invoice": [
+        "I need the bill for my last order",
+        "please send me the tax paperwork",
+        "where can I find the invoice for this",
+        "could I get an itemised statement",
+        "I would like a copy of the charges",
+        "send the billing document when you can",
+    ],
+}
+
+CUE_SETS["g"] = SIXTH_CUES
+
 QUESTION = "intent"
 
 
@@ -539,7 +615,8 @@ def main() -> int:
                         help="a: the original inventory; b: phrasings that "
                              "appear in no earlier split (round 122); "
                              "c/d: later held-out inventories; "
-                             "e: fresh inventory for split E (task 007)")
+                             "e: fresh inventory for split E (task 007); "
+                             "g: distillation inventory (task 020)")
     args = parser.parse_args()
 
     assert_fillers_are_neutral()
@@ -558,6 +635,8 @@ def main() -> int:
         overlap_report()
     if args.cues == "e":
         cross_inventory_report("e")
+    if args.cues == "g":
+        cross_inventory_report("g")
     return 0
 
 

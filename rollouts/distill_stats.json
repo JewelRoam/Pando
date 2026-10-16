@@ -1,0 +1,102 @@
+{
+  "total_generated": 1040,
+  "kept": 918,
+  "discarded": 122,
+  "teacher_agreement_rate": 0.8826923076923077,
+  "by_agreed_label": {
+    "chargeback": 57,
+    "complaint": 152,
+    "exchange": 125,
+    "greeting": 127,
+    "invoice": 100,
+    "login_issue": 127,
+    "praise": 134,
+    "refund": 96
+  },
+  "by_cue_label": {
+    "chargeback": 130,
+    "complaint": 128,
+    "exchange": 128,
+    "greeting": 127,
+    "invoice": 131,
+    "login_issue": 132,
+    "praise": 134,
+    "refund": 130
+  },
+  "parse_failures_8b": 0,
+  "parse_failures_4b": 0,
+  "latency_8b_ms": {
+    "mean": 410.13867456366336,
+    "p50": 356.46145802456886,
+    "p95": 726.234250003472
+  },
+  "latency_4b_ms": {
+    "mean": 287.6063716019137,
+    "p50": 231.76187498029321,
+    "p95": 594.256000011228
+  },
+  "suite": "big8_g.jsonl",
+  "teachers": {
+    "labeler": {
+      "model": "qwen3-8b-instruct",
+      "base_url": "http://127.0.0.1:8082/v1",
+      "prompt": "variant b (candidate only)"
+    },
+    "filter": {
+      "model": "qwen3-4b-instruct-2507",
+      "base_url": "http://127.0.0.1:8080/v1",
+      "prompt": "variant b (candidate only)"
+    }
+  },
+  "overlap_audit": {
+    "target": "g",
+    "cues": 48,
+    "per_set_overlap": {
+      "a": 0,
+      "b": 0,
+      "c": 0,
+      "d": 0,
+      "e": 0,
+      "f": 0
+    },
+    "total_overlap": 0,
+    "examples": {}
+  },
+  "discarded_examples": [
+    {
+      "task_id": "big8-0004",
+      "state": "Message: please send me the other model instead. I am not sure this is the right place to ask.",
+      "cue_label": "exchange",
+      "teacher_8b": "exchange",
+      "teacher_4b": "complaint"
+    },
+    {
+      "task_id": "big8-0027",
+      "state": "User says: I have opened a dispute with my bank over this.",
+      "cue_label": "chargeback",
+      "teacher_8b": "chargeback",
+      "teacher_4b": "complaint"
+    },
+    {
+      "task_id": "big8-0036",
+      "state": "Message: I would like a copy of the charges. It has been two days.",
+      "cue_label": "invoice",
+      "teacher_8b": "chargeback",
+      "teacher_4b": "refund"
+    },
+    {
+      "task_id": "big8-0041",
+      "state": "User says: I have opened a dispute with my bank over this. It is quite urgent.",
+      "cue_label": "chargeback",
+      "teacher_8b": "chargeback",
+      "teacher_4b": "complaint"
+    },
+    {
+      "task_id": "big8-0043",
+      "state": "User says: the payment is being reversed through the dispute process. Please advise.",
+      "cue_label": "chargeback",
+      "teacher_8b": "chargeback",
+      "teacher_4b": "refund"
+    }
+  ]
+}
