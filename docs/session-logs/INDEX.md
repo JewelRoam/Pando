@@ -97,3 +97,4 @@ Timestamped, sanitized snapshots of this PandoSI working session.
 | 2026-10-16T230003 | `docs/session-logs/2026-10-16T230003-session-backup.md` | 04233ace7362 | 297/1550/2747 | automatic snapshot after 73ccada chore: session backup 2026-10-16T223003 |
 | 2026-10-16T233003 | `docs/session-logs/2026-10-16T233003-session-backup.md` | f40b1563d1c6 | 303/1564/2831 | automatic snapshot after 887a52d fix(ci): quote the multi-word Research log key in pyproject so python -m build parses TOML |
 | 2026-10-17T000003 | `docs/session-logs/2026-10-17T000003-session-backup.md` | 2c982fae99a9 | 312/1576/2852 | automatic snapshot after e0d54db docs: seed the reflections log (diminishing returns, ranked bottlenecks, next bets) |
+| 2026-10-17T003004 | `docs/session-logs/2026-10-17T003004-session-backup.md` | 267c728b1ce6 | 325/1599/2884 | automatic snapshot after bd00c1c docs: bounded substitution design (answers mac-codex 8447) + firekeeper L1 reflection; reverse channel live |
