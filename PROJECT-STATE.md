@@ -299,6 +299,9 @@ NPU) all voting in the same consensus quorum.
 | recommend_fallback shipped | offline advisor-vs-veto recommender from recorded votes | round 166 |
 | Reasoning axis (8B thinking) | E tied 0.9250, F 0.9750 vs 0.9833; ~7.8-9.4 s/row, ~97% reasoning tokens - not worth it | round 167 |
 | Four tiering axes measured | strength (162), breadth (164), confidence (165), reasoning (167) - only family-appropriate ones pay | round 167 |
+| Distill corpus landed | set G: 1040 rows, 0 cue overlap with A-F; dual-teacher filter kept 918 (88.3% agreement); tools in repo | round 168 |
+| Mac two-tier island | Mac root :8765 now {mac-text, mac-llm-8b-local}; island quorum_k=1; endpoint updated | round 168 |
+| ft-v5 first turn started | holdout 91 teacher-labeled rows: english 0.8352, ft-v3 0.9451; training on 827 rows (unfrozen) on the 3070 | round 168 |
 | Second LLM tier deployed | Qwen3-8B Q4_K_M on Mac :8082, ~25.5 tok/s; 4B+8B coexist | round 162 |
 | 8B solo | D 0.8583 / E 0.9250 (4B: 0.8167 / 0.9167) | round 162 |
 | Strength axis | stronger weak-tier buys coverage: E auto 233 @ 1.0000 (core 199; 4B 227); decided set by the fallback | round 162 |
