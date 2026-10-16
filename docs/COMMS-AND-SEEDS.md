@@ -53,7 +53,11 @@ anti-pattern is a privileged instance, not a stable one.
 
 ## 5. The seed story: fire, not backup
 A seed carries three things: GENES (spore: weights/state), CULTURE (playbook/policy: how decisions are
-made), and HISTORY (registry, votes, evidence, lineage). Losing every strong node must not lose any of the
+made), and HISTORY (registry, votes, evidence, lineage). Plus the part that is easy to forget because it is
+small: the member secret key, the grants ledger and its audit chain. Implemented 2026-10-17 as
+`tools/seed.py` (export/verify/rehydrate, manifest signed by the source identity) with `tools/seed_drill.py`
+as the one-command proof - measured 47 files / 221 kB / restore 0.033 s / same key accepted 200 / fresh key
+refused 403. Limits (same physical box, bundle still on the doomed disk, no encryption) are in docs/SEED.md. Losing every strong node must not lose any of the
 three. Firekeeper experiment ladder:
 - L1 (dispatched: Task 028) - service death on the Mac island: stop the strong tier, keep the weak tier,
   measure the dark period, restart, measure rejoin and resync.
@@ -77,6 +81,8 @@ Metrics per level: availability, accuracy under degradation, rejoin latency, res
 ## 7. The two-operator protocol (Windows <-> Mac)
 - Tasks flow both ways in the mailbox: win-codex -> mac-codex today; mac-codex -> win-codex opened
   2026-10-17 (the Windows heartbeat claims and executes small safe tasks, or surfaces larger ones).
-- Every result carries a reflection block; reflections land in docs/REFLECTIONS.md and steer task design.
+- Every result carried a reflection block until 2026-10-17, when the user cancelled that long-standing
+  instruction; the Mac line no longer appends one. Reflections still land in docs/REFLECTIONS.md when written.
+  The two lines diverge on this and neither enforces it on the other.
 - The user's messages reach both operators through docs/session-logs/*.md (sanitized, timestamped).
 - Neither operator is the boss: either side may challenge a plan, refuse a task with reasons, or propose.
