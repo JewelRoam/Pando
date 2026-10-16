@@ -1,0 +1,169 @@
+{
+  "suite": "assets/heldout5_test.jsonl",
+  "rows": 120,
+  "class_distribution": {
+    "reschedule": 20,
+    "billing_clarify": 20,
+    "permission_escalation": 20,
+    "data_export": 20,
+    "content_appeal": 20,
+    "device_triage": 20
+  },
+  "overlap_audit": {
+    "old_suite_rows": 960,
+    "label_intersection_count": 0,
+    "expected_intersection_count": 0,
+    "cross_suite_cue_runs_ge_3": 0,
+    "max_cross_suite_cue_run_words": 1,
+    "max_internal_cue_run_words": 1,
+    "filler_leak_count": 0
+  },
+  "prompt_variant": "b",
+  "probability_note": "variant b emits no confidence; probability recorded as 0.5 for every row",
+  "models": {
+    "4b": {
+      "model": "qwen3-4b-instruct-2507",
+      "total": 120,
+      "correct": 112,
+      "accuracy": 0.9333333333333333,
+      "parse_errors": 1,
+      "regex_fallbacks": 119,
+      "avg_latency_ms": 307.0487121702172,
+      "p50_latency_ms": 292.6908329827711,
+      "p95_latency_ms": 404.23099999316037,
+      "avg_tokens_per_second": 25.599732373612685,
+      "probability_mean": 0.5,
+      "per_class": {
+        "billing_clarify": {
+          "correct": 16,
+          "n": 20,
+          "accuracy": 0.8
+        },
+        "content_appeal": {
+          "correct": 18,
+          "n": 20,
+          "accuracy": 0.9
+        },
+        "data_export": {
+          "correct": 18,
+          "n": 20,
+          "accuracy": 0.9
+        },
+        "device_triage": {
+          "correct": 20,
+          "n": 20,
+          "accuracy": 1.0
+        },
+        "permission_escalation": {
+          "correct": 20,
+          "n": 20,
+          "accuracy": 1.0
+        },
+        "reschedule": {
+          "correct": 20,
+          "n": 20,
+          "accuracy": 1.0
+        }
+      },
+      "wrong": [
+        {
+          "task_id": "big7-0002",
+          "expected": "content_appeal",
+          "choice": "permission_escalation"
+        },
+        {
+          "task_id": "big7-0013",
+          "expected": "billing_clarify",
+          "choice": "content_appeal"
+        },
+        {
+          "task_id": "big7-0020",
+          "expected": "content_appeal",
+          "choice": "permission_escalation"
+        },
+        {
+          "task_id": "big7-0027",
+          "expected": "data_export",
+          "choice": "device_triage"
+        },
+        {
+          "task_id": "big7-0043",
+          "expected": "billing_clarify",
+          "choice": "complaint"
+        },
+        {
+          "task_id": "big7-0051",
+          "expected": "data_export",
+          "choice": null
+        },
+        {
+          "task_id": "big7-0085",
+          "expected": "billing_clarify",
+          "choice": "greeting"
+        },
+        {
+          "task_id": "big7-0115",
+          "expected": "billing_clarify",
+          "choice": "content_appeal"
+        }
+      ]
+    },
+    "8b": {
+      "model": "qwen3-8b-instruct",
+      "total": 120,
+      "correct": 118,
+      "accuracy": 0.9833333333333333,
+      "parse_errors": 0,
+      "regex_fallbacks": 120,
+      "avg_latency_ms": 428.3790006743705,
+      "p50_latency_ms": 383.95658403169364,
+      "p95_latency_ms": 608.687459025532,
+      "avg_tokens_per_second": 18.99223261385515,
+      "probability_mean": 0.5,
+      "per_class": {
+        "billing_clarify": {
+          "correct": 18,
+          "n": 20,
+          "accuracy": 0.9
+        },
+        "content_appeal": {
+          "correct": 20,
+          "n": 20,
+          "accuracy": 1.0
+        },
+        "data_export": {
+          "correct": 20,
+          "n": 20,
+          "accuracy": 1.0
+        },
+        "device_triage": {
+          "correct": 20,
+          "n": 20,
+          "accuracy": 1.0
+        },
+        "permission_escalation": {
+          "correct": 20,
+          "n": 20,
+          "accuracy": 1.0
+        },
+        "reschedule": {
+          "correct": 20,
+          "n": 20,
+          "accuracy": 1.0
+        }
+      },
+      "wrong": [
+        {
+          "task_id": "big7-0013",
+          "expected": "billing_clarify",
+          "choice": "content_appeal"
+        },
+        {
+          "task_id": "big7-0115",
+          "expected": "billing_clarify",
+          "choice": "content_appeal"
+        }
+      ]
+    }
+  }
+}
