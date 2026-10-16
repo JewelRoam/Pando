@@ -1281,6 +1281,43 @@ class TestSmoke(unittest.TestCase):
                 stem.stop()
             root.stop()
 
+    def test_calibration_table_declares_its_own_scope(self):
+        """A shipped temperature table must not read as "this model is calibrated".
+
+        ``assets/calibration/laya-en.json`` is the scale the live pi5 stem's
+        votes pass through, and the loader hands it to *any* caller that names
+        the checkpoint "laya-en" - there is no notion of "calibrated only on
+        these suites" at lookup time. So the scoping has to live in the file
+        and be checkable, otherwise a table fitted on one domain silently
+        rescales every other domain too (round 2026-10-17).
+        """
+        from pando.calibrate import apply_temperature, load_calibration
+
+        root = Path(__file__).resolve().parents[1]
+        table = json.loads((root / "assets" / "calibration" /
+                            "laya-en.json").read_text(encoding="utf-8"))
+
+        # The live gate resolves it by checkpoint string, so it is load-bearing.
+        cal = load_calibration("laya-en")
+        self.assertTrue(cal["calibrated"])
+        self.assertAlmostEqual(cal["temperature"], table["temperature"], 3)
+
+        # Confidence only: this must never be quoted as an accuracy claim.
+        self.assertLess(table["calibrated_ece"], table["raw_ece"])
+
+        # Every suite the fit is *not* valid on is named, and is named by the
+        # same string used as the key of the per-suite table.
+        self.assertTrue(table["fitted_domains"])
+        self.assertTrue(table["out_of_scope_domains"])
+        for domain in table["out_of_scope_domains"]:
+            stat = table["shift_by_suite"][domain]
+            self.assertGreater(stat["ece_calibrated"], stat["ece_raw"])
+
+        # A saturated vote comes off the rail without crossing to the other
+        # side; a temperature that did otherwise would flip decisions.
+        self.assertLess(apply_temperature(1.0, table["temperature"]), 1.0)
+        self.assertGreater(apply_temperature(0.0, table["temperature"]), 0.0)
+
     def test_end_to_end_http_vote(self):
         """Real root + real HTTP stems; dead node shrinks quorum gracefully."""
         root = Root()

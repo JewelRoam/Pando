@@ -1,0 +1,97 @@
+{
+  "checkpoint": "laya-en",
+  "temperature": 2.6661,
+  "source": "tools/fit_stem_temperature.py - harvested from http://192.168.31.22:35575, NLL fit on ['assets/heldout_test.jsonl', 'assets/heldout2_test.jsonl', 'assets/heldout3_test.jsonl']",
+  "n_tasks": 720,
+  "accuracy": 0.6819,
+  "raw_ece": 0.1377,
+  "calibrated_ece": 0.0714,
+  "raw_log_loss": 0.6238,
+  "calibrated_log_loss": 0.4877,
+  "fit_suites": [
+    "assets/heldout_test.jsonl",
+    "assets/heldout2_test.jsonl",
+    "assets/heldout3_test.jsonl"
+  ],
+  "holdout_suites": [
+    "assets/heldout4_test.jsonl",
+    "assets/heldout6_test.jsonl"
+  ],
+  "shift_suites": [
+    "assets/heldout5_test.jsonl",
+    "rollouts/distill_ft5_holdout.jsonl"
+  ],
+  "holdout": {
+    "n": 480,
+    "accuracy": 0.7416666666666667,
+    "mean_p_raw": 0.8352450458333335,
+    "ece_raw": 0.09357837916666671,
+    "nll_raw": 0.5217058836619678,
+    "mean_p_calibrated": 0.7494052222223774,
+    "ece_calibrated": 0.04607734569490842,
+    "nll_calibrated": 0.43311879747014637
+  },
+  "holdout_by_suite": {
+    "assets/heldout4_test.jsonl": {
+      "n": 240,
+      "accuracy": 0.7625,
+      "mean_p_raw": 0.8249294000000001,
+      "ece_raw": 0.0716385666666666,
+      "nll_raw": 0.4433940169891554,
+      "mean_p_calibrated": 0.7458496338862795,
+      "ece_calibrated": 0.04943664362247418,
+      "nll_calibrated": 0.4055647331147488
+    },
+    "assets/heldout6_test.jsonl": {
+      "n": 240,
+      "accuracy": 0.7208333333333333,
+      "mean_p_raw": 0.8455606916666667,
+      "ece_raw": 0.1250448583333334,
+      "nll_raw": 0.6000177503347802,
+      "mean_p_calibrated": 0.7529608105584754,
+      "ece_calibrated": 0.050504759606194535,
+      "nll_calibrated": 0.46067286182554396
+    }
+  },
+  "shift": {
+    "n": 211,
+    "accuracy": 0.7345971563981043,
+    "mean_p_raw": 0.7488184360189575,
+    "ece_raw": 0.045862037914691914,
+    "nll_raw": 0.45852580844274193,
+    "mean_p_calibrated": 0.6717056419347486,
+    "ece_calibrated": 0.066661487436705,
+    "nll_calibrated": 0.47243181293773623
+  },
+  "shift_by_suite": {
+    "assets/heldout5_test.jsonl": {
+      "n": 120,
+      "accuracy": 0.6833333333333333,
+      "mean_p_raw": 0.6663441666666666,
+      "ece_raw": 0.039617499999999965,
+      "nll_raw": 0.5138532358384291,
+      "mean_p_calibrated": 0.5991325458359655,
+      "ece_calibrated": 0.08420078749736784,
+      "nll_calibrated": 0.5538977334162347
+    },
+    "rollouts/distill_ft5_holdout.jsonl": {
+      "n": 91,
+      "accuracy": 0.8021978021978022,
+      "mean_p_raw": 0.8575757142857142,
+      "ece_raw": 0.08510538461538456,
+      "nll_raw": 0.38556656352535235,
+      "mean_p_calibrated": 0.7674064279990778,
+      "ece_calibrated": 0.05812876957069453,
+      "nll_calibrated": 0.36500422549356265
+    }
+  },
+  "fitted_domains": [
+    "assets/heldout_test.jsonl",
+    "assets/heldout2_test.jsonl",
+    "assets/heldout3_test.jsonl"
+  ],
+  "out_of_scope_domains": [
+    "assets/heldout5_test.jsonl"
+  ],
+  "note": "temperature scaling fits confidence, not accuracy: accuracy is invariant under it, so this makes a wrong member a wrong member that knows how unsure to be. It does not by itself open any auto tier; read out_of_scope_domains before using the table offline. Do not read this file as '<checkpoint> is calibrated' - read it as 'calibrated on fitted_domains'."
+}
