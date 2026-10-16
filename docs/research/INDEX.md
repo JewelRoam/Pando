@@ -176,6 +176,7 @@ Rebuilt by tools/build_research_index.py; one row per file.
 | 2026-10-16-round161.md | 161 | A fresh split (E) and the fallback that depends on the split |
 | 2026-10-16-round162.md | 162 | The strength axis: 8B buys coverage; precision is the invariant |
 | 2026-10-16-round163.md | 163 | The 16GB tier budget: coexistence costs the tail, not the mean |
+| 2026-10-16-round164.md | 164 | The breadth axis: the witness flips with the family |
 
 ## Files without a round number
 

@@ -1,6 +1,6 @@
 # PandoSI Project State
 
-*Last updated: 2026-10-16 (round 161; continuous research session)*
+*Last updated: 2026-10-16 (round 164; continuous research session)*
 
 ## Where we are
 
@@ -277,6 +277,12 @@ NPU) all voting in the same consensus quorum.
 | Veto live on E | auto 227 @ 1.0000, decided 0.9750 (advisor live 0.9583; offline veto 0.9917) | round 161 |
 | assent=auto landed | assets/registry/accuracies.json + runtime resolution among present voters; /status assent_resolved; 24/24 smoke | round 161 |
 | auto live on E | registry resolved to ft-v3; auto 227 @ 1.0000, decided 0.9750 - identical to explicit ft-v3 | round 161 |
+| New intent family F | 120 rows, 6 brand-new intents (big7-*, branch split-f aef5f01) | round 164 |
+| Solo on F (zero-shot) | english 0.8417, ft-v3 0.8667, 4B 0.9333, **8B 0.9833** - graceful degradation, not collapse | round 164 |
+| The witness flips | old-family witness ft-v3 (0.967) answers 0.867 on F; the 8B (0.892 old) is the right F witness | round 164 |
+| Out-of-family advisor is zero | combiner suggestions 0/23 on F declined rows; veto fallback carried 0.7667 -> 0.9833 | round 164 |
+| Best cross-family system | core + 8B, assent=8B veto: auto 94 @ 0.9894, decided 0.9833 (strongest member's ceiling, precision premium) | round 164 |
+| Next (dispatched) | Task 014: registry v2, per-family accuracy + family-aware assent=auto | round 164 |
 | Second LLM tier deployed | Qwen3-8B Q4_K_M on Mac :8082, ~25.5 tok/s; 4B+8B coexist | round 162 |
 | 8B solo | D 0.8583 / E 0.9250 (4B: 0.8167 / 0.9167) | round 162 |
 | Strength axis | stronger weak-tier buys coverage: E auto 233 @ 1.0000 (core 199; 4B 227); decided set by the fallback | round 162 |
