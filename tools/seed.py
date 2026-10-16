@@ -53,6 +53,16 @@ def canonical(payload: dict) -> bytes:
 
 
 def _identity_module():
+    # Standalone runs (`python tools/seed.py ...`) put tools/ - not the repo
+    # root - on sys.path, so `from pando import identity` failed there and the
+    # export silently lost its signer and its source fingerprint (drill on
+    # Windows found it, 2026-10-17). The drill inserted the path itself, which
+    # is why only the standalone CLI was affected.
+    import sys as _sys
+    from pathlib import Path as _Path
+    root = str(_Path(__file__).resolve().parents[1])
+    if root not in _sys.path:
+        _sys.path.insert(0, root)
     try:
         from pando import identity  # noqa: PLC0415
         return identity
