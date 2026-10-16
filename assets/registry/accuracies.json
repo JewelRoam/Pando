@@ -93,6 +93,19 @@
           }
         }
       }
+    },
+    "mac-llm-8b-q6": {
+      "updated": "2026-10-17",
+      "families": {
+        "known": {
+          "accuracy": {
+            "H": 0.9417
+          },
+          "source": {
+            "H": "origin/teacher2-h:metrics/llm-votes-h-teacher2.json"
+          }
+        }
+      }
     }
   }
 }
