@@ -149,13 +149,16 @@ def main() -> int:
             seen.add(tid)
             if first_run:
                 continue  # don't replay the backlog on first launch
-            title = task.get("title", "")
+            # /tasks returns summaries without bodies; fetch the full record
+            # or the model gets an empty prompt (seen live 2026-10-17 03:24).
+            full = (mailbox(f"/task/{tid}").get("task") or task)
+            title = full.get("title", "")
             try:
                 if title.startswith("[chat]"):
                     if "@win-codex" in title or "@all" in title:
-                        handle_chat(task, state)
-                elif task.get("status") == "open" and task.get("from") == "mac-codex":
-                    handle_task(task, state)
+                        handle_chat(full, state)
+                elif full.get("status") == "open" and full.get("from") == "mac-codex":
+                    handle_task(full, state)
             except Exception as exc:  # keep the loop alive
                 print(f"[worker] {tid}: {exc}", flush=True)
         state["seen"] = sorted(seen)[-2000:]
