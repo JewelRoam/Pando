@@ -312,6 +312,62 @@
       "note": "evaluation",
       "suite": "heldout5_test.jsonl",
       "model": "ft-v5 (distilled from 8B+4B dual-teacher corpus)"
+    },
+    {
+      "file": "ft-v6-holdout.json",
+      "split": "G-holdout",
+      "member": "ft-v6",
+      "rows": 91,
+      "accuracy": 1.0,
+      "sha256": "e01628b0c45351597288acb2bbbf52d2e06b019457d7cb65520a19bec4822a59",
+      "source_path": "Windows workspace metrics/lan-check/holdout-votes-ft-v6.json",
+      "branch": "local (Windows); round 169",
+      "round": "round 169",
+      "note": "teacher-labeled holdout agreement",
+      "suite": "distill_ft5_holdout.jsonl",
+      "model": "ft-v6 (mixed: 827 distill + 720 human-labeled)"
+    },
+    {
+      "file": "ft-v6-votes-d.json",
+      "split": "D",
+      "member": "ft-v6",
+      "rows": 240,
+      "accuracy": 0.9208,
+      "sha256": "a56a4a5c92016052da2927007290658190c66be4a48e334567580bef4184fc93",
+      "source_path": "Windows workspace metrics/lan-check/d-votes-ft-v6.json",
+      "branch": "local (Windows); round 169",
+      "round": "round 169",
+      "note": "evaluation",
+      "suite": "heldout3_test.jsonl",
+      "model": "ft-v6 (mixed: 827 distill + 720 human-labeled)"
+    },
+    {
+      "file": "ft-v6-votes-e.json",
+      "split": "E",
+      "member": "ft-v6",
+      "rows": 240,
+      "accuracy": 0.9083,
+      "sha256": "e27badb719e6221db9ac1f6e79aba81f10b51c90c074b7a1a9eb4ba46938bc21",
+      "source_path": "Windows workspace metrics/lan-check/e-votes-ft-v6.json",
+      "branch": "local (Windows); round 169",
+      "round": "round 169",
+      "note": "evaluation",
+      "suite": "heldout4_test.jsonl",
+      "model": "ft-v6 (mixed: 827 distill + 720 human-labeled)"
+    },
+    {
+      "file": "ft-v6-votes-f.json",
+      "split": "F",
+      "member": "ft-v6",
+      "rows": 120,
+      "accuracy": 0.8917,
+      "sha256": "f61ada5b5cf9d86d53c0eeafc08723d057355d603d0dbc9a9c8ed5f11cea2006",
+      "source_path": "Windows workspace metrics/lan-check/f-votes-ft-v6.json",
+      "branch": "local (Windows); round 169",
+      "round": "round 169",
+      "note": "evaluation",
+      "suite": "heldout5_test.jsonl",
+      "model": "ft-v6 (mixed: 827 distill + 720 human-labeled)"
     }
   ],
   "missing": [
