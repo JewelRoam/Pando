@@ -1,86 +1,65 @@
-# IDENTITY-SPEC: actors, names, and roles (v1)
+# IDENTITY-SPEC v2: four words, three invariants
 
-Status: frozen vocabulary, 2026-10-17. The goal is local intelligences that talk, decide and
-expand; therefore the addressable unit is **the model**, not the machine. Devices are locations,
-processes are sessions, humans' agents are operators. Today's `node_id` (e.g. `pandosi-pi5-x`)
-conflates all three - fine for a demo, wrong for a system. This spec fixes the words once so
-later code does not have to be rewritten to match a bigger story.
+Status: 2026-10-17. v1 of this file proposed per-class key types, six naming prefixes, a six-role
+taxonomy and seven numbered "laws". Review feedback: LLM-designed systems accrete meaningless
+abstractions and component roles; stay flat and simple. v1 was cut by about 60%. The rejected
+pieces are listed at the bottom so they do not creep back.
 
-## 1. Four actor classes (the Linux analogy)
-| Linux | PandoSI | Key | Lifetime |
-|---|---|---|---|
-| machine / hostname | **host** - a device: endpoints, grants, resources | device key (Ed25519; TPM later) | hardware life |
-| user account | **intelligence** (an *instance* of a model) | instance key, minted at model birth, travels inside the artifact | as long as its weights exist somewhere |
-| process (pid) | **session** - one running stem serving an instance | ephemeral (instance, host, start time) | process life |
-| root / wheel group | **operator** - the administering agents and humans (win-codex, mac-codex) | operator key | human |
+## 1. The four words (the only vocabulary we need)
+- **device** - a machine. The only thing that holds a key (Ed25519 at `~/.pando/identity.json`;
+  already shipped in S1).
+- **member** - what the fabric counts. Defined by DATA, not minted:
+  **member = (checkpoint name, artifact sha256)** - both fields are already attested on every
+  registration. There is no member keypair.
+- **session** - a running process serving a member. Ephemeral; restarts mint new sessions.
+- **operator** - the humans' agents (win-codex, mac-codex). They administer; they are not members;
+  chat/log messages carry an `op:` marker.
+One grouping id rides along: **group** = genesis hash (S2).
 
-Plus three grouping concepts that already exist in code: **lineage** (family: training provenance,
-e.g. `rlcd-fi/v7`, `qwen3-8b/q5km`, `text-nb/v1`), **group** (realm; id = genesis hash), and
-**grants** (capabilities with scope + expiry + audit chain - the `grants.toml` model, generalized).
+## 2. Three invariants (each prevents a specific, named failure)
+1. **Count per member; dedupe by artifact sha256.** Copying one checkpoint onto N machines is ONE
+   vote with availability failover, not N votes. Prevents: Sybil-by-replication. Matches rounds
+   95-97 ("copies add latency, not information"). This replaces v1's "instance keypair" idea -
+   the hash we already attest is enough.
+2. **Restarts do not change membership.** Sessions come and go; the member returns as the same
+   (checkpoint, sha256). Prevents: registry flapping misread as growth/shrink.
+3. **Only devices hold keys.** Members and sessions are derived or ephemeral; operators are merely
+   labeled. Prevents: key sprawl, and the "who owns the model file" ambiguity.
 
-## 2. Naming grammar
-```
-host/     host/<name>                      alias; key fingerprint is the truth
-lineage/  lineage/<family>/<run>           provenance of weights
-instance/ <lineage>#<key8>                 e.g. rlcd-fi/v7#a3f9c21e
-session/  <instance>@<host>~<run>          ephemeral; never stored in quorum records
-operator/ op/<name>                        e.g. op/win-codex
-group/    group/<genesis8> (alias optional)
-```
-Rules: ASCII, case-sensitive, no spaces; names are **signed aliases**, fingerprints are the truth
-(the DNS principle); aliases are unique per group, enforced at join; collision resolution is by
-first signed bind, the loser must rename - never silently shadow.
+## 3. Naming (no framework)
+- The human label is the checkpoint string that already exists (`text-nb-v1`, `mac-llm-8b-q6`, ...).
+- When one checkpoint has several artifacts: `checkpoint@sha8`. That is the whole grammar.
+- Aliases are labels; the sha256 is the truth (the DNS principle).
+- Operators appear as `op/<name>` in the chat/log marker only.
 
-## 3. The load-bearing semantics
-- **R1 - one instance, one vote.** Replicas of the same instance (identical weights sha256) are a
-  *single* member with availability failover: the root may race replicas, but counts the instance
-  once. This codifies the measured law from rounds 95-97: copies add latency, not information.
-- **R2 - lineage != instance.** Different fine-tunes of one family (ft-v7 vs ft-v8) are different
-  instances with correlated errors; lineage-level counting stays as *policy* (`--lineage-quorum`,
-  blocs), not as identity.
-- **R3 - roles are grants, bound to identities.** Never device-class properties. Scope + expiry +
-  audit chain, revocable; expiry fails closed.
-- **R4 - identity travels with the artifact.** The spore manifest carries the instance public key
-  and lineage metadata; moving the weights moves the member - it returns as *the same member*.
-- **R5 - the host is a location.** It binds endpoints and holds grants; it contributes no voting
-  weight by itself.
-- **R6 - operators are a separate class.** They administer and talk; they do not vote, and their
-  messages are marked `op/*` so audit can tell administration from intelligence.
-- **R7 - sessions are ephemeral.** Ballots are attributed to `(instance, session)`; the counted
-  unit is the instance. Restarts mint new sessions, never new members.
+## 4. Roles: none
+Mechanically: a member is in the quorum iff it serves /decide; a device that stores files is just
+a device with files; permissions are the grants ledger (already shipped: scope + expiry + audit,
+fail-closed). If a named role is ever needed (e.g. formal seeds serving catch-up), it is added
+together with the use case that demands it. Witness already exists as assent behavior; a bridge
+role waits until islands exist in code.
 
-## 4. Roles v1 (each a grant)
-`voter` (answer /decide as its instance) - `witness` (may veto an auto tier via assent) -
-`seed` (store/replicate artifacts; no votes) - `relay` (connectivity) - `observer` (read, request) -
-`bridge` (super-peer: aggregates exactly one island vote; never proxies to multiply weight).
-A phone can be `observer+relay`; a NAS can be `seed+relay+voter(low-priority)`; a GPU box is
-`voter(+bridge)`. Every role is revocable and re-measurable (docs/POWER-AND-COMPETENCE.md).
+## 5. Migration (firekeeper at member granularity)
+Move the weights (spore) to another device; any device can present the member by proving it holds
+`(checkpoint, sha256)`; the fabric reports the same member returning. Acceptance test: stop the
+pi5 stem, rehydrate its text-nb member elsewhere, and the root shows the same member back - no new
+id.
 
-## 5. Group membership
-A group = genesis-hash id + signed membership log (S2). Join = a signed event carrying
-`(instance, host, roles)`. Leave / retire / rekey are events too. Aliases register as signed
-records. The mailbox/chat bus shows the actor as `op/<name>` or `<instance>` - never a bare
-hostname.
+## 6. Deliberately NOT built (rejected in v1; do not reintroduce without a concrete failure)
+- Actor classes with per-class key types (4 classes -> 4 kinds of keys): devices hold keys;
+  everything else derives or is ephemeral.
+- Instance keypairs minted at "model birth": the artifact sha256 already IS the identity.
+- Six naming prefixes (`host/`, `lineage/`, `instance/`, `session/`, `operator/`, `group/`):
+  labels plus `@sha8` suffice.
+- A role taxonomy (voter / witness / seed / relay / observer / bridge as formal roles):
+  observable behavior plus grants already cover it.
+- Numbered "laws" R1-R7: replaced by the three invariants above.
 
-## 6. Migration: the firekeeper story at model granularity
-Kill a runtime -> rehydrate the instance elsewhere from spore -> it rejoins with the *same*
-instance identity and the *same* vote slot. Acceptance test: stop the pi5 stem; move its
-text-nb instance to another machine; the root reports the same member returning, not a new one.
+## 7. Compatibility
+`node_id` stays as the session label; registrations already carry `checkpoint` and
+`artifact_sha256`. Invariant 1 (dedupe) is the only new behavior and ships small in S1.5. S2's
+group log records `(checkpoint, sha256, device)` tuples.
 
-## 7. Compatibility and migration from today
-- `node_id` keeps working as the **session name**; registrations gain optional fields
-  `instance`, `lineage`, `host`. Roots that do not see them keep today's behavior (each session
-  treated as its own instance) - no breakage.
-- The bones already exist: artifact `sha256` attestation (weights identity), checkpoint strings
-  (lineage), `--lineage-quorum`/blocs (family policy), the grants ledger (capabilities), signed
-  spore manifests (artifact provenance). This spec names them, it does not invent them.
-- **S1.5** (before or with S2): mint instance keys into manifest metadata at model birth; root
-  dedupes votes per instance; operator messages tagged `op/*`; alias registry in the group log.
-
-## 8. Anti-overfit checklist
-Every rule below must read the same at 2 devices or 10,000:
-1. Identity is data that travels (R4), not state of a box.
-2. Counting is per instance (R1), policy is per lineage/island (R2 + the mac stance).
-3. Roles are grants (R3), never hardcoded for a device class.
-4. Operators stay out of the vote (R6).
-5. Names never carry authority (section 2); keys do.
+## 8. The discipline this file exists to enforce
+Every future abstraction must cite the concrete failure it prevents, as section 2 does. If it
+cannot name one, it goes into section 6 - or nowhere.
