@@ -2090,6 +2090,34 @@ class TestResidentThinker(unittest.TestCase):
             self.assertEqual(restored.destination, "win")
             self.assertEqual(restored.action, "seed.replicate")
 
+    def test_a_replicate_without_a_destination_is_not_published(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            thinker, proposer, sent = self._thinker(
+                [{"action": "seed.replicate", "goal": "carry"},
+                 {"action": "seed.replicate", "goal": "carry", "destination": "win"}],
+                Path(tmp) / "think.jsonl", host_names=["mac", "win"])
+            round_ = thinker.think(1)
+            thinker.ledger.append(round_)
+            self.assertTrue(round_.published)
+            self.assertEqual(sent[-1].destination, "win")
+            self.assertEqual(proposer.calls, 2)
+
+            thinker, proposer, sent = self._thinker(
+                [{"action": "seed.replicate", "goal": "carry"},
+                 {"action": "seed.replicate", "goal": "still nowhere"}],
+                Path(tmp) / "think2.jsonl", host_names=["mac", "win"])
+            round_ = thinker.think(1)
+            self.assertFalse(round_.published)
+            self.assertIn("needs a destination", round_.error)
+            self.assertEqual(sent, [])
+
+            thinker, _proposer, sent = self._thinker(
+                [{"action": "seed.replicate", "goal": "carry"}],
+                Path(tmp) / "think3.jsonl")
+            round_ = thinker.think(1)
+            self.assertTrue(round_.published)
+            self.assertEqual(sent[-1].destination, "")
+
 
 if __name__ == "__main__":
     unittest.main()

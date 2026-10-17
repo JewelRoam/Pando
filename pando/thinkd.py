@@ -702,6 +702,39 @@ class Thinker:
             })
         return out
 
+    def _destination_problem(self, proposal) -> str:
+        """Empty when this replicate may be published. No host list means no check."""
+        if not self.host_names or proposal is None or proposal.action != "seed.replicate":
+            return ""
+        if not proposal.destination:
+            return "missing"
+        if proposal.destination not in self.host_names:
+            return "unknown"
+        return ""
+
+    def _ask_for_destination(self, user: str, round_no: int, round_, proposal):
+        """One more call. A replicate with nowhere to go is not published."""
+        names = "、".join(self.host_names)
+        if self._destination_problem(proposal) == "missing":
+            why = "你选了 seed.replicate 但没有 destination。"
+        else:
+            why = f"destination {proposal.destination!r} 不在已知主机里。"
+        retry_user = (
+            user + "\n\n【上一轮你的回答被拒绝】" + why
+            + f"destination 必须是这些名字之一：{names}。或者换一个动作。"
+            + "只输出一行 JSON。")
+        try:
+            text2, usage2 = self.proposer.complete(SYSTEM_PROMPT, retry_user)
+        except Exception:  # noqa: BLE001 - a failed retry holds the round
+            return None
+        round_.prompt_tokens += int(usage2.get("prompt_tokens") or 0)
+        round_.completion_tokens += int(usage2.get("completion_tokens") or 0)
+        proposal2, _why2 = proposal_from_obj(
+            extract_json(text2) or {}, self.node_id, self.node_id, round_no)
+        if proposal2 is None or self._destination_problem(proposal2):
+            return None
+        return proposal2
+
     def _user_prompt(self, round_no: int, group: list[dict]) -> str:
         own = self.ledger.tail(self.history_window)
         lines = [f"这是你的第 {round_no} 轮思考。", "", "【你自己的历史】"]
@@ -835,6 +868,14 @@ class Thinker:
                 # repeat up as a decision: this is the number to watch, and it is
                 # the honest answer to "is the group evolving or pacing?"
                 round_.novelty_forced = True
+
+        if proposal is not None and self._destination_problem(proposal):
+            repaired = self._ask_for_destination(user, round_no, round_, proposal)
+            if repaired is None:
+                round_.error = "seed.replicate needs a destination from the host list"
+                round_.detail = "held: " + round_.error
+                return round_
+            proposal = repaired
 
         if proposal is None:
             round_.error = why
