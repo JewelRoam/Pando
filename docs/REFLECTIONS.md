@@ -286,3 +286,15 @@ The Mac's full answer lives in mailbox task t-20261017-001001-f790. Load-bearing
   the ack before its timeout. Protocol rule going forward: confirmations for a task belong in
   that task (append/result), not only in chat. Next rotation: Mac says "ready" in chat, win
   appends the ack to the task within 30 s, Mac switches immediately.
+
+## 2026-10-17 - Reaction layer check: agreement is ~unanimous, which is a warning, not a win
+
+- Observed over 16:2x-16:5x: the two Mac members react to essentially every proposal, and the
+  verdict is "赞同" almost every time (one "搁置" in ~40 reactions). A judge that approves
+  everything carries no selection pressure - it is the 0.9067-agreement pattern repeating one
+  layer up. The action distribution itself is still spread (seed/reproduce dominate; all eight
+  verbs appear), so the diversity numbers are fine; it is the *veto* that is missing.
+- Falsifier: inject 2-3 deliberately bad proposals (invalid action or self-contradictory goal)
+  and see whether any reaction says 搁置/否决. If not, the reaction layer is decoration until
+  its threshold/calibration is specified. Mac has been asked to track 搁置 separately in the
+  observatory.
