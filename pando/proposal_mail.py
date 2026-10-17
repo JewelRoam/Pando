@@ -136,19 +136,26 @@ def publish_reaction(record: dict, node_id: str, url: str,
 def fetch_proposals(url: str, token: str | None = None,
                     pinned: dict[str, str] | None = None,
                     status: str = "all", timeout: float = 15,
-                    max_items: int | None = None) -> list[Proposal]:
+                    max_items: int | None = None,
+                    rows: list | None = None) -> list[Proposal]:
     """Every verifiable proposal on the mailbox, in the order it was left.
 
     Unverifiable ones are dropped rather than raising, so a mixed feed (chat,
     work, forgeries) still yields the genuine proposals -- the same contract as
     ``proposals_from_log``. ``pinned`` maps node_id -> public key; a proposal
     whose author is a known member must carry that member's key.
+
+    ``rows`` is a listing already chosen by the caller. When it is given,
+    this does not list the mailbox again and does not apply ``max_items``.
     """
-    listing = _request(url, f"/tasks?status={status}", token, "GET",
-                       timeout=timeout)
-    tasks = listing.get("tasks") or []
-    if max_items is not None:
-        tasks = tasks[-max_items:]
+    if rows is None:
+        listing = _request(url, f"/tasks?status={status}", token, "GET",
+                           timeout=timeout)
+        tasks = listing.get("tasks") or []
+        if max_items is not None:
+            tasks = tasks[-max_items:]
+    else:
+        tasks = rows
     records = []
     for task in tasks:
         if not isinstance(task, dict):

@@ -29,6 +29,44 @@ DECLINE = "反对"
 STANCES = (ADOPT, HOLD, DECLINE)
 
 
+
+def _titled(title: str, prefix: str) -> tuple[str, str] | None:
+    """Second and third tokens of a ``[proposal]`` or ``[reaction]`` title.
+
+    The mailbox listing has titles, not bodies. The id is the second token
+    and the action or stance is the third, followed by ``by``.
+    """
+    parts = str(title).split()
+    if len(parts) < 5 or parts[0] != prefix or parts[3] != "by":
+        return None
+    if not parts[1] or not parts[2]:
+        return None
+    return parts[1], parts[2]
+
+
+def rows_for_execution(tasks: list, limit: int) -> list:
+    """Recent rows, plus every seed.export and the reactions that name it.
+
+    The recent window is the last ``limit`` rows. An adopted seed.export
+    does not stop being adopted because newer mail pushed it out of that
+    window, so those proposals, and the reactions whose titles name them,
+    are kept as well. Order stays the listing order.
+    """
+    rows = [row for row in tasks if isinstance(row, dict)]
+    window = rows[-limit:] if limit > 0 else []
+    keep = {row.get("id") for row in window}
+    seed_ids = set()
+    for row in rows:
+        parsed = _titled(str(row.get("title") or ""), "[proposal]")
+        if parsed and parsed[1] == "seed.export":
+            seed_ids.add(parsed[0])
+            keep.add(row.get("id"))
+    for row in rows:
+        parsed = _titled(str(row.get("title") or ""), "[reaction]")
+        if parsed and parsed[0] in seed_ids:
+            keep.add(row.get("id"))
+    return [row for row in rows if row.get("id") in keep]
+
 def tally(proposal: Proposal, reactions: list[dict]) -> dict[str, list[str]]:
     """One vote per decision model. The author does not count."""
     buckets = {ADOPT: [], HOLD: [], DECLINE: []}
@@ -275,12 +313,16 @@ def dry_run(proposals: list[Proposal], reactions: list[dict], **policy) -> dict:
     return {"summary": summarize(results), "results": results}
 
 
-def _load_reactions(url: str, token: str | None, limit: int) -> list[dict]:
+def _load_reactions(url: str, token: str | None, limit: int,
+                    rows: list | None = None) -> list[dict]:
     from .proposal_mail import _request
     from .genesis import verify_reaction
-    listing = _request(url, "/tasks?status=all", token, "GET")
-    tasks = listing.get("tasks") or []
-    tasks = tasks[-limit:]
+    if rows is None:
+        listing = _request(url, "/tasks?status=all", token, "GET")
+        tasks = listing.get("tasks") or []
+        tasks = tasks[-limit:]
+    else:
+        tasks = rows
     found = []
     for task in tasks:
         if not isinstance(task, dict) or not is_reaction_task(str(task.get("title") or "")):
@@ -399,9 +441,11 @@ def main() -> int:
         print("pass exactly one of --dry-run or --once", flush=True)
         return 2
     token = Path(args.token_file).expanduser().read_text(encoding="utf-8").strip()
-    proposals = fetch_proposals(args.mailbox, token, status="all",
-                                max_items=args.limit)
-    reactions = _load_reactions(args.mailbox, token, max(args.limit * 4, args.limit))
+    from .proposal_mail import _request
+    listing = _request(args.mailbox, "/tasks?status=all", token, "GET")
+    rows = rows_for_execution(listing.get("tasks") or [], args.limit)
+    proposals = fetch_proposals(args.mailbox, token, status="all", rows=rows)
+    reactions = _load_reactions(args.mailbox, token, args.limit, rows=rows)
     if args.once:
         return run_once(proposals, reactions, args)
     report = dry_run(proposals, reactions)

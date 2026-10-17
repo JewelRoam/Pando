@@ -2653,6 +2653,16 @@ class TestExecution(unittest.TestCase):
     def _vote(self, node, stance, target="p1"):
         return {"target_id": target, "node_id": node, "stance": stance}
 
+    def test_a_seed_export_stays_visible_after_the_window_fills(self):
+        from pando.execute import rows_for_execution
+        old = {"id": "t-old", "title": "[proposal] p-old seed.export by mac-proposer"}
+        vote = {"id": "t-vote", "title": "[reaction] p-old 赞同 by mac-text"}
+        other = {"id": "t-other", "title": "[proposal] p-other recruit.invite by mac-proposer"}
+        other_vote = {"id": "t-other-vote", "title": "[reaction] p-other 赞同 by mac-text"}
+        recent = {"id": "t-new", "title": "[chat] hello"}
+        rows = rows_for_execution([old, vote, other, other_vote, recent], 1)
+        self.assertEqual([row["id"] for row in rows], ["t-old", "t-vote", "t-new"])
+
     def test_the_author_does_not_vote_and_one_adopt_does_not_pass(self):
         from pando.execute import judge
         proposal = self._proposal()
