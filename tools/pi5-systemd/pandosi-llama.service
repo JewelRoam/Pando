@@ -6,7 +6,7 @@ After=network-online.target
 Type=simple
 WorkingDirectory=/home/admin
 Environment=LD_LIBRARY_PATH=/home/admin/llama/llama-b11700
-ExecStart=/home/admin/llama/llama-b11700/llama-server -m /home/admin/models/Qwen3-1.7B-Q4_K_M.gguf --host 127.0.0.1 --port 8085 -c 2048 -np 1 -t 4 --jinja --reasoning off
+ExecStart=/home/admin/llama/llama-b11700/llama-server -m /home/admin/models/Qwen3-1.7B-Q4_K_M.gguf --host 127.0.0.1 --port 8085 -c 2048 -np 1 --cache-ram 0 -t 4 --jinja --reasoning off
 Restart=always
 RestartSec=5
 

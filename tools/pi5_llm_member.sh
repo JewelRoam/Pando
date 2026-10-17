@@ -31,7 +31,7 @@ case "${1:-}" in
     # Note: --chat-template-kwargs is deprecated upstream in favor of
     # --reasoning off; kept until the pinned build is updated.
     exec "$LLAMA_DIR/llama-server" -m "$MODEL" \
-      --host 127.0.0.1 --port "$PORT" -c 2048 -np 1 -t 4 --jinja \
+      --host 127.0.0.1 --port "$PORT" -c 2048 -np 1 --cache-ram 0 -t 4 --jinja \
       --chat-template-kwargs '{"enable_thinking": false}'
     ;;
   stem)
