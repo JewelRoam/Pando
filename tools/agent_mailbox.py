@@ -52,6 +52,37 @@ from pando.net import open_url  # noqa: E402 - repo root must be importable
 OPEN, CLAIMED, DONE, FAILED, BLOCKED = "open", "claimed", "done", \
     "failed", "blocked"
 FINAL = {DONE, FAILED, BLOCKED}
+STATUSES = {OPEN, CLAIMED, DONE, FAILED, BLOCKED}
+# Finished states share a rank so "done" is not newer than "blocked".
+_RANK = {OPEN: 0, CLAIMED: 1, DONE: 2, FAILED: 2, BLOCKED: 2}
+_ID_OK = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
+
+
+def _replicable(task: dict) -> bool:
+    if not isinstance(task, dict):
+        return False
+    task_id = task.get("id")
+    if not isinstance(task_id, str) or not task_id or any(ch not in _ID_OK for ch in task_id):
+        return False
+    if task.get("status") not in STATUSES:
+        return False
+    if not isinstance(task.get("from"), str) or not isinstance(task.get("title"), str):
+        return False
+    history = task.get("history", [])
+    return isinstance(history, list)
+
+
+def _prefer(current: dict | None, incoming: dict) -> dict:
+    """The copy that should be stored. ``current`` wins ties."""
+    if current is None or not _replicable(current):
+        return incoming
+    if _RANK[incoming["status"]] > _RANK[current["status"]]:
+        return incoming
+    if _RANK[incoming["status"]] < _RANK[current["status"]]:
+        return current
+    if len(incoming.get("history") or []) > len(current.get("history") or []):
+        return incoming
+    return current
 
 
 def now() -> str:
@@ -117,6 +148,24 @@ class Mailbox:
                 {"at": now(), "event": event, "by": by})
             self.save(task)
         return task
+
+    def accept(self, incoming: dict) -> tuple[dict | None, bool]:
+        """Keep a replica of an existing task id. Never downgrade status.
+
+        A missing id is stored as it arrived. A copy that would move a
+        finished or claimed task back to an earlier status is ignored.
+        Same rank, and the incoming history is longer: take the incoming
+        copy. Returns ``(stored, wrote)``.
+        """
+        if not _replicable(incoming):
+            return None, False
+        with self._lock:
+            current = self.load(incoming["id"])
+            chosen = _prefer(current, incoming)
+            if chosen is current:
+                return current, False
+            self.save(chosen)
+            return chosen, True
 
 
 def build_handler(mailbox: Mailbox, token: str):
@@ -227,6 +276,17 @@ def build_handler(mailbox: Mailbox, token: str):
                     finished_at=now())
                 self._send(200, {"task": task})
                 return
+            if path == "/import":
+                task = payload.get("task") if isinstance(payload, dict) else None
+                if not isinstance(task, dict):
+                    self._send(400, {"error": "task object required"})
+                    return
+                stored, wrote = mailbox.accept(task)
+                if stored is None:
+                    self._send(400, {"error": "task is not replicable"})
+                    return
+                self._send(200, {"task": stored, "wrote": wrote})
+                return
             if path == "/append":
                 task = mailbox.load(str(payload.get("id", "")))
                 if task is None:
@@ -331,7 +391,49 @@ def client(args) -> int:
         result = _request(args, "POST", "/append", payload)
         print(json.dumps(result, indent=2, ensure_ascii=False))
         return 0 if "task" in result else 1
+    if args.verb == "replicate":
+        return replicate(args)
     raise SystemExit(f"unknown verb {args.verb}")
+
+
+def replicate(args) -> int:
+    """Copy tasks that the destination is missing or behind on.
+
+    Dry-run unless ``--write``. A destination that does not know ``/import``
+    refuses the write; this does not fall back to creating new ids.
+    """
+    source = _request(args, "GET", "/tasks?status=all")
+    # The destination is a second mailbox. Swap url for the listing only.
+    dest_args = argparse.Namespace(**{**vars(args), "url": args.to_url,
+                                      "token": args.to_token or args.token,
+                                      "token_file": args.to_token_file or args.token_file})
+    dest = _request(dest_args, "GET", "/tasks?status=all")
+    if "tasks" not in source or "tasks" not in dest:
+        print(json.dumps({"source": source, "dest": dest}, ensure_ascii=False),
+              file=sys.stderr)
+        return 1
+    have = {row["id"] for row in dest["tasks"]}
+    missing = [row["id"] for row in source["tasks"] if row["id"] not in have]
+    print(json.dumps({"source": len(source["tasks"]), "dest": len(dest["tasks"]),
+                      "missing": len(missing), "write": bool(args.write)},
+                     ensure_ascii=False))
+    if not args.write:
+        return 0
+    wrote = 0
+    for task_id in missing:
+        full = _request(args, "GET", f"/task/{task_id}")
+        task = full.get("task") if isinstance(full, dict) else None
+        if not isinstance(task, dict):
+            print(f"skip {task_id}: {full}", file=sys.stderr)
+            continue
+        result = _request(dest_args, "POST", "/import", {"task": task})
+        if result.get("wrote"):
+            wrote += 1
+        elif "error" in result:
+            print(f"{task_id}: {result}", file=sys.stderr)
+            return 1
+    print(json.dumps({"wrote": wrote}, ensure_ascii=False))
+    return 0
 
 
 def main() -> int:
@@ -388,6 +490,18 @@ def main() -> int:
     append.add_argument("--id", required=True)
     append.add_argument("--output")
     append.add_argument("--output-file")
+
+    copy = sub.add_parser("replicate", help="copy missing tasks onto another mailbox")
+    copy.add_argument("--url", required=True, help="source mailbox")
+    copy.add_argument("--to-url", required=True, help="destination mailbox")
+    copy.add_argument("--token")
+    copy.add_argument("--token-file", default="~/.pandosi/mailbox.token")
+    copy.add_argument("--to-token", default=None)
+    copy.add_argument("--to-token-file", default=None)
+    copy.add_argument("--timeout", type=float, default=15)
+    copy.add_argument("--write", action="store_true",
+                      help="actually import; default is a count only")
+    copy.set_defaults(verb="replicate")
 
     args = parser.parse_args()
     return args.func(args) if args.verb == "serve" else client(args)

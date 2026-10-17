@@ -2817,3 +2817,34 @@ class TestChat(unittest.TestCase):
             speaker.stop()
             silent.stop()
             root.stop()
+
+
+class TestMailboxReplica(unittest.TestCase):
+    def test_accept_keeps_the_further_copy_and_never_rewinds(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "agent_mailbox_under_test",
+            Path(__file__).resolve().parents[1] / "tools" / "agent_mailbox.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as tmp:
+            box = module.Mailbox(Path(tmp))
+            original = {
+                "id": "t-1", "from": "mac-codex", "title": "[chat] @all: hi",
+                "body": "hi", "status": "done", "history": [{"event": "created"}, {"event": "result"}],
+            }
+            stored, wrote = box.accept(original)
+            self.assertTrue(wrote)
+            self.assertEqual(stored["status"], "done")
+            older = dict(original, status="open", history=[{"event": "created"}])
+            stored, wrote = box.accept(older)
+            self.assertFalse(wrote)
+            self.assertEqual(stored["status"], "done")
+            longer = dict(original, history=original["history"] + [{"event": "append"}])
+            stored, wrote = box.accept(longer)
+            self.assertTrue(wrote)
+            self.assertEqual(len(stored["history"]), 3)
+            bad, wrote = box.accept({"id": "../x", "from": "a", "title": "t", "status": "open", "history": []})
+            self.assertIsNone(bad)
+            self.assertFalse(wrote)
+            self.assertIsNone(box.load("../x"))
