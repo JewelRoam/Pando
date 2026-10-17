@@ -357,6 +357,53 @@ class GenesisLoop:
 # --------------------------------------------------------------------------
 
 PROPOSAL_KIND = "proposal"
+REACTION_KIND = "reaction"
+# What a decision model may put under a proposal. A stance is a label, like a
+# reaction on a message, not another proposal.
+REACTION_STANCES = ("赞同", "搁置", "反对")
+
+
+def sign_reaction(target_id: str, node_id: str, checkpoint: str, stance: str,
+                  identity, probability: float | None = None) -> dict:
+    """A signed note that one decision model answered one proposal."""
+    payload = {
+        "target_id": str(target_id),
+        "node_id": str(node_id),
+        "checkpoint": str(checkpoint),
+        "stance": str(stance),
+    }
+    if probability is not None:
+        payload["probability"] = float(probability)
+    return {"kind": REACTION_KIND, "version": 1, "payload": payload,
+            **identity.proof(payload)}
+
+
+def verify_reaction(record, expected_pubkey: str | None = None) -> dict | None:
+    """Return the reaction payload when the signature holds, else None."""
+    if not isinstance(record, dict) or record.get("kind") != REACTION_KIND:
+        return None
+    payload = record.get("payload")
+    if not isinstance(payload, dict):
+        return None
+    stance = str(payload.get("stance") or "")
+    target = str(payload.get("target_id") or "")
+    node = str(payload.get("node_id") or "")
+    if not target or not node or stance not in REACTION_STANCES:
+        return None
+    pubkey = str(record.get("pubkey", ""))
+    if expected_pubkey is not None and pubkey != expected_pubkey:
+        return None
+    if not _verify_signature(pubkey, payload, str(record.get("sig", ""))):
+        return None
+    return {
+        "target_id": target,
+        "node_id": node,
+        "checkpoint": str(payload.get("checkpoint") or ""),
+        "stance": stance,
+        "signed": True,
+    }
+
+
 
 
 def sign_proposal(proposal: Proposal, identity) -> dict:

@@ -26,7 +26,8 @@ import json
 import urllib.error
 import urllib.request
 
-from .genesis import Proposal, proposals_from_log, sign_proposal
+from .genesis import (Proposal, proposals_from_log, sign_proposal,
+                      sign_reaction)
 from .net import open_url
 
 TITLE_PREFIX = "[proposal]"
@@ -36,6 +37,17 @@ PROPOSAL_PREFIX = TITLE_PREFIX
 def is_proposal_task(title: str) -> bool:
     """True when a mailbox task title marks a message rather than work."""
     return str(title).lstrip().startswith(TITLE_PREFIX)
+
+
+REACTION_PREFIX = "[reaction]"
+
+
+def is_reaction_task(title: str) -> bool:
+    """True when a mailbox task is a decision model's answer to a proposal.
+
+    Same rule as ``[chat]`` and ``[proposal]``: it is a message, not work.
+    """
+    return str(title).lstrip().startswith(REACTION_PREFIX)
 
 
 def _request(url: str, path: str, token: str | None, method: str,
@@ -83,6 +95,35 @@ def publish_proposal(proposal: Proposal, identity, url: str,
         claimed = _request(url, "/claim", token, "POST",
                            {"id": task_id, "by": proposal.author},
                            timeout=timeout)
+        took = isinstance(claimed, dict) and "task" in claimed
+        posted["claimed"] = took
+        if not took:
+            posted["claim_warning"] = (
+                f"sent {task_id} but the claim failed ({claimed}); it may be "
+                f"read as a task - claim or close it manually")
+    return posted
+
+
+
+def publish_reaction(record: dict, node_id: str, url: str,
+                     token: str | None = None, timeout: float = 15) -> dict:
+    """Leave a signed reaction on the mailbox and claim it so it is not work.
+
+    ``record`` is the output of ``sign_reaction``. The title names the proposal
+    and the stance so a reader can see who answered without opening the body.
+    """
+    payload = record.get("payload") or {}
+    title = (f"{REACTION_PREFIX} {payload.get('target_id')} "
+             f"{payload.get('stance')} by {node_id}")
+    posted = _request(url, "/task", token, "POST",
+                      {"from": node_id, "title": title,
+                       "body": json.dumps(record, sort_keys=True)},
+                      timeout=timeout)
+    task = posted.get("task") if isinstance(posted, dict) else None
+    task_id = task.get("id") if isinstance(task, dict) else None
+    if task_id:
+        claimed = _request(url, "/claim", token, "POST",
+                           {"id": task_id, "by": node_id}, timeout=timeout)
         took = isinstance(claimed, dict) and "task" in claimed
         posted["claimed"] = took
         if not took:

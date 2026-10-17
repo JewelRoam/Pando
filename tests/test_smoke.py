@@ -2428,3 +2428,51 @@ class TestProposalView(unittest.TestCase):
         self.assertEqual(view["cites"], ["r3"])
         self.assertTrue(view["signed"])
         self.assertIsNone(proposal_view("not a proposal"))
+
+
+class TestReactions(unittest.TestCase):
+    def test_a_signed_reaction_survives_and_a_tampered_one_does_not(self):
+        from pando.genesis import sign_reaction, verify_reaction
+        from pando.identity import Identity
+
+        identity = Identity.generate()
+        record = sign_reaction("p1", "mac-text", "text-nb-v1", "赞同", identity)
+        view = verify_reaction(record)
+        self.assertEqual(view["node_id"], "mac-text")
+        self.assertEqual(view["stance"], "赞同")
+        self.assertTrue(view["signed"])
+        record["payload"]["stance"] = "反对"
+        self.assertIsNone(verify_reaction(record))
+
+    def test_a_reaction_hangs_on_the_proposal_it_names(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        from observatory import attach_reactions
+
+        messages = [
+            {"kind": "proposal", "proposal": {"proposal_id": "p1"}},
+            {"kind": "chat"},
+        ]
+        attach_reactions(messages, [
+            {"target_id": "p1", "node_id": "mac-text", "checkpoint": "text-nb-v1",
+             "stance": "赞同"},
+            {"target_id": "p1", "node_id": "mac-text", "checkpoint": "text-nb-v1",
+             "stance": "搁置"},
+            {"target_id": "other", "node_id": "win-laya", "checkpoint": "laya-en",
+             "stance": "反对"},
+        ])
+        self.assertEqual(messages[0]["reactions"], [{
+            "node_id": "mac-text", "checkpoint": "text-nb-v1", "stance": "搁置"}])
+        self.assertNotIn("reactions", messages[1])
+
+    def test_a_remote_stem_is_not_this_machines_to_ask(self):
+        from pando.reactd import select_local_stems
+
+        nodes = {
+            "mac-text": {"host": "127.0.0.1", "url": "http://127.0.0.1:8766",
+                         "checkpoint": "text-nb-v1"},
+            "pandosi-pi5-laya": {"host": "192.168.31.22",
+                                 "url": "http://192.168.31.22:9",
+                                 "checkpoint": "laya-en"},
+        }
+        chosen = select_local_stems(nodes, {"127.0.0.1", "localhost"})
+        self.assertEqual([row["node_id"] for row in chosen], ["mac-text"])

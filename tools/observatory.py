@@ -45,7 +45,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from pando.genesis import Proposal  # noqa: E402
+from pando.genesis import Proposal, verify_reaction  # noqa: E402
 from pando.identity import load_or_create  # noqa: E402
 from pando.net import open_url  # noqa: E402 - repo root must be importable
 from pando.proposal_mail import publish_proposal  # noqa: E402
@@ -367,6 +367,33 @@ def proposal_view(body: str) -> dict | None:
     }
 
 
+
+def attach_reactions(messages: list[dict], reactions: list[dict]) -> None:
+    """Hang each decision-model stance on the proposal it names.
+
+    One chip per model. A later answer from the same node replaces the earlier
+    one. Messages that are not that proposal are left alone.
+    """
+    by_target: dict[str, list[dict]] = {}
+    for reaction in reactions:
+        target = str(reaction.get("target_id") or "")
+        node = str(reaction.get("node_id") or "")
+        if not target or not node:
+            continue
+        bucket = by_target.setdefault(target, [])
+        bucket[:] = [row for row in bucket if row.get("node_id") != node]
+        bucket.append({
+            "node_id": node,
+            "checkpoint": reaction.get("checkpoint") or "",
+            "stance": reaction.get("stance") or "",
+        })
+    for message in messages:
+        proposal = message.get("proposal") or {}
+        target = str(proposal.get("proposal_id") or "")
+        if target and target in by_target:
+            message["reactions"] = by_target[target]
+
+
 def collect_state(cfg: dict) -> dict:
     started = time.monotonic()
     state: dict = {
@@ -381,6 +408,7 @@ def collect_state(cfg: dict) -> dict:
         "quorum": None,
         "proposers": [],
         "chat": [],
+        "reactions": [],
         "work": [],
         "thinkd": [],
     }
@@ -418,7 +446,11 @@ def collect_state(cfg: dict) -> dict:
             "created_at": item.get("created_at"),
             "claimed_by": item.get("claimed_by"),
         }
-        if title.startswith("[chat]") or title.startswith("[proposal]"):
+        if title.startswith("[reaction]"):
+            record["body"] = item.get("body", "")
+            record["kind"] = "reaction"
+            state["reactions"].append(record)
+        elif title.startswith("[chat]") or title.startswith("[proposal]"):
             record["body"] = item.get("body", "")
             record["kind"] = "chat" if title.startswith("[chat]") else "proposal"
             state["chat"].append(record)
@@ -427,7 +459,8 @@ def collect_state(cfg: dict) -> dict:
 
     # The /tasks listing carries titles only. Fetch every chat/proposal
     # record in full so the feed never hides the back half of a message.
-    chat_ids = [str(m["id"]) for m in state["chat"] if m.get("id")]
+    feed = state["chat"] + state["reactions"]
+    chat_ids = [str(m["id"]) for m in feed if m.get("id")]
 
     def _full_body(task_id: str) -> tuple[str, str | None]:
         cache_key = f"{base}|{task_id}"
@@ -445,18 +478,32 @@ def collect_state(cfg: dict) -> dict:
     if chat_ids:
         with ThreadPoolExecutor(max_workers=8) as pool:
             fetched = dict(pool.map(_full_body, chat_ids))
-        for record in state["chat"]:
+        parsed_reactions = []
+        for record in feed:
             body = fetched.get(str(record.get("id")))
-            if body is not None:
-                if record.get("kind") == "proposal":
-                    view = proposal_view(body)
-                    if view is not None:
-                        record["proposal"] = view
-                        # The page renders the fields. The envelope (pubkey,
-                        # signature, raw JSON) is not something to print.
-                        record["body"] = ""
-                        continue
-                record["body"] = body
+            if body is None:
+                continue
+            if record.get("kind") == "proposal":
+                view = proposal_view(body)
+                if view is not None:
+                    record["proposal"] = view
+                    # The page renders the fields. The envelope is not printed.
+                    record["body"] = ""
+                    continue
+            if record.get("kind") == "reaction":
+                view = None
+                if body.lstrip().startswith("{"):
+                    try:
+                        view = verify_reaction(json.loads(body))
+                    except json.JSONDecodeError:
+                        view = None
+                if view is not None:
+                    parsed_reactions.append(view)
+                record["body"] = ""
+                continue
+            record["body"] = body
+        state["reactions"] = parsed_reactions
+        attach_reactions(state["chat"], parsed_reactions)
 
     # --- island roots: participants, quorum, playbooks ----------------
     # Roots are independent membership tables. Read every configured root and
@@ -809,6 +856,13 @@ tr:last-child td{border-bottom:0}
 .msg .facts{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px}
 .msg .pid{margin-left:auto;color:var(--faint);font-size:11px;
   font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.reacts{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border-radius:99px;
+  border:1px solid var(--line);background:#0e1722;font-size:12px}
+.chip .who{color:var(--dim);font-weight:500}
+.chip.yes{border-color:#1d3d28;color:var(--ok)}
+.chip.mid{border-color:#4a3a12;color:var(--warn)}
+.chip.no{border-color:#5c2a2a;color:#ffb4ae}
 .composer{border-top:1px solid var(--line);padding:11px 13px;background:#0c131b}
 .composer .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
 input,select,textarea,button{font:inherit;color:var(--ink);background:#0e161f;
@@ -912,6 +966,17 @@ const ago = (s) => {
   if (d < 86400) return Math.round(d/3600) + ' 小时前';
   return Math.round(d/86400) + ' 天前';
 };
+function stanceClass(stance){
+  if (stance === '赞同') return 'yes';
+  if (stance === '反对') return 'no';
+  return 'mid';
+}
+function reactionRow(list){
+  if (!list || !list.length) return '';
+  return `<div class="reacts">` + list.map(r =>
+    `<span class="chip ${stanceClass(r.stance)}" title="${esc(r.checkpoint || '')}">${esc(r.stance)} <span class="who">${esc(r.node_id)}</span></span>`
+  ).join('') + `</div>`;
+}
 function renderMessage(m){
   const p = m.proposal;
   if (m.kind === 'proposal' && p) {
@@ -930,6 +995,7 @@ function renderMessage(m){
       ${effect ? `<div class="effect">${esc(effect)}</div>` : (showGoal ? '' : `<div class="effect">${esc(goal)}</div>`)}
       <div class="facts">${cost}${cites}
         ${p.proposal_id ? `<span class="pid">${esc(p.proposal_id)}</span>` : ''}</div>
+      ${reactionRow(m.reactions)}
     </div>`;
   }
   const to = chatTo(m.title);
