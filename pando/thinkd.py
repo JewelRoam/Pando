@@ -218,8 +218,15 @@ class OpenAIProposer:
         request = urllib.request.Request(
             url, data=json.dumps(payload).encode("utf-8"),
             headers=headers, method="POST")
-        with open_url(request, self.timeout) as resp:
-            return json.loads(resp.read())
+        try:
+            with open_url(request, self.timeout) as resp:
+                return json.loads(resp.read())
+        except urllib.error.HTTPError as exc:
+            # llama.cpp explains 400s in the body ("exceeds the available
+            # context size..."). Swallowing it cost a debugging round; carry it.
+            detail = exc.read().decode("utf-8", "replace")[:300]
+            raise urllib.error.HTTPError(
+                exc.url, exc.code, f"{exc.reason}: {detail}", exc.headers, None)
 
     def complete(self, system: str, user: str) -> tuple[str, dict]:
         payload = {
@@ -885,6 +892,13 @@ class Thinker:
             if max_rounds is not None and done >= max_rounds:
                 break
             wait = self.interval * (1.0 + random.uniform(-self.jitter, self.jitter))
+            # A model that is still loading (503/unreachable) is not a reason
+            # to sleep a full interval: retry soon and keep the loop feeling
+            # alive (measured: every stack restart burned 4-5 minutes of
+            # silence per proposer on the first-round 503).
+            err = str(round_.error)
+            if "503" in err or "unreachable" in err:
+                wait = min(wait, 45.0)
             sleep(max(wait, 1.0))
 
     def _say(self, round_: Round) -> None:

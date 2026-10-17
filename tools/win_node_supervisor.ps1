@@ -45,7 +45,7 @@ $thinkArgs = @('-m', 'pando.thinkd', '--node-id', 'win-gpu-proposer',
   '--mailbox-fallback', 'http://127.0.0.1:8778',
   '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
   '--ledger', 'D:\pando-models\win-gpu-think-ledger.jsonl',
-  '--interval', '240', '--explore-every', '5', '--activity-every', '4')
+  '--interval', '120', '--explore-every', '5', '--activity-every', '4')
 # Yi-1.5-9B on CPU: a second, different-bloodline local model. It votes as a
 # fabric member and runs its own proposer so the win node initiates with two
 # independent minds, not one.
@@ -65,7 +65,8 @@ $yiThinkArgs = @('-m', 'pando.thinkd', '--node-id', 'win-cpu-proposer',
   '--mailbox-fallback', 'http://127.0.0.1:8778',
   '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
   '--ledger', 'D:\pando-models\win-cpu-think-ledger.jsonl',
-  '--interval', '300', '--explore-every', '5', '--activity-every', '4')
+  '--interval', '240', '--explore-every', '5', '--activity-every', '8',
+  '--history-window', '4')
 $observatoryArgs = @("$repo\tools\observatory.py", '--port', '8799')
 
 $names = @('llama-3070', 'stem-gemma', 'stem-laya', 'worker', 'win-mailbox',
