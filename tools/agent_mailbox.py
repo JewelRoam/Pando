@@ -85,6 +85,29 @@ def _prefer(current: dict | None, incoming: dict) -> dict:
     return current
 
 
+def replication_ids(source_rows: list, dest_rows: list) -> dict:
+    """Ids to send. Listings only carry status, so "behind" means status rank.
+
+    A longer history at the same status is not visible here. ``accept`` still
+    keeps that longer copy when a full record is posted.
+    """
+    dest = {}
+    for row in dest_rows or []:
+        if isinstance(row, dict) and row.get("id"):
+            dest[row["id"]] = row
+    missing, behind = [], []
+    for row in source_rows or []:
+        if not isinstance(row, dict) or not row.get("id"):
+            continue
+        current = dest.get(row["id"])
+        if current is None:
+            missing.append(row["id"])
+            continue
+        if _RANK.get(row.get("status"), -1) > _RANK.get(current.get("status"), -1):
+            behind.append(row["id"])
+    return {"missing": missing, "behind": behind}
+
+
 def now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S")
 
@@ -404,7 +427,7 @@ def client(args) -> int:
 
 
 def replicate(args) -> int:
-    """Copy tasks that the destination is missing or behind on.
+    """Copy tasks the destination is missing, or whose status is behind.
 
     Dry-run unless ``--write``. A destination that does not know ``/import``
     refuses the write; this does not fall back to creating new ids.
@@ -419,15 +442,14 @@ def replicate(args) -> int:
         print(json.dumps({"source": source, "dest": dest}, ensure_ascii=False),
               file=sys.stderr)
         return 1
-    have = {row["id"] for row in dest["tasks"]}
-    missing = [row["id"] for row in source["tasks"] if row["id"] not in have]
+    plan = replication_ids(source["tasks"], dest["tasks"])
     print(json.dumps({"source": len(source["tasks"]), "dest": len(dest["tasks"]),
-                      "missing": len(missing), "write": bool(args.write)},
-                     ensure_ascii=False))
+                      "missing": len(plan["missing"]), "behind": len(plan["behind"]),
+                      "write": bool(args.write)}, ensure_ascii=False))
     if not args.write:
         return 0
     wrote = 0
-    for task_id in missing:
+    for task_id in plan["missing"] + plan["behind"]:
         full = _request(args, "GET", f"/task/{task_id}")
         task = full.get("task") if isinstance(full, dict) else None
         if not isinstance(task, dict):

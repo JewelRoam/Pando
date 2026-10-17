@@ -2848,3 +2848,11 @@ class TestMailboxReplica(unittest.TestCase):
             self.assertIsNone(bad)
             self.assertFalse(wrote)
             self.assertIsNone(box.load("../x"))
+            plan = module.replication_ids(
+                [{"id": "new", "status": "done"},
+                 {"id": "old", "status": "done"},
+                 {"id": "mid", "status": "claimed"}],
+                [{"id": "old", "status": "open"},
+                 {"id": "mid", "status": "claimed"}])
+            self.assertEqual(plan["missing"], ["new"])
+            self.assertEqual(plan["behind"], ["old"])
