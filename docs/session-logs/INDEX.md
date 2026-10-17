@@ -124,3 +124,4 @@ Timestamped, sanitized snapshots of this PandoSI working session.
 | 2026-10-17T130003 | `docs/session-logs/2026-10-17T130003-session-backup.md` | c4a462095986 | 421/1803/3179 | automatic snapshot after 1941f4f chore: session backup 2026-10-17T123003 |
 | 2026-10-17T133002 | `docs/session-logs/2026-10-17T133002-session-backup.md` | fc567d4582b6 | 425/1806/3190 | automatic snapshot after e5944f4 security: unhardcode the Mac pairing token + go-public pre-flight checklist |
 | 2026-10-17T140002 | `docs/session-logs/2026-10-17T140002-session-backup.md` | 0d982fbfdfe4 | 427/1807/3194 | automatic snapshot after cadbff4 docs: name the session-backup mechanism in the go-public checklist |
+| 2026-10-17T143003 | `docs/session-logs/2026-10-17T143003-session-backup.md` | e2e3c9e994f2 | 433/1824/3245 | automatic snapshot after 9904dcc doctrine: GitHub is a code repository only - retire the endpoint plane |
