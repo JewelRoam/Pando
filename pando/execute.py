@@ -184,6 +184,13 @@ def next_seed_export(proposals: list[Proposal], reactions: list[dict],
     return None
 
 
+def write_status(path: Path, payload: dict) -> None:
+    """One file, replaced each run. The ledger stays append-only."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n",
+                    encoding="utf-8")
+
+
 def foreign_adopted_seeds(proposals: list[Proposal], reactions: list[dict],
                           done: set[str], signer: str) -> list[str]:
     """Adopted seed.export ids this host must not seal."""
@@ -248,8 +255,9 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
     if chosen is None:
         foreign = foreign_adopted_seeds(
             proposals, reactions, done_ids(ledger), signer)
-        print(json.dumps({"did": "idle", "foreign_seed_exports": foreign},
-                         ensure_ascii=False), flush=True)
+        payload = {"did": "idle", "foreign_seed_exports": foreign}
+        print(json.dumps(payload, ensure_ascii=False), flush=True)
+        write_status(ledger.with_name("execute-status.json"), payload)
         return 0
     home = Path("~/.pandosi/seed-home-empty").expanduser()
     home.mkdir(parents=True, exist_ok=True)
@@ -265,8 +273,10 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
             "executed": bool(ok),
             "sealed": bool(ok),
         }, sort_keys=True) + "\n")
-    print(json.dumps({"proposal_id": chosen.proposal_id, "executed": bool(ok)},
-                     sort_keys=True), flush=True)
+    payload = {"did": "executed", "proposal_id": chosen.proposal_id,
+               "executed": bool(ok)}
+    print(json.dumps(payload, sort_keys=True), flush=True)
+    write_status(ledger.with_name("execute-status.json"), payload)
     return 0 if ok else 1
 
 

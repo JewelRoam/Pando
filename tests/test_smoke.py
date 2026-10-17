@@ -2740,6 +2740,13 @@ class TestExecution(unittest.TestCase):
         self.assertEqual(
             foreign_adopted_seeds([foreign, local], reactions, set(), "local-key"),
             ["theirs"])
+        from pando.execute import write_status
+        with tempfile.TemporaryDirectory() as tmp:
+            status = Path(tmp) / "execute-status.json"
+            write_status(status, {"did": "idle", "foreign_seed_exports": ["theirs"]})
+            self.assertEqual(json.loads(status.read_text())["foreign_seed_exports"], ["theirs"])
+            write_status(status, {"did": "executed", "proposal_id": "ours"})
+            self.assertEqual(json.loads(status.read_text())["did"], "executed")
 
 
 class TestChat(unittest.TestCase):
