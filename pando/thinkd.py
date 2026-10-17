@@ -354,6 +354,26 @@ def proposal_from_obj(obj: dict, author: str, node_id: str,
     ), ""
 
 
+def mailbox_chain(primary: str, fallbacks=None) -> list[str]:
+    """Ordered, deduplicated list of mailboxes to try, first to last.
+
+    The same sentence the model failover rests on applies to the mailbox, and
+    nobody had applied it there: *"handing the thinker a single URL would make
+    its uptime a property of the operator's memory schedule rather than of the
+    citizen."* One mailbox on one host is one process away from every device
+    in the colony being unable to be heard - which is exactly the failure that
+    was measured (thinking moved off the Mac; being-heard did not).
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for url in [primary] + list(fallbacks or []):
+        url = (url or "").strip()
+        if url and url not in seen:
+            seen.add(url)
+            out.append(url)
+    return out
+
+
 class Spool:
     """Signed proposals that could not be delivered, kept until they can be.
 
@@ -473,13 +493,15 @@ class Thinker:
                  history_window: int = 8, dry_run: bool = False,
                  explore_every: int = 0, out=None, fetch_history=None,
                  publish=None, fetch_activity=None,
-                 activity_every: int = 4, spool: "Spool | None" = None):
+                 activity_every: int = 4, spool: "Spool | None" = None,
+                 mailbox_fallbacks=None):
         self.node_id = node_id
         self.spool = spool
         self.proposer = proposer
         self.identity = identity
         self.ledger = ledger
         self.mailbox_url = mailbox_url
+        self.mailboxes = mailbox_chain(mailbox_url, mailbox_fallbacks)
         self.token = token
         self.interval = float(interval)
         self.jitter = float(jitter)
@@ -541,16 +563,55 @@ class Thinker:
                         "title": title[:120]})
         return out
 
-    def _mailbox_get(self, path: str) -> dict:
+    def _get_from(self, url: str, path: str) -> dict:
         bypass_proxy_for_lan()
         headers = {}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         request = urllib.request.Request(
-            f"{self.mailbox_url.rstrip('/')}{path}", headers=headers, method="GET")
+            f"{url.rstrip('/')}{path}", headers=headers, method="GET")
         with opener.open(request, timeout=15) as resp:
             return json.loads(resp.read())
+
+    def _mailbox_get(self, path: str) -> dict:
+        """Read from the first mailbox in the chain that answers.
+
+        Raising the last error (rather than returning it as data) keeps the
+        callers that already treat "unreadable log" as a normal condition -
+        they catch, and the thinker proposes from its own memory this round.
+        """
+        last: Exception | None = None
+        for url in self.mailboxes:
+            try:
+                return self._get_from(url, path)
+            except Exception as exc:  # noqa: BLE001 - try the next mailbox
+                last = exc
+        raise last if last is not None else RuntimeError("no mailbox configured")
+
+    def _deliver(self, proposal: Proposal) -> dict:
+        """Offer one signed proposal to each mailbox until one hears it.
+
+        Returns the first answer that is not a *retryable* failure. A refusal
+        (4xx) is returned at once: the colony heard it and said no, and asking
+        the next mailbox the same question cannot change that. Only when every
+        mailbox is unreachable or 5xx does the caller hold the proposal - which
+        is the case the spool exists for.
+        """
+        last: dict = {"error": "unreachable: no mailbox configured"}
+        for url in self.mailboxes:
+            try:
+                result = self._publish(proposal, self.identity, url, self.token)
+            except Exception as exc:  # noqa: BLE001 - try the next mailbox
+                last = {"error": f"unreachable: {exc}"}
+                continue
+            if not isinstance(result, dict):
+                return {"raw": result}
+            if result.get("error") and delivery_failed(result):
+                last = result
+                continue
+            return result
+        return last
 
     def _fetch_group_history(self) -> list[dict]:
         """Other members' signed proposals, as the menu the group already has.
@@ -559,11 +620,20 @@ class Thinker:
         colony, it is talking to itself. Failures here are non-fatal on purpose:
         an unreadable log means we propose from our own memory this round.
         """
-        try:
-            proposals = fetch_proposals(self.mailbox_url, self.token,
+        # Try each mailbox; the first that returns anything wins. An empty
+        # list is ambiguous (up-but-quiet vs down) so it does not stop the
+        # walk - the cost of one extra read is paid only while the feed is
+        # empty, i.e. only when there is nothing to read anyway.
+        proposals: list = []
+        for url in self.mailboxes:
+            try:
+                found = fetch_proposals(url, self.token,
                                         max_items=self.history_window)
-        except Exception:  # noqa: BLE001 - transport must never end the loop
-            return []
+            except Exception:  # noqa: BLE001 - transport must never end the loop
+                continue
+            if found:
+                proposals = found
+                break
         out = []
         for item in proposals:
             out.append({
@@ -706,8 +776,7 @@ class Thinker:
             return round_
 
         try:
-            result = self._publish(proposal, self.identity, self.mailbox_url,
-                                   self.token)
+            result = self._deliver(proposal)
         except Exception as exc:  # noqa: BLE001 - transport never ends the loop
             round_.error = f"publish failed: {exc}"
             round_.detail = self._hold(proposal, round_.round_no)
@@ -763,8 +832,7 @@ class Thinker:
                 delivered.append(proposal.proposal_id)
                 continue
             try:
-                result = self._publish(proposal, self.identity,
-                                       self.mailbox_url, self.token)
+                result = self._deliver(proposal)
             except Exception as exc:  # noqa: BLE001 - the loop never ends here
                 print(f"spool: mailbox still away ({exc}); "
                       f"{len(pending) - len(delivered)} proposal(s) held",
@@ -856,7 +924,12 @@ def build_parser() -> argparse.ArgumentParser:
                         help="second endpoint, tried when the first is down")
     parser.add_argument("--fallback-model", default="")
     parser.add_argument("--fallback-api-key-file", default="")
-    parser.add_argument("--mailbox", required=True)
+    parser.add_argument("--mailbox", required=True,
+                        help="primary mailbox URL (proposals are published here)")
+    parser.add_argument("--mailbox-fallback", action="append", default=[],
+                        help="second mailbox, tried when the primary cannot be "
+                             "heard; repeatable. One mailbox on one host is one "
+                             "process away from nobody being able to be heard.")
     parser.add_argument("--token-file", default="")
     parser.add_argument("--identity", default="")
     parser.add_argument("--ledger", default="~/.pando/think-ledger.jsonl")
@@ -899,6 +972,7 @@ def main(argv: list[str] | None = None) -> int:
     thinker = Thinker(
         node_id=args.node_id, proposer=proposer, identity=identity,
         ledger=Ledger(args.ledger), mailbox_url=args.mailbox,
+        mailbox_fallbacks=args.mailbox_fallback,
         spool=Spool(args.spool or (str(args.ledger) + ".held")),
         token=_read_secret(args.token_file) or None,
         interval=args.interval, history_window=args.history_window,

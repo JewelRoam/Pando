@@ -2162,7 +2162,8 @@ class TestProposerSpool(unittest.TestCase):
     grow.
     """
 
-    def _thinker(self, answers, ledger_path, spool_path, published=None):
+    def _thinker(self, answers, ledger_path, spool_path, published=None,
+                 fallbacks=None):
         from pando.identity import Identity
         from pando.thinkd import Ledger, Spool, Thinker
 
@@ -2189,7 +2190,7 @@ class TestProposerSpool(unittest.TestCase):
             identity=Identity.generate(), ledger=Ledger(ledger_path),
             mailbox_url="http://invalid.example", interval=0, dry_run=False,
             fetch_history=lambda: [], fetch_activity=lambda: [],
-            spool=Spool(spool_path),
+            spool=Spool(spool_path), mailbox_fallbacks=fallbacks,
             publish=(publish if published is None else published)), sent
 
     def test_a_proposal_held_by_a_partition_is_delivered_when_it_ends(self):
@@ -2266,6 +2267,74 @@ class TestProposerSpool(unittest.TestCase):
             # A rejection is the mailbox doing its job; spooling it would mean
             # replaying the same "no" until the disk fills.
             self.assertEqual(thinker.spool.depth(), 0)
+
+    def test_mailbox_chain_is_ordered_and_deduplicated(self):
+        from pando.thinkd import mailbox_chain
+        self.assertEqual(mailbox_chain("a", ["b", "a", "  ", "c"]),
+                         ["a", "b", "c"])
+        self.assertEqual(mailbox_chain("a"), ["a"])
+        self.assertEqual(mailbox_chain(""), [])
+        self.assertEqual(mailbox_chain(" a ", [" a "]), ["a"])
+
+    def test_a_deaf_primary_falls_through_to_the_second_mailbox(self):
+        """One mailbox on one host is one process away from nobody being heard.
+
+        The model already had a failover chain; the mailbox did not, which is
+        why a partition could silence a proposer that was still thinking.
+        """
+        tried = []
+
+        def publish(proposal, identity, url, token):
+            tried.append(url)
+            if url == "http://invalid.example":
+                raise OSError("primary is gone")
+            return {"task": {"id": "t-x"}, "claimed": True}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            thinker, sent = self._thinker(
+                [{"action": "seed.export", "goal": "carry a seed"}],
+                Path(tmp) / "think.jsonl", Path(tmp) / "held.jsonl",
+                published=publish, fallbacks=["http://backup"])
+            round_ = thinker.think(1)
+
+            self.assertTrue(round_.published)
+            self.assertEqual(tried, ["http://invalid.example", "http://backup"])
+            self.assertEqual(thinker.spool.depth(), 0)
+
+    def test_a_refusal_is_not_re_asked_of_the_next_mailbox(self):
+        """A 4xx is an answer. Asking the next mailbox the same question is not."""
+        tried = []
+
+        def publish(proposal, identity, url, token):
+            tried.append(url)
+            return {"error": "HTTP 400", "detail": "not in the charter"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            thinker, _ = self._thinker(
+                [{"action": "seed.export", "goal": "carry a seed"}],
+                Path(tmp) / "think.jsonl", Path(tmp) / "held.jsonl",
+                published=publish, fallbacks=["http://backup"])
+            round_ = thinker.think(1)
+
+            self.assertFalse(round_.published)
+            self.assertIn("refused", round_.detail)
+            self.assertEqual(tried, ["http://invalid.example"])
+            self.assertEqual(thinker.spool.depth(), 0)
+
+    def test_every_mailbox_down_is_held_not_lost(self):
+        def publish(proposal, identity, url, token):
+            raise OSError(f"{url} is gone")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            thinker, _ = self._thinker(
+                [{"action": "seed.export", "goal": "carry a seed"}],
+                Path(tmp) / "think.jsonl", Path(tmp) / "held.jsonl",
+                published=publish, fallbacks=["http://backup", "http://third"])
+            round_ = thinker.think(1)
+
+            self.assertFalse(round_.published)
+            self.assertIn("spooled for replay", round_.detail)
+            self.assertEqual(thinker.spool.depth(), 1)
 
     def test_a_week_behind_a_partition_does_not_fill_a_4gb_device(self):
         from pando.thinkd import Proposal, Spool
