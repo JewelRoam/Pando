@@ -277,33 +277,43 @@ _REMOTE_CACHE: dict = {}
 
 
 def read_remote_jsonl_tail(target: str, path: str, limit: int = 3,
-                           ttl: float = 30.0) -> list:
-    """Tail a ledger on another member over ssh. Empty list means no answer.
+                           ttl: float = 30.0) -> tuple[list, str | None]:
+    """Tail a ledger over ssh. The error is kept; an empty list is not success.
 
     The page refreshes every 5 s, so a slow ssh must not be paid per poll:
     results are cached for `ttl` seconds and the call itself is bounded.
+    A launchd process on this Mac cannot open 192.168.31.0/24 (EHOSTUNREACH).
+    The error has to stay on the row, or the host looks like an empty person.
     """
     key = (target, path)
     hit = _REMOTE_CACHE.get(key)
     if hit and time.time() - hit[0] < ttl:
-        return hit[1]
+        return hit[1], hit[2]
+    err = None
+    out = ""
     try:
-        out = subprocess.run(
+        done = subprocess.run(
             ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3",
              "-o", "ServerAliveInterval=2", "-o", "ServerAliveCountMax=1",
              "-o", "StrictHostKeyChecking=accept-new", target,
              f"tail -n {max(1, int(limit))} {path}"],
-            capture_output=True, text=True, timeout=6).stdout
-    except (OSError, subprocess.SubprocessError, ValueError):
-        out = ""
+            capture_output=True, text=True, timeout=6)
+        out = done.stdout or ""
+        if done.returncode != 0 or not out.strip():
+            err = ((done.stderr or "").strip().replace("\n", " ")[:240]
+                   or f"ssh rc={done.returncode}")
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        err = str(exc)[:240]
     entries = []
     for line in out.splitlines():
         try:
             entries.append(json.loads(line))
         except json.JSONDecodeError:
             continue
-    _REMOTE_CACHE[key] = (time.time(), entries)
-    return entries
+    if entries:
+        err = None
+    _REMOTE_CACHE[key] = (time.time(), entries, err)
+    return entries, err
 
 
 def read_jsonl_tail(path: Path, limit: int) -> list:
@@ -438,6 +448,7 @@ def build_people(participants: list[dict], ledgers: list[dict],
             "served_by": last.get("served_by") or "",
             "alive": bool(ledger.get("alive")),
             "via": ledger.get("via") or "",
+            "error": ledger.get("error") or "",
         }
         if not row["lineage"]:
             row["lineage"] = row["activity"]["served_by"]
@@ -581,7 +592,7 @@ def present_people(rows: list[dict]) -> list[dict]:
             "host": _dash(row.get("host")),
             "model": _dash(model),
             "record": record,
-            "detail": str(activity.get("goal") or ""),
+            "detail": str(activity.get("error") or activity.get("goal") or ""),
             "mark": str(row.get("pubkey") or ""),
         })
     return presented
@@ -987,12 +998,15 @@ def collect_state(cfg: dict) -> dict:
         if not path:
             continue
         target = source.get("ssh")
-        entries = (read_remote_jsonl_tail(str(target), path, 3) if target
-                   else read_jsonl_tail(Path(path).expanduser(), 3))
+        if target:
+            entries, err = read_remote_jsonl_tail(str(target), path, 3)
+        else:
+            entries, err = read_jsonl_tail(Path(path).expanduser(), 3), None
         state["thinkd"].append({
             "host": name, "ledger": path, "rounds": len(entries),
             "via": f"ssh {target}" if target else "local file",
             "alive": bool(entries),
+            "error": err,
             "last": entries[-1] if entries else None,
         })
 
