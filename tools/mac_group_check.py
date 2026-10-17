@@ -20,13 +20,15 @@ What this verifies, in order:
      and a parent gate reading that number must decide what it means.
 
 Usage:
-    python tools/mac_group_check.py --yes [--rows 24]
+    PANDOSI_MAC_TOKEN=<mac pairing token> python tools/mac_group_check.py
+        --yes [--rows 24]
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import secrets
 import socket
 import statistics
@@ -41,7 +43,10 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
 
 MAC_ROOT = "http://192.168.31.41:8765"
-MAC_TOKEN = "0U1cirxOq35LaDUwH-tFocJV"
+# Never hardcode pairing tokens: the old literal is still in git history and
+# must be rotated (see docs/GO-PUBLIC-PLAN.md). Export PANDOSI_MAC_TOKEN or
+# pass --mac-token instead.
+MAC_TOKEN = os.environ.get("PANDOSI_MAC_TOKEN", "")
 SAMPLE = {"state": "the build failed and the tests are red",
           "question": "next", "candidates": ["fix", "ship", "ignore"]}
 
@@ -92,6 +97,9 @@ def main() -> int:
     args = parser.parse_args()
     if not args.yes:
         parser.error("this starts local root/stem/bridge processes")
+    if not args.mac_token:
+        parser.error("missing Mac pairing token: export PANDOSI_MAC_TOKEN "
+                     "or pass --mac-token")
 
     work = ROOT_DIR / "metrics" / "lan-check"
     work.mkdir(parents=True, exist_ok=True)
