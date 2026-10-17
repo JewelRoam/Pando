@@ -121,6 +121,10 @@ class Round:
     # round" is the difference between a loop that thinks and a loop that looks
     # like it thinks.
     served_by: str = ""
+    # "field" when the model filled destination. "sentence" when the only
+    # listed host name was in the goal or expected effect and the field was
+    # empty. Absent means there was nothing to record.
+    destination_source: str = ""
 
     def as_dict(self) -> dict:
         data = {
@@ -146,6 +150,8 @@ class Round:
         }
         if self.proposal and self.proposal.destination:
             data["destination"] = self.proposal.destination
+        if self.destination_source:
+            data["destination_source"] = self.destination_source
         return data
 
 
@@ -505,6 +511,20 @@ def delivery_failed(result) -> bool:
     if not err:
         return False
     return err.startswith("unreachable:") or err.startswith("HTTP 5")
+
+
+def named_host(text: str, names: list[str]) -> str:
+    """The one listed host written as its own token, or empty.
+
+    Two names, or a name glued inside a longer word, is not a destination.
+    """
+    found = []
+    for name in names:
+        if re.search(rf"(?<![A-Za-z0-9]){re.escape(name)}(?![A-Za-z0-9])", text or ""):
+            found.append(name)
+    if len(found) == 1:
+        return found[0]
+    return ""
 
 
 def destination_hint(names: list[str]) -> str:
@@ -872,13 +892,19 @@ class Thinker:
         if proposal is not None and self._destination_problem(proposal):
             repaired = self._ask_for_destination(user, round_no, round_, proposal)
             if repaired is None:
-                # Keep the rejected proposal on the round. A held replicate
-                # with a blank action cannot be counted later.
-                round_.proposal = proposal
-                round_.error = "seed.replicate needs a destination from the host list"
-                round_.detail = "held: " + round_.error
-                return round_
-            proposal = repaired
+                host = named_host(
+                    f"{proposal.goal} {proposal.expected_effect}", self.host_names)
+                if not host:
+                    round_.proposal = proposal
+                    round_.error = "seed.replicate needs a destination from the host list"
+                    round_.detail = "held: " + round_.error
+                    return round_
+                proposal.destination = host
+                round_.destination_source = "sentence"
+            else:
+                proposal = repaired
+                if proposal.action == "seed.replicate":
+                    round_.destination_source = "field"
 
         if proposal is None:
             round_.error = why

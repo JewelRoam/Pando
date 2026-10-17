@@ -2124,6 +2124,30 @@ class TestResidentThinker(unittest.TestCase):
             self.assertTrue(round_.published)
             self.assertEqual(sent[-1].destination, "")
 
+    def test_one_host_named_only_in_the_goal_is_labeled_as_such(self):
+        from pando.thinkd import named_host
+        self.assertEqual(named_host("在 win 主机上", ["mac", "win"]), "win")
+        self.assertEqual(named_host("在 mac 和 win 上", ["mac", "win"]), "")
+        self.assertEqual(named_host("window", ["win"]), "")
+        with tempfile.TemporaryDirectory() as tmp:
+            thinker, _proposer, sent = self._thinker(
+                [{"action": "seed.replicate", "goal": "在 win 主机上部署"},
+                 {"action": "seed.replicate", "goal": "仍是在 win 主机上"}],
+                Path(tmp) / "think.jsonl", host_names=["mac", "win"])
+            round_ = thinker.think(1)
+            self.assertTrue(round_.published)
+            self.assertEqual(sent[-1].destination, "win")
+            self.assertEqual(round_.destination_source, "sentence")
+            self.assertEqual(round_.as_dict()["destination_source"], "sentence")
+
+            thinker, _proposer, sent = self._thinker(
+                [{"action": "seed.replicate", "goal": "在 mac 和 win 上"},
+                 {"action": "seed.replicate", "goal": "还是 mac 和 win"}],
+                Path(tmp) / "think2.jsonl", host_names=["mac", "win"])
+            round_ = thinker.think(1)
+            self.assertFalse(round_.published)
+            self.assertEqual(sent, [])
+
 
 if __name__ == "__main__":
     unittest.main()
