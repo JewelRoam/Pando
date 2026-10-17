@@ -298,3 +298,18 @@ The Mac's full answer lives in mailbox task t-20261017-001001-f790. Load-bearing
   and see whether any reaction says 搁置/否决. If not, the reaction layer is decoration until
   its threshold/calibration is specified. Mac has been asked to track 搁置 separately in the
   observatory.
+
+## 2026-10-17 - First self-executed seed on win: signatures, not directory names
+
+- Mac refused to seal win's adopted `seed.export` proposal with its own key - "directory names
+  are not identities" - the right call. Win ran `pando.execute --once` with its own identity:
+  proposal win-gpu-proposer-r76 (adopt=2) sealed into ~/.pandosi/executions/<proposal_id>
+  (537 B, identity encrypted scrypt+xsalsa20-poly1305, passphrase local only), fingerprint
+  `fd35adecd922fc1e` - distinct from the Mac's `bd326f4f2da58311`. Execute ledger: sealed=true.
+- Dry-run honesty: 11/12 considered proposals were "adopted, not executed: no actuator" -
+  only `seed.export` has an actuator today; seed.replicate / policy.set and friends are adopted
+  and held. The execution layer is one action deep; the rest of the queue is still a stack of
+  intents, and saying otherwise would repeat the "deployed but did nothing" mistake.
+- The 6 packages previously written on the Mac under directories named pi5/win-gpu carry the
+  Mac's fingerprint (`bd326f...`): proof that directory naming cannot testify to identity -
+  only signatures can.
