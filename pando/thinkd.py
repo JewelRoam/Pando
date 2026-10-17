@@ -104,6 +104,10 @@ class Round:
     latency_ms: float = 0.0
     error: str = ""
     retried: bool = False
+    # A dropped model call was tried once more. This is not the novelty repair:
+    # that one is ``retried``. Mixing them made a reconnect look like the model
+    # had changed its mind.
+    call_retried: bool = False
     novelty_forced: bool = False
     # Did this round land on the same action as the one before it? Recorded even
     # when the goal was reworded, because "same verb, new sentence" is still the
@@ -133,6 +137,7 @@ class Round:
             "latency_ms": self.latency_ms,
             "error": self.error,
             "retried": self.retried,
+            "call_retried": self.call_retried,
             "novelty_forced": self.novelty_forced,
             "repeated": self.repeated,
             "served_by": self.served_by,
@@ -716,7 +721,7 @@ class Thinker:
                     # Measured on pi5: llama is OOM-killed and restarted.
                     # The first call dies with the process; the next one
                     # often lands on the new server. One retry, then hold.
-                    round_.retried = True
+                    round_.call_retried = True
                     self._pause(3.0)
                     continue
                 round_.latency_ms = (time.time() - t0) * 1000

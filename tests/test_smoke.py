@@ -1910,7 +1910,8 @@ class TestResidentThinker(unittest.TestCase):
             thinker.run_forever(max_rounds=1, sleep=lambda _s: None)
             row = thinker.ledger.tail(1)[0]
             self.assertEqual(row["action"], "seed.export")
-            self.assertTrue(row["retried"])
+            self.assertTrue(row["call_retried"])
+            self.assertFalse(row["retried"])
             self.assertFalse(row["error"])
             self.assertEqual(proposer.calls, 2)
             self.assertEqual(len(sent), 1)
