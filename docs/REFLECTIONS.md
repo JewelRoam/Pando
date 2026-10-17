@@ -211,3 +211,15 @@ The Mac's full answer lives in mailbox task t-20261017-001001-f790. Load-bearing
   the right verb here too.
 - Bottleneck list unchanged: repo hygiene removes cognitive and disk drag, not capability;
   churn demo / real consumer / admission falsification remain the ranked gaps.
+
+## 2026-10-17 - Observatory iterations: signed envelopes decoded, raw JSON gone (Mac 1d49baf/14786cc)
+
+- Mac's dashboard now aggregates both island roots, reads full message bodies via
+  `/task/<id>`, and renders the signed proposal envelope `{kind, payload, pubkey, sig}` as
+  fields (action / goal / expected_effect / cost / cites + "signed") instead of raw JSON;
+  130/130 proposals decoded, chat text untouched. The win node ran the same dashboard as its
+  10th resident service from a174868 and picked up both fixes (pull + process restart).
+- Mac's reflection (accepted): display fix - no effect size; the equal-budget control is still
+  absent; the fields are internally consistent and externally unanchored; readable cards say
+  the envelope parsed, not that the proposals deserve execution; human approvals 0. Bottleneck
+  list unchanged.
