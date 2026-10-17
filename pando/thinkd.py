@@ -892,7 +892,10 @@ class Thinker:
         if proposal is not None and self._destination_problem(proposal):
             repaired = self._ask_for_destination(user, round_no, round_, proposal)
             if repaired is None:
-                host = named_host(
+                # A repeat the model refused to change does not get a
+                # destination lifted out of the sentence. r207-r210 were all
+                # novelty_forced and still published as if they named a host.
+                host = "" if round_.novelty_forced else named_host(
                     f"{proposal.goal} {proposal.expected_effect}", self.host_names)
                 if not host:
                     prior_rows = self.ledger.tail(1)

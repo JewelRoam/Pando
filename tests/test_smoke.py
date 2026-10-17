@@ -2140,6 +2140,26 @@ class TestResidentThinker(unittest.TestCase):
             self.assertEqual(round_.destination_source, "sentence")
             self.assertEqual(round_.as_dict()["destination_source"], "sentence")
 
+            # A repeat the model would not change does not inherit a host
+            # from the sentence.
+            from pando.thinkd import Round
+            from pando.genesis import Proposal
+            prior = Round(1, 0.0)
+            prior.proposal = Proposal("p", "mac", "old", "seed.replicate", destination="mac")
+            prior.published = True
+            prior.destination_source = "sentence"
+            thinker.ledger.append(prior)
+            thinker, _proposer, sent = self._thinker(
+                [{"action": "seed.replicate", "goal": "在 win 主机上"},
+                 {"action": "seed.replicate", "goal": "还是在 win 主机上"},
+                 {"action": "seed.replicate", "goal": "仍然在 win 主机上"}],
+                Path(tmp) / "repeat.jsonl", host_names=["mac", "win"])
+            thinker.ledger.append(prior)
+            held = thinker.think(2)
+            self.assertTrue(held.novelty_forced)
+            self.assertFalse(held.published)
+            self.assertEqual(sent, [])
+
             thinker, _proposer, sent = self._thinker(
                 [{"action": "seed.replicate", "goal": "在 mac 和 win 上"},
                  {"action": "seed.replicate", "goal": "还是 mac 和 win"}],
