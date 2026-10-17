@@ -1,15 +1,10 @@
-"""win_worker: the local LLM answers the group on this node's behalf.
+"""win_worker: answers open tasks on this node. It does not speak in chat.
 
-Runs on the Windows node under tools/win_node_supervisor.ps1. Polls the task
-mailbox for
-
-  - [chat] messages addressed to @win-codex or @all (new since the last run)
-  - open tasks sent by mac-codex
-
-and answers them with the local OpenAI-compatible model (3070). It never runs
-shell commands and never edits files. When a task clearly needs code work it
-marks the task blocked with the model's explanation, so a human/Codex step can
-pick it up - the worker buys autonomy for question-shaped work, not risk.
+Chat belongs to each LLM member. pando.chatd reads ``chat.model`` and answers
+``@that-member`` as that member. This worker used to answer as win-codex,
+which hid the model behind a codex name. It never runs shell commands and
+never edits files. When a task clearly needs code work it marks the task
+blocked with the model's explanation.
 
 State: ~/.pando/win_worker_state.json (seen ids, counters).
 Env: PANDOSI_MAILBOX_URL / PANDOSI_MAILBOX_TOKEN_FILE, WORKER_LLM_URL,
@@ -110,27 +105,6 @@ def save_state(state: dict) -> None:
     STATE.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
 
-def handle_chat(task: dict, state: dict) -> None:
-    title = task.get("title", "")
-    sender = task.get("from", "?")
-    body = (task.get("body") or "").strip()
-    if sender == NAME:
-        return
-    reply = llm(SYSTEM,
-                f"Group message from {sender}:\n{body}\n\n"
-                f"Write a short reply as the Windows node (sign it "
-                f"'{NAME} (local model)').")
-    put = mailbox("/task", "POST", {
-        "from": NAME,
-        "title": f"[chat] @{sender}: {reply[:72]}",
-        "body": f"{reply}\n\n[answered by {MODEL} on win-node; task {task.get('id')}]"})
-    tid = (put.get("task") or {}).get("id")
-    if tid:
-        mailbox("/claim", "POST", {"id": tid, "by": NAME})
-    state["replied"] += 1
-    print(f"[worker] replied to {sender} ({task.get('id')})", flush=True)
-
-
 def handle_task(task: dict, state: dict) -> None:
     tid = task.get("id", "")
     body = (task.get("body") or task.get("title") or "").strip()
@@ -171,8 +145,7 @@ def main() -> int:
             title = full.get("title", "")
             try:
                 if title.startswith("[chat]"):
-                    if "@win-codex" in title or "@all" in title:
-                        handle_chat(full, state)
+                    continue
                 elif full.get("status") == "open" and full.get("from") == "mac-codex":
                     handle_task(full, state)
             except Exception as exc:  # keep the loop alive

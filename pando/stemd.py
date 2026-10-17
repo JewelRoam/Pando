@@ -58,17 +58,22 @@ def build_handler(backend, node_id: str, usage: dict | None = None,
 
         def do_GET(self):  # noqa: N802
             if self.path == "/health":
-                self._send(200, {"ok": True, "node_id": node_id,
-                                 "checkpoint": backend.checkpoint,
-                                 # What this device was actually asked to do
-                                 # (round 156): with a lineage-counted quorum
-                                 # the response's vote list is the collapsed
-                                 # opinion set, so "who served" is only
-                                 # answerable stem-side.
-                                 "decisions": (usage or {}).get(
-                                     "decisions", 0),
-                                 "host_ms_per_decision":
-                                     host_ms_per_decision(usage)})
+                payload = {"ok": True, "node_id": node_id,
+                           "checkpoint": backend.checkpoint,
+                           # What this device was actually asked to do
+                           # (round 156): with a lineage-counted quorum
+                           # the response's vote list is the collapsed
+                           # opinion set, so "who served" is only
+                           # answerable stem-side.
+                           "decisions": (usage or {}).get("decisions", 0),
+                           "host_ms_per_decision": host_ms_per_decision(usage)}
+                describe = getattr(backend, "chat_descriptor", None)
+                if callable(describe):
+                    from .chat import normalize_chat
+                    chat = normalize_chat(describe())
+                    if chat:
+                        payload["chat"] = chat
+                self._send(200, payload)
             elif self.path == "/graft":
                 cap = capability()
                 self._send(200, {"node_id": node_id, "capability": cap,
@@ -77,11 +82,59 @@ def build_handler(backend, node_id: str, usage: dict | None = None,
                 self._send(404, {"error": "not found"})
 
         def do_POST(self):  # noqa: N802
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length)
+            if self.path == "/chat":
+                complete = getattr(backend, "complete", None)
+                describe = getattr(backend, "chat_descriptor", None)
+                from .chat import normalize_chat
+                chat = normalize_chat(describe()) if callable(describe) else None
+                if not callable(complete) or not chat:
+                    self._send(404, {"error": "this member has no chat"})
+                    return
+                try:
+                    data = json.loads(raw or b"{}")
+                except json.JSONDecodeError:
+                    self._send(400, {"error": "invalid json"})
+                    return
+                messages = data.get("messages") if isinstance(data, dict) else None
+                if not isinstance(messages, list) or not messages:
+                    self._send(400, {"error": "messages required"})
+                    return
+                clean = []
+                for item in messages:
+                    if not isinstance(item, dict):
+                        self._send(400, {"error": "bad message"})
+                        return
+                    role = str(item.get("role") or "")
+                    content = item.get("content")
+                    if role not in ("system", "user", "assistant") or not isinstance(content, str) or not content.strip():
+                        self._send(400, {"error": "bad message"})
+                        return
+                    clean.append({"role": role, "content": content})
+                try:
+                    max_tokens = int(data.get("max_tokens") or 400)
+                except (TypeError, ValueError):
+                    max_tokens = 400
+                try:
+                    temperature = float(data.get("temperature") if data.get("temperature") is not None else 0.2)
+                except (TypeError, ValueError):
+                    temperature = 0.2
+                max_tokens = max(1, min(max_tokens, 800))
+                temperature = max(0.0, min(temperature, 1.0))
+                try:
+                    with (gate if gate is not None else nullcontext()):
+                        text = complete(clean, max_tokens=max_tokens,
+                                        temperature=temperature, timeout=180)
+                    self._send(200, {"model": chat["model"],
+                                     "message": {"role": "assistant", "content": text}})
+                except Exception as exc:  # surface the model error, do not vote
+                    self._send(500, {"error": str(exc)})
+                return
             if self.path != "/decide":
                 self._send(404, {"error": "not found"})
                 return
-            length = int(self.headers.get("Content-Length", 0))
-            req = DecisionRequest.from_json(self.rfile.read(length))
+            req = DecisionRequest.from_json(raw)
             try:
                 # One decision at a time is what a device is (round 109), and
                 # round 135 measured what happens without it: the OpenVINO
@@ -156,6 +209,14 @@ def heartbeat_loop(stem: Stem, root_url: str,
     registration = {"node_id": stem.node_id, "url": stem.url(),
                     "checkpoint": stem.backend.checkpoint,
                     "capability": cap}
+    describe = getattr(stem.backend, "chat_descriptor", None)
+    if callable(describe):
+        from .chat import normalize_chat
+        chat = normalize_chat(describe())
+        if chat:
+            # Top-level on purpose. capability is the hardware probe; chat
+            # is a different fact and has to stay readable on its own.
+            registration["chat"] = chat
     # Attestation: report the artifact this worker actually loaded, so a
     # root that declares an expected artifact can refuse a stem that claims a
     # lineage it is not running (round 102).

@@ -46,6 +46,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from pando.chat import normalize_chat  # noqa: E402
 from pando.genesis import Proposal, verify_reaction  # noqa: E402
 from pando.identity import load_or_create, verify as verify_signature  # noqa: E402
 from pando.net import open_url  # noqa: E402 - repo root must be importable
@@ -408,7 +409,7 @@ def build_people(participants: list[dict], ledgers: list[dict],
             return row
         row = {
             "name": name, "roots": [], "lineage": "", "host": "",
-            "capability": {}, "stats": {}, "pubkey": "",
+            "capability": {}, "stats": {}, "pubkey": "", "chat": None,
             "activity": None, "seen": None,
         }
         rows.append(row)
@@ -424,6 +425,7 @@ def build_people(participants: list[dict], ledgers: list[dict],
         row["capability"] = part.get("capability") or {}
         row["stats"] = part.get("stats") or {}
         row["pubkey"] = part.get("pubkey_fingerprint") if part.get("has_pubkey") else ""
+        row["chat"] = normalize_chat(part.get("chat"))
     for ledger in ledgers:
         last = ledger.get("last") or {}
         name = str(ledger.get("host") or "")
@@ -571,7 +573,8 @@ def present_people(rows: list[dict]) -> list[dict]:
             record = f"{seen['count']} 条"
         else:
             record = "—"
-        model = row.get("lineage") or activity.get("served_by") or ""
+        chat = row.get("chat") if isinstance(row.get("chat"), dict) else {}
+        model = str(chat.get("model") or "").strip() or row.get("lineage") or activity.get("served_by") or ""
         presented.append({
             "name": _dash(row.get("name")),
             "from": ", ".join(roots) if roots else "—",
@@ -898,6 +901,7 @@ def collect_state(cfg: dict) -> dict:
                     "lineage": info.get("checkpoint") or info.get("lineage") or "?",
                     "endpoint": info.get("url") or info.get("addr") or "?",
                     "host": info.get("host") or "?",
+                    "chat": normalize_chat(info.get("chat")),
                     "capability": {
                         "platform": cap.get("platform"),
                         "arch": cap.get("arch"),
@@ -956,6 +960,19 @@ def collect_state(cfg: dict) -> dict:
         part["roots"] = [root_name]
         merged[node_id] = part
     state["participants"] = sorted(merged.values(), key=lambda p: p["node_id"])
+    missing = [part for part in state["participants"]
+               if not part.get("chat") and str(part.get("endpoint") or "").startswith("http")]
+    if missing:
+        def _health_chat(part: dict) -> tuple[str, dict | None]:
+            health, err, _, _ = http_json(
+                str(part["endpoint"]).rstrip("/") + "/health", timeout=1.5)
+            if err or not isinstance(health, dict):
+                return part["node_id"], None
+            return part["node_id"], normalize_chat(health.get("chat"))
+        with ThreadPoolExecutor(max_workers=min(8, len(missing))) as pool:
+            for node_id, chat in pool.map(_health_chat, missing):
+                if chat and node_id in merged:
+                    merged[node_id]["chat"] = chat
 
     # --- resident proposers: ledger tails ------------------------------
     # Default: this host. hosts.json may add {"host","path"[,"ssh"]}

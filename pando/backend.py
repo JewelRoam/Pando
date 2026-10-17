@@ -364,6 +364,28 @@ class OpenAIChoiceBackend:
         return Vote(self.node_id, self.checkpoint, choice,
                     round(self.probability, 4), neutral=True)
 
+    def chat_descriptor(self) -> dict:
+        """What the node record stores. Presence of this is the chat grant."""
+        return {"model": self.model}
+
+    def complete(self, messages: list[dict], max_tokens: int = 400,
+                 temperature: float = 0.2, timeout: float | None = None) -> str:
+        """One chat completion. This is not a vote and carries no probability."""
+        payload = {
+            "model": self.model,
+            "messages": list(messages),
+            "temperature": float(temperature),
+            "max_tokens": int(max_tokens),
+            "stream": False,
+        }
+        response = self._transport(
+            self.base_url + "/chat/completions", payload, self.api_key,
+            self.timeout if timeout is None else float(timeout))
+        text = _openai_completion_text(response).strip()
+        if not text:
+            raise RuntimeError("model returned an empty message")
+        return text
+
 
 class _OVLazySession:
     """Duck-types ort.InferenceSession with OpenVINO.

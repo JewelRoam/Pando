@@ -2704,3 +2704,116 @@ class TestExecution(unittest.TestCase):
         self.assertEqual(next_seed_export([first, second], reactions, set()).proposal_id, "old")
         self.assertEqual(next_seed_export([first, second], reactions, {"old"}).proposal_id, "new")
         self.assertIsNone(next_seed_export([first, second], reactions, {"old", "new"}))
+
+
+class TestChat(unittest.TestCase):
+    def test_chat_is_a_member_field(self):
+        """An LLM speaks because its record has chat.model, not because of its name."""
+        from pando.chat import (next_reply, normalize_chat, should_answer,
+                                title_addressee)
+        from pando.chatd import local_chat_members
+
+        self.assertEqual(normalize_chat({"model": "qwen-test", "url": "http://x"}),
+                         {"model": "qwen-test"})
+        self.assertIsNone(normalize_chat({"model": ""}))
+        self.assertIsNone(normalize_chat("qwen-test"))
+        self.assertEqual(title_addressee("[chat] @mac-llm-8b-local: hi"),
+                         "mac-llm-8b-local")
+        self.assertIsNone(title_addressee("[chat] @@mac-llm-8b-local: hi"))
+        self.assertTrue(should_answer("mac-llm", "mac-codex", "all", set(), 0))
+        self.assertFalse(should_answer("mac-llm", "win-gemma", "all",
+                                       {"win-gemma"}, 0))
+        self.assertTrue(should_answer("mac-llm", "win-gemma", "mac-llm",
+                                      {"win-gemma"}, 1))
+        self.assertFalse(should_answer("mac-llm", "win-gemma", "mac-llm",
+                                       {"win-gemma"}, 2))
+        self.assertFalse(should_answer("mac-llm", "mac-llm", "mac-llm", set(), 0))
+
+        nodes = {
+            "mac-llm": {"url": "http://127.0.0.1:9", "host": "127.0.0.1",
+                        "checkpoint": "lineage-only"},
+            "win-gemma": {"url": "http://192.168.31.100:1", "host": "192.168.31.100",
+                          "chat": {"model": "gemma-test"}},
+            "mac-text": {"url": "http://127.0.0.1:8", "host": "127.0.0.1"},
+        }
+
+        def health_of(url):
+            if url.endswith(":9"):
+                return {"chat": {"model": "qwen-test"}}
+            return {}
+
+        members, known = local_chat_members(nodes, {"127.0.0.1"}, health_of)
+        self.assertEqual([item["node_id"] for item in members], ["mac-llm"])
+        self.assertEqual(members[0]["model"], "qwen-test")
+        self.assertEqual(known, {"mac-llm", "win-gemma"})
+        choice = next_reply(
+            members, known,
+            [{"id": "t1", "from": "mac-codex", "title": "[chat] @mac-llm: hi",
+              "body": "hi", "created_at": "1"}],
+            set(), {})
+        self.assertEqual(choice["member"]["node_id"], "mac-llm")
+        self.assertIsNone(next_reply(
+            members, known,
+            [{"id": "t2", "from": "mac-codex", "title": "[chat] @win-gemma: hi",
+              "body": "hi", "created_at": "1"}],
+            set(), {}))
+
+        seen = {}
+
+        def fake_transport(url, payload, api_key, timeout):
+            seen.update(payload=payload, timeout=timeout)
+            return {"choices": [{"message": {"content": "在。"}}]}
+
+        backend = OpenAIChoiceBackend(
+            "mac-llm", "http://127.0.0.1:9/v1", model="qwen-test",
+            transport=fake_transport)
+        self.assertEqual(backend.chat_descriptor(), {"model": "qwen-test"})
+        self.assertEqual(backend.complete(
+            [{"role": "user", "content": "hi"}], timeout=12), "在。")
+        self.assertEqual(seen["timeout"], 12)
+        self.assertEqual(seen["payload"]["max_tokens"], 400)
+
+        speaker = Stem("mac-llm", backend, host="127.0.0.1", port=0)
+        silent = Stem("mac-text", MockBackend("mac-text"), host="127.0.0.1", port=0)
+        root = Root()
+        speaker.start()
+        silent.start()
+        root.start()
+        try:
+            with urllib.request.urlopen(speaker.url() + "/health", timeout=2) as resp:
+                health = json.loads(resp.read())
+            self.assertEqual(health["chat"], {"model": "qwen-test"})
+            body = json.dumps({"messages": [{"role": "user", "content": "hi"}]}).encode()
+            request = urllib.request.Request(
+                speaker.url() + "/chat", data=body,
+                headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(request, timeout=2) as resp:
+                reply = json.loads(resp.read())
+            self.assertEqual(reply["message"]["content"], "在。")
+            self.assertEqual(reply["model"], "qwen-test")
+            denied = urllib.request.Request(
+                silent.url() + "/chat", data=body,
+                headers={"Content-Type": "application/json"})
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(denied, timeout=2)
+            self.assertEqual(caught.exception.code, 404)
+            caught.exception.close()
+
+            payload = json.dumps({
+                "node_id": "mac-llm", "url": speaker.url(),
+                "checkpoint": "mac-llm",
+                "chat": {"model": "qwen-test", "url": "http://should-drop"},
+            }).encode()
+            request = urllib.request.Request(
+                f"{root.url()}/register", data=payload,
+                headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(request, timeout=2) as resp:
+                self.assertTrue(json.loads(resp.read())["ok"])
+            with urllib.request.urlopen(f"{root.url()}/nodes", timeout=2) as resp:
+                nodes = json.loads(resp.read())["nodes"]
+            self.assertEqual(nodes["mac-llm"]["chat"], {"model": "qwen-test"})
+            self.assertNotIn("url", nodes["mac-llm"]["chat"])
+        finally:
+            speaker.stop()
+            silent.stop()
+            root.stop()

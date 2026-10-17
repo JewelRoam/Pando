@@ -21,6 +21,8 @@ from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
+from .chat import normalize_chat
+
 
 class _PandoHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
@@ -303,7 +305,8 @@ class Coordinator:
     # -- registry -------------------------------------------------------
     def register(self, node_id: str, url: str, checkpoint: str,
                  cap: dict | None = None,
-                 artifact_sha256: str | None = None) -> bool:
+                 artifact_sha256: str | None = None,
+                 chat: dict | None = None) -> bool:
         """Add or refresh a node. Returns False for a retired node."""
         with self._lock:
             if node_id in self.blocked:
@@ -320,7 +323,7 @@ class Coordinator:
                   flush=True)
         with self._lock:
             stats = self.nodes.get(node_id, {}).get("stats")
-            self.nodes[node_id] = {
+            record = {
                 "url": url,
                 # Which machine this member lives on. Two members of the same
                 # lineage on one host share its compute and add no
@@ -333,6 +336,10 @@ class Coordinator:
                 "last_seen": time.monotonic(),
                 "stats": stats or _empty_stem_stats(),
             }
+            kept = normalize_chat(chat)
+            if kept:
+                record["chat"] = kept
+            self.nodes[node_id] = record
         return True
 
     def retire(self, node_id: str, reason: str = "retired") -> bool:
@@ -1094,7 +1101,8 @@ def build_handler(coordinator: Coordinator, root=None):
                 if not coordinator.register(data["node_id"], data["url"],
                                             data["checkpoint"],
                                             data.get("capability"),
-                                            data.get("artifact_sha256")):
+                                            data.get("artifact_sha256"),
+                                            data.get("chat")):
                     self._send(403, {
                         "error": f"node {data['node_id']!r} was retired by "
                                  "this swarm",
