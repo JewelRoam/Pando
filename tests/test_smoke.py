@@ -2132,8 +2132,10 @@ class TestResidentThinker(unittest.TestCase):
         from pando.thinkd import Round, replicate_streak
         from pando.genesis import Proposal
         self.assertFalse(replicate_streak([{"action": "seed.replicate"}]))
-        self.assertTrue(replicate_streak([
+        self.assertFalse(replicate_streak([
             {"action": "seed.replicate"}, {"action": "seed.replicate"}]))
+        mixed = [{"action": "culture.refine"}] + [{"action": "seed.replicate"}] * 4
+        self.assertTrue(replicate_streak(mixed))
         with tempfile.TemporaryDirectory() as tmp:
             thinker, _proposer, sent = self._thinker(
                 [{"action": "seed.replicate", "goal": "在 win 主机上部署"},
@@ -2196,13 +2198,14 @@ class TestResidentThinker(unittest.TestCase):
             thinker, _, _ = self._thinker(
                 [{"action": "culture.refine", "goal": "x"}],
                 Path(tmp) / "think.jsonl")
-            for i in (1, 2):
+            for i in range(1, 5):
                 prior = Round(i, 0.0)
                 prior.proposal = Proposal(f"p{i}", "mac", "g", "seed.replicate")
                 prior.published = True
                 thinker.ledger.append(prior)
-            prompt = thinker._user_prompt(3, [])
+            prompt = thinker._user_prompt(5, [])
             self.assertIn("这一轮不要再选它", prompt)
+            self.assertIn("已经太多", prompt)
 
 
 if __name__ == "__main__":

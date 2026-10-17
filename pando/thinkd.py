@@ -513,11 +513,16 @@ def delivery_failed(result) -> bool:
     return err.startswith("unreachable:") or err.startswith("HTTP 5")
 
 
-def replicate_streak(rows: list[dict], n: int = 2) -> bool:
-    """True when the last n recorded actions are all seed.replicate."""
-    if len(rows) < n:
+def replicate_streak(rows: list[dict], window: int = 6, need: int = 4) -> bool:
+    """True when seed.replicate already dominates the recent ledger.
+
+    Two in a row was not enough: one other action cleared the ban and the
+    next round went straight back. r207-r218 were 11 of 12.
+    """
+    recent = rows[-window:]
+    if len(recent) < need:
         return False
-    return all(rows[-i].get("action") == "seed.replicate" for i in range(1, n + 1))
+    return sum(1 for row in recent if row.get("action") == "seed.replicate") >= need
 
 
 def named_host(text: str, names: list[str]) -> str:
@@ -808,7 +813,7 @@ class Thinker:
                              "写不出来就换一个动作。")
         if replicate_streak(own):
             lines.append("")
-            lines.append("最近两轮都是 seed.replicate。这一轮不要再选它。")
+            lines.append("最近的提案里 seed.replicate 已经太多。这一轮不要再选它。")
         if self.host_names:
             lines.append("")
             lines.append("【可以写进 destination 的主机】")
