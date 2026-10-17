@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import sys
 import time
@@ -353,6 +354,116 @@ def proposal_from_obj(obj: dict, author: str, node_id: str,
     ), ""
 
 
+class Spool:
+    """Signed proposals that could not be delivered, kept until they can be.
+
+    The colony's mailbox lives on exactly one host (see CIVILIZATION-NOTES:
+    "we moved the thinking off the Mac, but not the being-heard"). While that
+    host is away a proposer on another device keeps thinking - and, without
+    this, keeps thinking *into the void*: the round is recorded as "held" and
+    the signed proposal is gone. A signed proposal is the one artifact worth
+    carrying across a partition, so it is written here and re-delivered the
+    moment the mailbox answers again.
+
+    Deliberately a flat file of JSON lines, deduplicated by ``proposal_id``
+    and capped: a proposer that sits behind a partition for a week must not
+    fill a 4 GB device's disk with undeliverable optimism.
+    """
+
+    def __init__(self, path: str | Path, cap: int = 500):
+        self.path = Path(path)
+        self.cap = int(cap)
+
+    def _read(self) -> list[dict]:
+        try:
+            text = self.path.read_text(encoding="utf-8")
+        except OSError:
+            return []
+        rows: list[dict] = []
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(obj, dict) and obj.get("proposal_id"):
+                rows.append(obj)
+        return rows
+
+    def _write(self, rows: list[dict]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_name(self.path.name + ".tmp")
+        tmp.write_text(
+            "".join(json.dumps(r, sort_keys=True, ensure_ascii=False) + "\n"
+                    for r in rows),
+            encoding="utf-8")
+        os.replace(tmp, self.path)
+
+    def add(self, proposal: Proposal, held_round: int) -> None:
+        rows = [r for r in self._read()
+                if r.get("proposal_id") != proposal.proposal_id]
+        rows.append({
+            "proposal_id": proposal.proposal_id,
+            "author": proposal.author,
+            "goal": proposal.goal,
+            "action": proposal.action,
+            "expected_effect": proposal.expected_effect,
+            "cost": float(getattr(proposal, "cost", 0.0) or 0.0),
+            "cites": list(getattr(proposal, "cites", []) or []),
+            "held_round": int(held_round),
+            "held_at": time.time(),
+        })
+        self._write(rows[-self.cap:])
+
+    def pending(self) -> list[dict]:
+        return self._read()
+
+    def depth(self) -> int:
+        return len(self._read())
+
+    def drop(self, proposal_ids) -> None:
+        gone = set(proposal_ids)
+        self._write([r for r in self._read()
+                     if r.get("proposal_id") not in gone])
+
+
+def delivery_failed(result) -> bool:
+    """Was the proposal *undelivered* (retryable) or *refused* (final)?
+
+    Get this wrong and the spool is worse than useless. ``proposal_mail._request``
+    reports transport problems as data, not exceptions - a dead host comes back
+    as ``{"error": "unreachable: ..."}`` and a broken mailbox as ``{"error":
+    "HTTP 5xx"}``. Both mean "nobody heard it", so both must be spooled. A 4xx
+    is the mailbox doing its job; spooling that would replay the same rejection
+    until the disk filled. (This distinction was caught by an end-to-end run
+    against a dead port, not by reading the code: the first version spooled only
+    on exceptions and would therefore have never spooled the real case.)
+    """
+    if not isinstance(result, dict):
+        return True
+    err = str(result.get("error") or "")
+    if not err:
+        return False
+    return err.startswith("unreachable:") or err.startswith("HTTP 5")
+
+
+def proposal_from_spool(row: dict) -> Proposal:
+    """Rebuild a held proposal. The signature is recomputed, so a spool file
+    that was edited by hand produces a payload the mailbox will reject - which
+    is the correct outcome, not a reason to keep it forever."""
+    return Proposal(
+        proposal_id=str(row.get("proposal_id") or ""),
+        author=str(row.get("author") or ""),
+        goal=str(row.get("goal") or ""),
+        action=str(row.get("action") or ""),
+        expected_effect=str(row.get("expected_effect") or ""),
+        cost=float(row.get("cost") or 0.0),
+        cites=list(row.get("cites") or []),
+    )
+
+
 class Thinker:
     """The loop itself: never stops, never dies, always writes down what it did."""
 
@@ -362,8 +473,9 @@ class Thinker:
                  history_window: int = 8, dry_run: bool = False,
                  explore_every: int = 0, out=None, fetch_history=None,
                  publish=None, fetch_activity=None,
-                 activity_every: int = 4):
+                 activity_every: int = 4, spool: "Spool | None" = None):
         self.node_id = node_id
+        self.spool = spool
         self.proposer = proposer
         self.identity = identity
         self.ledger = ledger
@@ -598,12 +710,19 @@ class Thinker:
                                    self.token)
         except Exception as exc:  # noqa: BLE001 - transport never ends the loop
             round_.error = f"publish failed: {exc}"
-            round_.detail = "held: could not reach the mailbox"
+            round_.detail = self._hold(proposal, round_.round_no)
             return round_
 
         if isinstance(result, dict) and result.get("error"):
-            round_.error = f"publish rejected: {result.get('error')}"
-            round_.detail = "held: mailbox refused the proposal"
+            if delivery_failed(result):
+                # Unreachable or 5xx: nobody heard it. Keep the thought.
+                round_.error = f"publish failed: {result.get('error')}"
+                round_.detail = self._hold(proposal, round_.round_no)
+            else:
+                # Refused: the mailbox heard it and said no. Spooling that
+                # would just replay a rejection until the disk filled.
+                round_.error = f"publish rejected: {result.get('error')}"
+                round_.detail = "held: mailbox refused the proposal"
             return round_
 
         round_.published = True
@@ -614,11 +733,82 @@ class Thinker:
                          f"published but claim did not take: {warning}")
         return round_
 
+    def _hold(self, proposal: Proposal, held_round: int) -> str:
+        """Write an undeliverable proposal down instead of losing it."""
+        if self.spool is None:
+            return "held: could not reach the mailbox"
+        try:
+            self.spool.add(proposal, held_round)
+        except OSError as exc:  # a full disk must not stop thought either
+            print(f"spool write failed: {exc}", file=sys.stderr)
+            return "held: could not reach the mailbox"
+        return (f"held: could not reach the mailbox; spooled for replay "
+                f"({self.spool.depth()} waiting)")
+
+    def flush_spool(self, limit: int = 20) -> tuple[int, int]:
+        """Re-deliver held proposals. Returns (delivered, still pending).
+
+        Stops at the first transport failure: if the mailbox is still away,
+        retrying twenty times just burns the device that is trying to keep
+        thinking. A *refused* proposal is dropped - the mailbox heard it.
+        """
+        if self.spool is None:
+            return 0, 0
+        delivered: list[str] = []
+        pending = self.spool.pending()
+        for row in pending[:limit]:
+            proposal = proposal_from_spool(row)
+            if not proposal.action or not proposal.proposal_id:
+                # Unreadable row: drop it rather than loop on it forever.
+                delivered.append(proposal.proposal_id)
+                continue
+            try:
+                result = self._publish(proposal, self.identity,
+                                       self.mailbox_url, self.token)
+            except Exception as exc:  # noqa: BLE001 - the loop never ends here
+                print(f"spool: mailbox still away ({exc}); "
+                      f"{len(pending) - len(delivered)} proposal(s) held",
+                      file=self._out, flush=True)
+                break
+            if isinstance(result, dict) and result.get("error"):
+                if delivery_failed(result):
+                    print(f"spool: mailbox still away ({result.get('error')}); "
+                          f"{len(pending) - len(delivered)} proposal(s) held",
+                          file=self._out, flush=True)
+                    break
+                print(f"spool: {proposal.proposal_id} refused "
+                      f"({result.get('error')}); dropping", file=self._out,
+                      flush=True)
+                delivered.append(proposal.proposal_id)
+                continue
+            delivered.append(proposal.proposal_id)
+            print(f"spool: delivered {proposal.proposal_id} "
+                  f"(held since round r{row.get('held_round')})",
+                  file=self._out, flush=True)
+        if delivered:
+            try:
+                self.spool.drop(delivered)
+            except OSError as exc:
+                print(f"spool drop failed: {exc}", file=sys.stderr)
+        return len(delivered), self.spool.depth()
+
     # -- forever ---------------------------------------------------------
     def run_forever(self, max_rounds: int | None = None,
                     sleep=time.sleep) -> None:
+        # Round numbering continues the ledger (a resumed proposer does not
+        # restart its history at r1). ``max_rounds`` counts rounds *this*
+        # process runs, not an absolute index -- otherwise a bounded run
+        # against an already-long ledger executes zero rounds and exits 0,
+        # which is a test that cannot fail and therefore proves nothing.
         round_no = len(self.ledger.tail(100_000)) + 1
-        while max_rounds is None or round_no <= max_rounds:
+        done = 0
+        while max_rounds is None or done < max_rounds:
+            # Before asking for a new thought, try to deliver the old ones.
+            # A partition is not a reason to lose the thoughts it interrupted.
+            try:
+                self.flush_spool()
+            except Exception as exc:  # noqa: BLE001 - never ends the loop
+                print(f"spool flush failed: {exc}", file=sys.stderr)
             round_ = self.think(round_no)
             self.rounds.append(round_)
             try:
@@ -627,7 +817,8 @@ class Thinker:
                 print(f"ledger append failed: {exc}", file=sys.stderr)
             self._say(round_)
             round_no += 1
-            if max_rounds is not None and round_no > max_rounds:
+            done += 1
+            if max_rounds is not None and done >= max_rounds:
                 break
             wait = self.interval * (1.0 + random.uniform(-self.jitter, self.jitter))
             sleep(max(wait, 1.0))
@@ -669,6 +860,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--token-file", default="")
     parser.add_argument("--identity", default="")
     parser.add_argument("--ledger", default="~/.pando/think-ledger.jsonl")
+    parser.add_argument("--spool", default="",
+                        help="where undeliverable proposals wait for the "
+                             "mailbox to come back (default: <ledger>.held)")
     parser.add_argument("--interval", type=float, default=120.0,
                         help="seconds between rounds (jittered by +-15%%)")
     parser.add_argument("--max-tokens", type=int, default=400)
@@ -705,6 +899,7 @@ def main(argv: list[str] | None = None) -> int:
     thinker = Thinker(
         node_id=args.node_id, proposer=proposer, identity=identity,
         ledger=Ledger(args.ledger), mailbox_url=args.mailbox,
+        spool=Spool(args.spool or (str(args.ledger) + ".held")),
         token=_read_secret(args.token_file) or None,
         interval=args.interval, history_window=args.history_window,
         dry_run=args.dry_run, explore_every=args.explore_every,

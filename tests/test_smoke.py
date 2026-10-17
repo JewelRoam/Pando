@@ -2147,3 +2147,191 @@ class TestThinkStats(unittest.TestCase):
         self.assertEqual(s["n"], 0)
         self.assertEqual(s["rounds_per_hour"], 0.0)
         self.assertIn("empty ledger", ts.format_report("x", s))
+
+
+class TestProposerSpool(unittest.TestCase):
+    """pando.thinkd.Spool - thought that survives a partition.
+
+    The hole this closes was found by reading, not by a crash: the colony's
+    mailbox lives on one host, and every proposer on every other device points
+    at it. While that host is away those proposers keep *thinking* (the loop
+    never stops) but the signed proposal was simply gone - the ledger said
+    "held" and nothing was ever re-delivered. Thinking into the void is a
+    quieter failure than stopping, and it is the one the survival rule cares
+    about: a device that is alive but cannot be heard does not let the group
+    grow.
+    """
+
+    def _thinker(self, answers, ledger_path, spool_path, published=None):
+        from pando.identity import Identity
+        from pando.thinkd import Ledger, Spool, Thinker
+
+        class ScriptedProposer:
+            def __init__(self, script):
+                self.script = list(script)
+                self.calls = 0
+
+            def complete(self, system, user):
+                self.calls += 1
+                item = self.script.pop(0) if self.script else {"action": ""}
+                if isinstance(item, Exception):
+                    raise item
+                return json.dumps(item, ensure_ascii=False), {"completion_tokens": 7}
+
+        sent = []
+
+        def publish(proposal, identity, url, token):
+            sent.append(proposal)
+            return {"task": {"id": "t-x"}, "claimed": True}
+
+        return Thinker(
+            node_id="test-node", proposer=ScriptedProposer(answers),
+            identity=Identity.generate(), ledger=Ledger(ledger_path),
+            mailbox_url="http://invalid.example", interval=0, dry_run=False,
+            fetch_history=lambda: [], fetch_activity=lambda: [],
+            spool=Spool(spool_path),
+            publish=(publish if published is None else published)), sent
+
+    def test_a_proposal_held_by_a_partition_is_delivered_when_it_ends(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spool_path = Path(tmp) / "held.jsonl"
+            state = {"up": False}
+            sent = []
+
+            def publish(proposal, identity, url, token):
+                if not state["up"]:
+                    raise OSError("mailbox down")
+                sent.append(proposal)
+                return {"task": {"id": "t-x"}, "claimed": True}
+
+            thinker, _ = self._thinker(
+                [{"action": "seed.export", "goal": "carry a seed"},
+                 {"action": "recruit.invite", "goal": "invite a member"},
+                 {"action": "culture.refine", "goal": "refine culture"}],
+                Path(tmp) / "think.jsonl", spool_path, published=publish)
+
+            # The Mac is off. The proposer keeps thinking; nothing is delivered.
+            for round_no in (1, 2, 3):
+                round_ = thinker.think(round_no)
+                self.assertFalse(round_.published)
+                self.assertIn("spooled for replay", round_.detail)
+            self.assertEqual(thinker.spool.depth(), 3)
+
+            # The Mac comes back. The held thoughts are not silently dropped.
+            state["up"] = True
+            delivered, remaining = thinker.flush_spool()
+            self.assertEqual(delivered, 3)
+            self.assertEqual(remaining, 0)
+            self.assertEqual([p.action for p in sent][-3:],
+                             ["seed.export", "recruit.invite", "culture.refine"])
+
+    def test_a_dead_mailbox_is_spooled_not_mistaken_for_a_refusal(self):
+        """The exact shape a real partition arrives in.
+
+        proposal_mail reports a dead host as data - {"error": "unreachable: ..."}
+        - not as an exception. The first version of the spool only caught
+        exceptions, so it would never have fired in the one scenario it exists
+        for. Caught by running thinkd against a dead port, not by reading.
+        """
+        def publish(proposal, identity, url, token):
+            return {"error": "unreachable: <urlopen error [Errno 61] refused>"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            thinker, _ = self._thinker(
+                [{"action": "seed.export", "goal": "carry a seed"}],
+                Path(tmp) / "think.jsonl", Path(tmp) / "held.jsonl",
+                published=publish)
+            round_ = thinker.think(1)
+            self.assertIn("spooled for replay", round_.detail)
+            self.assertEqual(thinker.spool.depth(), 1)
+            # A 5xx is the same thing: the mailbox is up but nobody heard it.
+            self.assertTrue(__import__("pando.thinkd", fromlist=["x"]).delivery_failed(
+                {"error": "HTTP 502"}))
+            self.assertFalse(__import__("pando.thinkd", fromlist=["x"]).delivery_failed(
+                {"error": "HTTP 403"}))
+
+    def test_a_refusal_is_dropped_not_replayed_forever(self):
+        """Being heard and told "no" is not the same as not being heard."""
+        def publish(proposal, identity, url, token):
+            return {"error": "HTTP 400", "detail": "action not in the charter"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            thinker, _ = self._thinker(
+                [{"action": "seed.export", "goal": "carry a seed"}],
+                Path(tmp) / "think.jsonl", Path(tmp) / "held.jsonl",
+                published=publish)
+            round_ = thinker.think(1)
+            self.assertIn("held", round_.detail)
+            self.assertIn("rejected", round_.error)
+            # A rejection is the mailbox doing its job; spooling it would mean
+            # replaying the same "no" until the disk fills.
+            self.assertEqual(thinker.spool.depth(), 0)
+
+    def test_a_week_behind_a_partition_does_not_fill_a_4gb_device(self):
+        from pando.thinkd import Proposal, Spool
+        with tempfile.TemporaryDirectory() as tmp:
+            spool = Spool(Path(tmp) / "held.jsonl", cap=5)
+            for i in range(40):
+                spool.add(Proposal(proposal_id=f"p-r{i}", author="a",
+                                   goal=f"g{i}", action="seed.export"), i)
+            self.assertEqual(spool.depth(), 5)
+            # The newest are kept, the oldest are the ones that overflow.
+            kept = [r["proposal_id"] for r in spool.pending()]
+            self.assertEqual(kept, [f"p-r{i}" for i in range(35, 40)])
+
+    def test_flush_stops_at_the_first_transport_failure(self):
+        """If the mailbox is still away, do not hammer it twenty times."""
+        calls = {"n": 0}
+
+        def publish(proposal, identity, url, token):
+            calls["n"] += 1
+            raise OSError("still down")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spool_path = Path(tmp) / "held.jsonl"
+            thinker, _ = self._thinker(
+                [{"action": "seed.export", "goal": "g1"},
+                 {"action": "recruit.invite", "goal": "g2"}],
+                Path(tmp) / "think.jsonl", spool_path, published=publish)
+            thinker.think(1)
+            thinker.think(2)
+            self.assertEqual(thinker.spool.depth(), 2)
+
+            calls["n"] = 0
+            delivered, remaining = thinker.flush_spool()
+            self.assertEqual(delivered, 0)
+            self.assertEqual(remaining, 2)   # nothing forgotten
+            self.assertEqual(calls["n"], 1)  # tried once, then stopped
+
+    def test_a_bounded_run_against_a_used_ledger_still_runs(self):
+        """`max_rounds` counts rounds *this* process runs, not an absolute index.
+
+        Found by an end-to-end replay, not by reading. Phase 2 existed to prove
+        that a partition's held proposals get re-delivered once the mailbox is
+        back, and it was invoked with `--max-rounds 1` against a ledger that
+        already held 2 rows. The old loop compared ``3 <= 1`` and executed
+        nothing: it printed the banner, exited 0, and looked like a passing
+        test. A check that cannot fail is worse than no check, because it buys
+        confidence it has not earned.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Path(tmp) / "think.jsonl"
+            thinker, _ = self._thinker(
+                [{"action": "seed.export", "goal": "g1"},
+                 {"action": "seed.export", "goal": "g2"},
+                 {"action": "recruit.invite", "goal": "g3"}],
+                ledger, Path(tmp) / "held.jsonl")
+
+            # Two rounds from a previous life are already on the ledger.
+            thinker.ledger.append(thinker.think(1))
+            thinker.ledger.append(thinker.think(2))
+            self.assertEqual(len(thinker.ledger.tail(10)), 2)
+
+            thinker.rounds.clear()
+            thinker.run_forever(max_rounds=1, sleep=lambda _s: None)
+
+            # One *new* round ran, and the numbering continued from the ledger.
+            self.assertEqual(len(thinker.rounds), 1)
+            rows = thinker.ledger.tail(10)
+            self.assertEqual(len(rows), 3)
+            self.assertEqual([r["round"] for r in rows], [1, 2, 3])
