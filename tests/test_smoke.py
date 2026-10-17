@@ -2207,6 +2207,25 @@ class TestResidentThinker(unittest.TestCase):
             self.assertIn("这一轮不要再选它", prompt)
             self.assertIn("已经太多", prompt)
 
+    def test_a_destination_retry_cannot_walk_back_onto_the_action_just_left(self):
+        from pando.genesis import Proposal
+        from pando.thinkd import Round
+        with tempfile.TemporaryDirectory() as tmp:
+            thinker, _proposer, sent = self._thinker(
+                [{"action": "culture.refine", "goal": "again"},
+                 {"action": "seed.replicate", "goal": "carry"},
+                 {"action": "culture.refine", "goal": "back again"}],
+                Path(tmp) / "think.jsonl", host_names=["mac", "win"])
+            prior = Round(1, 0.0)
+            prior.proposal = Proposal("p0", "mac", "old", "culture.refine")
+            prior.published = True
+            thinker.ledger.append(prior)
+            round_ = thinker.think(2)
+            self.assertTrue(round_.retried)
+            self.assertFalse(round_.published)
+            self.assertEqual(round_.proposal.action, "seed.replicate")
+            self.assertEqual(sent, [])
+
 
 if __name__ == "__main__":
     unittest.main()

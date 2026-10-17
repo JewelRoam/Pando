@@ -906,6 +906,11 @@ class Thinker:
 
         if proposal is not None and self._destination_problem(proposal):
             repaired = self._ask_for_destination(user, round_no, round_, proposal)
+            # r221: novelty had moved off culture.refine onto seed.replicate,
+            # then the destination retry walked back onto culture.refine and
+            # was published as if the switch had stuck.
+            if repaired is not None and last_action and repaired.action == last_action:
+                repaired = None
             if repaired is None:
                 # A repeat the model refused to change does not get a
                 # destination lifted out of the sentence. r207-r210 were all
