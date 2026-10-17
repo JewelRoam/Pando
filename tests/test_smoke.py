@@ -2073,6 +2073,24 @@ class TestResidentThinker(unittest.TestCase):
             self.assertIsNotNone(round_.proposal)  # thought happened, delivery did not
 
 
+    def test_a_destination_is_kept_on_the_round_and_in_the_spool(self):
+        from pando.genesis import Proposal
+        from pando.thinkd import Round, Spool, destination_hint, proposal_from_spool
+        bare = Round(1, 0.0)
+        self.assertNotIn("destination", bare.as_dict())
+        bare.proposal = Proposal("p", "mac", "carry", "seed.replicate", destination="win")
+        self.assertEqual(bare.as_dict()["destination"], "win")
+        self.assertEqual(
+            destination_hint(["mac", "win"]),
+            "seed.replicate 的 destination 只能是这些名字之一，不知道就不要这个字段：mac, win")
+        with tempfile.TemporaryDirectory() as tmp:
+            spool = Spool(Path(tmp) / "held.jsonl")
+            spool.add(bare.proposal, 4)
+            restored = proposal_from_spool(spool.pending()[0])
+            self.assertEqual(restored.destination, "win")
+            self.assertEqual(restored.action, "seed.replicate")
+
+
 if __name__ == "__main__":
     unittest.main()
 

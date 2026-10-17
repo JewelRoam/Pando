@@ -144,6 +144,8 @@ class Round:
             "repeated": self.repeated,
             "served_by": self.served_by,
         }
+        if self.proposal and self.proposal.destination:
+            data["destination"] = self.proposal.destination
         return data
 
 
@@ -467,6 +469,7 @@ class Spool:
             "expected_effect": proposal.expected_effect,
             "cost": float(getattr(proposal, "cost", 0.0) or 0.0),
             "cites": list(getattr(proposal, "cites", []) or []),
+            "destination": str(getattr(proposal, "destination", "") or ""),
             "held_round": int(held_round),
             "held_at": time.time(),
         })
@@ -504,6 +507,23 @@ def delivery_failed(result) -> bool:
     return err.startswith("unreachable:") or err.startswith("HTTP 5")
 
 
+def destination_hint(names: list[str]) -> str:
+    """Names only. The URLs stay in hosts.json."""
+    shown = ", ".join(names)
+    return ("seed.replicate 的 destination 只能是这些名字之一，"
+            f"不知道就不要这个字段：{shown}")
+
+
+def host_names_from(path: Path) -> list[str]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    from .execute import known_hosts
+    found = known_hosts(data) or {}
+    return sorted(found)
+
+
 def proposal_from_spool(row: dict) -> Proposal:
     """Rebuild a held proposal. The signature is recomputed, so a spool file
     that was edited by hand produces a payload the mailbox will reject - which
@@ -516,6 +536,7 @@ def proposal_from_spool(row: dict) -> Proposal:
         expected_effect=str(row.get("expected_effect") or ""),
         cost=float(row.get("cost") or 0.0),
         cites=list(row.get("cites") or []),
+        destination=str(row.get("destination") or ""),
     )
 
 
@@ -529,7 +550,7 @@ class Thinker:
                  explore_every: int = 0, out=None, fetch_history=None,
                  publish=None, fetch_activity=None,
                  activity_every: int = 4, spool: "Spool | None" = None,
-                 mailbox_fallbacks=None, pause=None):
+                 mailbox_fallbacks=None, pause=None, host_names=None):
         self.node_id = node_id
         self.spool = spool
         self.proposer = proposer
@@ -558,6 +579,7 @@ class Thinker:
         # on a stride instead; outcomes minutes old are still the same outcome.
         self.activity_every = max(1, int(activity_every))
         self._activity_cache: list[dict] | None = None
+        self.host_names = [str(name) for name in (host_names or []) if str(name).strip()]
         self._activity_age = 0
         self.rounds: list[Round] = []
         # One pause between a dropped model call and its single retry.
@@ -724,6 +746,10 @@ class Thinker:
                 lines.append("如果这轮还是同一个动作，你必须在 goal 或 "
                              "expected_effect 里写出这次和上次的差别；"
                              "写不出来就换一个动作。")
+        if self.host_names:
+            lines.append("")
+            lines.append("【可以写进 destination 的主机】")
+            lines.append(destination_hint(self.host_names))
         lines.append("")
         lines.append("请提出下一步。只输出一行 JSON。")
         return "\n".join(lines)
@@ -1002,6 +1028,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--activity-every", type=int, default=4,
                         help="refresh the colony's outcome feed every N rounds "
                              "(the mailbox listing is O(tasks))")
+    parser.add_argument("--hosts", default="~/.pandosi/hosts.json",
+                        help="host names a seed.replicate may name; URLs are not shown to the model")
     parser.add_argument("--dry-run", action="store_true",
                         help="think and sign, but never publish")
     return parser
@@ -1030,9 +1058,11 @@ def main(argv: list[str] | None = None) -> int:
         token=_read_secret(args.token_file) or None,
         interval=args.interval, history_window=args.history_window,
         dry_run=args.dry_run, explore_every=args.explore_every,
-        activity_every=args.activity_every)
+        activity_every=args.activity_every,
+        host_names=host_names_from(Path(args.hosts).expanduser()))
     print(f"thinkd: {args.node_id} thinking via {args.model} at {args.base_url}, "
-          f"round every {args.interval:.0f}s, ledger {args.ledger}", flush=True)
+          f"round every {args.interval:.0f}s, ledger {args.ledger}, "
+          f"hosts {','.join(thinker.host_names) or '-'}", flush=True)
     try:
         thinker.run_forever(max_rounds=args.max_rounds)
     except KeyboardInterrupt:
