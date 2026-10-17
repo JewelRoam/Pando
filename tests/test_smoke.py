@@ -2784,6 +2784,16 @@ class TestExecution(unittest.TestCase):
         ]
         self.assertEqual(local_replications([copy], votes, set(), "local-key"), ["copy"])
         self.assertEqual(local_replications([copy], votes, {"copy"}, "local-key"), [])
+        from pando.execute import local_unacted
+        other = self._proposal(pid="move", action="resource.rebalance")
+        other.pubkey = "local-key"
+        more = votes + [
+            self._vote("mac-text", "赞同", "move"),
+            self._vote("mac-llm", "赞同", "move"),
+        ]
+        self.assertEqual(
+            local_unacted([other, copy], more, set(), "local-key"),
+            [("move", "resource.rebalance")])
 
 
 class TestChat(unittest.TestCase):

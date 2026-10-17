@@ -236,6 +236,24 @@ def local_replications(proposals: list[Proposal], reactions: list[dict],
     return found
 
 
+def local_unacted(proposals: list[Proposal], reactions: list[dict],
+                  done: set[str], signer: str) -> list[tuple[str, str]]:
+    """Adopted proposals this host signed that have no actuator.
+
+    seed.export is sealed. seed.replicate is recorded separately, because
+    the missing piece is a destination, not the lack of a verb.
+    """
+    found = []
+    for proposal in proposals:
+        if proposal.proposal_id in done or proposal.pubkey != signer:
+            continue
+        if proposal.action in ("seed.export", "seed.replicate"):
+            continue
+        if judge(proposal, reactions, actuators={})["adopted"]:
+            found.append((proposal.proposal_id, proposal.action))
+    return found
+
+
 def dry_run(proposals: list[Proposal], reactions: list[dict], **policy) -> dict:
     """Judge every proposal. No actuator, no write."""
     results = [judge(proposal, reactions, actuators={}, **policy)
@@ -288,7 +306,8 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
         seen = done_ids(ledger) | left_ids(ledger)
         foreign = foreign_adopted_seeds(proposals, reactions, seen, signer)
         replicates = local_replications(proposals, reactions, seen, signer)
-        if foreign or replicates:
+        unacted = local_unacted(proposals, reactions, seen, signer)
+        if foreign or replicates or unacted:
             ledger.parent.mkdir(parents=True, exist_ok=True)
             with ledger.open("a", encoding="utf-8") as handle:
                 for proposal_id in foreign:
@@ -305,8 +324,16 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                         "executed": False,
                         "skipped": "no-destination",
                     }, sort_keys=True) + "\n")
+                for proposal_id, action in unacted:
+                    handle.write(json.dumps({
+                        "proposal_id": proposal_id,
+                        "action": action,
+                        "executed": False,
+                        "skipped": "no-actuator",
+                    }, sort_keys=True) + "\n")
         payload = {"did": "idle", "foreign_seed_exports": foreign,
-                   "replication_without_destination": replicates}
+                   "replication_without_destination": replicates,
+                   "no_actuator": [item[0] for item in unacted]}
         print(json.dumps(payload, ensure_ascii=False), flush=True)
         write_status(ledger.with_name("execute-status.json"), payload)
         return 0
