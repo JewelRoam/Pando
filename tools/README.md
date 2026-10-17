@@ -22,13 +22,15 @@ are not all the same kind of thing. Read this index before adding another.
 Rule: operational tools carry no machine addresses; hosts live in
 `~/.pandosi/hosts.json` (shape in `hosts.example.json`).
 
-## Fabric invariants (CI-enforced)
+## Fabric invariants (run locally; CI is a second copy)
 
 `check_no_weights.py` (no weights in git), `genesis_check.py`,
 `genesis_log_check.py`, `genesis_transport_check.py` (signed proposals),
 `topology_check.py`, `demo.py`, `verify_wheel.py` / `verify_sdist.py`,
-`service_check.py`, `swarm_check.py`, `slow_stem_check.py`. CI runs these;
-breaking them breaks the build.
+`service_check.py`, `swarm_check.py`, `slow_stem_check.py`. Before pushing,
+run `.venv/bin/python tools/local_ci.py`. It is the same list as
+`.github/workflows/ci.yml`. A failure found only by the remote run was a
+skipped local run.
 
 ## Research evidence (`*_check.py` and friends)
 

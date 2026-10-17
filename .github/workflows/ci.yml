@@ -1,3 +1,4 @@
+# Same checks, on the machine that is about to push: .venv/bin/python tools/local_ci.py
 name: CI
 on: [push, pull_request]
 

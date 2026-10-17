@@ -3093,3 +3093,13 @@ class TestLedgerMirror(unittest.TestCase):
             saved = json.loads(dest.read_text(encoding="utf-8"))
             self.assertEqual(saved["nodes"]["pandosi-pi5-llm"]["chat"]["model"], "qwen3-1.7b")
             self.assertIn("mirrored_at", saved)
+
+
+class TestLocalCi(unittest.TestCase):
+    def test_the_local_gate_names_every_check_the_workflow_runs(self):
+        import importlib.util
+        path = Path(__file__).resolve().parents[1] / "tools" / "local_ci.py"
+        spec = importlib.util.spec_from_file_location("local_ci_under_test", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.assertEqual(module.drift(module.WORKFLOW.read_text(encoding="utf-8")), [])
