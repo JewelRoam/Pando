@@ -240,3 +240,27 @@ The Mac's full answer lives in mailbox task t-20261017-001001-f790. Load-bearing
   root token; tokens stay in per-host `~/.pandosi/hosts.json` (`roots`: name/url/token),
   never in git. Pi5 capacity after the change: ~297MB available, ~208MB swap free - the node
   gets nothing else added, and win does not touch pi5 again unless the user says so.
+
+## 2026-10-17 - pi5 survives a power cut (verified by reboot), gets git; repo goes public
+
+- Verified by an actual reboot (15:51): within ~90 s `pandosi-pi5.local:8791/pairing` answered
+  200, and all six user units (pandosi-root, llama, three stems, thinkd) were active - linger=yes
+  plus every unit enabled at boot did the work; /nodes afterwards = the three pi5 members.
+  thinkd recorded one "held: model unreachable" round while llama loaded, then resumes on the
+  next 180 s tick - the never-die design behaving as specified. Recovery needed no Codex step.
+- Addressing: pi5 is DHCP, so instead of a static-IP risk we standardised on the mDNS name
+  `pandosi-pi5.local` (avahi active). Win's observatory now aggregates win root + pi5 root over
+  that name (3 members each) - after fixing a real bug: pando/net.is_local_host did not treat
+  `*.local` / single-label hosts as local, so the system proxy answered 502 for mDNS names. One
+  fix in the shared module now covers every tool.
+- git on pi5: installed via the Tsinghua mirror (4 MB/s; the default repo stalls;
+  unattended-upgrades held the dpkg lock). The repo arrived over the LAN as a 2.6 MB git bundle
+  (clone at 65d1bb2, origin -> the public URL), and ~/pando-refresh.sh pulls (tolerating
+  offline), copies pando/*.py into the venv and restarts the thinkers.
+- Security: the repo is public now. Older session logs still contain the Mac mailbox bearer and
+  the old Mac root pairing token in history - rotation is the only reliable mitigation (history
+  rewriting cannot recall clones). Task 036 asks Mac to rotate both with a read-before-switch
+  handoff; win and pi5 token files get updated when the new value is confirmed. Redaction in
+  backup_session.py keeps future logs clean.
+- Bottleneck list unchanged: power-loss survival and observability are infrastructure truth,
+  not capability.

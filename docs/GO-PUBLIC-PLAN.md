@@ -47,3 +47,13 @@ Stars follow a readable front page, not more lab work: a 3-minute README
 (what it is, demo GIF/trace, quick start, honest limitations), a few runnable
 examples, and one reproducible experiment a stranger can re-run offline.
 Ship that first; flip visibility second; only then talk about growth.
+
+## Update 2026-10-17 15:5x - the repository is public now
+
+The user flipped visibility to public on 2026-10-17; the "keep private"
+recommendation above is historical. Mitigations in flight: (a)
+`backup_session.py` redacts token values / tunnel URLs / tailnet IPs at write
+time; (b) Task 036 rotates the Mac mailbox bearer and the Mac root pairing
+token - the two secrets that are present in older session logs; (c) history
+is kept as-is by decision: rotation, not rewriting, is the mitigation (a
+public clone cannot be recalled).

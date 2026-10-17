@@ -17,11 +17,16 @@ import urllib.request
 
 
 def is_local_host(host: str) -> bool:
-    """True for loopback/LAN/tailnet literals and localhost."""
+    """True for loopback/LAN/tailnet literals, localhost and mDNS names."""
     try:
         return not ipaddress.ip_address(host).is_global
     except ValueError:
-        return host in ("localhost", "")
+        if host in ("localhost", ""):
+            return True
+        # mDNS names (*.local) and single-label hostnames resolve on the local
+        # segment; a system proxy cannot reach them (seen live: HTTP 502 for
+        # pandosi-pi5.local through the Windows proxy).
+        return host.endswith(".local") or "." not in host
 
 
 def open_url(request: urllib.request.Request, timeout: float):
