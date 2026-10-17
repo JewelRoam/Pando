@@ -11,6 +11,7 @@ are not all the same kind of thing. Read this index before adding another.
 | `agent_mailbox.py` | the mailbox itself: `serve` (server) plus the client verbs (put/list/get/claim/result). |
 | `check_mac_endpoint.py` | local-only mailbox resolver; candidates come from `~/.pandosi/hosts.json`, never from git. |
 | `backup_session.py` | sanitized session archive; redacts tokens / tunnel URLs / tailnet IPs at write time. |
+| `observatory.py` | one-command read-only dashboard for a node: participants, service health, chat feed, and a chat/proposal composer. stdlib only. |
 | `think_stats.py`, `think_watchdog.py` | proposer-ledger statistics; stall watchdog for a frozen thinker. |
 | `win_node_supervisor.ps1`, `win_stack_restart.ps1` | keep the nine resident win services alive; restart everything. |
 | `win_worker.py` | the local model answers `[chat]`/tasks on the win node's behalf. |
