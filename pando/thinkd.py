@@ -895,12 +895,23 @@ class Thinker:
                 host = named_host(
                     f"{proposal.goal} {proposal.expected_effect}", self.host_names)
                 if not host:
+                    prior_rows = self.ledger.tail(1)
+                    already_held = bool(
+                        prior_rows
+                        and prior_rows[0].get("action") == "seed.replicate"
+                        and not prior_rows[0].get("published"))
                     round_.proposal = proposal
-                    round_.error = "seed.replicate needs a destination from the host list"
-                    round_.detail = "held: " + round_.error
-                    return round_
-                proposal.destination = host
-                round_.destination_source = "sentence"
+                    if not already_held:
+                        round_.error = "seed.replicate needs a destination from the host list"
+                        round_.detail = "held: " + round_.error
+                        return round_
+                    # One held round is the signal. Holding every later round
+                    # silences the proposer, which is what r203-r206 did.
+                    round_.destination_source = "missing"
+                    round_.error = ""
+                else:
+                    proposal.destination = host
+                    round_.destination_source = "sentence"
             else:
                 proposal = repaired
                 if proposal.action == "seed.replicate":

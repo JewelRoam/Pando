@@ -2148,6 +2148,20 @@ class TestResidentThinker(unittest.TestCase):
             self.assertFalse(round_.published)
             self.assertEqual(sent, [])
 
+            thinker.ledger.append(round_)
+            thinker, _proposer, sent = self._thinker(
+                [{"action": "seed.replicate", "goal": "还是 mac 和 win"},
+                 {"action": "seed.replicate", "goal": "继续 mac 和 win"},
+                 {"action": "seed.replicate", "goal": "仍然 mac 和 win"}],
+                Path(tmp) / "think2.jsonl", host_names=["mac", "win"])
+            # The ledger above belongs to the previous thinker. Repeat the
+            # held row on this one so the second round can see it.
+            thinker.ledger.append(round_)
+            again = thinker.think(2)
+            self.assertTrue(again.published)
+            self.assertEqual(sent[-1].destination, "")
+            self.assertEqual(again.destination_source, "missing")
+
 
 if __name__ == "__main__":
     unittest.main()
