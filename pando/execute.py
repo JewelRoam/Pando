@@ -288,6 +288,28 @@ def local_replications(proposals: list[Proposal], reactions: list[dict],
     return found
 
 
+def known_hosts(data: dict | None) -> dict[str, str] | None:
+    """Host name to root URL. None when there is no table to check against."""
+    if not isinstance(data, dict):
+        return None
+    found: dict[str, str] = {}
+    for row in data.get("roots") or []:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("name") or "").strip()
+        url = str(row.get("url") or "").strip()
+        if name and url:
+            found[name] = url
+    return found
+
+
+def replication_skip(destination: str, hosts: dict[str, str] | None) -> str:
+    """Why this named copy is not sent. This function does not open the URL."""
+    if hosts is not None and destination not in hosts:
+        return "unknown-host"
+    return "no-transport"
+
+
 def addressed_replications(proposals: list[Proposal], reactions: list[dict],
                            done: set[str], signer: str) -> list[tuple[str, str]]:
     """Adopted seed.replicate ids signed here that name a host.
@@ -380,6 +402,7 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
         foreign = foreign_adopted_seeds(proposals, reactions, seen, signer)
         replicates = local_replications(proposals, reactions, seen, signer)
         addressed = addressed_replications(proposals, reactions, seen, signer)
+        hosts = getattr(args, "hosts", None)
         foreign_repl = foreign_replications(proposals, reactions, seen, signer)
         unacted = local_unacted(proposals, reactions, seen, signer)
         if foreign or replicates or addressed or unacted or foreign_repl:
@@ -405,7 +428,7 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                         "action": "seed.replicate",
                         "destination": destination,
                         "executed": False,
-                        "skipped": "no-transport",
+                        "skipped": replication_skip(destination, hosts),
                     }, sort_keys=True) + "\n")
                 for proposal_id in foreign_repl:
                     handle.write(json.dumps({
@@ -474,6 +497,11 @@ def main() -> int:
     proposals = fetch_proposals(args.mailbox, token, status="all", rows=rows)
     reactions = _load_reactions(args.mailbox, token, args.limit, rows=rows)
     if args.once:
+        path = Path("~/.pandosi/hosts.json").expanduser()
+        try:
+            args.hosts = known_hosts(json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, json.JSONDecodeError):
+            args.hosts = None
         return run_once(proposals, reactions, args)
     report = dry_run(proposals, reactions)
     summary = report["summary"]

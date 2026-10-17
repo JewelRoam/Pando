@@ -2907,6 +2907,16 @@ class TestExecution(unittest.TestCase):
             [("named", "pi5")])
         self.assertNotIn("destination", copy.payload())
         self.assertEqual(named.payload()["destination"], "pi5")
+        from pando.execute import known_hosts, replication_skip
+        table = known_hosts({"roots": [
+            {"name": "win", "url": "http://win:8790"},
+            {"name": "pi5"},
+            "nope",
+        ]})
+        self.assertEqual(table, {"win": "http://win:8790"})
+        self.assertEqual(replication_skip("win", table), "no-transport")
+        self.assertEqual(replication_skip("pi5", table), "unknown-host")
+        self.assertEqual(replication_skip("win", None), "no-transport")
         from pando.execute import foreign_replications
         theirs = self._proposal(pid="away", action="seed.replicate", author="pi5-proposer")
         theirs.pubkey = "pi5-key"
