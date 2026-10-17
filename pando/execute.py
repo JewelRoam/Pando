@@ -96,11 +96,14 @@ def judge(proposal: Proposal, reactions: list[dict], *,
 
 
 
-def export_seed(proposal: Proposal, *, home, identity, rollout_dir, out_root) -> bool:
+def export_seed(proposal: Proposal, *, home, identity, rollout_dir, out_root,
+                 passphrase_file=None) -> bool:
     """Write one seed bundle for this proposal, under ``out_root``.
 
     Uses the existing seed tool. The destination is the proposal id, not the
     live seed path, and a bundle is never written inside a git worktree.
+    ``passphrase_file`` seals the identity. Without it the bundle holds a
+    bare private key, which is only acceptable inside a test directory.
     """
     import argparse
     import importlib.util
@@ -118,7 +121,7 @@ def export_seed(proposal: Proposal, *, home, identity, rollout_dir, out_root) ->
         identity=str(Path(identity).expanduser()),
         rollout_dir=str(Path(rollout_dir).expanduser()),
         force=False,
-        passphrase_file=None,
+        passphrase_file=(str(passphrase_file) if passphrase_file else None),
     ))
     return rc == 0 and (out / "manifest.json").is_file()
 

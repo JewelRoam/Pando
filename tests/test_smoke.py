@@ -2658,3 +2658,35 @@ class TestExecution(unittest.TestCase):
             self.assertTrue(done["success"])
             self.assertTrue((out_root / "done" / "manifest.json").is_file())
             self.assertTrue((out_root / "done" / "identity" / "identity.json").is_file())
+
+    def test_a_passphrase_seals_the_identity_in_the_bundle(self):
+        import json
+        import tempfile
+        from pando.execute import export_seed, judge
+        from pando.identity import Identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            home.mkdir()
+            identity_path = root / "identity.json"
+            identity_path.write_text(
+                json.dumps(Identity.generate().to_json()), encoding="utf-8")
+            phrase = root / "phrase"
+            phrase.write_text("test-phrase-not-a-secret\n", encoding="utf-8")
+            out_root = root / "bundles"
+
+            def act(proposal):
+                return export_seed(
+                    proposal, home=home, identity=identity_path,
+                    rollout_dir=root / "rollouts", out_root=out_root,
+                    passphrase_file=phrase)
+
+            result = judge(self._proposal(pid="sealed"), [
+                self._vote("mac-text", "赞同", "sealed"),
+                self._vote("mac-llm", "赞同", "sealed"),
+            ], actuators={"seed.export": act})
+            self.assertTrue(result["executed"])
+            sealed = json.loads((out_root / "sealed" / "identity" / "identity.json").read_text())
+            self.assertEqual(sealed.get("kind"), "encrypted-identity")
+            self.assertNotIn("secret_key", sealed)
