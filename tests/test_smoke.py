@@ -2765,11 +2765,13 @@ class TestObservatoryFeed(unittest.TestCase):
             path = Path(tmp) / "execute-ledger.jsonl"
             path.write_text(
                 '{"proposal_id": "p1", "action": "seed.export", "executed": true, "sealed": true}\n'
-                '{"proposal_id": "p2", "action": "culture.refine", "executed": false, "skipped": "no-actuator"}\n',
+                '{"proposal_id": "p2", "action": "culture.refine", "executed": false, "skipped": "no-actuator"}\n'
+                '{"proposal_id": "p3", "action": "seed.replicate", "executed": false, "skipped": "no-transport", "destination": "mac"}\n',
                 encoding="utf-8")
             rows = read_execution_ledger(path)
             self.assertEqual(execution_text(rows["p1"]), "sealed")
             self.assertEqual(execution_text(rows["p2"]), "no-actuator")
+            self.assertEqual(execution_text(rows["p3"]), "no-transport mac")
             self.assertEqual(read_execution_ledger(Path(tmp) / "missing"), {})
         messages = [{"fields": {"proposal_id": "p2", "action": "culture.refine",
                                 "goal": "g", "expected_effect": "e"},
