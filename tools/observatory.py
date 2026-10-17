@@ -35,6 +35,7 @@ import re
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -55,6 +56,29 @@ from pando.proposal_mail import publish_proposal  # noqa: E402
 PANDO_DIR = Path(os.environ.get("PANDOSI_HOME", "~/.pandosi")).expanduser()
 DEFAULT_MAILBOX = os.environ.get("PANDOSI_MAILBOX_URL", "http://127.0.0.1:8776")
 _BODY_CACHE: dict[str, str] = {}
+_STATE_CACHE: dict = {"at": 0.0, "value": None}
+_STATE_LOCK = threading.Lock()
+CHAT_VIEW_LIMIT = 120
+
+
+def cached_state(cfg: dict, ttl: float = 5.0) -> dict:
+    """Serve a 5s-old state instead of collecting once per poll.
+
+    The page polls every 5s; with 260+ messages one collection is a few
+    seconds, and overlapping collections (page + CLI curl + another tab)
+    starve the small thread pool - seen live as a 10s timeout on /api/state
+    while the socket was listening. One collect per TTL period fixes it.
+    """
+    now = time.time()
+    if _STATE_CACHE["value"] is not None and now - _STATE_CACHE["at"] < ttl:
+        return _STATE_CACHE["value"]
+    with _STATE_LOCK:  # concurrent misses collect once, not N times
+        if (_STATE_CACHE["value"] is not None
+                and time.time() - _STATE_CACHE["at"] < ttl):
+            return _STATE_CACHE["value"]
+        state = collect_state(cfg)
+        _STATE_CACHE.update(at=time.time(), value=state)
+        return state
 
 
 # --------------------------------------------------------------------------
@@ -923,7 +947,9 @@ def collect_state(cfg: dict) -> dict:
 
     # The /tasks listing carries titles only. Fetch every chat/proposal
     # record in full so the feed never hides the back half of a message.
-    feed = state["chat"] + state["reactions"]
+    # 600+ messages, one body fetch each, measured 23 s per collect. The
+    # dashboard shows recent history; whole-feed counts stay intact.
+    feed = (state["chat"] + state["reactions"])[-CHAT_VIEW_LIMIT:]
     chat_ids = [str(m["id"]) for m in feed if m.get("id")]
 
     def _full_body(task_id: str) -> tuple[str, str | None]:
@@ -1187,7 +1213,7 @@ def build_handler(cfg: dict):
                 return
             if path == "/api/state":
                 try:
-                    self._json(200, collect_state(cfg))
+                    self._json(200, cached_state(cfg))
                 except Exception as exc:  # never take the page down with us
                     self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
                 return
