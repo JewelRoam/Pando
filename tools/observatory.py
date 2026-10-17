@@ -1148,7 +1148,7 @@ PAGE = r"""<!doctype html>
 <style>
 :root{
   --bg:#17191b; --panel:#22262a; --ink:#e6e8eb; --dim:#a4a8ae; --faint:#6e737a;
-  --line:#34383d; --sap:#c5c8cc; --bark:#d0d4d8; --bad:#e15d4a;
+  --line:#34383d; --sap:#a3b37a; --bark:#e08a3c; --bad:#e15d4a;
 }
 *{box-sizing:border-box}
 body{
@@ -1164,7 +1164,7 @@ body{
 .wrap{max-width:1480px;margin:0 auto;padding:28px 28px 64px}
 header{display:flex;align-items:baseline;justify-content:space-between;gap:18px;
   border-bottom:1px solid var(--line);padding-bottom:14px}
-h1{margin:0;font-weight:500;font-size:28px;letter-spacing:-.03em}
+h1{margin:0;font-weight:500;font-size:28px;letter-spacing:-.03em;color:#f7f7f5}
 h1 em{font-style:italic;color:var(--bark);font-weight:500}
 #hdr{color:var(--dim);font-size:12px}
 .sub{color:var(--dim);font-size:12px}
@@ -1191,7 +1191,7 @@ td{padding:8px 10px 8px 0;border-top:1px solid var(--line);vertical-align:top;fo
 .tx{margin-top:4px;white-space:pre-wrap;word-break:break-word;color:#d7dbe0}
 .meta{margin-top:6px;color:var(--faint);font-size:11px}
 .reacts{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
-.chip{border:1px solid var(--line);padding:1px 6px;color:var(--sap);font-size:12px}
+.chip{border:1px solid #3d4632;padding:1px 6px;color:var(--sap);font-size:12px}
 .svc{display:flex;gap:8px;align-items:baseline;padding:5px 0;border-top:1px solid var(--line)}
 .svc:first-of-type{border-top:0}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--bad);flex:none}
