@@ -2784,6 +2784,16 @@ class TestExecution(unittest.TestCase):
         ]
         self.assertEqual(local_replications([copy], votes, set(), "local-key"), ["copy"])
         self.assertEqual(local_replications([copy], votes, {"copy"}, "local-key"), [])
+        from pando.execute import foreign_replications
+        theirs = self._proposal(pid="away", action="seed.replicate", author="pi5-proposer")
+        theirs.pubkey = "pi5-key"
+        away_votes = votes + [
+            self._vote("mac-text", "赞同", "away"),
+            self._vote("mac-llm", "赞同", "away"),
+        ]
+        self.assertEqual(
+            foreign_replications([theirs, copy], away_votes, set(), "local-key"),
+            ["away"])
         from pando.execute import local_unacted
         other = self._proposal(pid="move", action="resource.rebalance")
         other.pubkey = "local-key"

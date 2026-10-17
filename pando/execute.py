@@ -222,6 +222,20 @@ def foreign_adopted_seeds(proposals: list[Proposal], reactions: list[dict],
     return found
 
 
+def foreign_replications(proposals: list[Proposal], reactions: list[dict],
+                         done: set[str], signer: str) -> list[str]:
+    """Adopted seed.replicate ids signed by someone else. Not ours to send."""
+    found = []
+    for proposal in proposals:
+        if proposal.proposal_id in done or proposal.action != "seed.replicate":
+            continue
+        if not proposal.pubkey or proposal.pubkey == signer:
+            continue
+        if judge(proposal, reactions, actuators={})["adopted"]:
+            found.append(proposal.proposal_id)
+    return found
+
+
 def local_replications(proposals: list[Proposal], reactions: list[dict],
                        done: set[str], signer: str) -> list[str]:
     """Adopted seed.replicate ids signed here. None names a destination."""
@@ -306,8 +320,9 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
         seen = done_ids(ledger) | left_ids(ledger)
         foreign = foreign_adopted_seeds(proposals, reactions, seen, signer)
         replicates = local_replications(proposals, reactions, seen, signer)
+        foreign_repl = foreign_replications(proposals, reactions, seen, signer)
         unacted = local_unacted(proposals, reactions, seen, signer)
-        if foreign or replicates or unacted:
+        if foreign or replicates or unacted or foreign_repl:
             ledger.parent.mkdir(parents=True, exist_ok=True)
             with ledger.open("a", encoding="utf-8") as handle:
                 for proposal_id in foreign:
@@ -324,6 +339,13 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                         "executed": False,
                         "skipped": "no-destination",
                     }, sort_keys=True) + "\n")
+                for proposal_id in foreign_repl:
+                    handle.write(json.dumps({
+                        "proposal_id": proposal_id,
+                        "action": "seed.replicate",
+                        "executed": False,
+                        "skipped": "other-host",
+                    }, sort_keys=True) + "\n")
                 for proposal_id, action in unacted:
                     handle.write(json.dumps({
                         "proposal_id": proposal_id,
@@ -333,6 +355,7 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                     }, sort_keys=True) + "\n")
         payload = {"did": "idle", "foreign_seed_exports": foreign,
                    "replication_without_destination": replicates,
+                   "foreign_replications": foreign_repl,
                    "no_actuator": [item[0] for item in unacted]}
         print(json.dumps(payload, ensure_ascii=False), flush=True)
         write_status(ledger.with_name("execute-status.json"), payload)
