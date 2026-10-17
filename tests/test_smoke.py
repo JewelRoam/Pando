@@ -2533,3 +2533,91 @@ class TestObservatoryFeed(unittest.TestCase):
         self.assertEqual(audit_view({"people": rows, "messages": [
             {"to": "@win-codex", "text": "hello", "who": "mac"},
         ]}), [])
+
+
+class TestExecution(unittest.TestCase):
+    def _proposal(self, action="seed.export", author="mac-proposer", pid="p1"):
+        from pando.genesis import Proposal
+        return Proposal(pid, author, "goal", action, "effect", 0.2, [])
+
+    def _vote(self, node, stance, target="p1"):
+        return {"target_id": target, "node_id": node, "stance": stance}
+
+    def test_the_author_does_not_vote_and_one_adopt_does_not_pass(self):
+        from pando.execute import judge
+        proposal = self._proposal()
+        result = judge(proposal, [
+            self._vote("mac-proposer", "赞同"),
+            self._vote("mac-text", "赞同"),
+            self._vote("mac-text", "赞同"),
+        ])
+        self.assertFalse(result["adopted"])
+        self.assertFalse(result["executed"])
+        self.assertEqual(result["adopt"], ["mac-text"])
+        self.assertIn("adopt <", result["detail"])
+
+    def test_two_adopts_without_an_actuator_do_not_touch_the_world(self):
+        from pando.execute import judge
+        result = judge(self._proposal(), [
+            self._vote("mac-text", "赞同"),
+            self._vote("mac-llm", "赞同"),
+        ])
+        self.assertTrue(result["adopted"])
+        self.assertFalse(result["executed"])
+        self.assertIsNone(result["success"])
+        self.assertIn("no actuator", result["detail"])
+
+    def test_one_decline_holds_even_when_others_adopt(self):
+        from pando.execute import judge
+        result = judge(self._proposal(), [
+            self._vote("mac-text", "赞同"),
+            self._vote("mac-llm", "赞同"),
+            self._vote("pi5-laya", "反对"),
+        ])
+        self.assertFalse(result["adopted"])
+        self.assertIn("declined", result["detail"])
+
+    def test_an_unknown_action_is_held(self):
+        from pando.execute import judge
+        result = judge(self._proposal(action="human.propose"), [
+            self._vote("mac-text", "赞同"),
+            self._vote("mac-llm", "赞同"),
+        ])
+        self.assertFalse(result["adopted"])
+        self.assertIn("action space", result["detail"])
+
+    def test_an_actuator_runs_only_after_adoption(self):
+        from pando.execute import judge
+        calls = []
+
+        def act(proposal):
+            calls.append(proposal.proposal_id)
+            return True
+
+        denied = judge(self._proposal(pid="nope"), [self._vote("only", "赞同", "nope")],
+                       actuators={"seed.export": act})
+        self.assertFalse(denied["executed"])
+        self.assertEqual(calls, [])
+
+        allowed = judge(self._proposal(), [
+            self._vote("mac-text", "赞同"),
+            self._vote("mac-llm", "赞同"),
+        ], actuators={"seed.export": act})
+        self.assertTrue(allowed["executed"])
+        self.assertTrue(allowed["success"])
+        self.assertEqual(calls, ["p1"])
+
+    def test_a_raising_actuator_is_not_counted_as_executed(self):
+        from pando.execute import judge
+
+        def act(proposal):
+            raise RuntimeError("disk full")
+
+        result = judge(self._proposal(), [
+            self._vote("mac-text", "赞同"),
+            self._vote("mac-llm", "赞同"),
+        ], actuators={"seed.export": act})
+        self.assertTrue(result["adopted"])
+        self.assertFalse(result["executed"])
+        self.assertIsNone(result["success"])
+        self.assertIn("disk full", result["detail"])
