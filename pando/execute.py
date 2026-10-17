@@ -177,7 +177,7 @@ def left_ids(ledger: Path) -> set[str]:
             row = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if row.get("skipped") == "other-host" and row.get("proposal_id"):
+        if row.get("skipped") and row.get("proposal_id") and not row.get("executed"):
             found.add(str(row["proposal_id"]))
     return found
 
@@ -222,6 +222,20 @@ def foreign_adopted_seeds(proposals: list[Proposal], reactions: list[dict],
     return found
 
 
+def local_replications(proposals: list[Proposal], reactions: list[dict],
+                       done: set[str], signer: str) -> list[str]:
+    """Adopted seed.replicate ids signed here. None names a destination."""
+    found = []
+    for proposal in proposals:
+        if proposal.proposal_id in done or proposal.action != "seed.replicate":
+            continue
+        if proposal.pubkey != signer:
+            continue
+        if judge(proposal, reactions, actuators={})["adopted"]:
+            found.append(proposal.proposal_id)
+    return found
+
+
 def dry_run(proposals: list[Proposal], reactions: list[dict], **policy) -> dict:
     """Judge every proposal. No actuator, no write."""
     results = [judge(proposal, reactions, actuators={}, **policy)
@@ -258,7 +272,8 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
     """Export one sealed seed, or do nothing if none is waiting.
 
     The home directory is empty on purpose: the bundle must not copy the
-    mailbox token or task files. Only seed.export is eligible.
+    mailbox token or task files. Only a seed.export signed by this host is sealed. A seed.replicate
+    with no destination is recorded and not sent.
     """
     phrase = Path(args.passphrase_file).expanduser()
     if not phrase.is_file():
@@ -272,7 +287,8 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
     if chosen is None:
         seen = done_ids(ledger) | left_ids(ledger)
         foreign = foreign_adopted_seeds(proposals, reactions, seen, signer)
-        if foreign:
+        replicates = local_replications(proposals, reactions, seen, signer)
+        if foreign or replicates:
             ledger.parent.mkdir(parents=True, exist_ok=True)
             with ledger.open("a", encoding="utf-8") as handle:
                 for proposal_id in foreign:
@@ -282,7 +298,15 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                         "executed": False,
                         "skipped": "other-host",
                     }, sort_keys=True) + "\n")
-        payload = {"did": "idle", "foreign_seed_exports": foreign}
+                for proposal_id in replicates:
+                    handle.write(json.dumps({
+                        "proposal_id": proposal_id,
+                        "action": "seed.replicate",
+                        "executed": False,
+                        "skipped": "no-destination",
+                    }, sort_keys=True) + "\n")
+        payload = {"did": "idle", "foreign_seed_exports": foreign,
+                   "replication_without_destination": replicates}
         print(json.dumps(payload, ensure_ascii=False), flush=True)
         write_status(ledger.with_name("execute-status.json"), payload)
         return 0

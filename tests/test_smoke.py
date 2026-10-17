@@ -2757,6 +2757,15 @@ class TestExecution(unittest.TestCase):
             self.assertEqual(
                 foreign_adopted_seeds([foreign, local], reactions, left_ids(ledger), "local-key"),
                 [])
+        from pando.execute import local_replications
+        copy = self._proposal(pid="copy", action="seed.replicate")
+        copy.pubkey = "local-key"
+        votes = reactions + [
+            self._vote("mac-text", "赞同", "copy"),
+            self._vote("mac-llm", "赞同", "copy"),
+        ]
+        self.assertEqual(local_replications([copy], votes, set(), "local-key"), ["copy"])
+        self.assertEqual(local_replications([copy], votes, {"copy"}, "local-key"), [])
 
 
 class TestChat(unittest.TestCase):
