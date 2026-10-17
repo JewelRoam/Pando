@@ -513,6 +513,13 @@ def delivery_failed(result) -> bool:
     return err.startswith("unreachable:") or err.startswith("HTTP 5")
 
 
+def replicate_streak(rows: list[dict], n: int = 2) -> bool:
+    """True when the last n recorded actions are all seed.replicate."""
+    if len(rows) < n:
+        return False
+    return all(rows[-i].get("action") == "seed.replicate" for i in range(1, n + 1))
+
+
 def named_host(text: str, names: list[str]) -> str:
     """The one listed host written as its own token, or empty.
 
@@ -799,6 +806,9 @@ class Thinker:
                 lines.append("如果这轮还是同一个动作，你必须在 goal 或 "
                              "expected_effect 里写出这次和上次的差别；"
                              "写不出来就换一个动作。")
+        if replicate_streak(own):
+            lines.append("")
+            lines.append("最近两轮都是 seed.replicate。这一轮不要再选它。")
         if self.host_names:
             lines.append("")
             lines.append("【可以写进 destination 的主机】")

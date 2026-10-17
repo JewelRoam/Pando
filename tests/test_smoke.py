@@ -2129,6 +2129,11 @@ class TestResidentThinker(unittest.TestCase):
         self.assertEqual(named_host("在 win 主机上", ["mac", "win"]), "win")
         self.assertEqual(named_host("在 mac 和 win 上", ["mac", "win"]), "")
         self.assertEqual(named_host("window", ["win"]), "")
+        from pando.thinkd import Round, replicate_streak
+        from pando.genesis import Proposal
+        self.assertFalse(replicate_streak([{"action": "seed.replicate"}]))
+        self.assertTrue(replicate_streak([
+            {"action": "seed.replicate"}, {"action": "seed.replicate"}]))
         with tempfile.TemporaryDirectory() as tmp:
             thinker, _proposer, sent = self._thinker(
                 [{"action": "seed.replicate", "goal": "在 win 主机上部署"},
@@ -2181,6 +2186,23 @@ class TestResidentThinker(unittest.TestCase):
             self.assertTrue(again.published)
             self.assertEqual(sent[-1].destination, "")
             self.assertEqual(again.destination_source, "missing")
+
+
+
+    def test_a_replicate_streak_is_named_before_the_model_answers(self):
+        from pando.genesis import Proposal
+        from pando.thinkd import Round
+        with tempfile.TemporaryDirectory() as tmp:
+            thinker, _, _ = self._thinker(
+                [{"action": "culture.refine", "goal": "x"}],
+                Path(tmp) / "think.jsonl")
+            for i in (1, 2):
+                prior = Round(i, 0.0)
+                prior.proposal = Proposal(f"p{i}", "mac", "g", "seed.replicate")
+                prior.published = True
+                thinker.ledger.append(prior)
+            prompt = thinker._user_prompt(3, [])
+            self.assertIn("这一轮不要再选它", prompt)
 
 
 if __name__ == "__main__":
