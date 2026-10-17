@@ -1,0 +1,14 @@
+#!/bin/sh
+# Remote CI is a second copy of tools/local_ci.py. This hook is the first.
+root=$(git rev-parse --show-toplevel) || exit 1
+cd "$root" || exit 1
+if [ -x .venv/bin/python ]; then
+  py=.venv/bin/python
+elif [ -x .venv/Scripts/python.exe ]; then
+  py=.venv/Scripts/python.exe
+else
+  echo "pre-push: no project venv (.venv). Create it before pushing." >&2
+  exit 1
+fi
+echo "pre-push: running tools/local_ci.py" >&2
+exec "$py" tools/local_ci.py

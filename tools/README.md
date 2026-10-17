@@ -30,7 +30,8 @@ Rule: operational tools carry no machine addresses; hosts live in
 `service_check.py`, `swarm_check.py`, `slow_stem_check.py`. Before pushing,
 run `.venv/bin/python tools/local_ci.py`. It is the same list as
 `.github/workflows/ci.yml`. A failure found only by the remote run was a
-skipped local run.
+skipped local run. `tools/githooks/pre-push` runs that command. Enable it
+once with `git config core.hooksPath tools/githooks`.
 
 ## Research evidence (`*_check.py` and friends)
 

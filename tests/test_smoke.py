@@ -3113,3 +3113,9 @@ class TestLocalCi(unittest.TestCase):
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         self.assertEqual(module.drift(module.WORKFLOW.read_text(encoding="utf-8")), [])
+
+    def test_pre_push_runs_the_local_gate(self):
+        hook = Path(__file__).resolve().parents[1] / "tools" / "githooks" / "pre-push"
+        text = hook.read_text(encoding="utf-8")
+        self.assertIn("tools/local_ci.py", text)
+        self.assertTrue(hook.stat().st_mode & 0o111)
