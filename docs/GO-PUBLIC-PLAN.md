@@ -11,8 +11,10 @@ outside can see it**. Before flipping it public, three measured facts matter:
    - The Mac mailbox bearer token: ~70 x `docs/session-logs/*`. This is the
      token that guards the task mailbox / group chat behind the public tunnel.
 2. **`docs/session-logs/` holds 206 tracked files** - the full internal
-   conversation, committed every ~30 min by the session-backup automation.
-   It includes strategy discussions that were never meant for a front page.
+   conversation, committed every ~30 min by the session-backup automation
+   (thread-scoped: it mirrors the Windows win-codex thread rollout files and
+   pushes to main). It includes strategy discussions that were never meant
+   for a front page.
 3. Clean parts, verified: no tracked file is named like a token/key/secret,
    and the Windows root pairing token does not appear in tree contents.
 
