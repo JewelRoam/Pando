@@ -2621,3 +2621,40 @@ class TestExecution(unittest.TestCase):
         self.assertFalse(result["executed"])
         self.assertIsNone(result["success"])
         self.assertIn("disk full", result["detail"])
+
+    def test_seed_export_writes_a_bundle_only_after_two_votes(self):
+        import tempfile
+        from pando.execute import export_seed, judge
+        from pando.identity import Identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            home.mkdir()
+            identity_path = root / "identity.json"
+            identity_path.write_text(
+                json.dumps(Identity.generate().to_json()), encoding="utf-8")
+            out_root = root / "bundles"
+            calls = []
+
+            def act(proposal):
+                calls.append(proposal.proposal_id)
+                return export_seed(
+                    proposal, home=home, identity=identity_path,
+                    rollout_dir=root / "rollouts", out_root=out_root)
+
+            held = judge(self._proposal(pid="held"),
+                         [self._vote("mac-text", "赞同", "held")],
+                         actuators={"seed.export": act})
+            self.assertFalse(held["executed"])
+            self.assertEqual(calls, [])
+            self.assertFalse((out_root / "held" / "manifest.json").exists())
+
+            done = judge(self._proposal(pid="done"), [
+                self._vote("mac-text", "赞同", "done"),
+                self._vote("mac-llm", "赞同", "done"),
+            ], actuators={"seed.export": act})
+            self.assertTrue(done["executed"])
+            self.assertTrue(done["success"])
+            self.assertTrue((out_root / "done" / "manifest.json").is_file())
+            self.assertTrue((out_root / "done" / "identity" / "identity.json").is_file())

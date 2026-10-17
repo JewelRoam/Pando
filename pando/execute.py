@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 from collections import Counter
+from pathlib import Path
 
 from .genesis import ACTION_SPACE, Proposal
 from .proposal_mail import fetch_proposals, is_reaction_task
@@ -91,6 +92,35 @@ def judge(proposal: Proposal, reactions: list[dict], *,
     result["success"] = ok
     result["detail"] = "actuator reported " + ("success" if ok else "failure")
     return result
+
+
+
+
+def export_seed(proposal: Proposal, *, home, identity, rollout_dir, out_root) -> bool:
+    """Write one seed bundle for this proposal, under ``out_root``.
+
+    Uses the existing seed tool. The destination is the proposal id, not the
+    live seed path, and a bundle is never written inside a git worktree.
+    """
+    import argparse
+    import importlib.util
+
+    tool = Path(__file__).resolve().parents[1] / "tools" / "seed.py"
+    spec = importlib.util.spec_from_file_location("pandosi_seed", tool)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("seed tool is missing")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    out = Path(out_root).expanduser() / proposal.proposal_id
+    rc = module.cmd_export(argparse.Namespace(
+        out=str(out),
+        home=str(Path(home).expanduser()),
+        identity=str(Path(identity).expanduser()),
+        rollout_dir=str(Path(rollout_dir).expanduser()),
+        force=False,
+        passphrase_file=None,
+    ))
+    return rc == 0 and (out / "manifest.json").is_file()
 
 
 def summarize(results: list[dict]) -> dict:
