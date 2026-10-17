@@ -39,18 +39,42 @@ $mailboxArgs = @("$repo\tools\agent_mailbox.py", 'serve', '--port', '8778',
 # sleeping Mac-hosted mailbox can no longer silence the colony (2026-10-17).
 $thinkArgs = @('-m', 'pando.thinkd', '--node-id', 'win-proposer',
   '--base-url', 'http://127.0.0.1:8086/v1', '--model', 'gemma-4-12b-it-Q4_K_M',
+  '--fallback-base-url', 'http://127.0.0.1:8087/v1',
+  '--fallback-model', 'yi-1.5-9b-q4km',
   '--mailbox', 'http://192.168.31.41:8776',
   '--mailbox-fallback', 'http://127.0.0.1:8778',
   '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
   '--ledger', 'D:\pando-models\win-think-ledger.jsonl',
   '--interval', '240', '--explore-every', '5', '--activity-every', '4')
+# Yi-1.5-9B on CPU: a second, different-bloodline local model. It votes as a
+# fabric member and runs its own proposer so the win node initiates with two
+# independent minds, not one.
+$yiLlamaArgs = @('-m', 'D:\pando-models\Yi-1.5-9B-Chat-Q4_K_M.gguf',
+  '-ngl', '0', '-c', '1024', '--parallel', '1', '--jinja',
+  '--host', '127.0.0.1', '--port', '8087', '-t', '10',
+  '--alias', 'yi-1.5-9b-q4km')
+$yiStemArgs = @('-m', 'pando.stemd', '--node-id', 'win-yi-9b', '--backend',
+  'openai', '--openai-url', 'http://127.0.0.1:8087/v1', '--openai-model',
+  'yi-1.5-9b-q4km', '--openai-key-file', $dummyKey, '--checkpoint',
+  'yi-1.5-9b-q4km', '--root', 'http://127.0.0.1:8790',
+  '--pairing-token-file', $token, '--host', '0.0.0.0', '--advertise-host',
+  '192.168.31.100')
+$yiThinkArgs = @('-m', 'pando.thinkd', '--node-id', 'win-yi-proposer',
+  '--base-url', 'http://127.0.0.1:8087/v1', '--model', 'yi-1.5-9b-q4km',
+  '--mailbox', 'http://192.168.31.41:8776',
+  '--mailbox-fallback', 'http://127.0.0.1:8778',
+  '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
+  '--ledger', 'D:\pando-models\win-yi-think-ledger.jsonl',
+  '--interval', '300', '--explore-every', '5', '--activity-every', '4')
 
 $names = @('llama-3070', 'stem-gemma', 'stem-laya', 'worker', 'win-mailbox',
-  'think-proposer')
-$exes = @($llamaExe, $python, $python, $python, $python, $python)
+  'llama-yi-cpu', 'stem-yi', 'think-proposer', 'think-yi')
+$exes = @($llamaExe, $python, $python, $python, $python, $llamaExe, $python,
+  $python, $python)
 $argsList = @($llamaArgs, $gemmaArgs, $layaArgs, $workerArgs, $mailboxArgs,
-  $thinkArgs)
-$cwds = @('D:\pando-models\llama-cuda', $repo, $repo, $repo, $repo, $repo)
+  $yiLlamaArgs, $yiStemArgs, $thinkArgs, $yiThinkArgs)
+$cwds = @('D:\pando-models\llama-cuda', $repo, $repo, $repo, $repo,
+  'D:\pando-models\llama-cuda', $repo, $repo, $repo)
 
 $procs = @{}
 while ($true) {
