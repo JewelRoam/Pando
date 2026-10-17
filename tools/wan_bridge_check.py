@@ -1,18 +1,18 @@
 """First WAN bridge: Windows parent root <- bridge <- island root (tunnel).
 
-The island URL is read from the mac-endpoint control plane and cross-checked
-against the Task 023 report; the island's pairing bearer comes from a local
-secret file (the user-provisioned root token). Six decisions (three from the
-old family, three from the new intent family) go through the parent root.
+The island URL comes from the operator via PANDOSI_ISLAND_URL and is
+cross-checked against the Task 023 report; connection information is never
+read from GitHub (doctrine 2026-10-17). The island's pairing bearer comes
+from a local secret file (the user-provisioned root token).
 
-Usage: python tools/wan_bridge_check.py
+Usage: PANDOSI_ISLAND_URL=https://... python tools/wan_bridge_check.py
 """
 
 from __future__ import annotations
 
 import json
+import os
 import pathlib
-import subprocess
 import sys
 import time
 import urllib.request
@@ -22,15 +22,12 @@ WORK = ROOT / "metrics" / "lan-check"
 
 
 def load_island_url() -> str:
-    subprocess.run(["git", "fetch", "origin", "mac-endpoint"],
-                   capture_output=True)
-    blob = subprocess.run(
-        ["git", "show", "origin/mac-endpoint:endpoint/mac.json"],
-        capture_output=True).stdout
-    endpoint = json.loads(blob)
-    island = endpoint.get("island_root_url")
+    island = os.environ.get("PANDOSI_ISLAND_URL", "").strip()
+    if not island:
+        raise SystemExit("set PANDOSI_ISLAND_URL - connection info is never "
+                         "read from GitHub in this project")
     report = (WORK / "task-023-output.md").read_text(encoding="utf-8")
-    if not island or island not in report:
+    if island not in report:
         raise SystemExit("island URL missing or not cross-confirmed by the "
                          "Task 023 report")
     return island.rstrip("/")

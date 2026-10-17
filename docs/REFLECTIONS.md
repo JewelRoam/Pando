@@ -157,3 +157,21 @@ The Mac's full answer lives in mailbox task t-20261017-001001-f790. Load-bearing
   lifted deployment success 45% -> 61-84% over six generations. thinkd's ledger IS that
   Memento pattern, and the article's caveats (pipeline latency, real-network dropouts,
   firewalls) are exactly the failure modes we measured this week.
+
+## 2026-10-17 - Doctrine: GitHub is a code repository only (the endpoint plane is retired)
+
+- User's rule, adopted as law: connection information (URLs, tokens, addresses) must never
+  travel through git branches, and git must never serve as a resolution fallback in a
+  decentralized system.
+- Executed: removed tools/publish_mac_endpoints.sh (the Mac's 5-minute publisher), deleted the
+  remote mac-endpoint branch, replaced tools/check_mac_endpoint.py with a local-only probe
+  (Mac LAN -> Mac tailnet -> win-local :8778 -> win tailnet; first /health 200 wins), switched
+  tools/wan_bridge_check.py to PANDOSI_ISLAND_URL, and extended tools/backup_session.py with
+  literal-token / tunnel-URL / tailnet-IP redaction so the session archive stops accumulating
+  connection info. Post-change probe: Mac LAN 200 (~0.1 s), Mac tailnet timeout (pending the
+  Mac-side inbound fix), win-local 200, win-tailnet 200.
+- Consequence: addressing rests on stable names (tailnet 100.x / MagicDNS / LAN) plus per-host
+  configuration - no directory, no republished pointers. Public ingress, when needed, is ONE
+  stable entrance (Tailscale Funnel or a named tunnel) configured locally, never announced
+  via git. Mac has Task 035: retire the launchd publisher, add the win mailbox fallback, fix
+  tailnet inbound.

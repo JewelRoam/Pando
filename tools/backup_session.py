@@ -31,7 +31,9 @@ TOKEN_RE = re.compile(
 CREDENTIAL_URL_RE = re.compile(r"\b[a-z][a-z0-9+.-]*://[^\s/:@]+:[^\s/@]+@", re.I)
 PRIVATE_URL_RE = re.compile(
     r"https?://(?:127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+"
-    r"|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+)(?::\d+)?")
+    r"|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+"
+    r"|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d+\.\d+)(?::\d+)?")
+TUNNEL_URL_RE = re.compile(r"https?://[a-z0-9-]+\.trycloudflare\.com", re.I)
 USER_PATH_RE = re.compile(r"[A-Za-z]:\\Users\\[^\\\s\"']+")
 # Project-local redaction list for known machine-specific identifiers.
 EXTRA_REDACTIONS = [
@@ -39,11 +41,38 @@ EXTRA_REDACTIONS = [
     (re.compile(r"\b54056\b"), "[PROXY_PORT]"),
 ]
 
+# Live token values are redacted by literal match, loaded from the local
+# secret files at write time (never embedded in the repo). This is the class
+# of leak earlier backups missed: a bare 36-char token on its own line
+# matches none of the token regexes.
+SECRET_FILES = (
+    PROJECT_ROOT / "metrics" / "lan-check" / "mac-mailbox.token",
+    PROJECT_ROOT / "artifacts" / "lan-experiment" / "root-pairing.token",
+)
+
+
+def _literal_secrets() -> list[str]:
+    values = []
+    for path in SECRET_FILES:
+        try:
+            value = path.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if len(value) >= 16:
+            values.append(value)
+    return values
+
+
+LITERAL_SECRETS = _literal_secrets()
+
 
 def sanitize(text: str) -> str:
     """Redact common secrets and identifiers without interpreting content."""
     text = CREDENTIAL_URL_RE.sub("[CREDENTIAL_URL]@", text)
     text = TOKEN_RE.sub("[TOKEN]", text)
+    for value in LITERAL_SECRETS:
+        text = text.replace(value, "[TOKEN]")
+    text = TUNNEL_URL_RE.sub("[TUNNEL_URL]", text)
     text = PRIVATE_URL_RE.sub("[LOCAL_URL]", text)
     text = EMAIL_RE.sub("[EMAIL]", text)
     text = USER_PATH_RE.sub("~", text)
