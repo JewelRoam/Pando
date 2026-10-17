@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import socket
 import time
 import urllib.error
 import urllib.request
@@ -25,31 +24,8 @@ from pathlib import Path
 from .common import DecisionRequest
 from .genesis import REACTION_STANCES, sign_reaction
 from .identity import load_or_create
-from .net import open_url
+from .net import local_addresses, open_url
 from .proposal_mail import fetch_proposals, publish_reaction
-
-LOOPBACK = {"127.0.0.1", "::1", "localhost", "0.0.0.0"}
-
-
-def local_addresses() -> set[str]:
-    """Addresses that mean this machine, never another device."""
-    found = set(LOOPBACK)
-    try:
-        found.add(socket.gethostname())
-        for info in socket.getaddrinfo(socket.gethostname(), None):
-            found.add(info[4][0])
-    except OSError:
-        pass
-    try:
-        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-            probe.connect(("192.168.31.1", 9))
-            found.add(probe.getsockname()[0])
-        finally:
-            probe.close()
-    except OSError:
-        pass
-    return found
 
 
 def select_local_stems(nodes: dict, addresses: set[str]) -> list[dict]:

@@ -20,8 +20,7 @@ import urllib.request
 from pathlib import Path
 
 from .chat import message_text, next_reply, normalize_chat
-from .net import open_url
-from .reactd import local_addresses
+from .net import local_addresses, open_url
 
 
 def _read(path: str | None) -> str | None:

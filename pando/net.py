@@ -12,8 +12,11 @@ tailnet mailboxes. This module is the single implementation:
 from __future__ import annotations
 
 import ipaddress
+import socket
 import urllib.parse
 import urllib.request
+
+LOOPBACK = {"127.0.0.1", "::1", "localhost", "0.0.0.0"}
 
 
 def is_local_host(host: str) -> bool:
@@ -36,3 +39,25 @@ def open_url(request: urllib.request.Request, timeout: float):
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         return opener.open(request, timeout=timeout)
     return urllib.request.urlopen(request, timeout=timeout)
+
+
+def local_addresses() -> set[str]:
+    """Addresses that mean this machine, never another device."""
+    found = set(LOOPBACK)
+    try:
+        found.add(socket.gethostname())
+        for info in socket.getaddrinfo(socket.gethostname(), None):
+            found.add(info[4][0])
+    except OSError:
+        pass
+    try:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            probe.connect(("192.168.31.1", 9))
+            found.add(probe.getsockname()[0])
+        finally:
+            probe.close()
+    except OSError:
+        pass
+    return found
+
