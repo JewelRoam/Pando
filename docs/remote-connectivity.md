@@ -64,6 +64,13 @@ keep the endpoints closed** (mailbox token, per-API keys). Never publish a
 token in `endpoint/mac.json` or in a tunnel URL. Quick tunnels are for the
 experiment window; treat URL churn on restart as normal and re-publish.
 
+Republishing is mechanical: `tools/publish_mac_endpoints.sh` reads the latest
+URL from each `~/.pandosi/tunnel-*.log`, refuses to publish a partial set, and
+updates the `mac-endpoint` branch only when the URL set changed. The launchd
+job `com.jewelroam.pandosi-endpoints` runs a copy from
+`~/.pandosi/bin/publish-endpoints.sh` every 300 seconds; it must not run from
+`~/Downloads`, which macOS TCC denies to launchd with exit code 126.
+
 Trade-offs: fastest to bring up with no accounts; URL churn and a shared
 public TLS terminator make it a bootstrap/interim channel rather than the
 long-term link.
