@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Watches the proposer's *progress*, not its liveness.
+
+  KeepAlive restarts a process that exits. It cannot see a process that is
+  still running but has stopped producing thoughts - a wedged socket, a model
+  server that accepts and never answers. That silence is the same failure mode
+  that has already bitten this colony twice, so the signal here is the mtime of
+  think-ledger.jsonl. No growth for 600s (4x the 150s round interval, ~120x a
+  normal round's cost) => kick the supervisor. The kick is logged, and a
+  cooldown stops an unfixed stall from turning into restart noise.
+
+  Install:
+    cp tools/mac-launchd/com.jewelroam.pandosi-think-watchdog.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.jewelroam.pandosi-think-watchdog.plist
+  Inspect:
+    tail -f ~/.pandosi/logs/think-watchdog.launchd.out
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.jewelroam.pandosi-think-watchdog</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/zhengenrong/Downloads/PandoSI-island/.venv/bin/python</string>
+    <string>/Users/zhengenrong/Downloads/PandoSI-island/tools/think_watchdog.py</string>
+    <string>--ledger</string>
+    <string>/Users/zhengenrong/.pandosi/think-ledger.jsonl</string>
+    <string>--stall-seconds</string>
+    <string>600</string>
+    <string>--cooldown-file</string>
+    <string>/Users/zhengenrong/.pandosi/logs/think-watchdog.cooldown</string>
+    <string>--restart-cmd</string>
+    <string>launchctl kickstart -k gui/501/com.jewelroam.pandosi-think</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/zhengenrong/Downloads/PandoSI-island</string>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>StartInterval</key>
+  <integer>300</integer>
+  <key>StandardOutPath</key>
+  <string>/Users/zhengenrong/.pandosi/logs/think-watchdog.launchd.out</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/zhengenrong/.pandosi/logs/think-watchdog.launchd.err</string>
+</dict>
+</plist>

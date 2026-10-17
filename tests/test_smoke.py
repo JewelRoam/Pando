@@ -2009,3 +2009,65 @@ class TestResidentThinker(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestThinkWatchdog(unittest.TestCase):
+    """tools/think_watchdog.py - the difference between "running" and "thinking".
+
+    KeepAlive answers "did it exit?". It does not answer "did it stop
+    producing thoughts?" A proposer wedged on an unread socket keeps running
+    with a frozen ledger, which is the same silent failure that cost this
+    colony 7h47m. The contract: silence past the threshold triggers a kick,
+    and a kick that has not helped yet must not become a restart loop.
+    """
+
+    def _tool(self):
+        import importlib.util
+        path = Path(__file__).resolve().parents[1] / "tools" / "think_watchdog.py"
+        spec = importlib.util.spec_from_file_location("think_watchdog", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_progress_not_liveness_is_the_signal(self):
+        wd = self._tool()
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Path(tmp) / "think.jsonl"
+            ledger.write_text("{}\n", encoding="utf-8")
+            mtime = ledger.stat().st_mtime
+
+            # A live process is implied: the ledger moved recently.
+            verdict, _ = wd.decide(mtime + 10, ledger, stall_seconds=900)
+            self.assertEqual(verdict, "ok")
+            # Same process, same liveness - but it has stopped thinking.
+            verdict, why = wd.decide(mtime + 901, ledger, stall_seconds=900)
+            self.assertEqual(verdict, "stall")
+            self.assertIn("ledger age", why)
+
+    def test_a_kick_that_did_not_help_does_not_become_a_restart_loop(self):
+        wd = self._tool()
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Path(tmp) / "think.jsonl"
+            ledger.write_text("{}\n", encoding="utf-8")
+            mtime = ledger.stat().st_mtime
+            cooldown = Path(tmp) / "cooldown"
+
+            verdict, _ = wd.decide(mtime + 901, ledger, 900, cooldown, 300)
+            self.assertEqual(verdict, "stall")
+            cooldown.write_text(f"{mtime + 901}\n", encoding="utf-8")
+            # 100s later: we already kicked, it has not recovered. Kicking again
+            # would just paper over a real stall with restart noise.
+            verdict, why = wd.decide(mtime + 1001, ledger, 900, cooldown, 300)
+            self.assertEqual(verdict, "cooldown")
+            self.assertIn("kicked", why)  # names the earlier kick, not a new one
+            # 400s later the cooldown has expired and a real kick is due again.
+            verdict, _ = wd.decide(mtime + 1301, ledger, 900, cooldown, 300)
+            self.assertEqual(verdict, "stall")
+
+    def test_a_missing_ledger_is_a_stall_not_a_crash(self):
+        wd = self._tool()
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict, why = wd.decide(
+                time.time(), Path(tmp) / "never-written.jsonl", 900)
+            self.assertEqual(verdict, "stall")
+            self.assertIn("no ledger", why)

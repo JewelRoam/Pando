@@ -1,0 +1,11 @@
+[Unit]
+Description=PandoSI pi5 proposer watchdog: kick the supervisor when the ledger stops growing
+Documentation=file:///home/admin/pando/tools/think_watchdog.py
+# KeepAlive/Restart answers "did it exit?". This answers "did it stop thinking?"
+# A wedged proposer stays running with a frozen ledger - the same silent failure
+# that already cost this colony 7h47m once.
+
+[Service]
+Type=oneshot
+Environment=XDG_RUNTIME_DIR=%t
+ExecStart=/home/admin/pando/bin/python /home/admin/pando/tools/think_watchdog.py --ledger /home/admin/.pando/think-ledger.jsonl --stall-seconds 900 --cooldown-file /home/admin/.pando/think-watchdog.cooldown --restart-cmd "systemctl --user restart pandosi-think"
