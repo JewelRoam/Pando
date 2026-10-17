@@ -2856,3 +2856,30 @@ class TestMailboxReplica(unittest.TestCase):
                  {"id": "mid", "status": "claimed"}])
             self.assertEqual(plan["missing"], ["new"])
             self.assertEqual(plan["behind"], ["old"])
+
+
+class TestLedgerMirror(unittest.TestCase):
+    def test_a_failed_copy_does_not_blank_the_previous_ledger(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "mirror_ledger_under_test",
+            Path(__file__).resolve().parents[1] / "tools" / "mirror_ledger.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "pi5.jsonl"
+            dest.write_text("{\"round\": 1}\n", encoding="utf-8")
+
+            def boom(host, remote):
+                raise RuntimeError("no route to host")
+
+            report = module.mirror_once("pi5", "~/.pando/think-ledger.jsonl", dest, fetch=boom)
+            self.assertFalse(report["wrote"])
+            self.assertEqual(dest.read_text(encoding="utf-8"), "{\"round\": 1}\n")
+
+            def ok(host, remote):
+                return "{\"round\": 2}\n"
+
+            report = module.mirror_once("pi5", "~/.pando/think-ledger.jsonl", dest, fetch=ok)
+            self.assertTrue(report["wrote"])
+            self.assertEqual(dest.read_text(encoding="utf-8"), "{\"round\": 2}\n")
