@@ -1539,7 +1539,8 @@ class TestSmoke(unittest.TestCase):
         author = Identity.generate()
         forger = Identity.generate()
         proposal = Proposal(proposal_id="p1", author="mac-codex",
-                            goal="copy ourselves", action="reproduce.spawn")
+                            goal="copy ourselves", action="reproduce.spawn",
+                            pubkey=author.public_key)
         record = sign_proposal(proposal, author)
         self.assertEqual(verify_proposal(record), proposal)
 
@@ -1601,7 +1602,7 @@ class TestSmoke(unittest.TestCase):
 
         member = Identity.generate()
         proposal = Proposal(proposal_id="p1", author="member-a", goal="g",
-                            action="reproduce.spawn")
+                            action="reproduce.spawn", pubkey=member.public_key)
         record = sign_proposal(proposal, member)
 
         # A raw signed record is verified and pinned into a Proposal.
@@ -2704,6 +2705,24 @@ class TestExecution(unittest.TestCase):
         self.assertEqual(next_seed_export([first, second], reactions, set()).proposal_id, "old")
         self.assertEqual(next_seed_export([first, second], reactions, {"old"}).proposal_id, "new")
         self.assertIsNone(next_seed_export([first, second], reactions, {"old", "new"}))
+
+    def test_seed_export_does_not_seal_another_hosts_key(self):
+        from pando.execute import next_seed_export
+        local = self._proposal(pid="ours", author="mac-proposer")
+        foreign = self._proposal(pid="theirs", author="pi5-proposer")
+        local.pubkey = "local-key"
+        foreign.pubkey = "pi5-key"
+        reactions = [
+            self._vote("mac-text", "赞同", "ours"),
+            self._vote("mac-llm", "赞同", "ours"),
+            self._vote("mac-text", "赞同", "theirs"),
+            self._vote("mac-llm", "赞同", "theirs"),
+        ]
+        # foreign is older in the list, and would have been chosen before.
+        self.assertEqual(
+            next_seed_export([foreign, local], reactions, set(), "local-key").proposal_id,
+            "ours")
+        self.assertIsNone(next_seed_export([foreign], reactions, set(), "local-key"))
 
 
 class TestChat(unittest.TestCase):

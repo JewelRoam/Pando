@@ -60,6 +60,9 @@ class Proposal:
     expected_effect: str = ""
     cost: float = 0.0
     cites: list[str] = field(default_factory=list)
+    # The key that signed this record. Empty on objects built in-process.
+    # It is not part of payload(); the signature covers payload only.
+    pubkey: str = ""
 
     def payload(self) -> dict:
         """The content a signature covers (everything but the proof)."""
@@ -443,6 +446,7 @@ def verify_proposal(record, expected_pubkey: str | None = None) -> Proposal | No
             expected_effect=str(payload.get("expected_effect", "")),
             cost=float(payload.get("cost", 0.0)),
             cites=list(payload.get("cites", [])),
+            pubkey=pubkey,
         )
     except (KeyError, TypeError, ValueError):
         return None
@@ -462,7 +466,7 @@ def proposals_from_log(entries, pinned: dict[str, str] | None = None
     - a ``Proposal``: already past the verification boundary. It was either
       built in this process by a trusted proposer or returned by
       ``pando.proposal_mail.fetch_proposals``, which enforced the pin on the
-      way in. A ``Proposal`` carries no key, so ``pinned`` cannot apply to it
+      way in. A ``Proposal`` may carry the pubkey copied at verification. ``pinned`` still cannot be re-checked from the object alone
       and does not -- which is exactly why the pin has to bite at the fetch.
 
     Passing ``Proposal`` objects through is what lets the two halves compose:

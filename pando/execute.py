@@ -164,10 +164,17 @@ def done_ids(ledger: Path) -> set[str]:
 
 
 def next_seed_export(proposals: list[Proposal], reactions: list[dict],
-                     done: set[str]) -> Proposal | None:
-    """Oldest adopted seed.export that has not already been written."""
+                     done: set[str], signer: str | None = None) -> Proposal | None:
+    """Oldest adopted seed.export this host is allowed to seal.
+
+    The bundle is this machine's identity. A proposal signed by another
+    host must be sealed there. ``signer`` is this machine's public key;
+    when it is set, a proposal with any other key is left alone.
+    """
     for proposal in proposals:
         if proposal.proposal_id in done or proposal.action != "seed.export":
+            continue
+        if signer is not None and proposal.pubkey != signer:
             continue
         result = judge(proposal, reactions, actuators={})
         if result["adopted"]:
@@ -218,7 +225,10 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
         print("no passphrase file; refusing to write a plaintext key", flush=True)
         return 2
     ledger = Path(args.ledger).expanduser()
-    chosen = next_seed_export(proposals, reactions, done_ids(ledger))
+    from .identity import Identity
+    signer = Identity.from_json(json.loads(
+        Path(args.identity).expanduser().read_text(encoding="utf-8"))).public_key
+    chosen = next_seed_export(proposals, reactions, done_ids(ledger), signer)
     if chosen is None:
         print("idle", flush=True)
         return 0
