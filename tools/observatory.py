@@ -538,6 +538,52 @@ def proposal_view(body: str) -> dict | None:
 
 
 
+
+def read_execution_ledger(path: Path) -> dict[str, dict]:
+    """Last ledger row for each proposal. Missing file means nothing was recorded."""
+    found: dict[str, dict] = {}
+    try:
+        lines = Path(path).expanduser().read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return found
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(row, dict):
+            continue
+        proposal_id = str(row.get("proposal_id") or "")
+        if not proposal_id:
+            continue
+        found[proposal_id] = {
+            "action": str(row.get("action") or ""),
+            "executed": bool(row.get("executed")),
+            "skipped": str(row.get("skipped") or ""),
+            "sealed": bool(row.get("sealed")),
+        }
+    return found
+
+
+def execution_text(row: dict | None) -> str:
+    """The ledger's own words. No extra label."""
+    if not row:
+        return ""
+    if row.get("sealed"):
+        return "sealed"
+    if row.get("executed"):
+        return "executed"
+    return str(row.get("skipped") or "")
+
+
+def attach_executions(messages: list[dict], executions: dict[str, dict]) -> None:
+    for message in messages:
+        proposal = message.get("fields") or message.get("proposal") or {}
+        target = str(proposal.get("proposal_id") or "")
+        if target and target in executions:
+            message["execution"] = executions[target]
+
+
 def attach_reactions(messages: list[dict], reactions: list[dict]) -> None:
     """Hang each decision-model stance on the proposal it names.
 
@@ -636,6 +682,7 @@ def present_messages(messages: list[dict]) -> list[dict]:
             "signed": bool(message.get("signed")),
             "card": card,
             "reactions": reactions,
+            "execution": execution_text(message.get("execution")),
         })
     return presented
 
@@ -920,6 +967,8 @@ def collect_state(cfg: dict) -> dict:
         state["chat"] = visible
         state["reactions"] = parsed_reactions
         attach_reactions(state["chat"], parsed_reactions)
+        ledger_path = Path(cfg.get("execute_ledger") or (PANDO_DIR / "execute-ledger.jsonl"))
+        attach_executions(state["chat"], read_execution_ledger(ledger_path))
 
     # --- island roots: participants, quorum, playbooks ----------------
     # Roots are independent membership tables. Read every configured root and
@@ -1375,6 +1424,7 @@ function messageBlock(m){
     ${m.text ? `<div class="tx">${esc(m.text)}</div>` : ''}
     ${m.meta ? `<div class="meta">${esc(m.meta)}</div>` : ''}
     ${reacts ? `<div class="reacts">${reacts}</div>` : ''}
+    ${m.execution ? `<div class="meta">${esc(m.execution)}</div>` : ''}
   </div>`;
 }
 async function refresh(){

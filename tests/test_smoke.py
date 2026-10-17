@@ -2601,6 +2601,29 @@ class TestObservatoryFeed(unittest.TestCase):
             path.write_text("{", encoding="utf-8")
             self.assertIsNone(read_root_snapshot(str(path))[0])
 
+
+    def test_an_execution_ledger_row_is_shown_unchanged(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        from observatory import (attach_executions, execution_text,
+                                 present_messages, read_execution_ledger)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "execute-ledger.jsonl"
+            path.write_text(
+                '{"proposal_id": "p1", "action": "seed.export", "executed": true, "sealed": true}\n'
+                '{"proposal_id": "p2", "action": "culture.refine", "executed": false, "skipped": "no-actuator"}\n',
+                encoding="utf-8")
+            rows = read_execution_ledger(path)
+            self.assertEqual(execution_text(rows["p1"]), "sealed")
+            self.assertEqual(execution_text(rows["p2"]), "no-actuator")
+            self.assertEqual(read_execution_ledger(Path(tmp) / "missing"), {})
+        messages = [{"fields": {"proposal_id": "p2", "action": "culture.refine",
+                                "goal": "g", "expected_effect": "e"},
+                     "kind": "proposal", "from": "mac-proposer"}]
+        attach_executions(messages, {"p2": rows["p2"]})
+        shown = present_messages(messages)[0]
+        self.assertEqual(shown["execution"], "no-actuator")
+
+
 class TestExecution(unittest.TestCase):
     def _proposal(self, action="seed.export", author="mac-proposer", pid="p1"):
         from pando.genesis import Proposal
