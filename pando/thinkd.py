@@ -62,9 +62,9 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .common import bypass_proxy_for_lan
 from .genesis import ACTION_SPACE, Proposal
 from .identity import load_or_create
+from .net import open_url
 from .proposal_mail import fetch_proposals, publish_proposal
 
 # Actions we hand the model, in a stable order so prompts are reproducible.
@@ -211,16 +211,14 @@ class OpenAIProposer:
         self._session = session
 
     def _post(self, payload: dict) -> dict:
-        bypass_proxy_for_lan()
         url = f"{self.base_url}/chat/completions"
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         request = urllib.request.Request(
             url, data=json.dumps(payload).encode("utf-8"),
             headers=headers, method="POST")
-        with opener.open(request, timeout=self.timeout) as resp:
+        with open_url(request, self.timeout) as resp:
             return json.loads(resp.read())
 
     def complete(self, system: str, user: str) -> tuple[str, dict]:
@@ -564,14 +562,12 @@ class Thinker:
         return out
 
     def _get_from(self, url: str, path: str) -> dict:
-        bypass_proxy_for_lan()
         headers = {}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         request = urllib.request.Request(
             f"{url.rstrip('/')}{path}", headers=headers, method="GET")
-        with opener.open(request, timeout=15) as resp:
+        with open_url(request, 15) as resp:
             return json.loads(resp.read())
 
     def _mailbox_get(self, path: str) -> dict:

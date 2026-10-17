@@ -14,40 +14,23 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import ipaddress
 import json
 import os
 import sys
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from pando.net import open_url  # noqa: E402 - repo root must be importable
 
 # Connection info lives in per-machine config, not in the repo (doctrine
 # 2026-10-17). Pass --url or set PANDOSI_MAILBOX_URL; the bare default is the
 # localhost convention only.
 DEFAULT_URL = "http://127.0.0.1:8776"
 DEFAULT_TOKEN_FILE = "metrics/lan-check/mac-mailbox.token"
-
-
-def _open(request: urllib.request.Request, timeout: float):
-    """Open `request`, bypassing any system proxy for local targets.
-
-    LAN and Tailscale (100.64.0.0/10) addresses are not routable through a
-    local HTTP proxy - it answers 502 (seen live 2026-10-17: the Windows
-    system proxy 127.0.0.1:54056 has 192.168.* and 127.* in ProxyOverride
-    but not the 100.* tailnet range). Public hosts (the Cloudflare tunnel)
-    keep using the system proxy; some networks need it to reach the tunnel.
-    """
-    host = urllib.parse.urlsplit(request.full_url).hostname or ""
-    try:
-        direct = not ipaddress.ip_address(host).is_global
-    except ValueError:
-        direct = host == "localhost"
-    if not direct:
-        return urllib.request.urlopen(request, timeout=timeout)
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    return opener.open(request, timeout=timeout)
 
 
 def _request(args, method: str, path: str,
@@ -63,7 +46,7 @@ def _request(args, method: str, path: str,
                                      data=body, headers=headers,
                                      method=method)
     try:
-        with _open(request, args.timeout) as resp:
+        with open_url(request, args.timeout) as resp:
             return json.loads(resp.read())
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")

@@ -26,8 +26,8 @@ import json
 import urllib.error
 import urllib.request
 
-from .common import bypass_proxy_for_lan
 from .genesis import Proposal, proposals_from_log, sign_proposal
+from .net import open_url
 
 TITLE_PREFIX = "[proposal]"
 PROPOSAL_PREFIX = TITLE_PREFIX
@@ -40,8 +40,6 @@ def is_proposal_task(title: str) -> bool:
 
 def _request(url: str, path: str, token: str | None, method: str,
              payload: dict | None = None, timeout: float = 15) -> dict:
-    bypass_proxy_for_lan()
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     headers = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -49,7 +47,7 @@ def _request(url: str, path: str, token: str | None, method: str,
     request = urllib.request.Request(f"{url.rstrip('/')}{path}", data=body,
                                      headers=headers, method=method)
     try:
-        with opener.open(request, timeout=timeout) as resp:
+        with open_url(request, timeout=timeout) as resp:
             return json.loads(resp.read())
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")

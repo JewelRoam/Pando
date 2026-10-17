@@ -24,13 +24,16 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import ipaddress
 import json
 import os
+import sys
 import urllib.error
-import urllib.parse
 import urllib.request
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from pando.net import open_url  # noqa: E402 - repo root must be importable
 
 CONFIG_PATH = Path(os.environ.get(
     "PANDOSI_HOSTS_FILE", "~/.pandosi/hosts.json")).expanduser()
@@ -58,22 +61,10 @@ def load_candidates() -> list[str]:
     return list(DEFAULT_LOCAL)
 
 
-def _open(url: str, timeout: float):
-    """LAN and tailnet targets bypass any system proxy (see agent_chat)."""
-    host = urllib.parse.urlsplit(url).hostname or ""
-    try:
-        direct = not ipaddress.ip_address(host).is_global
-    except ValueError:
-        direct = host == "localhost"
-    if not direct:
-        return urllib.request.urlopen(url, timeout=timeout)
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    return opener.open(url, timeout=timeout)
-
-
 def probe(url: str, timeout: float) -> tuple[bool, str]:
     try:
-        with _open(url.rstrip("/") + "/health", timeout=timeout) as resp:
+        request = urllib.request.Request(url.rstrip("/") + "/health")
+        with open_url(request, timeout=timeout) as resp:
             body = resp.read().decode("utf-8", "replace")[:120]
             return resp.status == 200, body
     except urllib.error.HTTPError as exc:
