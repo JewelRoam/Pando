@@ -165,6 +165,23 @@ def done_ids(ledger: Path) -> set[str]:
     return found
 
 
+def left_ids(ledger: Path) -> set[str]:
+    """Seed exports already recorded as another host's job."""
+    found: set[str] = set()
+    try:
+        lines = ledger.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return found
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if row.get("skipped") == "other-host" and row.get("proposal_id"):
+            found.add(str(row["proposal_id"]))
+    return found
+
+
 def next_seed_export(proposals: list[Proposal], reactions: list[dict],
                      done: set[str], signer: str | None = None) -> Proposal | None:
     """Oldest adopted seed.export this host is allowed to seal.
@@ -253,8 +270,18 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
         Path(args.identity).expanduser().read_text(encoding="utf-8"))).public_key
     chosen = next_seed_export(proposals, reactions, done_ids(ledger), signer)
     if chosen is None:
-        foreign = foreign_adopted_seeds(
-            proposals, reactions, done_ids(ledger), signer)
+        seen = done_ids(ledger) | left_ids(ledger)
+        foreign = foreign_adopted_seeds(proposals, reactions, seen, signer)
+        if foreign:
+            ledger.parent.mkdir(parents=True, exist_ok=True)
+            with ledger.open("a", encoding="utf-8") as handle:
+                for proposal_id in foreign:
+                    handle.write(json.dumps({
+                        "proposal_id": proposal_id,
+                        "action": "seed.export",
+                        "executed": False,
+                        "skipped": "other-host",
+                    }, sort_keys=True) + "\n")
         payload = {"did": "idle", "foreign_seed_exports": foreign}
         print(json.dumps(payload, ensure_ascii=False), flush=True)
         write_status(ledger.with_name("execute-status.json"), payload)

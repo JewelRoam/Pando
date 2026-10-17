@@ -2750,6 +2750,13 @@ class TestExecution(unittest.TestCase):
             self.assertEqual(json.loads(status.read_text())["foreign_seed_exports"], ["theirs"])
             write_status(status, {"did": "executed", "proposal_id": "ours"})
             self.assertEqual(json.loads(status.read_text())["did"], "executed")
+            from pando.execute import left_ids
+            ledger = Path(tmp) / "ledger.jsonl"
+            ledger.write_text(json.dumps({"proposal_id": "theirs", "skipped": "other-host", "executed": False}) + "\n")
+            self.assertEqual(left_ids(ledger), {"theirs"})
+            self.assertEqual(
+                foreign_adopted_seeds([foreign, local], reactions, left_ids(ledger), "local-key"),
+                [])
 
 
 class TestChat(unittest.TestCase):
