@@ -426,7 +426,7 @@ def collect_state(cfg: dict) -> dict:
         })
 
     # --- optional extra service probes (addresses stay in hosts.json) ---
-    for row in (cfg.get("extra_services") or []):
+    for row in (cfg.get("extra_services") or cfg.get("services") or []):
         url = str((row or {}).get("url") or "")
         if not url:
             continue

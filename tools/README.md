@@ -13,6 +13,7 @@ are not all the same kind of thing. Read this index before adding another.
 | `backup_session.py` | sanitized session archive; redacts tokens / tunnel URLs / tailnet IPs at write time. |
 | `observatory.py` | one-command read-only dashboard for a node: participants, service health, chat feed, and a chat/proposal composer. stdlib only. |
 | `think_stats.py`, `think_watchdog.py` | proposer-ledger statistics; stall watchdog for a frozen thinker. |
+| `observatory.py` | one-command node dashboard: participants, service health, chat/proposal feed, proposer rounds (reads `~/.pandosi/hosts.json`; no mocks). |
 | `win_node_supervisor.ps1`, `win_stack_restart.ps1` | keep the nine resident win services alive; restart everything. |
 | `win_worker.py` | the local model answers `[chat]`/tasks on the win node's behalf. |
 | `win_yi_probe.ps1`, `ctx_guard_probe.py` | one-shot hardware probes (Yi CPU load; llama-server VRAM/context guard). |

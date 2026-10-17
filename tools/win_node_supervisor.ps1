@@ -66,15 +66,16 @@ $yiThinkArgs = @('-m', 'pando.thinkd', '--node-id', 'win-cpu-proposer',
   '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
   '--ledger', 'D:\pando-models\win-cpu-think-ledger.jsonl',
   '--interval', '300', '--explore-every', '5', '--activity-every', '4')
+$observatoryArgs = @("$repo\tools\observatory.py", '--port', '8799')
 
 $names = @('llama-3070', 'stem-gemma', 'stem-laya', 'worker', 'win-mailbox',
-  'llama-yi-cpu', 'stem-yi', 'think-proposer', 'think-yi')
+  'llama-yi-cpu', 'stem-yi', 'think-proposer', 'think-yi', 'observatory')
 $exes = @($llamaExe, $python, $python, $python, $python, $llamaExe, $python,
-  $python, $python)
+  $python, $python, $python)
 $argsList = @($llamaArgs, $gemmaArgs, $layaArgs, $workerArgs, $mailboxArgs,
-  $yiLlamaArgs, $yiStemArgs, $thinkArgs, $yiThinkArgs)
+  $yiLlamaArgs, $yiStemArgs, $thinkArgs, $yiThinkArgs, $observatoryArgs)
 $cwds = @('D:\pando-models\llama-cuda', $repo, $repo, $repo, $repo,
-  'D:\pando-models\llama-cuda', $repo, $repo, $repo)
+  'D:\pando-models\llama-cuda', $repo, $repo, $repo, $repo)
 
 $procs = @{}
 while ($true) {
