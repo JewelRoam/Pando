@@ -37,7 +37,8 @@ def main() -> int:
                         goal="keep the group alive: copy ourselves",
                         action="reproduce.spawn",
                         expected_effect="a second member exists elsewhere",
-                        cites=["r1:seed.export"])
+                        cites=["r1:seed.export"],
+                        pubkey=author.public_key)
     record = sign_proposal(proposal, author)
     print(f"author pubkey : {author.public_key[:16]}...")
     print(f"forger pubkey : {forger.public_key[:16]}...")
