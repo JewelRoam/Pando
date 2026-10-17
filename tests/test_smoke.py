@@ -2690,3 +2690,17 @@ class TestExecution(unittest.TestCase):
             sealed = json.loads((out_root / "sealed" / "identity" / "identity.json").read_text())
             self.assertEqual(sealed.get("kind"), "encrypted-identity")
             self.assertNotIn("secret_key", sealed)
+
+    def test_an_already_exported_seed_is_not_chosen_again(self):
+        from pando.execute import next_seed_export
+        first = self._proposal(pid="old")
+        second = self._proposal(pid="new")
+        reactions = [
+            self._vote("mac-text", "赞同", "old"),
+            self._vote("mac-llm", "赞同", "old"),
+            self._vote("mac-text", "赞同", "new"),
+            self._vote("mac-llm", "赞同", "new"),
+        ]
+        self.assertEqual(next_seed_export([first, second], reactions, set()).proposal_id, "old")
+        self.assertEqual(next_seed_export([first, second], reactions, {"old"}).proposal_id, "new")
+        self.assertIsNone(next_seed_export([first, second], reactions, {"old", "new"}))

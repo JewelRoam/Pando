@@ -146,6 +146,35 @@ def summarize(results: list[dict]) -> dict:
     }
 
 
+
+def done_ids(ledger: Path) -> set[str]:
+    found: set[str] = set()
+    try:
+        lines = ledger.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return found
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if row.get("executed") and row.get("proposal_id"):
+            found.add(str(row["proposal_id"]))
+    return found
+
+
+def next_seed_export(proposals: list[Proposal], reactions: list[dict],
+                     done: set[str]) -> Proposal | None:
+    """Oldest adopted seed.export that has not already been written."""
+    for proposal in proposals:
+        if proposal.proposal_id in done or proposal.action != "seed.export":
+            continue
+        result = judge(proposal, reactions, actuators={})
+        if result["adopted"]:
+            return proposal
+    return None
+
+
 def dry_run(proposals: list[Proposal], reactions: list[dict], **policy) -> dict:
     """Judge every proposal. No actuator, no write."""
     results = [judge(proposal, reactions, actuators={}, **policy)
@@ -177,6 +206,41 @@ def _load_reactions(url: str, token: str | None, limit: int) -> list[dict]:
     return found
 
 
+
+def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
+    """Export one sealed seed, or do nothing if none is waiting.
+
+    The home directory is empty on purpose: the bundle must not copy the
+    mailbox token or task files. Only seed.export is eligible.
+    """
+    phrase = Path(args.passphrase_file).expanduser()
+    if not phrase.is_file():
+        print("no passphrase file; refusing to write a plaintext key", flush=True)
+        return 2
+    ledger = Path(args.ledger).expanduser()
+    chosen = next_seed_export(proposals, reactions, done_ids(ledger))
+    if chosen is None:
+        print("idle", flush=True)
+        return 0
+    home = Path("~/.pandosi/seed-home-empty").expanduser()
+    home.mkdir(parents=True, exist_ok=True)
+    ok = export_seed(
+        chosen, home=home, identity=args.identity,
+        rollout_dir=home / "rollouts", out_root=args.out_root,
+        passphrase_file=phrase)
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    with ledger.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({
+            "proposal_id": chosen.proposal_id,
+            "action": "seed.export",
+            "executed": bool(ok),
+            "sealed": bool(ok),
+        }, sort_keys=True) + "\n")
+    print(json.dumps({"proposal_id": chosen.proposal_id, "executed": bool(ok)},
+                     sort_keys=True), flush=True)
+    return 0 if ok else 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="judge proposals; does not execute them")
@@ -184,16 +248,22 @@ def main() -> int:
     parser.add_argument("--token-file", default="~/.pandosi/mailbox.token")
     parser.add_argument("--limit", type=int, default=40)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--once", action="store_true",
+                        help="export one adopted seed that is not already done")
+    parser.add_argument("--passphrase-file", default="~/.pandosi/seed.passphrase")
+    parser.add_argument("--identity", default="~/.pando/identity.json")
+    parser.add_argument("--out-root", default="~/.pandosi/executions")
+    parser.add_argument("--ledger", default="~/.pandosi/execute-ledger.jsonl")
     args = parser.parse_args()
-    if not args.dry_run:
-        print("refusing to run without --dry-run; no actuator is shipped",
-              flush=True)
+    if args.dry_run == args.once:
+        print("pass exactly one of --dry-run or --once", flush=True)
         return 2
-    from pathlib import Path
     token = Path(args.token_file).expanduser().read_text(encoding="utf-8").strip()
     proposals = fetch_proposals(args.mailbox, token, status="all",
                                 max_items=args.limit)
     reactions = _load_reactions(args.mailbox, token, max(args.limit * 4, args.limit))
+    if args.once:
+        return run_once(proposals, reactions, args)
     report = dry_run(proposals, reactions)
     summary = report["summary"]
     print(json.dumps(summary, ensure_ascii=False, sort_keys=True), flush=True)
