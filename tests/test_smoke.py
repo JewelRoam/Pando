@@ -2570,6 +2570,37 @@ class TestObservatoryFeed(unittest.TestCase):
         ]}), [])
 
 
+
+    def test_a_root_snapshot_is_read_from_the_file(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        from observatory import _root_sources, read_root_snapshot, participant_from_node
+
+        sources = _root_sources({"roots": [
+            {"name": "pi5", "file": "~/.pandosi/remote/pi5-root.json"},
+            {"name": "mac", "url": "http://127.0.0.1:8765"},
+        ]})
+        self.assertEqual(sources[0]["file"], "~/.pandosi/remote/pi5-root.json")
+        self.assertEqual(sources[0]["url"], "")
+        self.assertEqual(sources[1]["url"], "http://127.0.0.1:8765")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "root.json"
+            path.write_text(json.dumps({"nodes": {
+                "pandosi-pi5-llm": {
+                    "url": "http://192.168.31.22:1",
+                    "host": "192.168.31.22",
+                    "checkpoint": "qwen3-1.7b-q4km",
+                    "chat": {"model": "qwen3-1.7b"},
+                }
+            }}), encoding="utf-8")
+            payload, err = read_root_snapshot(str(path))
+            self.assertIsNone(err)
+            row = participant_from_node(
+                "pandosi-pi5-llm", payload["nodes"]["pandosi-pi5-llm"], "pi5")
+            self.assertEqual(row["chat"], {"model": "qwen3-1.7b"})
+            self.assertEqual(row["host"], "192.168.31.22")
+            path.write_text("{", encoding="utf-8")
+            self.assertIsNone(read_root_snapshot(str(path))[0])
+
 class TestExecution(unittest.TestCase):
     def _proposal(self, action="seed.export", author="mac-proposer", pid="p1"):
         from pando.genesis import Proposal
@@ -2983,3 +3014,38 @@ class TestLedgerMirror(unittest.TestCase):
             report = module.mirror_once("pi5", "~/.pando/think-ledger.jsonl", dest, fetch=ok)
             self.assertTrue(report["wrote"])
             self.assertEqual(dest.read_text(encoding="utf-8"), "{\"round\": 2}\n")
+
+
+    def test_a_failed_snapshot_does_not_blank_the_previous_table(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "mirror_ledger_snapshot_under_test",
+            Path(__file__).resolve().parents[1] / "tools" / "mirror_ledger.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "pi5-root.json"
+            dest.write_text('{"nodes": {"keep": {}}}', encoding="utf-8")
+
+            def boom():
+                raise RuntimeError("no route to host")
+
+            report = module.snapshot_once(dest, boom)
+            self.assertFalse(report["wrote"])
+            self.assertIn("keep", dest.read_text(encoding="utf-8"))
+
+            def empty():
+                return '{"nodes": {}}'
+
+            report = module.snapshot_once(dest, empty)
+            self.assertFalse(report["wrote"])
+            self.assertIn("keep", dest.read_text(encoding="utf-8"))
+
+            def ok():
+                return json.dumps({"nodes": {"pandosi-pi5-llm": {"chat": {"model": "qwen3-1.7b"}}}})
+
+            report = module.snapshot_once(dest, ok)
+            self.assertTrue(report["wrote"])
+            saved = json.loads(dest.read_text(encoding="utf-8"))
+            self.assertEqual(saved["nodes"]["pandosi-pi5-llm"]["chat"]["model"], "qwen3-1.7b")
+            self.assertIn("mirrored_at", saved)

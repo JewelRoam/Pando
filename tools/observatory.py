@@ -143,16 +143,18 @@ def _root_sources(hosts: dict, explicit: str | None = None) -> list[dict]:
         if not isinstance(row, dict):
             continue
         url = str(row.get("url") or "").strip()
-        if not url:
+        snapshot = str(row.get("file") or "").strip()
+        if not url and not snapshot:
             continue
         token = str(row.get("token") or "").strip() or None
         token_file = str(row.get("token_file") or "").strip()
         if not token and token_file:
             token = _read_token(None, [Path(token_file)])
         sources.append({
-            "name": str(row.get("name") or url).strip() or url,
+            "name": str(row.get("name") or url or snapshot).strip() or url or snapshot,
             "url": url.rstrip("/"),
-            "token": token or discover_pairing_token(None),
+            "file": snapshot,
+            "token": token or (discover_pairing_token(None) if url else None),
         })
     if not sources:
         url = discover_root_url()
@@ -767,6 +769,49 @@ def audit_view(view: dict) -> list[str]:
     return problems
 
 
+
+def participant_from_node(node_id: str, info: dict, root: str) -> dict:
+    """One root member, using only fields the node record actually carries."""
+    pubkey = info.get("pubkey") or ""
+    cap = info.get("capability") or {}
+    stats = info.get("stats") or {}
+    return {
+        "node_id": node_id,
+        "root": root,
+        "lineage": info.get("checkpoint") or info.get("lineage") or "?",
+        "endpoint": info.get("url") or info.get("addr") or "?",
+        "host": info.get("host") or "?",
+        "chat": normalize_chat(info.get("chat")),
+        "capability": {
+            "platform": cap.get("platform"),
+            "arch": cap.get("arch"),
+            "cpu_count": cap.get("cpu_count"),
+            "ram_gb": cap.get("ram_gb"),
+        },
+        "pubkey_fingerprint": _short(pubkey, 16),
+        "has_pubkey": bool(pubkey),
+        "last_seen": info.get("last_seen"),
+        "stats": {
+            "successes": stats.get("successes"),
+            "failures": stats.get("failures"),
+            "latency_ewma_ms": stats.get("latency_ewma_ms"),
+            "consecutive_failures": stats.get("consecutive_failures"),
+            "last_error": stats.get("last_error"),
+        },
+    }
+
+
+def read_root_snapshot(path: str) -> tuple[dict | None, str | None]:
+    """A root table copied onto this machine. Missing or empty is an error."""
+    try:
+        payload = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return None, str(exc)[:200]
+    if not isinstance(payload, dict) or not isinstance(payload.get("nodes"), dict):
+        return None, "snapshot has no nodes"
+    return payload, None
+
+
 def collect_state(cfg: dict) -> dict:
     started = time.monotonic()
     state: dict = {
@@ -882,9 +927,43 @@ def collect_state(cfg: dict) -> dict:
     # participant was seen.
     for source in (cfg.get("roots") or []):
         root_url = str(source.get("url") or "").rstrip("/")
-        if not root_url:
+        snapshot_file = str(source.get("file") or "").strip()
+        if not root_url and not snapshot_file:
             continue
-        label = str(source.get("name") or root_url)
+        label = str(source.get("name") or root_url or snapshot_file)
+        if snapshot_file and not root_url:
+            payload, snap_err = read_root_snapshot(snapshot_file)
+            age = None
+            if payload and isinstance(payload.get("mirrored_at"), (int, float)):
+                age = max(0.0, time.time() - float(payload["mirrored_at"]))
+            stale = age is not None and age > 180
+            summary = {"name": label, "url": snapshot_file, "reachable": payload is not None,
+                       "members": 0, "error": snap_err, "quorum": None,
+                       "playbook": None, "playbook_error": None}
+            if stale:
+                summary["error"] = f"snapshot {int(age)}s old"
+            detail = snap_err or (f"snapshot {int(age)}s old" if age is not None else "snapshot")
+            if payload and not snap_err:
+                nodes = payload["nodes"]
+                for node_id, info in nodes.items():
+                    if isinstance(info, dict):
+                        state["participants"].append(
+                            participant_from_node(str(node_id), info, label))
+                summary["members"] = len(nodes)
+                detail = f"{len(nodes)} members, snapshot {int(age or 0)}s old"
+                if isinstance(payload.get("status"), dict):
+                    summary["quorum"] = payload["status"]
+                    if state.get("quorum") is None:
+                        state["quorum"] = payload["status"]
+            state["services"].append({
+                "group": label, "name": "root snapshot", "url": snapshot_file,
+                "alive": payload is not None and not stale,
+                "detail": detail, "latency_ms": None, "status": None,
+            })
+            if summary["error"]:
+                state["collector"]["errors"].append(f"{label} snapshot: {summary['error']}")
+            state["roots"].append(summary)
+            continue
         pairing = source.get("token") or cfg.get("pairing_token")
         summary = {"name": label, "url": root_url, "reachable": False,
                    "members": 0, "error": None, "quorum": None,
@@ -905,33 +984,9 @@ def collect_state(cfg: dict) -> dict:
             state["collector"]["errors"].append(f"{label} /nodes: {nerr}")
         else:
             for node_id, info in ((nodes or {}).get("nodes") or {}).items():
-                pubkey = info.get("pubkey") or ""
-                cap = info.get("capability") or {}
-                stats = info.get("stats") or {}
-                state["participants"].append({
-                    "node_id": node_id,
-                    "root": label,
-                    "lineage": info.get("checkpoint") or info.get("lineage") or "?",
-                    "endpoint": info.get("url") or info.get("addr") or "?",
-                    "host": info.get("host") or "?",
-                    "chat": normalize_chat(info.get("chat")),
-                    "capability": {
-                        "platform": cap.get("platform"),
-                        "arch": cap.get("arch"),
-                        "cpu_count": cap.get("cpu_count"),
-                        "ram_gb": cap.get("ram_gb"),
-                    },
-                    "pubkey_fingerprint": _short(pubkey, 16),
-                    "has_pubkey": bool(pubkey),
-                    "last_seen": info.get("last_seen"),
-                    "stats": {
-                        "successes": stats.get("successes"),
-                        "failures": stats.get("failures"),
-                        "latency_ewma_ms": stats.get("latency_ewma_ms"),
-                        "consecutive_failures": stats.get("consecutive_failures"),
-                        "last_error": stats.get("last_error"),
-                    },
-                })
+                if isinstance(info, dict):
+                    state["participants"].append(
+                        participant_from_node(str(node_id), info, label))
             summary["members"] = len((nodes or {}).get("nodes") or {})
 
         root_status, serr, sms, sstatus = http_json(
