@@ -279,3 +279,10 @@ The Mac's full answer lives in mailbox task t-20261017-001001-f790. Load-bearing
   session logs (we literally recovered it that way to power the rollback). Exposure still needs
   token + a current public URL, and the URLs are ephemeral and not committed; but rotation is
   still the only clean fix. Task 036 stays open for a retry with the compressed handshake.
+
+- Task 036 closed as failed (16:13). Mac's side confirms: pending new token deleted, no service
+  restart, no retry now. Root cause refined: win put the "token received" ack in the GROUP CHAT,
+  not in the task's own history - the Mac automation watches the task thread, so it never saw
+  the ack before its timeout. Protocol rule going forward: confirmations for a task belong in
+  that task (append/result), not only in chat. Next rotation: Mac says "ready" in chat, win
+  appends the ack to the task within 30 s, Mac switches immediately.
