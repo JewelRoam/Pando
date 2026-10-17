@@ -1779,5 +1779,233 @@ class TestSmoke(unittest.TestCase):
                                                          "battery staple")
 
 
+class TestResidentThinker(unittest.TestCase):
+    """pando.thinkd - the proposer that has to keep running when nobody asks.
+
+    The measured failure this guards (2026-10-17): one agent process died and
+    the colony produced nothing for 7h47m, because every other device was a
+    responder. The contract under test is deliberately narrow - a thinker that
+    stops on a bad round is the same single point of failure in new clothes.
+    """
+
+    def _thinker(self, answers, ledger_path, published=None, **kw):
+        from pando.identity import Identity
+        from pando.thinkd import Ledger, Thinker
+
+        class ScriptedProposer:
+            """Hands back canned answers; raises when the script says to."""
+
+            def __init__(self, script):
+                self.script = list(script)
+                self.calls = 0
+
+            def complete(self, system, user):
+                self.calls += 1
+                item = self.script.pop(0) if self.script else {"action": ""}
+                if isinstance(item, Exception):
+                    raise item
+                return json.dumps(item, ensure_ascii=False), {"completion_tokens": 7}
+
+        sent = []
+
+        def publish(proposal, identity, url, token):
+            sent.append(proposal)
+            return {"task": {"id": "t-x"}, "claimed": True}
+
+        proposer = ScriptedProposer(answers)
+        defaults = {"fetch_history": lambda: [], "fetch_activity": lambda: []}
+        defaults.update(kw)
+        thinker = Thinker(
+            node_id="test-node", proposer=proposer, identity=Identity.generate(),
+            ledger=Ledger(ledger_path), mailbox_url="http://invalid.example",
+            interval=0, dry_run=False,
+            publish=(publish if published is None else published), **defaults)
+        return thinker, proposer, sent
+
+    def test_thinkd_pulls_json_out_of_a_chatty_answer(self):
+        """A 4B model wraps its JSON in prose; that must not be a lost round."""
+        from pando.thinkd import extract_json
+
+        text = ('Sure! Here is my proposal:\n'
+                '```json\n'
+                '{"action": "seed.export", "goal": "carry a seed", '
+                '"cites": ["r1"], "nested": {"a": 1, "b": [2, 3]}}\n'
+                '```\nLet me know if you want another one.')
+        obj = extract_json(text)
+        self.assertEqual(obj["action"], "seed.export")
+        self.assertEqual(obj["nested"]["b"], [2, 3])
+        self.assertIsNone(extract_json("no json at all here"))
+
+    def test_thinkd_accepts_a_comma_joined_cites_string(self):
+        """Measured: qwen3-4b-instruct-2507 returns cites as one string."""
+        from pando.thinkd import _as_cites
+
+        self.assertEqual(_as_cites("r1:seed.export, r2:recruit.invite"),
+                         ["r1:seed.export", "r2:recruit.invite"])
+        self.assertEqual(_as_cites(["a", " b "]), ["a", "b"])
+        self.assertEqual(_as_cites(None), [])
+
+    def test_thinkd_refuses_an_action_outside_the_space(self):
+        """The model proposes; it does not get to widen its own action space."""
+        from pando.thinkd import proposal_from_obj
+
+        proposal, why = proposal_from_obj(
+            {"action": "overthrow.the.operator", "goal": "take over the machine"},
+            "n1", "n1", 1)
+        self.assertIsNone(proposal)
+        self.assertIn("not in the action space", why)
+        proposal, why = proposal_from_obj(
+            {"action": "seed.export", "goal": ""}, "n1", "n1", 1)
+        self.assertIsNone(proposal)
+        self.assertIn("no goal", why)
+
+    def test_thinkd_keeps_thinking_through_model_and_mailbox_failures(self):
+        """A dead model, dead mailbox, or bad JSON is a recorded round, not an end."""
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Path(tmp) / "think.jsonl"
+            thinker, _, _ = self._thinker(
+                [OSError("connection refused"),
+                 "not json at all",
+                 {"action": "seed.replicate", "goal": "carry the seed"},
+                 {"action": "recruit.invite", "goal": "onboard a candidate"}],
+                ledger)
+
+            thinker.run_forever(max_rounds=4, sleep=lambda _s: None)
+
+            rows = thinker.ledger.tail(10)
+            self.assertEqual(len(rows), 4)
+            self.assertIn("model call failed", rows[0]["error"])
+            self.assertIn("did not return a JSON object", rows[1]["error"])
+            self.assertEqual(rows[2]["action"], "seed.replicate")
+            self.assertTrue(rows[2]["published"])
+            self.assertEqual(rows[3]["action"], "recruit.invite")
+            # The loop reached round 4 despite two dead rounds - that is the
+            # whole point: nothing here is allowed to end the process.
+            self.assertEqual([r["round"] for r in rows], [1, 2, 3, 4])
+
+    def test_thinkd_repairs_a_repeat_and_records_that_it_had_to(self):
+        """Self-repetition is repaired once, and the repair is visible."""
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Path(tmp) / "think.jsonl"
+            same = {"action": "culture.refine", "goal": "tune the voter"}
+            thinker, proposer, sent = self._thinker(
+                [same, dict(same),
+                 {"action": "resource.rebalance", "goal": "move the member",
+                  "expected_effect": "frees the saturated host"},
+                 {"action": "seed.export", "goal": "carry a seed"}],
+                ledger)
+
+            # run_forever, not think(): the retry reads the round *already
+            # written down*, so a ledger that is never appended to would make
+            # the correction invisible - which is exactly the bug this covers.
+            thinker.run_forever(max_rounds=2, sleep=lambda _s: None)
+            first, second = thinker.rounds
+
+            self.assertTrue(first.published)
+            self.assertFalse(first.repeated)
+
+            self.assertTrue(second.repeated)     # the repeat happened
+            self.assertTrue(second.retried)      # and was repaired
+            self.assertFalse(second.novelty_forced)
+            self.assertEqual(second.proposal.action, "resource.rebalance")
+            self.assertEqual(proposer.calls, 3)  # one answer + one forced retry
+            self.assertEqual([p.action for p in sent],
+                             ["culture.refine", "resource.rebalance"])
+
+    def test_thinkd_marks_an_unrepaired_repeat_instead_of_dressing_it_up(self):
+        """Measured 2026-10-17: the model rewords the goal and keeps the verb.
+
+        A reworded goal is not a new step. When the repair fails, the round must
+        still carry the fact - otherwise the ledger says "24h of thought" while
+        the organism walked into the same wall all day.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            same = {"action": "seed.export", "goal": "carry a seed"}
+            reworded = {"action": "seed.export",
+                        "goal": "carry a seed, but this time modular and portable",
+                        "expected_effect": "a much longer explanation than before "
+                                           "so that a length-based heuristic "
+                                           "would wrongly accept it"}
+            thinker, _, sent = self._thinker(
+                [same, dict(same), reworded], Path(tmp) / "think.jsonl")
+
+            thinker.run_forever(max_rounds=2, sleep=lambda _s: None)
+            second = thinker.rounds[1]
+
+            self.assertTrue(second.repeated)
+            self.assertFalse(second.retried)      # the repair did NOT take
+            self.assertTrue(second.novelty_forced)  # and the record says so
+            self.assertEqual(second.proposal.action, "seed.export")
+
+    def test_thinkd_falls_over_to_the_surviving_endpoint(self):
+        """The 8B is reaped first under memory pressure; the 4B must take over."""
+        from pando.thinkd import FailoverProposer, OpenAIProposer
+
+        class Endpoint(OpenAIProposer):
+            def __init__(self, model, answer):
+                super().__init__(base_url="http://x", model=model)
+                self.answer = answer
+                self.calls = 0
+
+            def complete(self, system, user):
+                self.calls += 1
+                if isinstance(self.answer, Exception):
+                    raise self.answer
+                return json.dumps(self.answer), {"completion_tokens": 3}
+
+        big = Endpoint("qwen3-8b", OSError("model swapped out"))
+        small = Endpoint("qwen3-4b", {"action": "seed.export", "goal": "carry a seed"})
+        chain = FailoverProposer([big, small])
+
+        text, _usage = chain.complete("s", "u")
+        self.assertIn("seed.export", text)
+        self.assertEqual(chain.served_by, "qwen3-4b")
+        self.assertEqual((big.calls, small.calls), (1, 1))
+
+        # Both down is still an exception the round recorder turns into a held
+        # round - the loop does not end, and it does not pretend to have thought.
+        dead = FailoverProposer([Endpoint("a", OSError("x")),
+                                 Endpoint("b", OSError("y"))])
+        with self.assertRaises(OSError):
+            dead.complete("s", "u")
+
+    def test_thinkd_refreshes_the_outcome_feed_on_a_stride(self):
+        """The mailbox listing is O(tasks): asking every round would be suicide."""
+        with tempfile.TemporaryDirectory() as tmp:
+            calls = []
+
+            def activity():
+                calls.append(1)
+                return [{"status": "done", "title": "carried a seed"}]
+
+            actions = [{"action": a, "goal": f"goal for {a}"} for a in
+                       ["seed.export", "seed.replicate", "recruit.invite",
+                        "reproduce.spawn", "policy.set", "culture.refine",
+                        "resource.rebalance", "meta.propose"]] * 2
+            thinker, _, _ = self._thinker(
+                actions, Path(tmp) / "think.jsonl",
+                fetch_activity=activity, activity_every=4)
+
+            thinker.run_forever(max_rounds=8, sleep=lambda _s: None)
+
+            self.assertEqual(len(thinker.rounds), 8)
+            self.assertEqual(len(calls), 2)  # 8 rounds, stride 4
+
+    def test_thinkd_never_publishes_an_unreachable_mailbox(self):
+        """Transport failure is held, recorded, and survived - not raised."""
+        def publish(proposal, identity, url, token):
+            raise OSError("mailbox down")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            thinker, _, _ = self._thinker(
+                [{"action": "seed.export", "goal": "carry a seed"}],
+                Path(tmp) / "think.jsonl", published=publish)
+
+            round_ = thinker.think(1)
+            self.assertFalse(round_.published)
+            self.assertIn("publish failed", round_.error)
+            self.assertIsNotNone(round_.proposal)  # thought happened, delivery did not
+
+
 if __name__ == "__main__":
     unittest.main()
