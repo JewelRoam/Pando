@@ -5,7 +5,7 @@ After=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/home/admin
-ExecStart=/home/admin/pando/bin/python -m pando.stemd --node-id pandosi-pi5-laya --backend onnx --onnx-path /home/admin/models/laya-en.int8.onnx --repo /home/admin/models/laya-repo --checkpoint laya-en --root http://192.168.31.100:8790 --pairing-token-file /home/admin/.pando/pairing.token --host 0.0.0.0 --advertise-host 192.168.31.22
+ExecStart=/home/admin/pando/bin/python -m pando.stemd --node-id pandosi-pi5-laya --backend onnx --onnx-path /home/admin/models/laya-en.int8.onnx --repo /home/admin/models/laya-repo --checkpoint laya-en --root http://127.0.0.1:8791 --pairing-token-file /home/admin/.pando/root-pairing.token --host 0.0.0.0 --advertise-host 192.168.31.22
 Restart=always
 RestartSec=5
 

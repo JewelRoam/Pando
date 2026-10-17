@@ -223,3 +223,20 @@ The Mac's full answer lives in mailbox task t-20261017-001001-f790. Load-bearing
   absent; the fields are internally consistent and externally unanchored; readable cards say
   the envelope parsed, not that the proposals deserve execution; human approvals 0. Bottleneck
   list unchanged.
+
+## 2026-10-17 - Three independent islands (user correction via Mac): pi5 gets its own root
+
+- The user's correction, adopted: the three ends are independent; what is shared is the group
+  mailbox, not the member table. Before this change the pi5's three stems registered on the win
+  root - a membership fact, not an experiment.
+- Executed on pi5 (then hands off): `pandosi-root.service` on :8791 (`--lan --require-identity
+  --quorum-k 2`, own pairing token in ~/.pando/root-pairing.token). The three stem units now
+  point at 127.0.0.1:8791; its /nodes shows the three pi5 members with pubkeys. The win root
+  /nodes now lists only win-gemma-12b / win-laya-int8 / win-yi-9b - the pi5 entries expired out
+  of the registry. Repo templates updated (pandosi-root.service added; the stem templates no
+  longer carry the win address).
+- Win's resident observatory aggregates two independent roots in one panel: each reports
+  "3 members" without merging tables. Reading another island's member list needs that island's
+  root token; tokens stay in per-host `~/.pandosi/hosts.json` (`roots`: name/url/token),
+  never in git. Pi5 capacity after the change: ~297MB available, ~208MB swap free - the node
+  gets nothing else added, and win does not touch pi5 again unless the user says so.

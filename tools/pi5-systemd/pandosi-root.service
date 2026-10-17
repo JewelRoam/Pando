@@ -1,0 +1,13 @@
+[Unit]
+Description=PandoSI pi5 island root (own quorum; independent of win)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/admin
+ExecStart=/home/admin/pando/bin/python -m pando.rootd --port 8791 --pairing-token-file /home/admin/.pando/root-pairing.token --lan --require-identity --quorum-k 2 --stem-call-timeout 120 --initial-stem-timeout 30
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
