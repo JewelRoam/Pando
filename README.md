@@ -680,7 +680,7 @@ above is recomputed offline from the recorded votes in `assets/votes/` by
   answered at 0.4167 accuracy with median confidence 0.83 — confidence
   scales do not transfer across model families, and the answer is model
   tiers composed by the aggregation layer, not a herd of identical voters
-  (`tools/mac_group_check.py`, `docs/research/2026-10-16-round157.md`).
+  (`experiments/mac_group_check.py`, `docs/research/2026-10-16-round157.md`).
 - **The first real LLM tier — deployed, evaluated, and honestly not yet a
   win**: the Mac node (via the task mailbox) deployed Qwen3-4B-Instruct
   Q4_K_M on llama.cpp with Metal (~45 tok/s, OpenAI-compatible, key-guarded)
@@ -712,7 +712,7 @@ above is recomputed offline from the recorded votes in `assets/votes/` by
   0.9833** — above the two-member core's live 0.9750 — and a second full run
   reproduced it to the digit (5.60 rows/s, p50 181 ms). The offline matrix
   predicted 0.9833 before the run; the naive seating of the same LLM tier
-  decided 0.9167 (`tools/tiered_live_check.py`,
+  decided 0.9167 (`experiments/tiered_live_check.py`,
   `docs/research/2026-10-16-round160.md`).
 - **Fresh split E confirms the tier and exposes the fallback slot**: on a
   fifth wording inventory with zero overlap with A/A2/B/C/D, the three-tier

@@ -40,6 +40,9 @@ most of them).
 When adding a new experiment: one file, one question, print the numbers,
 link it from the research-round doc.
 
+Superseded harnesses whose numbers are still cited move to `experiments/`
+(see `experiments/README.md`); this directory keeps the live set.
+
 ## Companion modules
 
 Shared code lives in `pando/`. `pando/net.py` is THE way to open URLs:
