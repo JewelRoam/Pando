@@ -1118,31 +1118,26 @@ function reactionRow(list){
 }
 function renderPeople(rows){
   if (!rows.length) return '<div class="empty">没有读到任何人。</div>';
-  const head = `<table><thead><tr><th>名字</th><th>来自</th><th>最近</th><th>主机</th><th></th></tr></thead><tbody>`;
+  const head = `<table><thead><tr><th>名字</th><th>来自</th><th>主机</th><th>最近</th></tr></thead><tbody>`;
   return head + rows.map(p => {
-    const tags = []
-      .concat((p.roots || []).map(r => `<span class="tag">${esc(r)}</span>`))
-      .concat(p.activity ? ['<span class="tag">ledger</span>'] : [])
-      .concat(p.seen && p.seen.kind ? [`<span class="tag">${esc(p.seen.kind)} ${esc(p.seen.count)}</span>`] : []);
+    const from = (p.roots || []).filter(Boolean).join(', ') || '—';
     const act = p.activity || {};
-    const recent = [p.lineage, act.action, p.seen && p.seen.action].filter(Boolean).join(' · ') || '—';
-    const c = p.capability || {}, st = p.stats || {};
-    const spec = [p.host, c.arch, c.cpu_count ? c.cpu_count + ' cpu' : null,
-                  c.ram_gb ? c.ram_gb + ' GB' : null].filter(Boolean).join(' · ');
-    const votes = (st.successes != null || st.failures != null)
-      ? `${st.successes ?? 0}/${st.failures ?? 0}` : '';
-    const round = act.round != null ? 'r' + act.round : '';
-    const whenSeen = act.started_at
-      ? Math.max(0, Math.round(Date.now() / 1000 - act.started_at)) + 's'
-      : (p.seen && p.seen.at ? ago(p.seen.at) : '');
-    const key = p.pubkey ? `<span class="tag">${esc(p.pubkey)}</span>` : '';
+    const st = p.stats || {};
+    const bits = [];
+    if (p.lineage) bits.push(p.lineage);
+    if (act.action) bits.push(act.action);
+    if (act.round != null) bits.push('r' + act.round);
+    if (st.successes != null || st.failures != null)
+      bits.push((st.successes ?? 0) + '/' + (st.failures ?? 0));
+    if (p.seen && p.seen.count) bits.push(p.seen.count + ' 条');
+    const recent = bits.join(' · ') || '—';
     const goal = act.goal ? `<div class="sub">${esc(act.goal)}</div>` : '';
+    const title = p.pubkey ? ` title="${esc(p.pubkey)}"` : '';
     return `<tr>
-      <td class="mono">${esc(p.name)} ${key}</td>
-      <td>${tags.join(' ') || '—'}</td>
+      <td class="mono"${title}>${esc(p.name)}</td>
+      <td>${esc(from)}</td>
+      <td class="sub">${esc(p.host || '—')}</td>
       <td>${esc(recent)}${goal}</td>
-      <td class="sub">${esc(spec || act.via || '—')}</td>
-      <td class="sub">${esc([votes, round, whenSeen].filter(Boolean).join(' · '))}</td>
     </tr>`;
   }).join('') + '</tbody></table>';
 }
