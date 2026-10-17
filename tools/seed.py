@@ -275,6 +275,14 @@ def cmd_export(args) -> int:
                            if sealed else {"identity": "plaintext"}),
             "totals": {"files": len(files),
                        "bytes": sum(f["size"] for f in files)}}
+    # Optional. Absent on older bundles. Covered by the signature when present,
+    # so a directory named after someone else cannot be quietly relabeled.
+    proposal_id = getattr(args, "proposal_id", None)
+    author = getattr(args, "author", None)
+    if proposal_id:
+        body["proposal_id"] = str(proposal_id)
+    if author:
+        body["author"] = str(author)
     signature = None
     if signer is not None:
         signature = signer.sign(body)

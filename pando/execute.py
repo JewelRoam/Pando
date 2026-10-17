@@ -122,6 +122,8 @@ def export_seed(proposal: Proposal, *, home, identity, rollout_dir, out_root,
         rollout_dir=str(Path(rollout_dir).expanduser()),
         force=False,
         passphrase_file=(str(passphrase_file) if passphrase_file else None),
+        proposal_id=proposal.proposal_id,
+        author=proposal.author,
     ))
     return rc == 0 and (out / "manifest.json").is_file()
 

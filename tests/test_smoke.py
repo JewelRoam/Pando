@@ -1746,6 +1746,19 @@ class TestSmoke(unittest.TestCase):
             raw = (bundle / "identity" / "identity.json").read_text()
             self.assertNotIn(live.to_json()["secret_key"], raw)
             self.assertEqual(json.loads(raw)["kind"], "encrypted-identity")
+            plain_man = json.loads((root / "plain" / "manifest.json").read_text())
+            self.assertNotIn("proposal_id", plain_man)
+
+            labeled = root / "labeled"
+            self.assertEqual(seed.cmd_export(argparse.Namespace(
+                out=str(labeled), home=str(home), identity=str(identity_path),
+                rollout_dir=str(root / "rollouts"), force=True,
+                passphrase_file=str(pass_file),
+                proposal_id="mac-proposer-r1", author="mac-proposer")), 0)
+            labeled_man = json.loads((labeled / "manifest.json").read_text())
+            self.assertEqual(labeled_man["proposal_id"], "mac-proposer-r1")
+            self.assertEqual(labeled_man["author"], "mac-proposer")
+            self.assertEqual(verify(labeled, pass_file), 0)
 
             # 3. sealed bundle: no passphrase and wrong passphrase both fail.
             self.assertEqual(verify(bundle), 1)
