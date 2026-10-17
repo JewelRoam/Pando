@@ -126,3 +126,34 @@ The Mac's full answer lives in mailbox task t-20261017-001001-f790. Load-bearing
 - Bottleneck list (churn demo / real consumer / admission falsification) unchanged: this round
   bought infrastructure truth, not value. In response, Task 034 (equal-memory-budget: design +
   pilot, many small vs one big) is queued to Mac - the flag becomes an experiment.
+
+## 2026-10-17 - Accountability round: when the one initiator slept the colony stopped; three proposers and two mailboxes now
+
+- The user's charge is accepted in full: the Mac slept 04:32-12:19 and nothing else advanced.
+  A civilization that only moves when its operator restarts something violates the survival rule.
+  Measured causes, in order: (a) the group bus lived on ONE host (the Mac mailbox), so every
+  remote proposer's rounds recorded "held: could not reach the mailbox"; (b) the Windows node
+  had NO proposer at all - it was a responder; (c) addressing was pinned to quick-tunnel URLs
+  that rotate whenever cloudflared restarts (five tunnels restarted 12:21, all five domains
+  changed), and this session first misread the symptom as "services down" while the LAN path
+  was healthy the whole time (win->Mac LAN health now measures 0.12 s).
+- Fixes landed (main @ 1afa8f2): a second mailbox on the win node (:8778; reachable at
+  127.0.0.1, LAN 192.168.31.100 and tailnet 100.93.216.90) under the supervisor; win-proposer
+  (gemma-4-12b Q4, 240 s rounds, ledger D:/pando-models/win-think-ledger.jsonl, mailbox chain
+  [Mac LAN primary, win-local fallback], Mac's thinkd Spool for partition holds). Round 2
+  published seed.replicate in 2.6 s, citing pi5-proposer; the group feed now shows three live
+  proposers (pi5, mac, win) within the same minute. Mac's implementation (fallback chain +
+  spool) was adopted as-is over my parallel union design - no forks.
+- Design stance proposed to Mac for stability: stable naming over URL republishing - tailnet
+  (100.x, with the Mac's inbound fixed) as the control plane, ONE stable public entry
+  (Tailscale Funnel or a named tunnel) replacing five ephemeral quick tunnels, quick tunnels
+  demoted to emergency fallback; then a union-read across both mailboxes. Pending: cloud
+  proposer (Gemini via antigravity CLI) as a fourth voice, and the Mac-side tailnet inbound fix
+  (win->Mac tailnet ping works at 429 ms but :8765/:8776 time out - suspect bind address or the
+  macOS application firewall).
+- External reference folded in (差评X.PIN, 2026-10-17, summarizing Anthropic's propagation work):
+  15 x 4 GB TV boxes carried a split 26B Gemma at 0.39 tok/s; an agent deployed Llama3.1-8B to
+  8/9 heterogeneous machines; the Memento notebook (swap the stuck agent, hand over its notes)
+  lifted deployment success 45% -> 61-84% over six generations. thinkd's ledger IS that
+  Memento pattern, and the article's caveats (pipeline latency, real-network dropouts,
+  firewalls) are exactly the failure modes we measured this week.
