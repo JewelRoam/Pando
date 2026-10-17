@@ -1,0 +1,180 @@
+{
+  "task_id": "t-20261016-090528-8f39",
+  "task": "012 - 16GB coexistence budget: 4B+8B resident vs 8B alone",
+  "generated_at": "2026-10-16T09:12:00+0800",
+  "benchmark": {
+    "suite": "heldout4_test.jsonl",
+    "rows_per_condition": 240,
+    "prompt_variant": "b",
+    "temperature": 0,
+    "model": "qwen3-8b-instruct",
+    "base_url": "http://127.0.0.1:8082/v1",
+    "raw_votes_note": "Raw 240-row vote outputs were kept separately; accuracy is not used in this memory/throughput comparison."
+  },
+  "conditions": {
+    "a_4b_plus_8b": {
+      "description": "Condition A: 4B and 8B both resident",
+      "summary": {
+        "total": 240,
+        "correct": 222,
+        "accuracy": 0.925,
+        "parse_errors": 0,
+        "regex_fallbacks": 240,
+        "json_parse_rate": 0.0,
+        "avg_latency_ms": 250.27609163783686,
+        "p50_latency_ms": 248.31729201832786,
+        "p95_latency_ms": 300.9728330071084,
+        "avg_tokens_per_second": 25.42287934816662,
+        "probability_mean": 0.5,
+        "ece_5bin": 0.42500000000000004,
+        "model": "qwen3-8b-instruct",
+        "suite": "heldout4_test.jsonl",
+        "prompt_variant": "b"
+      },
+      "process_rss_mb": {
+        "method": "macOS phys_footprint from footprint(1), agreeing with top MEM; ps RSS is unusable on this host",
+        "8b_server_before": 1904.0,
+        "8b_server_after": 1947.0,
+        "4b_server_before": 5616.0,
+        "4b_server_after": 5616.0,
+        "4b_proxy_before": 7.2,
+        "4b_proxy_after": 7.2,
+        "8b_proxy_before": 7.1,
+        "8b_proxy_after": 7.1
+      },
+      "swap_mb": {
+        "before": {
+          "raw": "total = 23552.00M  used = 21901.69M  free = 1650.31M  (encrypted)",
+          "total_mb": 23552.0,
+          "used_mb": 21901.69,
+          "free_mb": 1650.31
+        },
+        "after": {
+          "raw": "total = 21504.00M  used = 20606.69M  free = 897.31M  (encrypted)",
+          "total_mb": 21504.0,
+          "used_mb": 20606.69,
+          "free_mb": 897.31
+        }
+      },
+      "vm_stat_pages": {
+        "before": {
+          "raw": "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:                                     7858.\nPages active:                                 357163.\nPages inactive:                               356166.\nPages speculative:                               234.\nPages throttled:                                   0.\nPages wired down:                             170111.\nPages purgeable:                                5327.\n\"Translation faults\":                     1621519774.\nPages copy-on-write:                        74269172.\nPages zero filled:                         914422034.\nPages reactivated:                         437411159.\nPages purged:                              129466743.\nFile-backed pages:                            342903.\nAnonymous pages:                              370660.\nPages stored in compressor:                   180571.\nPages occupied by compressor:                 102882.\nDecompressions:                            385222353.\nCompressions:                              425887295.\nPageins:                                    88450908.\nPageouts:                                     395084.\nSwapins:                                     7308522.\nSwapouts:                                    9269466.\nPages tagged:                                 113594.\nPages tagged resident:                         93822.\nPages tagged compressed:                       19772.\nPages tag-storage:                             32768.\nPages tag-storage holding tags:                 3757.\nPages tag-storage free:                           42.\nPages tag-storage non-tag pageable:            28858.\nPages tag-storage non-tag wired:                 110.\nBytes of compressed tags:                    2853376.\nTagged compressions:                        17869601.\nTagged decompressions:                      17012100.",
+          "Pages free": 7858,
+          "Pages active": 357163,
+          "Pages inactive": 356166,
+          "Pages wired down": 170111,
+          "Pages occupied by compressor": 102882
+        },
+        "after": {
+          "raw": "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:                                     7343.\nPages active:                                  94541.\nPages inactive:                                92604.\nPages speculative:                              1064.\nPages throttled:                                   0.\nPages wired down:                             517243.\nPages purgeable:                                   2.\n\"Translation faults\":                     1622987094.\nPages copy-on-write:                        74294718.\nPages zero filled:                         914659021.\nPages reactivated:                         438100253.\nPages purged:                              129508941.\nFile-backed pages:                             73574.\nAnonymous pages:                              114635.\nPages stored in compressor:                   467843.\nPages occupied by compressor:                 281619.\nDecompressions:                            386015928.\nCompressions:                              426890938.\nPageins:                                    88797572.\nPageouts:                                     395157.\nSwapins:                                     7423891.\nSwapouts:                                    9322216.\nPages tagged:                                 111402.\nPages tagged resident:                         82798.\nPages tagged compressed:                       28604.\nPages tag-storage:                             32768.\nPages tag-storage holding tags:                 3792.\nPages tag-storage free:                           23.\nPages tag-storage non-tag pageable:            28816.\nPages tag-storage non-tag wired:                 111.\nBytes of compressed tags:                    4568832.\nTagged compressions:                        17911496.\nTagged decompressions:                      17043884.",
+          "Pages free": 7343,
+          "Pages active": 94541,
+          "Pages inactive": 92604,
+          "Pages wired down": 517243,
+          "Pages occupied by compressor": 281619
+        }
+      }
+    },
+    "b_8b_only": {
+      "description": "Condition B: 8B alone; 4B server and proxy stopped and confirmed exited",
+      "summary": {
+        "total": 240,
+        "correct": 222,
+        "accuracy": 0.925,
+        "parse_errors": 0,
+        "regex_fallbacks": 240,
+        "json_parse_rate": 0.0,
+        "avg_latency_ms": 228.1920005499463,
+        "p50_latency_ms": 245.81533297896385,
+        "p95_latency_ms": 250.72254100814462,
+        "avg_tokens_per_second": 25.51650308802356,
+        "probability_mean": 0.5,
+        "ece_5bin": 0.42500000000000004,
+        "model": "qwen3-8b-instruct",
+        "suite": "heldout4_test.jsonl",
+        "prompt_variant": "b"
+      },
+      "process_rss_mb": {
+        "method": "macOS phys_footprint from footprint(1), agreeing with top MEM; ps RSS is unusable on this host",
+        "8b_server_before": 1947.0,
+        "8b_server_after": 1975.0,
+        "4b_server_before": null,
+        "4b_server_after": null,
+        "4b_proxy_before": null,
+        "4b_proxy_after": null,
+        "8b_proxy_before": 7.1,
+        "8b_proxy_after": 7.1
+      },
+      "swap_mb": {
+        "before": {
+          "raw": "total = 21504.00M  used = 20644.06M  free = 859.94M  (encrypted)",
+          "total_mb": 21504.0,
+          "used_mb": 20644.06,
+          "free_mb": 859.94
+        },
+        "after": {
+          "raw": "total = 21504.00M  used = 20524.00M  free = 980.00M  (encrypted)",
+          "total_mb": 21504.0,
+          "used_mb": 20524.0,
+          "free_mb": 980.0
+        }
+      },
+      "vm_stat_pages": {
+        "before": {
+          "raw": "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:                                    12089.\nPages active:                                 120332.\nPages inactive:                               113681.\nPages speculative:                              5463.\nPages throttled:                                   0.\nPages wired down:                             511666.\nPages purgeable:                                2740.\n\"Translation faults\":                     1623314350.\nPages copy-on-write:                        74301836.\nPages zero filled:                         914709457.\nPages reactivated:                         438225148.\nPages purged:                              129521440.\nFile-backed pages:                             73903.\nAnonymous pages:                              165573.\nPages stored in compressor:                   385071.\nPages occupied by compressor:                 231183.\nDecompressions:                            386187548.\nCompressions:                              427018766.\nPageins:                                    88807951.\nPageouts:                                     395157.\nSwapins:                                     7426995.\nSwapouts:                                    9328704.\nPages tagged:                                 110686.\nPages tagged resident:                         83810.\nPages tagged compressed:                       26876.\nPages tag-storage:                             32768.\nPages tag-storage holding tags:                 4069.\nPages tag-storage free:                           65.\nPages tag-storage non-tag pageable:            28427.\nPages tag-storage non-tag wired:                 110.\nBytes of compressed tags:                    4262912.\nTagged compressions:                        17918262.\nTagged decompressions:                      17051823.",
+          "Pages free": 12089,
+          "Pages active": 120332,
+          "Pages inactive": 113681,
+          "Pages wired down": 511666,
+          "Pages occupied by compressor": 231183
+        },
+        "after": {
+          "raw": "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:                                     8168.\nPages active:                                 131969.\nPages inactive:                               129261.\nPages speculative:                              1672.\nPages throttled:                                   0.\nPages wired down:                             516135.\nPages purgeable:                                 835.\n\"Translation faults\":                     1623923072.\nPages copy-on-write:                        74320007.\nPages zero filled:                         914821388.\nPages reactivated:                         438494803.\nPages purged:                              129531904.\nFile-backed pages:                             76756.\nAnonymous pages:                              186146.\nPages stored in compressor:                   370597.\nPages occupied by compressor:                 207209.\nDecompressions:                            386465004.\nCompressions:                              427276675.\nPageins:                                    88822839.\nPageouts:                                     395161.\nSwapins:                                     7433780.\nSwapouts:                                    9328704.\nPages tagged:                                 110131.\nPages tagged resident:                         79913.\nPages tagged compressed:                       30218.\nPages tag-storage:                             32768.\nPages tag-storage holding tags:                 3890.\nPages tag-storage free:                           53.\nPages tag-storage non-tag pageable:            28566.\nPages tag-storage non-tag wired:                 111.\nBytes of compressed tags:                    4976448.\nTagged compressions:                        17926330.\nTagged decompressions:                      17056283.",
+          "Pages free": 8168,
+          "Pages active": 131969,
+          "Pages inactive": 129261,
+          "Pages wired down": 516135,
+          "Pages occupied by compressor": 207209
+        }
+      }
+    }
+  },
+  "deltas_b_minus_a": {
+    "avg_tokens_per_second": 0.094,
+    "avg_tokens_per_second_percent": 0.368,
+    "p50_latency_ms": -2.502,
+    "p50_latency_ms_percent": -1.008,
+    "p95_latency_ms": -50.25,
+    "p95_latency_ms_percent": -16.696,
+    "avg_latency_ms": -22.084,
+    "avg_latency_ms_percent": -8.824,
+    "8b_server_rss_mb_after": 28.0,
+    "swap_used_mb_after": -82.69,
+    "swap_free_mb_after": 82.69,
+    "4b_resident_footprint_mb_after_a": 5616.0
+  },
+  "conclusion": "On this 16GB Apple-silicon Mac, keeping 4B and 8B resident cost the 8B service about 0.37% mean throughput and about 1.0% p50 latency, but the tail was visibly worse: p95 rose from 250.7 ms alone to 301.0 ms when 4B was resident (+20.0% on the coexistence side). The extra resident 4B process accounted for about 5.6 GB of physical footprint. Recommendation: keep 4B resident if its independent capability is useful, because mean 8B throughput is nearly unchanged; stop 4B for latency-sensitive 8B tail workloads or when reclaiming roughly 5.6 GB is more valuable.",
+  "restore": {
+    "status": "done",
+    "4b_server_pid": 54501,
+    "4b_proxy_pid": 54504,
+    "8b_server_pid": 13739,
+    "8b_proxy_pid": 13836,
+    "4b_models_url": "http://127.0.0.1:8080/v1/models",
+    "8b_models_url": "http://127.0.0.1:8082/v1/models",
+    "both_online_at_finish": true
+  },
+  "commands": {
+    "condition_a": "/Users/zhengenrong/Downloads/PandoSI/.venv/bin/python /private/tmp/pandosi-task-012/tools/llm_decision_check.py --suite /private/tmp/pandosi-task-012/assets/heldout4_test.jsonl --variant b --base-url http://127.0.0.1:8082/v1 --api-key-file /Users/zhengenrong/.pandosi/llm-api-8b.token --model qwen3-8b-instruct --timeout 180 --out /Users/zhengenrong/.pandosi/task012/condition-a-votes.json --summary-out /Users/zhengenrong/.pandosi/task012/condition-a-summary.json",
+    "condition_b": "/Users/zhengenrong/Downloads/PandoSI/.venv/bin/python /private/tmp/pandosi-task-012/tools/llm_decision_check.py --suite /private/tmp/pandosi-task-012/assets/heldout4_test.jsonl --variant b --base-url http://127.0.0.1:8082/v1 --api-key-file /Users/zhengenrong/.pandosi/llm-api-8b.token --model qwen3-8b-instruct --timeout 180 --out /Users/zhengenrong/.pandosi/task012/condition-b-votes.json --summary-out /Users/zhengenrong/.pandosi/task012/condition-b-summary.json",
+    "stop_4b": "kill -TERM 70733 70730  # 4B proxy then 4B server; both PIDs confirmed absent",
+    "restore_4b": "/Users/zhengenrong/Downloads/PandoSI/.venv/bin/python /Users/zhengenrong/.pandosi/llm-daemon.py && /Users/zhengenrong/Downloads/PandoSI/.venv/bin/python /Users/zhengenrong/.pandosi/llm-proxy-daemon.py"
+  },
+  "artifacts": {
+    "condition_a_summary": "/Users/zhengenrong/.pandosi/task012/condition-a-summary.json",
+    "condition_b_summary": "/Users/zhengenrong/.pandosi/task012/condition-b-summary.json",
+    "condition_a_log": "/Users/zhengenrong/.pandosi/task012/condition-a.log",
+    "condition_b_log": "/Users/zhengenrong/.pandosi/task012/condition-b.log",
+    "restore_log": "/Users/zhengenrong/.pandosi/task012/restore.log"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "rows": 100,
+  "agreement": 98,
+  "rate": 0.98,
+  "errors": 0,
+  "mean_latency_ms": 1786.260396282305,
+  "old8b_choice_histogram": {
+    "chargeback": 17,
+    "praise": 12,
+    "login_issue": 13,
+    "invoice": 11,
+    "refund": 14,
+    "complaint": 7,
+    "greeting": 12,
+    "exchange": 14
+  }
+}
