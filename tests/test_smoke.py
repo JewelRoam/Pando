@@ -1833,6 +1833,7 @@ class TestResidentThinker(unittest.TestCase):
             node_id="test-node", proposer=proposer, identity=Identity.generate(),
             ledger=Ledger(ledger_path), mailbox_url="http://invalid.example",
             interval=0, dry_run=False,
+            pause=kw.pop("pause", lambda _s: None),
             publish=(publish if published is None else published), **defaults)
         return thinker, proposer, sent
 
@@ -1879,6 +1880,7 @@ class TestResidentThinker(unittest.TestCase):
             ledger = Path(tmp) / "think.jsonl"
             thinker, _, _ = self._thinker(
                 [OSError("connection refused"),
+                 OSError("connection refused"),
                  "not json at all",
                  {"action": "seed.replicate", "goal": "carry the seed"},
                  {"action": "recruit.invite", "goal": "onboard a candidate"}],
@@ -1896,6 +1898,22 @@ class TestResidentThinker(unittest.TestCase):
             # The loop reached round 4 despite two dead rounds - that is the
             # whole point: nothing here is allowed to end the process.
             self.assertEqual([r["round"] for r in rows], [1, 2, 3, 4])
+
+    def test_thinkd_retries_one_dropped_model_call(self):
+        """A respawned server should not cost the whole round."""
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Path(tmp) / "think.jsonl"
+            thinker, proposer, sent = self._thinker(
+                [OSError("closed"),
+                 {"action": "seed.export", "goal": "carry a seed"}],
+                ledger)
+            thinker.run_forever(max_rounds=1, sleep=lambda _s: None)
+            row = thinker.ledger.tail(1)[0]
+            self.assertEqual(row["action"], "seed.export")
+            self.assertTrue(row["retried"])
+            self.assertFalse(row["error"])
+            self.assertEqual(proposer.calls, 2)
+            self.assertEqual(len(sent), 1)
 
     def test_thinkd_repairs_a_repeat_and_records_that_it_had_to(self):
         """Self-repetition is repaired once, and the repair is visible."""

@@ -499,7 +499,7 @@ class Thinker:
                  explore_every: int = 0, out=None, fetch_history=None,
                  publish=None, fetch_activity=None,
                  activity_every: int = 4, spool: "Spool | None" = None,
-                 mailbox_fallbacks=None):
+                 mailbox_fallbacks=None, pause=None):
         self.node_id = node_id
         self.spool = spool
         self.proposer = proposer
@@ -530,6 +530,9 @@ class Thinker:
         self._activity_cache: list[dict] | None = None
         self._activity_age = 0
         self.rounds: list[Round] = []
+        # One pause between a dropped model call and its single retry.
+        # Tests pass a no-op; production waits long enough for a respawn.
+        self._pause = pause or time.sleep
 
     # -- context ---------------------------------------------------------
     def _is_explore_round(self, round_no: int) -> bool:
@@ -702,14 +705,24 @@ class Thinker:
         group = self._fetch_history()
         user = self._user_prompt(round_no, group)
         t0 = time.time()
-        try:
-            text, usage = self.proposer.complete(SYSTEM_PROMPT, user)
-        except (urllib.error.URLError, urllib.error.HTTPError, OSError,
-                ValueError, TimeoutError) as exc:
-            round_.latency_ms = (time.time() - t0) * 1000
-            round_.error = f"model call failed: {exc}"
-            round_.detail = "held: the model was unreachable"
-            return round_
+        text = usage = None
+        for attempt in (1, 2):
+            try:
+                text, usage = self.proposer.complete(SYSTEM_PROMPT, user)
+                break
+            except (urllib.error.URLError, urllib.error.HTTPError, OSError,
+                    ValueError, TimeoutError) as exc:
+                if attempt == 1:
+                    # Measured on pi5: llama is OOM-killed and restarted.
+                    # The first call dies with the process; the next one
+                    # often lands on the new server. One retry, then hold.
+                    round_.retried = True
+                    self._pause(3.0)
+                    continue
+                round_.latency_ms = (time.time() - t0) * 1000
+                round_.error = f"model call failed: {exc}"
+                round_.detail = "held: the model was unreachable"
+                return round_
         round_.latency_ms = (time.time() - t0) * 1000
         round_.served_by = str(getattr(self.proposer, "served_by", "") or "")
         round_.raw = text
