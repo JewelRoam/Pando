@@ -1916,6 +1916,26 @@ class TestResidentThinker(unittest.TestCase):
             self.assertEqual(proposer.calls, 2)
             self.assertEqual(len(sent), 1)
 
+    def test_a_dropped_call_does_not_count_as_a_repaired_repeat(self):
+        """Reconnect and novelty repair are different facts."""
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Path(tmp) / "think.jsonl"
+            thinker, proposer, sent = self._thinker(
+                [{"action": "seed.export", "goal": "carry a seed"},
+                 OSError("closed"),
+                 {"action": "seed.export", "goal": "again"},
+                 {"action": "seed.export", "goal": "still the same"}],
+                ledger)
+            thinker.run_forever(max_rounds=2, sleep=lambda _s: None)
+            second = thinker.rounds[1]
+            self.assertTrue(second.call_retried)
+            self.assertTrue(second.repeated)
+            self.assertFalse(second.retried)
+            self.assertTrue(second.novelty_forced)
+            self.assertEqual(second.proposal.action, "seed.export")
+            self.assertEqual(proposer.calls, 4)
+            self.assertEqual(len(sent), 2)
+
     def test_thinkd_repairs_a_repeat_and_records_that_it_had_to(self):
         """Self-repetition is repaired once, and the repair is visible."""
         with tempfile.TemporaryDirectory() as tmp:
