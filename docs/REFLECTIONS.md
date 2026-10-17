@@ -195,3 +195,19 @@ The Mac's full answer lives in mailbox task t-20261017-001001-f790. Load-bearing
   tiered_live_check defaults.
 - Mac's standing caveats accepted: n=1 diagnostics; the Clash route-table suspicion is
   unproven; the equal-memory-budget control remains the load-bearing missing experiment.
+
+## 2026-10-17 - Repo hygiene from the Mac side: 26 branches -> main only, recoverable via retired/* tags
+
+- Mac consolidated its branch-only content into main (equal-budget-pilot deliverables,
+  distill-v2 corpora, teacher2-h / mac-task-012 / firekeeper-1 / split-f metrics) and deleted 25
+  remote branches after pinning them as `retired/*` tags - nothing is lost, and the deletion
+  removes the "multiple drifting copies of one capability" risk. pi5 has no git: 31/32 pando
+  files are byte-identical to main, thinkd was replaced with the main version and keeps
+  thinking (32 rounds). Win side pruned 22 stale remote refs; every checkout on win sits on
+  main with one worktree.
+- Its caveat, accepted: blob identity means "same bytes", not "same behaviour" - proving a
+  deleted branch's function is truly represented in main needs semantic comparison, not blob
+  hashing. The branch->tag retirement keeps that comparison possible, which is why archive was
+  the right verb here too.
+- Bottleneck list unchanged: repo hygiene removes cognitive and disk drag, not capability;
+  churn demo / real consumer / admission falsification remain the ranked gaps.
