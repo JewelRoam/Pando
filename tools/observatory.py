@@ -547,6 +547,210 @@ def attach_reactions(messages: list[dict], reactions: list[dict]) -> None:
             message["reactions"] = by_target[target]
 
 
+
+def _dash(value) -> str:
+    text = str(value or "").strip()
+    return text if text else "—"
+
+
+def present_people(rows: list[dict]) -> list[dict]:
+    """One display string per column. The page does not assemble these."""
+    presented = []
+    for row in rows:
+        roots = [str(item) for item in (row.get("roots") or []) if item]
+        activity = row.get("activity") or {}
+        seen = row.get("seen") or {}
+        stats = row.get("stats") or {}
+        if activity.get("round") is not None:
+            record = f"r{activity['round']}"
+            if activity.get("action"):
+                record = f"{activity['action']} · {record}"
+        elif stats.get("successes") is not None or stats.get("failures") is not None:
+            record = f"票 {stats.get('successes') or 0}/{stats.get('failures') or 0}"
+        elif seen.get("count"):
+            record = f"{seen['count']} 条"
+        else:
+            record = "—"
+        model = row.get("lineage") or activity.get("served_by") or ""
+        presented.append({
+            "name": _dash(row.get("name")),
+            "from": ", ".join(roots) if roots else "—",
+            "host": _dash(row.get("host")),
+            "model": _dash(model),
+            "record": record,
+            "detail": str(activity.get("goal") or ""),
+            "mark": str(row.get("pubkey") or ""),
+        })
+    return presented
+
+
+def present_messages(messages: list[dict]) -> list[dict]:
+    presented = []
+    for message in messages:
+        fields = message.get("fields") or {}
+        card = bool(fields.get("goal") or fields.get("action") or fields.get("expected_effect"))
+        goal = str(fields.get("goal") or "").strip()
+        effect = str(fields.get("expected_effect") or "").strip()
+        created = str(message.get("created_at") or "")
+        when = created[5:16].replace("T", " ") if len(created) >= 16 else created
+        cites = fields.get("cites") if isinstance(fields.get("cites"), list) else []
+        meta = [str(item) for item in cites if item]
+        if fields.get("cost") not in (None, ""):
+            meta.insert(0, str(fields.get("cost")))
+        if fields.get("proposal_id"):
+            meta.append(str(fields.get("proposal_id")))
+        reactions = []
+        for reaction in message.get("reactions") or []:
+            reactions.append({
+                "text": f"{reaction.get('stance') or ''} {reaction.get('node_id') or ''}".strip(),
+                "title": str(reaction.get("checkpoint") or ""),
+            })
+        address = str(message.get("to") or "").strip()
+        presented.append({
+            "who": _dash(fields.get("author") if card else message.get("from")),
+            "to": f"@{address}" if address else "",
+            "kind": str(message.get("kind") or ""),
+            "when": when,
+            "action": str(fields.get("action") or "") if card else "",
+            "goal": goal if card and goal and goal != effect else "",
+            "text": effect if card and effect else (goal if card else str(message.get("body") or "").strip()),
+            "meta": " · ".join(meta),
+            "signed": bool(message.get("signed")),
+            "card": card,
+            "reactions": reactions,
+        })
+    return presented
+
+
+
+def _service_group(url: str) -> str:
+    host = urllib.parse.urlparse(url).hostname or ""
+    if host in ("127.0.0.1", "::1", "localhost"):
+        return "本机"
+    return host or "其他"
+
+
+def present_services(services: list[dict]) -> list[dict]:
+    groups: list[dict] = []
+    index: dict[str, dict] = {}
+    for row in services:
+        name = str(row.get("group") or "其他")
+        bucket = index.get(name)
+        if bucket is None:
+            bucket = {"name": name, "rows": []}
+            index[name] = bucket
+            groups.append(bucket)
+        parts = []
+        if row.get("status"):
+            parts.append(str(row.get("status")))
+        if row.get("latency_ms") is not None:
+            parts.append(f"{row.get('latency_ms')} ms")
+        bucket["rows"].append({
+            "name": str(row.get("name") or ""),
+            "detail": str(row.get("detail") or ""),
+            "alive": bool(row.get("alive")),
+            "line": " · ".join(parts) if parts else "—",
+        })
+    return groups
+
+
+def present(state: dict) -> dict:
+    """The only object the page reads."""
+    people = present_people(state.get("people") or [])
+    messages = present_messages(state.get("chat") or [])
+    roots = state.get("roots") or []
+    services = state.get("services") or []
+    root_up = sum(1 for row in roots if row.get("reachable"))
+    service_up = sum(1 for row in services if row.get("alive"))
+    counts: dict[str, int] = {}
+    kinds: list[str] = []
+    for message in messages:
+        kind = message["kind"] or "?"
+        if kind not in counts:
+            kinds.append(kind)
+            counts[kind] = 0
+        counts[kind] += 1
+    quorum = []
+    for row in roots:
+        name = str(row.get("name") or "")
+        if row.get("reachable"):
+            quorum.append({"label": name, "value": f"{row.get('members') or 0} 成员"})
+        else:
+            quorum.append({"label": name, "value": str(row.get("error") or "不可达")})
+        snapshot = row.get("quorum") or {}
+        if snapshot:
+            quorum.append({
+                "label": f"{name} quorum",
+                "value": f"{snapshot.get('quorum_k', '—')}（{snapshot.get('quorum_floor', '—')}–{snapshot.get('quorum_ceiling', '—')}）",
+            })
+            if snapshot.get("decision_ewma_ms") is not None:
+                quorum.append({
+                    "label": f"{name} 决策",
+                    "value": f"{round(float(snapshot['decision_ewma_ms']))} ms",
+                })
+    units = []
+    for unit in ((state.get("local_units") or {}).get("services") or []):
+        units.append({
+            "name": str(unit.get("name") or ""),
+            "alive": bool(unit.get("alive")),
+            "value": "运行中" + (f" · {unit['pid']}" if unit.get("pid") else "") if unit.get("alive") else "未运行",
+        })
+    work = []
+    for item in reversed((state.get("work") or [])[-14:]):
+        work.append({
+            "status": str(item.get("status") or ""),
+            "id": str(item.get("id") or ""),
+            "title": str(item.get("title") or ""),
+            "who": str(item.get("claimed_by") or item.get("from") or ""),
+        })
+    open_work = sum(1 for item in (state.get("work") or []) if item.get("status") == "open")
+    return {
+        "headline": f"{root_up}/{len(roots)} root · {len(people)} 人 · {service_up}/{len(services)} 服务",
+        "service_count": f"{service_up}/{len(services)}" if services else "",
+        "error": " · ".join(state.get("collector", {}).get("errors") or []),
+        "kinds": kinds,
+        "kind_counts": " · ".join(f"{counts[kind]} {kind}" for kind in kinds),
+        "compose": list(state.get("compose") or []),
+        "defaults": state.get("defaults") or {},
+        "people": people,
+        "services": present_services(services),
+        "messages": messages,
+        "quorum": quorum,
+        "units": units,
+        "unit_count": f"{sum(1 for unit in units if unit['alive'])}/{len(units)}" if units else "",
+        "work": work,
+        "work_count": f"{open_work} open / {len(state.get('work') or [])}",
+    }
+
+
+def audit_view(view: dict) -> list[str]:
+    """Problems a reader would hit. Empty means the columns say one thing each."""
+    problems = []
+    for row in view.get("people") or []:
+        origin = row.get("from") or ""
+        if origin != "—" and not all(part and " " not in part.strip() or True for part in origin.split(", ")):
+            problems.append(f"from has a phrase: {row.get('name')} {origin}")
+        if any(token in origin for token in ("ledger", "条", "chat", "proposal")):
+            problems.append(f"from is not a root: {row.get('name')} {origin}")
+        if "cpu" in (row.get("host") or "") or "GB" in (row.get("host") or ""):
+            problems.append(f"host mixes a spec: {row.get('name')}")
+        if "条" in (row.get("model") or ""):
+            problems.append(f"model mixes a count: {row.get('name')}")
+        record = row.get("record") or ""
+        has_unit = ("条" in record or record.startswith("票 ")
+                    or re.search(r"(^| )r\d+", record))
+        if record != "—" and not has_unit:
+            problems.append(f"record has no unit: {row.get('name')} {record}")
+    for message in view.get("messages") or []:
+        address = message.get("to") or ""
+        if address.startswith("@@") or (address.startswith("@") and address[1:].startswith("@")):
+            problems.append(f"double at: {address}")
+        text = message.get("text") or ""
+        if text.lstrip().startswith("{") or '"payload"' in text or '"sig"' in text:
+            problems.append(f"json in text: {message.get('who')}")
+    return problems
+
+
 def collect_state(cfg: dict) -> dict:
     started = time.monotonic()
     state: dict = {
@@ -802,13 +1006,14 @@ def collect_state(cfg: dict) -> dict:
         name = str(row.get("name") or url)
         ok, detail, pms, pstatus = http_probe(url, timeout=3.0)
         state["services"].append({
-            "group": str(row.get("group") or "本机与外部探测"),
+            "group": str(row.get("group") or _service_group(url)),
             "name": name, "url": url, "alive": ok, "detail": detail,
             "latency_ms": pms, "status": pstatus,
         })
 
     state["local_units"] = local_units()
     state["collector"]["ms"] = round((time.monotonic() - started) * 1000, 1)
+    state["view"] = present(state)
     return state
 
 
@@ -939,339 +1144,204 @@ def build_handler(cfg: dict):
 PAGE = r"""<!doctype html>
 <html lang="zh"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>PandoSI · Observatory</title>
+<title>Pando · observatory</title>
 <style>
 :root{
-  --bg:#0a0f16; --panel:#111823; --panel2:#0d141d; --line:#1e2937;
-  --ink:#e8eef5; --dim:#93a1b1; --faint:#5f6d7d;
-  --ok:#3fb950; --warn:#d29922; --bad:#f85149; --accent:#58a6ff; --accent2:#39d3c3;
+  --bg:#141711; --panel:#1c2118; --ink:#e7ecd8; --dim:#a3ad96; --faint:#6e7868;
+  --line:#31382c; --sap:#c5d38a; --bark:#d4844a; --bad:#e15d4a;
 }
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);
-  font:14px/1.55 ui-sans-serif,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
-a{color:var(--accent)}
-.wrap{max-width:1560px;margin:0 auto;padding:22px 24px 70px}
-header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
-  padding-bottom:13px;border-bottom:1px solid var(--line)}
-h1{font-size:18px;margin:0;font-weight:650;letter-spacing:.3px}
-h1 span{color:var(--accent2);font-weight:500}
-#hdr{margin-left:auto}
+body{
+  margin:0; color:var(--ink);
+  background:
+    radial-gradient(880px 320px at 100% -8%, #24301c 0%, transparent 60%),
+    var(--bg);
+  font:15px/1.45 "Iowan Old Style", Palatino, "Songti SC", serif;
+}
+.mono, td, th, .msg, input, select, textarea, button, h2, .sub, #hdr{
+  font-family:ui-monospace, "SF Mono", Menlo, monospace;
+}
+.wrap{max-width:1480px;margin:0 auto;padding:28px 28px 64px}
+header{display:flex;align-items:baseline;justify-content:space-between;gap:18px;
+  border-bottom:1px solid var(--line);padding-bottom:14px}
+h1{margin:0;font-weight:500;font-size:28px;letter-spacing:-.03em}
+h1 em{font-style:italic;color:var(--bark);font-weight:500}
+#hdr{color:var(--dim);font-size:12px}
 .sub{color:var(--dim);font-size:12px}
-.sub b{color:var(--ink);font-weight:550}
-.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px;vertical-align:1px}
-.ok{background:var(--ok)} .bad{background:var(--bad)} .warn{background:var(--warn)}
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:16px 0}
-.kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 14px}
-.kpi .v{font-size:22px;font-weight:650;font-variant-numeric:tabular-nums}
-.kpi .l{color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:.1em;margin-top:1px}
-.grid{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(380px,1fr);gap:16px;align-items:start}
-@media(max-width:1100px){.grid{grid-template-columns:1fr}}
-.col{display:flex;flex-direction:column;gap:16px;min-width:0}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
-.card>h2{font-size:12px;letter-spacing:.12em;color:var(--dim);margin:0;
-  padding:11px 15px 9px;border-bottom:1px solid var(--line);font-weight:600;
+.grid{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(340px,.9fr);gap:22px;margin-top:22px;align-items:start}
+@media(max-width:980px){.grid{grid-template-columns:1fr}}
+.col{display:flex;flex-direction:column;gap:22px;min-width:0}
+.card{background:var(--panel);border:1px solid var(--line)}
+.card>h2{margin:0;padding:10px 14px;border-bottom:1px solid var(--line);
+  color:var(--dim);font-size:12px;font-weight:500;
   display:flex;justify-content:space-between;align-items:center;gap:10px}
-.card>h2 .n{color:var(--faint);letter-spacing:0;font-weight:400;font-size:11px}
-.body{padding:12px 15px}
-.grp{color:var(--faint);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
-  margin:10px 0 3px;padding-bottom:4px;border-bottom:1px solid #17212c}
-.grp:first-child{margin-top:0}
-.svc{display:flex;align-items:baseline;gap:9px;padding:6px 0}
-.svc .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.svc .msg{color:var(--dim);font-size:12px}
-.svc .ms{color:var(--faint);font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.body{padding:8px 14px 12px}
 table{width:100%;border-collapse:collapse}
-th{text-align:left;color:var(--faint);font-size:11px;letter-spacing:.07em;text-transform:uppercase;
-  font-weight:600;padding:0 8px 6px 0;border-bottom:1px solid var(--line)}
-td{padding:7px 8px 7px 0;border-bottom:1px solid #16202b;vertical-align:top}
-tr:last-child td{border-bottom:0}
-.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
-.tag{display:inline-block;padding:1px 7px;border-radius:99px;border:1px solid var(--line);
-  background:#0d151e;color:var(--dim);font-size:11px;white-space:nowrap}
-.tag.b{border-color:#1f3a5c;color:var(--accent);background:#0c1a2a}
-.tag.g{border-color:#1d3d28;color:var(--ok);background:#0b1a10}
-.tag.w{border-color:#4a3a12;color:var(--warn);background:#1a1408}
-.k{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:13px}
-.k dt{color:var(--faint)} .k dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
-.feed{display:flex;flex-direction:column;max-height:min(64vh,760px);overflow:auto}
-.msg{padding:10px 15px;border-bottom:1px solid #151e28}
-.msg:last-child{border-bottom:0}
-.msg .hd{display:flex;gap:9px;align-items:baseline;flex-wrap:wrap}
-.msg .who{font-weight:600}
-.msg .to{color:var(--accent2);font-size:12px}
-.msg .ts{color:var(--faint);font-size:11px;margin-left:auto;font-variant-numeric:tabular-nums}
-.msg .tx{margin-top:4px;white-space:pre-wrap;word-break:break-word}
-.msg.prop{background:#0d1620}
-.msg .meta{margin-top:6px;color:var(--faint);font-size:11px;
-  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-.msg .goal{margin-top:7px;font-weight:600}
-.msg .effect{margin-top:3px;white-space:pre-wrap;word-break:break-word;color:#d7e0ea}
-.msg .facts{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px}
-.msg .pid{margin-left:auto;color:var(--faint);font-size:11px;
-  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+th{text-align:left;color:var(--faint);font-size:11px;font-weight:500;padding:0 10px 6px 0}
+td{padding:8px 10px 8px 0;border-top:1px solid var(--line);vertical-align:top;font-size:12px}
+.feed{max-height:min(68vh,780px);overflow:auto}
+.msg{padding:12px 14px;border-top:1px solid var(--line)}
+.msg.cardish{border-left:2px solid var(--bark);padding-left:12px}
+.hd{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.who{color:var(--ink)}
+.to{color:var(--bark)}
+.kind{color:var(--faint)}
+.ts{margin-left:auto;color:var(--faint);font-size:11px}
+.goal{margin-top:6px}
+.tx{margin-top:4px;white-space:pre-wrap;word-break:break-word;color:#d5dcc4}
+.meta{margin-top:6px;color:var(--faint);font-size:11px}
 .reacts{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
-.chip{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border-radius:99px;
-  border:1px solid var(--line);background:#0e1722;font-size:12px}
-.chip .who{color:var(--dim);font-weight:500}
-.chip.yes{border-color:#1d3d28;color:var(--ok)}
-.chip.mid{border-color:#4a3a12;color:var(--warn)}
-.chip.no{border-color:#5c2a2a;color:#ffb4ae}
-.composer{border-top:1px solid var(--line);padding:11px 13px;background:#0c131b}
-.composer .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
-input,select,textarea,button{font:inherit;color:var(--ink);background:#0e161f;
-  border:1px solid var(--line);border-radius:8px;padding:7px 9px;outline:none}
-input:focus,select:focus,textarea:focus{border-color:#2f5d8f}
-textarea{width:100%;resize:vertical;min-height:62px}
-button{background:#17324d;border-color:#26537f;color:#cfe4ff;cursor:pointer;font-weight:500}
-button:hover{background:#1d3d5e} button:disabled{opacity:.5;cursor:default}
-.rowline{display:flex;gap:10px;align-items:center}
-.empty{color:var(--faint);font-style:italic;padding:12px 0}
-.banner{border:1px solid #5c2a2a;background:#1d1113;color:#ffb4ae;border-radius:10px;
-  padding:10px 13px;margin-top:14px;font-size:13px}
-.banner b{color:#fff}
-.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;margin-top:16px}
-.ok-text{color:var(--ok)} .bad-text{color:var(--bad)} .warn-text{color:var(--warn)}
+.chip{border:1px solid var(--line);padding:1px 6px;color:var(--sap);font-size:12px}
+.svc{display:flex;gap:8px;align-items:baseline;padding:5px 0;border-top:1px solid var(--line)}
+.svc:first-of-type{border-top:0}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--bad);flex:none}
+.dot.on{background:var(--sap)}
+.nm{flex:1;min-width:0}
+.nm span{color:var(--dim)}
+.ms{color:var(--faint);font-size:11px}
+.grp{color:var(--faint);font-size:11px;margin:10px 0 2px}
+.k{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;font-size:12px}
+.k dt{color:var(--faint)} .k dd{margin:0;text-align:right}
+.composer{border-top:1px solid var(--line);padding:10px 12px;background:#171c14}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+input,select,textarea,button{font:12px/1.4 ui-monospace,Menlo,monospace;color:var(--ink);
+  background:#12150f;border:1px solid var(--line);padding:6px 8px}
+textarea{width:100%;min-height:64px;resize:vertical}
+button{background:#2a241c;border-color:#6a4a30;color:#f0d7c2;cursor:pointer}
+button:disabled{opacity:.5}
+.lower{display:grid;grid-template-columns:1.2fr .8fr .8fr;gap:22px;margin-top:22px}
+@media(max-width:980px){.lower{grid-template-columns:1fr}}
+.empty{color:var(--faint);padding:12px 14px}
+.banner{border:1px solid #6a3030;color:#f0b2a8;padding:8px 12px;margin-top:14px;font-family:ui-monospace,Menlo,monospace;font-size:12px}
+.ok{color:var(--sap)} .bad{color:var(--bad)}
+@media (prefers-reduced-motion: no-preference){
+  .dot.on{animation:tick 4.8s steps(2) infinite}
+  @keyframes tick{50%{opacity:.35}}
+}
 </style></head>
 <body><div class="wrap">
 <header>
-  <h1>PandoSI <span>· Observatory</span></h1>
-  <div class="sub" id="hdr">loading…</div>
+  <h1>Pando <em>observatory</em></h1>
+  <div id="hdr">…</div>
 </header>
 <div id="errbox"></div>
-<div class="kpis" id="kpis"></div>
-
 <div class="grid">
-  <div class="col">
-    <div class="card">
-      <h2>群组对话 <span class="n" id="cc"></span>
-        <select id="filter" style="font-size:11px;padding:3px 6px">
-          <option value="all">全部</option>
-        </select></h2>
-      <div class="feed" id="chat"></div>
-      <div class="composer">
-        <div class="row">
-          <select id="kind"></select>
-          <label class="sub">发往</label>
-          <input id="recipient" value="" size="9">
-          <label class="sub">署名</label>
-          <input id="sender" value="" size="11">
-          <span class="sub" id="sendhint"></span>
-        </div>
-        <textarea id="text" placeholder="写在这里 (Cmd/Ctrl+Enter 发送)"></textarea>
-        <div class="rowline" style="margin-top:8px">
-          <button id="send">发送</button>
-        </div>
+  <div class="card">
+    <h2>对话 <span class="sub" id="cc"></span>
+      <select id="filter"><option value="all">全部</option></select></h2>
+    <div class="feed" id="chat"></div>
+    <div class="composer">
+      <div class="row">
+        <select id="kind"></select>
+        <label class="sub">发往</label><input id="recipient" size="10">
+        <label class="sub">署名</label><input id="sender" size="12">
+        <span class="sub" id="sendhint"></span>
       </div>
+      <textarea id="text" placeholder="写在这里"></textarea>
+      <div class="row" style="margin:8px 0 0"><button id="send">发送</button></div>
     </div>
   </div>
-
   <div class="col">
     <div class="card">
-      <h2>参与者 <span class="n" id="pc"></span></h2>
+      <h2>参与者 <span class="sub" id="pc"></span></h2>
       <div class="body" id="participants"></div>
     </div>
     <div class="card">
-      <h2>服务健康 <span class="n" id="sc"></span></h2>
+      <h2>服务 <span class="sub" id="sc"></span></h2>
       <div class="body" id="services"></div>
     </div>
   </div>
 </div>
-
-<div class="grid2">
-  <div class="card">
-    <h2>任务队列 <span class="n" id="wc"></span></h2>
-    <div class="body" id="work"></div>
-  </div>
-  <div class="card">
-    <h2>共识 <span class="n" id="qc"></span></h2>
-    <div class="body"><dl class="k" id="quorum"></dl></div>
-  </div>
-  <div class="card">
-    <h2>本机运行 <span class="n" id="lcc"></span></h2>
-    <div class="body"><dl class="k" id="local"></dl></div>
-  </div>
+<div class="lower">
+  <div class="card"><h2>任务 <span class="sub" id="wc"></span></h2><div class="body" id="work"></div></div>
+  <div class="card"><h2>共识</h2><div class="body"><dl class="k" id="quorum"></dl></div></div>
+  <div class="card"><h2>本机 <span class="sub" id="lcc"></span></h2><div class="body"><dl class="k" id="local"></dl></div></div>
 </div>
 </div>
 <script>
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const ts = (s) => (s || '').length >= 19 ? s.slice(11,19) : (s || '');
-const CHAT_HDR = /^\[(chat|proposal)\]\s*/i;
-const titleRest = (t) => String(t || '').replace(CHAT_HDR, '');
-const chatTo = (t) => { const r = titleRest(t); const i = r.indexOf(':'); return i < 0 ? '' : r.slice(0, i).trim(); };
-const chatBody = (t) => { const r = titleRest(t); const i = r.indexOf(':'); return i < 0 ? '' : r.slice(i + 1).trim(); };
-const when = (s) => { const t = Date.parse(String(s||'').replace(' ', 'T')); return isNaN(t) ? ts(s) : new Date(t).toLocaleString('sv-SE'); };
-const ago = (s) => {
-  const t = Date.parse(String(s||'').replace(' ', 'T'));
-  if (isNaN(t)) return '—';
-  const d = Math.max(0, Math.round((Date.now() - t) / 1000));
-  if (d < 60) return d + ' 秒前';
-  if (d < 3600) return Math.round(d/60) + ' 分钟前';
-  if (d < 86400) return Math.round(d/3600) + ' 小时前';
-  return Math.round(d/86400) + ' 天前';
-};
-function reactionRow(list){
-  if (!list || !list.length) return '';
-  return `<div class="reacts">` + list.map(r =>
-    `<span class="chip" title="${esc(r.checkpoint || '')}">${esc(r.stance)} <span class="who">${esc(r.node_id)}</span></span>`
-  ).join('') + `</div>`;
+function peopleTable(rows){
+  if (!rows.length) return '<div class="empty">没有人。</div>';
+  return `<table><thead><tr><th>名字</th><th>来自</th><th>主机</th><th>模型</th><th>记录</th></tr></thead><tbody>`
+    + rows.map(p => `<tr>
+      <td${p.mark ? ` title="${esc(p.mark)}"` : ''}>${esc(p.name)}</td>
+      <td>${esc(p.from)}</td>
+      <td>${esc(p.host)}</td>
+      <td>${esc(p.model)}</td>
+      <td>${esc(p.record)}${p.detail ? `<div class="sub">${esc(p.detail)}</div>` : ''}</td>
+    </tr>`).join('') + '</tbody></table>';
 }
-function renderPeople(rows){
-  if (!rows.length) return '<div class="empty">没有读到任何人。</div>';
-  const head = `<table><thead><tr><th>名字</th><th>来自</th><th>主机</th><th>最近</th></tr></thead><tbody>`;
-  return head + rows.map(p => {
-    const from = (p.roots || []).filter(Boolean).join(', ') || '—';
-    const act = p.activity || {};
-    const st = p.stats || {};
-    const bits = [];
-    if (p.lineage) bits.push(p.lineage);
-    if (act.action) bits.push(act.action);
-    if (act.round != null) bits.push('r' + act.round);
-    if (st.successes != null || st.failures != null)
-      bits.push((st.successes ?? 0) + '/' + (st.failures ?? 0));
-    if (p.seen && p.seen.count) bits.push(p.seen.count + ' 条');
-    const recent = bits.join(' · ') || '—';
-    const goal = act.goal ? `<div class="sub">${esc(act.goal)}</div>` : '';
-    const title = p.pubkey ? ` title="${esc(p.pubkey)}"` : '';
-    return `<tr>
-      <td class="mono"${title}>${esc(p.name)}</td>
-      <td>${esc(from)}</td>
-      <td class="sub">${esc(p.host || '—')}</td>
-      <td>${esc(recent)}${goal}</td>
-    </tr>`;
-  }).join('') + '</tbody></table>';
-}
-function renderMessage(m){
-  const f = m.fields || null;
-  if (f && (f.goal || f.action || f.expected_effect)) {
-    const goal = String(f.goal || '').trim();
-    const effect = String(f.expected_effect || '').trim();
-    const showGoal = goal && goal !== effect;
-    const cites = (Array.isArray(f.cites) ? f.cites : []).map(c => `<span class="tag">${esc(c)}</span>`).join('');
-    const cost = (f.cost === 0 || f.cost) ? `<span class="tag">${esc(f.cost)}</span>` : '';
-    return `<div class="msg prop">
-      <div class="hd"><span class="who">${esc(f.author || m.from)}</span>
-        ${f.action ? `<span class="tag b">${esc(f.action)}</span>` : ''}
-        <span class="tag">${esc(m.kind || '')}</span>
-        ${m.signed ? '<span class="tag g">已签名</span>' : ''}
-        <span class="ts">${esc(when(m.created_at))}</span></div>
-      ${showGoal ? `<div class="goal">${esc(goal)}</div>` : ''}
-      ${effect ? `<div class="effect">${esc(effect)}</div>` : (goal ? `<div class="effect">${esc(goal)}</div>` : '')}
-      <div class="facts">${cost}${cites}
-        ${f.proposal_id ? `<span class="pid">${esc(f.proposal_id)}</span>` : ''}</div>
-      ${reactionRow(m.reactions)}
-    </div>`;
-  }
-  const text = String(m.body || '').trim() || titleRest(m.title);
-  return `<div class="msg">
-    <div class="hd"><span class="who">${esc(m.from)}</span>
-      ${m.to ? `<span class="to">@${esc(m.to)}</span>` : ''}
-      <span class="tag">${esc(m.kind || '')}</span>
-      <span class="ts">${esc(when(m.created_at))}</span></div>
-    <div class="tx">${esc(text)}</div>
+function messageBlock(m){
+  const reacts = (m.reactions || []).map(r =>
+    `<span class="chip"${r.title ? ` title="${esc(r.title)}"` : ''}>${esc(r.text)}</span>`).join('');
+  return `<div class="msg${m.card ? ' cardish' : ''}">
+    <div class="hd"><span class="who">${esc(m.who)}</span>
+      ${m.to ? `<span class="to">${esc(m.to)}</span>` : ''}
+      ${m.action ? `<span class="kind">${esc(m.action)}</span>` : ''}
+      ${m.kind ? `<span class="kind">${esc(m.kind)}</span>` : ''}
+      ${m.signed ? '<span class="kind">已签名</span>' : ''}
+      <span class="ts">${esc(m.when)}</span></div>
+    ${m.goal ? `<div class="goal">${esc(m.goal)}</div>` : ''}
+    ${m.text ? `<div class="tx">${esc(m.text)}</div>` : ''}
+    ${m.meta ? `<div class="meta">${esc(m.meta)}</div>` : ''}
+    ${reacts ? `<div class="reacts">${reacts}</div>` : ''}
   </div>`;
 }
-
 async function refresh(){
   let st;
   try { st = await (await fetch('/api/state', {cache:'no-store'})).json(); }
-  catch(e){ $('#hdr').innerHTML = '<span class="dot bad"></span>面板后端不可达'; return; }
-  if (st.error){ $('#errbox').innerHTML = `<div class="banner"><b>采集失败</b> — ${esc(st.error)}</div>`; return; }
-
-  if (!window.__init){ window.__init = true;
-    const rows = st.compose || [];
+  catch(e){ $('#hdr').textContent = '面板后端不可达'; return; }
+  const v = st.view || {};
+  if (!window.__init){
+    window.__init = true;
+    const rows = v.compose || [];
     window.__signedKinds = rows.filter(r => r.signed).map(r => r.kind);
     $('#kind').innerHTML = rows.map(r => `<option value="${esc(r.kind)}">${esc(r.kind)}</option>`).join('');
-    $('#sender').value = st.defaults?.sender || '';
-    $('#recipient').value = st.defaults?.recipient || '';
+    $('#sender').value = (v.defaults || {}).sender || '';
+    $('#recipient').value = (v.defaults || {}).recipient || '';
     $('#kind').onchange();
   }
-
-  const svcs = st.services || [], parts = st.participants || [], roots = st.roots || [];
-  const alive = svcs.filter(s=>s.alive).length;
-  $('#hdr').innerHTML = `<span class="dot ${alive===svcs.length?'ok':'bad'}"></span>`
-    + `快照 ${esc(when(st.generated_at))} · 采集 ${st.collector?.ms ?? '?'} ms`;
-
-  const errs = st.collector?.errors || [];
-  $('#errbox').innerHTML = errs.length
-    ? `<div class="banner"><b>部分数据未读到</b> — ${errs.map(esc).join(' · ')}</div>` : '';
-
-  const reachable = roots.filter(r=>r.reachable).length;
-  $('#kpis').innerHTML = `
-    <div class="kpi"><div class="v">${reachable}/${roots.length || 1}</div><div class="l">island roots</div></div>
-    <div class="kpi"><div class="v">${(st.people||[]).length}</div><div class="l">参与者</div></div>
-    <div class="kpi"><div class="v ${alive===svcs.length?'ok-text':'bad-text'}">${alive}/${svcs.length}</div><div class="l">services up</div></div>`;
-
-  const people = st.people || [];
-  $('#pc').textContent = people.length ? `${people.length}` : '';
-  $('#participants').innerHTML = renderPeople(people);
-  $('#sc').textContent = svcs.length ? `${alive}/${svcs.length} up` : '';
-  const groups = {};
-  svcs.forEach(s => (groups[s.group || '其他'] = groups[s.group || '其他'] || []).push(s));
-  $('#services').innerHTML = Object.keys(groups).length ? Object.entries(groups).map(([g, rows]) =>
-      `<div class="grp">${esc(g)}</div>` + rows.map(s => `<div class="svc">
-        <span class="dot ${s.alive?'ok':'bad'}"></span>
-        <span class="nm">${esc(s.name)} <span class="msg">${esc(s.detail)}</span></span>
-        <span class="ms">${s.status ? s.status + ' · ' : ''}${s.latency_ms ?? '?'} ms</span>
-      </div>`).join('')).join('')
-    : `<div class="empty">没有可读的服务。</div>`;
-
-  const all = st.chat || [];
-  const want = $('#filter').value;
-  const chat = want === 'all' ? all : all.filter(m => m.kind === want);
-  const kinds = [...new Set(all.map(m => m.kind).filter(Boolean))];
-  if ($('#filter').dataset.kinds !== kinds.join(',')) {
+  $('#hdr').textContent = v.headline || '';
+  $('#errbox').innerHTML = v.error ? `<div class="banner">${esc(v.error)}</div>` : '';
+  const people = v.people || [];
+  $('#pc').textContent = people.length ? String(people.length) : '';
+  $('#participants').innerHTML = peopleTable(people);
+  const groups = v.services || [];
+  $('#sc').textContent = v.service_count || '';
+  $('#services').innerHTML = groups.map(g =>
+    `<div class="grp">${esc(g.name)}</div>` + g.rows.map(r =>
+      `<div class="svc"><span class="dot${r.alive ? ' on' : ''}"></span><span class="nm">${esc(r.name)} <span>${esc(r.detail)}</span></span><span class="ms">${esc(r.line)}</span></div>`
+    ).join('')).join('') || '<div class="empty">没有服务。</div>';
+  const messages = v.messages || [];
+  const kinds = v.kinds || [];
+  if ($('#filter').dataset.kinds !== kinds.join(',')){
     const cur = $('#filter').value || 'all';
-    $('#filter').innerHTML = '<option value="all">全部</option>'
-      + kinds.map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join('');
+    $('#filter').innerHTML = '<option value="all">全部</option>' + kinds.map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join('');
     $('#filter').value = [...$('#filter').options].some(o => o.value === cur) ? cur : 'all';
     $('#filter').dataset.kinds = kinds.join(',');
   }
-  const counts = kinds.map(k => `${all.filter(m => m.kind === k).length} ${k}`).join(' · ');
-  $('#cc').textContent = counts;
+  const want = $('#filter').value;
+  const shown = want === 'all' ? messages : messages.filter(m => m.kind === want);
+  $('#cc').textContent = v.kind_counts || '';
   const feed = $('#chat');
   const stick = feed.scrollTop + feed.clientHeight >= feed.scrollHeight - 48 || !feed.dataset.ready;
-  feed.innerHTML = chat.length ? chat.map(renderMessage).join('')
-    : `<div class="empty">没有匹配的消息。</div>`;
+  feed.innerHTML = shown.length ? shown.map(messageBlock).join('') : '<div class="empty">没有消息。</div>';
   feed.dataset.ready = '1';
   if (stick) feed.scrollTop = feed.scrollHeight;
-
-  const rootRows = [];
-  for (const r of roots) {
-    const q = r.quorum || {};
-    rootRows.push([`${r.name} · ${r.reachable ? '在线' : '不可达'}`,
-      r.reachable ? `${r.members} 成员` : (r.error || '—')]);
-    if (q && Object.keys(q).length) {
-      rootRows.push([`${r.name} · quorum`, `${q.quorum_k ?? '—'}（下限 ${q.quorum_floor ?? '—'} / 上限 ${q.quorum_ceiling ?? '—'}）`]);
-      if (q.decision_ewma_ms != null) rootRows.push([`${r.name} · 决策延迟`, Math.round(q.decision_ewma_ms) + ' ms']);
-      rootRows.push([`${r.name} · blocked`, (q.blocked || []).length]);
-    }
-    if (r.playbook) rootRows.push([`${r.name} · playbook`, `${r.playbook.name} v${r.playbook.version} · ${r.playbook.questions} 题`]);
-  }
-  $('#quorum').innerHTML = rootRows.length
-    ? rootRows.map(([k,v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')
-    : `<dt>—</dt><dd>没有读到 root</dd>`;
-
-  const units = (st.local_units || {}).services || [];
-  $('#lcc').textContent = units.length ? `${units.filter(u=>u.alive).length}/${units.length} 运行中` : '';
-  $('#local').innerHTML = units.length
-    ? units.map(u => `<dt>${esc(u.name)}</dt>
-        <dd class="${u.alive?'ok-text':'bad-text'}">${u.alive ? '运行中' : '未运行'}${u.pid ? ' · pid ' + esc(u.pid) : ''}</dd>`).join('')
-    : `<dt>—</dt><dd>无 launchd/systemd 记录</dd>`;
-
-  const work = st.work || [];
-  const nopen = work.filter(w => w.status === 'open').length;
-  $('#wc').textContent = work.length ? `${nopen} open / ${work.length} total` : '';
-  $('#work').innerHTML = work.length ? `<table><tbody>` + work.slice(-14).reverse().map(w =>
-      `<tr><td><span class="tag ${w.status==='open'?'b':''}">${esc(w.status)}</span></td>
-        <td class="mono">${esc(w.id)}</td><td>${esc(w.title)}</td>
-        <td class="sub">${esc(w.claimed_by || w.from || '')}</td></tr>`).join('') + `</tbody></table>`
-    : `<div class="empty">没有任务。</div>`;
+  const quorum = v.quorum || [];
+  $('#quorum').innerHTML = quorum.length ? quorum.map(r => `<dt>${esc(r.label)}</dt><dd>${esc(r.value)}</dd>`).join('') : '<dt>—</dt><dd>没有 root</dd>';
+  const units = v.units || [];
+  $('#lcc').textContent = v.unit_count || '';
+  $('#local').innerHTML = units.length ? units.map(u => `<dt>${esc(u.name)}</dt><dd class="${u.alive ? 'ok' : 'bad'}">${esc(u.value)}</dd>`).join('') : '<dt>—</dt><dd>无记录</dd>';
+  const work = v.work || [];
+  $('#wc').textContent = v.work_count || '';
+  $('#work').innerHTML = work.length ? `<table><tbody>${work.map(w =>
+    `<tr><td>${esc(w.status)}</td><td>${esc(w.id)}</td><td>${esc(w.title)}</td><td class="sub">${esc(w.who)}</td></tr>`).join('')}</tbody></table>`
+    : '<div class="empty">没有任务。</div>';
 }
-
 $('#kind').onchange = () => {
   const signed = new Set(window.__signedKinds || []);
-  $('#sender').disabled = false;
   $('#sendhint').textContent = signed.has($('#kind').value) ? '签名后发布' : '';
 };
 $('#send').onclick = async () => {
@@ -1280,23 +1350,20 @@ $('#send').onclick = async () => {
   const btn = $('#send'); btn.disabled = true; $('#sendhint').textContent = '发送中…';
   try {
     const r = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({text, from: $('#sender').value, to: $('#recipient').value,
-                            kind: $('#kind').value})});
+      body: JSON.stringify({text, from: $('#sender').value, to: $('#recipient').value, kind: $('#kind').value})});
     const j = await r.json();
-    if (j.ok){ $('#text').value=''; $('#sendhint').textContent = `已发送 ${j.id}` + (j.author ? ` · ${j.author}` : ''); refresh(); }
-    else { $('#sendhint').textContent = '失败: ' + (j.error||r.status); }
-  } catch(e){ $('#sendhint').textContent = '失败: '+e; }
+    $('#sendhint').textContent = j.ok ? `已发送 ${j.id || ''}` : ('失败: ' + (j.error || r.status));
+    if (j.ok){ $('#text').value = ''; refresh(); }
+  } catch(e){ $('#sendhint').textContent = '失败: ' + e; }
   btn.disabled = false;
 };
 $('#filter').onchange = refresh;
-$('#text').addEventListener('keydown', e => {
-  if ((e.metaKey||e.ctrlKey) && e.key === 'Enter') $('#send').click();
-});
-$('#kind').onchange();
+$('#text').addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') $('#send').click(); });
 refresh();
 setInterval(refresh, 5000);
 </script>
 </body></html>
+
 """
 
 

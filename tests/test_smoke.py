@@ -2509,3 +2509,27 @@ class TestObservatoryFeed(unittest.TestCase):
         self.assertEqual(text["roots"], ["mac"])
         ledger = next(row for row in rows if row["name"] == "mac")
         self.assertEqual(ledger["activity"]["round"], 4)
+
+
+    def test_a_column_is_one_field(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        from observatory import audit_view, present_people
+
+        rows = present_people([
+            {"name": "mac-text", "roots": ["mac"], "host": "127.0.0.1",
+             "lineage": "text-nb-v1", "pubkey": "abc",
+             "stats": {"successes": 1, "failures": 0},
+             "activity": None, "seen": {"count": 4, "kind": "chat"}},
+            {"name": "mac", "roots": [], "host": "",
+             "lineage": "", "stats": {},
+             "activity": {"action": "seed.export", "round": 3, "goal": "再播",
+                          "served_by": "qwen"},
+             "seen": None},
+        ])
+        self.assertEqual(rows[0]["from"], "mac")
+        self.assertEqual(rows[0]["record"], "票 1/0")
+        self.assertEqual(rows[1]["from"], "—")
+        self.assertEqual(rows[1]["record"], "seed.export · r3")
+        self.assertEqual(audit_view({"people": rows, "messages": [
+            {"to": "@win-codex", "text": "hello", "who": "mac"},
+        ]}), [])
