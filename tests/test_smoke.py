@@ -2523,6 +2523,9 @@ class TestObservatoryFeed(unittest.TestCase):
         self.assertEqual(text["roots"], ["mac"])
         ledger = next(row for row in rows if row["name"] == "mac")
         self.assertEqual(ledger["activity"]["round"], 4)
+        placed = build_people([], [{"host": "pi5", "address": "192.168.31.22",
+                                     "alive": True, "last": {"round": 8, "served_by": "qwen"}}], [])
+        self.assertEqual(placed[0]["host"], "192.168.31.22")
 
 
     def test_a_column_is_one_field(self):

@@ -452,6 +452,8 @@ def build_people(participants: list[dict], ledgers: list[dict],
         }
         if not row["lineage"]:
             row["lineage"] = row["activity"]["served_by"]
+        if not row["host"] and ledger.get("address"):
+            row["host"] = str(ledger["address"])
     counts: dict[str, dict] = {}
     for message in messages:
         fields = message.get("fields") or {}
@@ -1007,6 +1009,7 @@ def collect_state(cfg: dict) -> dict:
             "via": f"ssh {target}" if target else "local file",
             "alive": bool(entries),
             "error": err,
+            "address": str(source.get("address") or ""),
             "last": entries[-1] if entries else None,
         })
 
