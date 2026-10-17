@@ -872,6 +872,9 @@ class Thinker:
         if proposal is not None and self._destination_problem(proposal):
             repaired = self._ask_for_destination(user, round_no, round_, proposal)
             if repaired is None:
+                # Keep the rejected proposal on the round. A held replicate
+                # with a blank action cannot be counted later.
+                round_.proposal = proposal
                 round_.error = "seed.replicate needs a destination from the host list"
                 round_.detail = "held: " + round_.error
                 return round_

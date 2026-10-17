@@ -2109,6 +2109,8 @@ class TestResidentThinker(unittest.TestCase):
             round_ = thinker.think(1)
             self.assertFalse(round_.published)
             self.assertIn("needs a destination", round_.error)
+            self.assertEqual(round_.proposal.action, "seed.replicate")
+            self.assertEqual(round_.as_dict()["action"], "seed.replicate")
             self.assertEqual(sent, [])
 
             thinker, _proposer, sent = self._thinker(
