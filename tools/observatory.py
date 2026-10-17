@@ -1147,14 +1147,14 @@ PAGE = r"""<!doctype html>
 <title>Pando · observatory</title>
 <style>
 :root{
-  --bg:#141711; --panel:#1c2118; --ink:#e7ecd8; --dim:#a3ad96; --faint:#6e7868;
-  --line:#31382c; --sap:#c5d38a; --bark:#d4844a; --bad:#e15d4a;
+  --bg:#17191b; --panel:#22262a; --ink:#e6e8eb; --dim:#a4a8ae; --faint:#6e737a;
+  --line:#34383d; --sap:#c5c8cc; --bark:#d0d4d8; --bad:#e15d4a;
 }
 *{box-sizing:border-box}
 body{
   margin:0; color:var(--ink);
   background:
-    radial-gradient(880px 320px at 100% -8%, #24301c 0%, transparent 60%),
+    radial-gradient(880px 320px at 100% -8%, #2c3034 0%, transparent 60%),
     var(--bg);
   font:15px/1.45 "Iowan Old Style", Palatino, "Songti SC", serif;
 }
@@ -1188,7 +1188,7 @@ td{padding:8px 10px 8px 0;border-top:1px solid var(--line);vertical-align:top;fo
 .kind{color:var(--faint)}
 .ts{margin-left:auto;color:var(--faint);font-size:11px}
 .goal{margin-top:6px}
-.tx{margin-top:4px;white-space:pre-wrap;word-break:break-word;color:#d5dcc4}
+.tx{margin-top:4px;white-space:pre-wrap;word-break:break-word;color:#d7dbe0}
 .meta{margin-top:6px;color:var(--faint);font-size:11px}
 .reacts{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
 .chip{border:1px solid var(--line);padding:1px 6px;color:var(--sap);font-size:12px}
@@ -1202,12 +1202,12 @@ td{padding:8px 10px 8px 0;border-top:1px solid var(--line);vertical-align:top;fo
 .grp{color:var(--faint);font-size:11px;margin:10px 0 2px}
 .k{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;font-size:12px}
 .k dt{color:var(--faint)} .k dd{margin:0;text-align:right}
-.composer{border-top:1px solid var(--line);padding:10px 12px;background:#171c14}
+.composer{border-top:1px solid var(--line);padding:10px 12px;background:#1c1f22}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
 input,select,textarea,button{font:12px/1.4 ui-monospace,Menlo,monospace;color:var(--ink);
-  background:#12150f;border:1px solid var(--line);padding:6px 8px}
+  background:#141618;border:1px solid var(--line);padding:6px 8px}
 textarea{width:100%;min-height:64px;resize:vertical}
-button{background:#2a241c;border-color:#6a4a30;color:#f0d7c2;cursor:pointer}
+button{background:#2c3034;border-color:#4a4f55;color:#e6e8eb;cursor:pointer}
 button:disabled{opacity:.5}
 .lower{display:grid;grid-template-columns:1.2fr .8fr .8fr;gap:22px;margin-top:22px}
 @media(max-width:980px){.lower{grid-template-columns:1fr}}
