@@ -31,11 +31,26 @@ $layaArgs = @('-m', 'pando.stemd', '--node-id', 'win-laya-int8', '--backend',
   '--pairing-token-file', $token, '--host', '0.0.0.0', '--advertise-host',
   '192.168.31.100')
 $workerArgs = @("$repo\tools\win_worker.py")
+$mailboxArgs = @("$repo\tools\agent_mailbox.py", 'serve', '--port', '8778',
+  '--dir', 'D:\pando-models\mailbox-win',
+  '--token-file', "$repo\metrics\lan-check\mac-mailbox.token")
+# The resident proposer: the Windows node must initiate on its own, not only
+# answer polled work. Multi-mailbox: publish to both, read the union, so a
+# sleeping Mac-hosted mailbox can no longer silence the colony (2026-10-17).
+$thinkArgs = @('-m', 'pando.thinkd', '--node-id', 'win-proposer',
+  '--base-url', 'http://127.0.0.1:8086/v1', '--model', 'gemma-4-12b-it-Q4_K_M',
+  '--mailbox', 'http://192.168.31.41:8776',
+  '--mailbox-fallback', 'http://127.0.0.1:8778',
+  '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
+  '--ledger', 'D:\pando-models\win-think-ledger.jsonl',
+  '--interval', '240', '--explore-every', '5', '--activity-every', '4')
 
-$names = @('llama-3070', 'stem-gemma', 'stem-laya', 'worker')
-$exes = @($llamaExe, $python, $python, $python)
-$argsList = @($llamaArgs, $gemmaArgs, $layaArgs, $workerArgs)
-$cwds = @('D:\pando-models\llama-cuda', $repo, $repo, $repo)
+$names = @('llama-3070', 'stem-gemma', 'stem-laya', 'worker', 'win-mailbox',
+  'think-proposer')
+$exes = @($llamaExe, $python, $python, $python, $python, $python)
+$argsList = @($llamaArgs, $gemmaArgs, $layaArgs, $workerArgs, $mailboxArgs,
+  $thinkArgs)
+$cwds = @('D:\pando-models\llama-cuda', $repo, $repo, $repo, $repo, $repo)
 
 $procs = @{}
 while ($true) {
