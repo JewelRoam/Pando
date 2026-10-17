@@ -2071,3 +2071,79 @@ class TestThinkWatchdog(unittest.TestCase):
                 time.time(), Path(tmp) / "never-written.jsonl", 900)
             self.assertEqual(verdict, "stall")
             self.assertIn("no ledger", why)
+
+
+class TestThinkStats(unittest.TestCase):
+    """tools/think_stats.py - say only what the ledger can support.
+
+    The proposer runs on more than one device now, so "is it evolving or just
+    pacing?" is asked constantly. Every log tail looks the same either way.
+    The contract this tool must keep: report the sample size and the 1-sigma
+    band on every share, and never imply that diversity is progress. High
+    entropy means varied; a fair coin is maximally entropic.
+    """
+
+    def _tool(self):
+        import importlib.util
+        path = Path(__file__).resolve().parents[1] / "tools" / "think_stats.py"
+        spec = importlib.util.spec_from_file_location("think_stats", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_a_share_never_reports_a_nan_band(self):
+        ts = self._tool()
+        # 0/12 repeated is a real observation, not a missing one.
+        share, se = ts.share_with_se(0, 12)
+        self.assertEqual(share, 0.0)
+        self.assertEqual(se, 0.0)
+        # 6/12 carries ~14.4pp of 1-sigma error; that is the point of the tool.
+        share, se = ts.share_with_se(6, 12)
+        self.assertAlmostEqual(share, 0.5, places=6)
+        self.assertGreater(se, 0.14)
+        self.assertLess(se, 0.15)
+
+    def test_entropy_is_variedness_not_progress(self):
+        ts = self._tool()
+        from collections import Counter
+        # One action forever is zero entropy, whatever it is.
+        self.assertEqual(ts.shannon_bits(Counter({"seed.export": 10})), 0.0)
+        # A fair coin between two actions is 1 bit - maximal for two outcomes,
+        # and a state the colony must not call "better" than one action repeated.
+        self.assertAlmostEqual(
+            ts.shannon_bits(Counter({"a": 5, "b": 5})), 1.0, places=6)
+
+    def test_a_round_that_produced_nothing_is_not_a_round_that_thought(self):
+        ts = self._tool()
+        rows = [
+            {"action": "seed.export", "started_at": 1.0, "published": True},
+            {"action": "", "started_at": 2.0, "published": False,
+             "error": "held: could not reach the mailbox"},
+        ]
+        s = ts.summarise(rows)
+        self.assertEqual(s["n"], 2)
+        self.assertEqual(s["distinct_actions"], 1)  # "" is not an action
+        self.assertEqual(s["silent_rounds"], 1)
+        self.assertEqual(s["errored"]["count"], 1)
+        self.assertAlmostEqual(s["published"]["share"], 0.5, places=6)
+
+    def test_a_corrupt_ledger_line_is_skipped_not_fatal(self):
+        ts = self._tool()
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Path(tmp) / "think.jsonl"
+            ledger.write_text(
+                '{"action": "seed.export", "started_at": 1.0}\n'
+                'not json at all\n'
+                '\n'
+                '{"action": "recruit.invite", "started_at": 2.0}\n',
+                encoding="utf-8")
+            rows = ts.load_ledger(ledger)
+            self.assertEqual([r["action"] for r in rows],
+                             ["seed.export", "recruit.invite"])
+
+    def test_an_empty_ledger_says_empty_instead_of_dividing_by_zero(self):
+        ts = self._tool()
+        s = ts.summarise([])
+        self.assertEqual(s["n"], 0)
+        self.assertEqual(s["rounds_per_hour"], 0.0)
+        self.assertIn("empty ledger", ts.format_report("x", s))
