@@ -264,3 +264,18 @@ The Mac's full answer lives in mailbox task t-20261017-001001-f790. Load-bearing
   backup_session.py keeps future logs clean.
 - Bottleneck list unchanged: power-loss survival and observability are infrastructure truth,
   not capability.
+
+## 2026-10-17 - The rotation handshake timed out; this is itself a finding
+
+- Task 036 had Mac post the new mailbox token (old one still valid), win acked at 15:59, but
+  Mac never switched within its 20-minute window: win's new-token probes kept returning 403.
+  Per plan, win+pi5 files were reverted to the old token and the win mailbox/observatory were
+  restarted; communication is fully restored. No rotation happened.
+- The failure mode is instructive: a re-keying handshake whose confirmation travels through the
+  very channel being re-keyed needs either a compressed window (Mac beeps "ready", win acks
+  within 30 s, Mac switches immediately) or an out-of-band copy (user carries the file). A
+  20-minute window over a wake-on-message reader is too wide - the message sat unread.
+- Leak status: unchanged and proven - the old mailbox token is recoverable from the PUBLIC
+  session logs (we literally recovered it that way to power the rollback). Exposure still needs
+  token + a current public URL, and the URLs are ephemeral and not committed; but rotation is
+  still the only clean fix. Task 036 stays open for a retry with the compressed handshake.
