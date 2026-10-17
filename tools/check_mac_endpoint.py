@@ -2,14 +2,18 @@
 
 Doctrine (2026-10-17, user's rule): in this project GitHub is a code
 repository only. Connection information must never be published to
-branches, fetched from them, or kept as a resolution fallback. The
-`mac-endpoint` branch, `tools/publish_mac_endpoints.sh`, and the
-git-reading resolver were retired the same day; anything that recreates
-them is a regression.
+branches, fetched from them, or kept as a resolution fallback. Code
+carries structure (host names, ports, env var names); the addresses
+themselves live in per-machine config:
 
-Resolution is fully local: probe each known host's token-free /health and
-return the first that answers. Order prefers the group's home mailbox,
-then the resilience mailbox on this machine, then tailnet names.
+    ~/.pandosi/hosts.json   {"mailboxes": ["<url>", ...]}
+
+overridable with PANDOSI_HOSTS (inline JSON) or PANDOSI_HOSTS_FILE.
+Without any config the resolver only tries localhost conventions. See
+hosts.example.json for the shape (placeholders only - no real hosts).
+
+Resolution is fully local: probe each configured host's token-free
+/health and return the first that answers.
 
 Usage:
     python tools/check_mac_endpoint.py                # first healthy URL
@@ -22,16 +26,36 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import json
+import os
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
-CANDIDATES = [
-    "http://192.168.31.41:8776",   # Mac mailbox on the LAN (fastest at home)
-    "http://100.92.184.4:8776",    # Mac mailbox over Tailscale (stable name)
-    "http://127.0.0.1:8778",       # win mailbox: local, survives Mac sleep
-    "http://100.93.216.90:8778",   # win mailbox over Tailscale (other hosts)
-]
+CONFIG_PATH = Path(os.environ.get(
+    "PANDOSI_HOSTS_FILE", "~/.pandosi/hosts.json")).expanduser()
+DEFAULT_LOCAL = ["http://127.0.0.1:8776", "http://127.0.0.1:8778"]
+
+
+def load_candidates() -> list[str]:
+    """Mailbox URLs from per-machine config - never from the repository."""
+    inline = os.environ.get("PANDOSI_HOSTS", "").strip()
+    if inline:
+        try:
+            parsed = json.loads(inline)
+            hosts = parsed.get("mailboxes") if isinstance(parsed, dict) else parsed
+            if isinstance(hosts, list) and hosts:
+                return [str(url) for url in hosts if str(url).strip()]
+        except json.JSONDecodeError:
+            pass
+    try:
+        parsed = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        hosts = parsed.get("mailboxes") if isinstance(parsed, dict) else parsed
+        if isinstance(hosts, list) and hosts:
+            return [str(url) for url in hosts if str(url).strip()]
+    except (OSError, json.JSONDecodeError):
+        pass
+    return list(DEFAULT_LOCAL)
 
 
 def _open(url: str, timeout: float):
@@ -67,9 +91,10 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=3.0)
     args = parser.parse_args()
 
+    candidates = load_candidates()
     results = []
     chosen = None
-    for url in CANDIDATES:
+    for url in candidates:
         ok, detail = probe(url, args.timeout)
         results.append({"url": url, "ok": ok, "detail": detail})
         if ok and chosen is None:

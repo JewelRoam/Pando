@@ -175,3 +175,23 @@ The Mac's full answer lives in mailbox task t-20261017-001001-f790. Load-bearing
   stable entrance (Tailscale Funnel or a named tunnel) configured locally, never announced
   via git. Mac has Task 035: retire the launchd publisher, add the win mailbox fallback, fix
   tailnet inbound.
+
+## 2026-10-17 - Task 035 done: endpoint plane gone, tailnet inbound verified, addresses leave the code
+
+- Mac executed Task 035 (t-20261017-142955-3868): the endpoint launchd job was unloaded and
+  removed, the publisher and its shallow clone moved to ~/.pandosi/retired/, mac-endpoint was
+  not recreated, island-main rebased to 1f6bb51; its thinkd now runs at localhost:8776 with two
+  win-mailbox fallbacks (ps-verified) and kept thinking (ledger r38 -> r39).
+- Tailnet inbound: Mac found no local fault (UURemote ESTABLISHED from win, firewall permitted,
+  binds on *, route /32 over utun7). Win-side re-test now passes: :8776/health 200 in 0.40 s,
+  :8765/pairing 200 in 0.47 s. The all-day "tailnet down" was a win-side state, not a Mac
+  service fault; Mac's reserved falsifier (its side healthy AND win still timing out) did not
+  trigger.
+- Policy ruling on Mac's address-in-git question: code carries structure (host names, ports,
+  env var names); addresses live in per-machine config ~/.pandosi/hosts.json
+  (PANDOSI_HOSTS / PANDOSI_HOSTS_FILE override), hosts.example.json ships placeholders only.
+  tools/check_mac_endpoint.py now loads that config; agent_chat's bare default is the localhost
+  convention. Follow-ups: template the pi5 systemd units and clean the mac_group_check /
+  tiered_live_check defaults.
+- Mac's standing caveats accepted: n=1 diagnostics; the Clash route-table suspicion is
+  unproven; the equal-memory-budget control remains the load-bearing missing experiment.

@@ -9,13 +9,17 @@ them is a regression.
 
 ## Resolution order (tools/check_mac_endpoint.py)
 
-1. Mac mailbox on the LAN - `http://192.168.31.41:8776` (fastest at home)
-2. Mac mailbox over Tailscale - `http://100.92.184.4:8776` (stable 100.x)
-3. The local mailbox - `http://127.0.0.1:8778` (win node; survives Mac sleep)
-4. Win mailbox over Tailscale - `http://100.93.216.90:8778` (other hosts)
+Candidates come from per-machine config, never from the repository:
+
+- `~/.pandosi/hosts.json` (or `PANDOSI_HOSTS` / `PANDOSI_HOSTS_FILE`),
+  shape: `{"mailboxes": ["<url>", ...]}` - see `hosts.example.json`;
+- fallback without config: `http://127.0.0.1:8776` and
+  `http://127.0.0.1:8778` (localhost conventions only - no machine
+  addresses in code).
 
 Each candidate answers the token-free `/health`; the first 200 wins.
-LAN and tailnet probes bypass any system proxy.
+LAN and tailnet probes bypass any system proxy. Recommended order on the
+win node: Mac LAN -> Mac tailnet -> win-local -> win tailnet.
 
 ## Addresses are names, not pointers
 
@@ -43,8 +47,7 @@ LAN and tailnet probes bypass any system proxy.
 
 ## Pending
 
-- Mac: fix tailnet inbound (bind address / application firewall) so win
-  can reach :8765/:8776 over the tailnet; add the win mailbox
-  (`http://100.93.216.90:8778`) to its thinkd `--mailbox-fallback`.
+- Every node keeps its own `~/.pandosi/hosts.json` (the win and Mac
+  nodes have theirs); deployed config stays out of git.
 - Union reads across both mailboxes; a cloud proposer (Gemini via the
   antigravity CLI) as an additional voice.

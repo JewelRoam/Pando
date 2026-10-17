@@ -23,7 +23,10 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-DEFAULT_URL = "https://without-belongs-disks-committed.trycloudflare.com"
+# Connection info lives in per-machine config, not in the repo (doctrine
+# 2026-10-17). Pass --url or set PANDOSI_MAILBOX_URL; the bare default is the
+# localhost convention only.
+DEFAULT_URL = "http://127.0.0.1:8776"
 DEFAULT_TOKEN_FILE = "metrics/lan-check/mac-mailbox.token"
 
 

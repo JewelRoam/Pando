@@ -1,0 +1,7 @@
+{
+  "mailboxes": [
+    "http://mac-lan.example:8776",
+    "http://mac-tailnet.example:8776",
+    "http://127.0.0.1:8778"
+  ]
+}
