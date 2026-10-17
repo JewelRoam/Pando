@@ -2476,3 +2476,36 @@ class TestReactions(unittest.TestCase):
         }
         chosen = select_local_stems(nodes, {"127.0.0.1", "localhost"})
         self.assertEqual([row["node_id"] for row in chosen], ["mac-text"])
+
+
+class TestObservatoryFeed(unittest.TestCase):
+    def test_an_address_is_stored_once(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        from observatory import addressee, split_title
+
+        kind, rest = split_title("[chat] @@win-codex: hello")
+        self.assertEqual(kind, "chat")
+        self.assertEqual(addressee(rest), "win-codex")
+        self.assertEqual(addressee("@mac-codex: hi"), "mac-codex")
+        self.assertIsNone(split_title("Task 001 - deploy")[0])
+
+    def test_people_share_a_row_only_when_the_name_matches(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        from observatory import build_people
+
+        rows = build_people(
+            [{"node_id": "mac-text", "roots": ["mac"], "lineage": "text-nb-v1",
+              "host": "127.0.0.1", "has_pubkey": False, "capability": {},
+              "stats": {}}],
+            [{"host": "mac", "alive": True, "via": "local file",
+              "last": {"action": "seed.export", "goal": "再播一处", "round": 4,
+                       "served_by": "qwen"}}],
+            [{"from": "mac-text", "kind": "chat", "created_at": "t", "fields": {}}],
+        )
+        names = [row["name"] for row in rows]
+        self.assertEqual(names, ["mac-text", "mac"])
+        text = next(row for row in rows if row["name"] == "mac-text")
+        self.assertEqual(text["seen"]["count"], 1)
+        self.assertEqual(text["roots"], ["mac"])
+        ledger = next(row for row in rows if row["name"] == "mac")
+        self.assertEqual(ledger["activity"]["round"], 4)

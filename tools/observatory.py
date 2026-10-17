@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -46,7 +47,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from pando.genesis import Proposal, verify_reaction  # noqa: E402
-from pando.identity import load_or_create  # noqa: E402
+from pando.identity import load_or_create, verify as verify_signature  # noqa: E402
 from pando.net import open_url  # noqa: E402 - repo root must be importable
 from pando.proposal_mail import publish_proposal  # noqa: E402
 
@@ -329,6 +330,158 @@ def _short(value: str | None, keep: int = 12) -> str | None:
 
 
 
+
+_KIND_RE = re.compile(r"^\[([A-Za-z0-9_-]+)\]\s*(.*)$", re.DOTALL)
+
+
+def split_title(title: str) -> tuple[str | None, str]:
+    """A leading ``[kind]`` is the message class. Anything else is work.
+
+    The kind is whatever the writer put in the brackets. The page does not
+    keep a list of allowed members, roles, or message names.
+    """
+    match = _KIND_RE.match(str(title).strip())
+    if not match:
+        return None, str(title).strip()
+    return match.group(1).lower(), match.group(2).strip()
+
+
+def addressee(rest: str) -> str | None:
+    """Name addressed by a single leading @. Extra @ signs are not kept.
+
+    ``@win-codex: hello`` and ``@@win-codex: hello`` both yield ``win-codex``.
+    The page draws one @ itself.
+    """
+    text = str(rest or "").strip()
+    if not text.startswith("@"):
+        return None
+    head, _, _ = text.partition(":")
+    name = head.lstrip("@").strip()
+    return name or None
+
+
+def signed_fields(body: str) -> dict | None:
+    """Payload of a signed envelope, or None if it is not one.
+
+    The signature is checked. A body that merely looks like JSON is not
+    treated as fields.
+    """
+    try:
+        record = json.loads(body)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    if not isinstance(record, dict):
+        return None
+    payload = record.get("payload")
+    if not isinstance(payload, dict):
+        return None
+    pubkey = str(record.get("pubkey") or "")
+    sig = str(record.get("sig") or "")
+    if not pubkey or not sig or not verify_signature(pubkey, payload, sig):
+        return None
+    return dict(payload)
+
+
+def is_annotation(fields: dict | None) -> bool:
+    """A short stance hung on another message, not a message of its own."""
+    if not isinstance(fields, dict):
+        return False
+    return bool(str(fields.get("target_id") or "").strip()
+                and str(fields.get("stance") or "").strip()
+                and str(fields.get("node_id") or "").strip())
+
+
+def build_people(participants: list[dict], ledgers: list[dict],
+                 messages: list[dict]) -> list[dict]:
+    """One row per name we actually saw. No role is assigned here.
+
+    A root member, a ledger host, and a mailbox author share a row only when
+    the name is the same string. Otherwise they stay separate rows in the
+    same list.
+    """
+    rows: list[dict] = []
+    index: dict[str, dict] = {}
+
+    def add(name: str) -> dict:
+        row = index.get(name)
+        if row is not None:
+            return row
+        row = {
+            "name": name, "roots": [], "lineage": "", "host": "",
+            "capability": {}, "stats": {}, "pubkey": "",
+            "activity": None, "seen": None,
+        }
+        rows.append(row)
+        if name:
+            index[name] = row
+        return row
+
+    for part in participants:
+        row = add(str(part.get("node_id") or ""))
+        row["roots"] = list(part.get("roots") or [])
+        row["lineage"] = part.get("lineage") or ""
+        row["host"] = part.get("host") or ""
+        row["capability"] = part.get("capability") or {}
+        row["stats"] = part.get("stats") or {}
+        row["pubkey"] = part.get("pubkey_fingerprint") if part.get("has_pubkey") else ""
+    for ledger in ledgers:
+        last = ledger.get("last") or {}
+        name = str(ledger.get("host") or "")
+        row = add(name)
+        row["activity"] = {
+            "action": last.get("action") or "",
+            "goal": last.get("goal") or "",
+            "round": last.get("round"),
+            "started_at": last.get("started_at"),
+            "served_by": last.get("served_by") or "",
+            "alive": bool(ledger.get("alive")),
+            "via": ledger.get("via") or "",
+        }
+        if not row["lineage"]:
+            row["lineage"] = row["activity"]["served_by"]
+    counts: dict[str, dict] = {}
+    for message in messages:
+        fields = message.get("fields") or {}
+        if is_annotation(fields):
+            continue
+        author = str(message.get("from") or "")
+        if not author:
+            continue
+        slot = counts.setdefault(author, {"count": 0, "kind": "", "at": "", "action": ""})
+        slot["count"] += 1
+        created = str(message.get("created_at") or "")
+        if created >= str(slot["at"]):
+            slot["at"] = created
+            slot["kind"] = str(message.get("kind") or "")
+            slot["action"] = str(fields.get("action") or "")
+    for author, slot in counts.items():
+        row = add(author)
+        row["seen"] = slot
+    return rows
+
+
+def compose_kinds(hosts: dict) -> list[dict]:
+    """What the composer may send. Names come from hosts.json, not the page."""
+    rows = hosts.get("compose") if isinstance(hosts, dict) else None
+    parsed: list[dict] = []
+    for row in rows or []:
+        if isinstance(row, str):
+            row = {"kind": row}
+        if not isinstance(row, dict) or not row.get("kind"):
+            continue
+        parsed.append({
+            "kind": str(row["kind"]),
+            "signed": bool(row.get("signed")),
+            "action": str(row.get("action") or ""),
+        })
+    if parsed:
+        return parsed
+    return [
+        {"kind": "chat", "signed": False, "action": ""},
+        {"kind": "proposal", "signed": True, "action": "human.propose"},
+    ]
+
+
 def proposal_view(body: str) -> dict | None:
     """Turn a signed proposal envelope into the fields a person reads.
 
@@ -388,7 +541,7 @@ def attach_reactions(messages: list[dict], reactions: list[dict]) -> None:
             "stance": reaction.get("stance") or "",
         })
     for message in messages:
-        proposal = message.get("proposal") or {}
+        proposal = message.get("fields") or message.get("proposal") or {}
         target = str(proposal.get("proposal_id") or "")
         if target and target in by_target:
             message["reactions"] = by_target[target]
@@ -398,8 +551,9 @@ def collect_state(cfg: dict) -> dict:
     started = time.monotonic()
     state: dict = {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-        "defaults": {"sender": cfg.get("sender") or "mac-codex",
-                     "recipient": "all"},
+        "defaults": {"sender": cfg.get("sender") or "",
+                     "recipient": cfg.get("recipient") or "all"},
+        "compose": list(cfg.get("compose") or []),
         "generated_epoch": time.time(),
         "collector": {"ms": None, "errors": []},
         "services": [],
@@ -446,13 +600,11 @@ def collect_state(cfg: dict) -> dict:
             "created_at": item.get("created_at"),
             "claimed_by": item.get("claimed_by"),
         }
-        if title.startswith("[reaction]"):
+        kind, rest = split_title(title)
+        if kind:
             record["body"] = item.get("body", "")
-            record["kind"] = "reaction"
-            state["reactions"].append(record)
-        elif title.startswith("[chat]") or title.startswith("[proposal]"):
-            record["body"] = item.get("body", "")
-            record["kind"] = "chat" if title.startswith("[chat]") else "proposal"
+            record["kind"] = kind
+            record["to"] = addressee(rest)
             state["chat"].append(record)
         else:
             state["work"].append(record)
@@ -479,29 +631,28 @@ def collect_state(cfg: dict) -> dict:
         with ThreadPoolExecutor(max_workers=8) as pool:
             fetched = dict(pool.map(_full_body, chat_ids))
         parsed_reactions = []
+        visible = []
         for record in feed:
             body = fetched.get(str(record.get("id")))
-            if body is None:
-                continue
-            if record.get("kind") == "proposal":
-                view = proposal_view(body)
-                if view is not None:
-                    record["proposal"] = view
-                    # The page renders the fields. The envelope is not printed.
-                    record["body"] = ""
-                    continue
-            if record.get("kind") == "reaction":
-                view = None
-                if body.lstrip().startswith("{"):
-                    try:
-                        view = verify_reaction(json.loads(body))
-                    except json.JSONDecodeError:
-                        view = None
-                if view is not None:
-                    parsed_reactions.append(view)
+            fields = signed_fields(body) if isinstance(body, str) and body.lstrip().startswith("{") else None
+            if fields is not None:
+                record["fields"] = fields
+                record["signed"] = True
                 record["body"] = ""
+                if fields.get("proposal_id"):
+                    record["proposal"] = {"proposal_id": fields.get("proposal_id")}
+            elif isinstance(body, str):
+                record["body"] = body
+            if is_annotation(fields):
+                parsed_reactions.append({
+                    "target_id": str(fields.get("target_id") or ""),
+                    "node_id": str(fields.get("node_id") or ""),
+                    "checkpoint": str(fields.get("checkpoint") or ""),
+                    "stance": str(fields.get("stance") or ""),
+                })
                 continue
-            record["body"] = body
+            visible.append(record)
+        state["chat"] = visible
         state["reactions"] = parsed_reactions
         attach_reactions(state["chat"], parsed_reactions)
 
@@ -640,6 +791,8 @@ def collect_state(cfg: dict) -> dict:
             row["last_title"] = message.get("title") or ""
     state["proposers"] = sorted(
         by_author.values(), key=lambda r: str(r["last_at"] or ""), reverse=True)
+    state["people"] = build_people(
+        state["participants"], state["thinkd"], state["chat"])
 
     # --- optional extra service probes (addresses stay in hosts.json) ---
     for row in (cfg.get("extra_services") or cfg.get("services") or []):
@@ -709,12 +862,15 @@ def build_handler(cfg: dict):
                 self._json(400, {"error": "invalid JSON body"})
                 return
             text = str(payload.get("text", "")).strip()
-            sender = str(payload.get("from") or cfg.get("sender") or "mac-codex").strip() \
-                or "mac-codex"
-            to = str(payload.get("to", "all")).strip().lstrip("@") or "all"
-            kind = str(payload.get("kind", "chat")).strip().lower()
-            if kind not in ("chat", "proposal"):
-                self._json(400, {"error": "kind must be chat or proposal"})
+            sender = str(payload.get("from") or cfg.get("sender") or "").strip()
+            to = str(payload.get("to") or cfg.get("recipient") or "all").strip().lstrip("@") or "all"
+            kind = str(payload.get("kind") or "").strip().lower()
+            compose = {row["kind"]: row for row in (cfg.get("compose") or [])}
+            if not sender:
+                self._json(400, {"error": "from is required"})
+                return
+            if kind not in compose:
+                self._json(400, {"error": "unknown kind"})
                 return
             if not text:
                 self._json(400, {"error": "empty message"})
@@ -724,11 +880,8 @@ def build_handler(cfg: dict):
                 return
             base = cfg["mailbox_url"].rstrip("/")
 
-            if kind == "proposal":
-                # A proposal that is not signed is not a proposal: the agenda
-                # verifiers drop it. Publish through the same signed path the
-                # resident proposers use.
-                author = str(cfg.get("proposer_id") or "mac-proposer")
+            if compose[kind].get("signed"):
+                author = sender
                 try:
                     identity = load_or_create(cfg.get("identity_path"))
                 except Exception as exc:
@@ -738,10 +891,10 @@ def build_handler(cfg: dict):
                     proposal_id=f"ui-{int(time.time())}-{uuid.uuid4().hex[:8]}",
                     author=author,
                     goal=text.splitlines()[0][:160],
-                    action="human.propose",
+                    action=str(compose[kind].get("action") or "propose"),
                     expected_effect=text,
                     cost=0.0,
-                    cites=["observatory"],
+                    cites=[],
                 )
                 posted = publish_proposal(
                     proposal, identity, base, cfg.get("mailbox_token"))
@@ -893,23 +1046,18 @@ button:hover{background:#1d3d5e} button:disabled{opacity:.5;cursor:default}
       <h2>群组对话 <span class="n" id="cc"></span>
         <select id="filter" style="font-size:11px;padding:3px 6px">
           <option value="all">全部</option>
-          <option value="chat">只看对话</option>
-          <option value="proposal">只看提案</option>
         </select></h2>
       <div class="feed" id="chat"></div>
       <div class="composer">
         <div class="row">
-          <select id="kind">
-            <option value="chat">群聊消息</option>
-            <option value="proposal">正式提案（签名）</option>
-          </select>
+          <select id="kind"></select>
           <label class="sub">发往</label>
-          <input id="recipient" value="all" size="9">
+          <input id="recipient" value="" size="9">
           <label class="sub">署名</label>
-          <input id="sender" value="mac-codex" size="11">
+          <input id="sender" value="" size="11">
           <span class="sub" id="sendhint"></span>
         </div>
-        <textarea id="text" placeholder="输入消息或提案… (Cmd/Ctrl+Enter 发送)"></textarea>
+        <textarea id="text" placeholder="写在这里 (Cmd/Ctrl+Enter 发送)"></textarea>
         <div class="rowline" style="margin-top:8px">
           <button id="send">发送</button>
         </div>
@@ -925,10 +1073,6 @@ button:hover{background:#1d3d5e} button:disabled{opacity:.5;cursor:default}
     <div class="card">
       <h2>服务健康 <span class="n" id="sc"></span></h2>
       <div class="body" id="services"></div>
-    </div>
-    <div class="card">
-      <h2>提案者活动 <span class="n" id="tc"></span></h2>
-      <div class="body" id="thinkd"></div>
     </div>
   </div>
 </div>
@@ -966,44 +1110,68 @@ const ago = (s) => {
   if (d < 86400) return Math.round(d/3600) + ' 小时前';
   return Math.round(d/86400) + ' 天前';
 };
-function stanceClass(stance){
-  if (stance === '赞同') return 'yes';
-  if (stance === '反对') return 'no';
-  return 'mid';
-}
 function reactionRow(list){
   if (!list || !list.length) return '';
   return `<div class="reacts">` + list.map(r =>
-    `<span class="chip ${stanceClass(r.stance)}" title="${esc(r.checkpoint || '')}">${esc(r.stance)} <span class="who">${esc(r.node_id)}</span></span>`
+    `<span class="chip" title="${esc(r.checkpoint || '')}">${esc(r.stance)} <span class="who">${esc(r.node_id)}</span></span>`
   ).join('') + `</div>`;
 }
+function renderPeople(rows){
+  if (!rows.length) return '<div class="empty">没有读到任何人。</div>';
+  const head = `<table><thead><tr><th>名字</th><th>来自</th><th>最近</th><th>主机</th><th></th></tr></thead><tbody>`;
+  return head + rows.map(p => {
+    const tags = []
+      .concat((p.roots || []).map(r => `<span class="tag">${esc(r)}</span>`))
+      .concat(p.activity ? ['<span class="tag">ledger</span>'] : [])
+      .concat(p.seen && p.seen.kind ? [`<span class="tag">${esc(p.seen.kind)} ${esc(p.seen.count)}</span>`] : []);
+    const act = p.activity || {};
+    const recent = [p.lineage, act.action, p.seen && p.seen.action].filter(Boolean).join(' · ') || '—';
+    const c = p.capability || {}, st = p.stats || {};
+    const spec = [p.host, c.arch, c.cpu_count ? c.cpu_count + ' cpu' : null,
+                  c.ram_gb ? c.ram_gb + ' GB' : null].filter(Boolean).join(' · ');
+    const votes = (st.successes != null || st.failures != null)
+      ? `${st.successes ?? 0}/${st.failures ?? 0}` : '';
+    const round = act.round != null ? 'r' + act.round : '';
+    const whenSeen = act.started_at
+      ? Math.max(0, Math.round(Date.now() / 1000 - act.started_at)) + 's'
+      : (p.seen && p.seen.at ? ago(p.seen.at) : '');
+    const key = p.pubkey ? `<span class="tag">${esc(p.pubkey)}</span>` : '';
+    const goal = act.goal ? `<div class="sub">${esc(act.goal)}</div>` : '';
+    return `<tr>
+      <td class="mono">${esc(p.name)} ${key}</td>
+      <td>${tags.join(' ') || '—'}</td>
+      <td>${esc(recent)}${goal}</td>
+      <td class="sub">${esc(spec || act.via || '—')}</td>
+      <td class="sub">${esc([votes, round, whenSeen].filter(Boolean).join(' · '))}</td>
+    </tr>`;
+  }).join('') + '</tbody></table>';
+}
 function renderMessage(m){
-  const p = m.proposal;
-  if (m.kind === 'proposal' && p) {
-    const goal = String(p.goal || '').trim();
-    const effect = String(p.expected_effect || '').trim();
+  const f = m.fields || null;
+  if (f && (f.goal || f.action || f.expected_effect)) {
+    const goal = String(f.goal || '').trim();
+    const effect = String(f.expected_effect || '').trim();
     const showGoal = goal && goal !== effect;
-    const cites = (p.cites || []).map(c => `<span class="tag">${esc(c)}</span>`).join('');
-    const cost = (p.cost === 0 || p.cost) ? `<span class="tag">代价 ${esc(p.cost)}</span>` : '';
+    const cites = (Array.isArray(f.cites) ? f.cites : []).map(c => `<span class="tag">${esc(c)}</span>`).join('');
+    const cost = (f.cost === 0 || f.cost) ? `<span class="tag">${esc(f.cost)}</span>` : '';
     return `<div class="msg prop">
-      <div class="hd"><span class="who">${esc(p.author || m.from)}</span>
-        <span class="tag b">${esc(p.action || '提案')}</span>
-        ${p.signed ? `<span class="tag g" title="${esc(p.pubkey || '')}">已签名</span>`
-                   : '<span class="tag w">未签名</span>'}
+      <div class="hd"><span class="who">${esc(f.author || m.from)}</span>
+        ${f.action ? `<span class="tag b">${esc(f.action)}</span>` : ''}
+        <span class="tag">${esc(m.kind || '')}</span>
+        ${m.signed ? '<span class="tag g">已签名</span>' : ''}
         <span class="ts">${esc(when(m.created_at))}</span></div>
       ${showGoal ? `<div class="goal">${esc(goal)}</div>` : ''}
-      ${effect ? `<div class="effect">${esc(effect)}</div>` : (showGoal ? '' : `<div class="effect">${esc(goal)}</div>`)}
+      ${effect ? `<div class="effect">${esc(effect)}</div>` : (goal ? `<div class="effect">${esc(goal)}</div>` : '')}
       <div class="facts">${cost}${cites}
-        ${p.proposal_id ? `<span class="pid">${esc(p.proposal_id)}</span>` : ''}</div>
+        ${f.proposal_id ? `<span class="pid">${esc(f.proposal_id)}</span>` : ''}</div>
       ${reactionRow(m.reactions)}
     </div>`;
   }
-  const to = chatTo(m.title);
-  const text = String(m.body || '').trim() || chatBody(m.title) || titleRest(m.title);
+  const text = String(m.body || '').trim() || titleRest(m.title);
   return `<div class="msg">
     <div class="hd"><span class="who">${esc(m.from)}</span>
-      ${to ? `<span class="to">@${esc(to)}</span>` : ''}
-      <span class="tag">消息</span>
+      ${m.to ? `<span class="to">@${esc(m.to)}</span>` : ''}
+      <span class="tag">${esc(m.kind || '')}</span>
       <span class="ts">${esc(when(m.created_at))}</span></div>
     <div class="tx">${esc(text)}</div>
   </div>`;
@@ -1016,8 +1184,12 @@ async function refresh(){
   if (st.error){ $('#errbox').innerHTML = `<div class="banner"><b>采集失败</b> — ${esc(st.error)}</div>`; return; }
 
   if (!window.__init){ window.__init = true;
-    $('#sender').value = st.defaults?.sender || 'mac-codex';
-    $('#recipient').value = st.defaults?.recipient || 'all';
+    const rows = st.compose || [];
+    window.__signedKinds = rows.filter(r => r.signed).map(r => r.kind);
+    $('#kind').innerHTML = rows.map(r => `<option value="${esc(r.kind)}">${esc(r.kind)}</option>`).join('');
+    $('#sender').value = st.defaults?.sender || '';
+    $('#recipient').value = st.defaults?.recipient || '';
+    $('#kind').onchange();
   }
 
   const svcs = st.services || [], parts = st.participants || [], roots = st.roots || [];
@@ -1032,32 +1204,12 @@ async function refresh(){
   const reachable = roots.filter(r=>r.reachable).length;
   $('#kpis').innerHTML = `
     <div class="kpi"><div class="v">${reachable}/${roots.length || 1}</div><div class="l">island roots</div></div>
-    <div class="kpi"><div class="v">${parts.length}</div><div class="l">participants</div></div>
-    <div class="kpi"><div class="v ${alive===svcs.length?'ok-text':'bad-text'}">${alive}/${svcs.length}</div><div class="l">services up</div></div>
-    <div class="kpi"><div class="v">${(st.proposers||[]).length}</div><div class="l">proposers seen</div></div>`;
+    <div class="kpi"><div class="v">${(st.people||[]).length}</div><div class="l">参与者</div></div>
+    <div class="kpi"><div class="v ${alive===svcs.length?'ok-text':'bad-text'}">${alive}/${svcs.length}</div><div class="l">services up</div></div>`;
 
-  $('#pc').textContent = parts.length ? `${parts.length} 个节点` : '';
-  $('#participants').innerHTML = parts.length ? `<table><thead><tr>
-      <th>节点</th><th>来源</th><th>模型</th><th>主机</th><th>票 成/败</th><th>公钥</th></tr></thead><tbody>`
-    + parts.map(p => {
-        const c = p.capability || {}, s = p.stats || {};
-        const spec = [c.arch, c.cpu_count ? c.cpu_count + ' cpu' : null,
-                      c.ram_gb ? c.ram_gb + ' GB' : null].filter(Boolean).join(' · ') || '—';
-        const lat = s.latency_ewma_ms == null ? '—' : Math.round(s.latency_ewma_ms) + ' ms';
-        const bad = (s.consecutive_failures || 0) > 0;
-        const rootTags = (p.roots || []).map(r =>
-          `<span class="tag ${r==='win'?'b':(r==='mac'?'g':'')}">${esc(r)}</span>`).join(' ');
-        return `<tr>
-        <td class="mono">${esc(p.node_id)}</td>
-        <td>${rootTags}</td>
-        <td><span class="tag">${esc(p.lineage)}</span></td>
-        <td class="sub">${esc(spec)}<br><span class="mono">${esc(p.host)}</span></td>
-        <td class="${bad ? 'bad-text' : ''}">${esc((s.successes ?? 0) + '/' + (s.failures ?? 0))}
-          <span class="sub">${esc(lat)}</span></td>
-        <td class="mono">${p.has_pubkey ? '<span class="tag g">' + esc(p.pubkey_fingerprint) + '</span>' : '<span class="tag w">none</span>'}</td>
-      </tr>`; }).join('') + `</tbody></table>`
-    : `<div class="empty">没有读到任何参与者。</div>`;
-
+  const people = st.people || [];
+  $('#pc').textContent = people.length ? `${people.length}` : '';
+  $('#participants').innerHTML = renderPeople(people);
   $('#sc').textContent = svcs.length ? `${alive}/${svcs.length} up` : '';
   const groups = {};
   svcs.forEach(s => (groups[s.group || '其他'] = groups[s.group || '其他'] || []).push(s));
@@ -1069,30 +1221,19 @@ async function refresh(){
       </div>`).join('')).join('')
     : `<div class="empty">没有可读的服务。</div>`;
 
-  const tk = st.thinkd || [], pr = st.proposers || [];
-  $('#tc').textContent = (tk.length || pr.length) ? `${tk.length} ledger · ${pr.length} mailbox` : '';
-  const led = tk.map(t => {
-    const l = t.last || {};
-    const age = l.started_at ? Math.max(0, Math.round(Date.now() / 1000 - l.started_at)) : null;
-    const stale = t.alive && age != null && age > 900;
-    const state = !t.alive ? 'bad' : (stale ? 'warn' : 'ok');
-    return `<div class="rowline" style="justify-content:space-between;padding:4px 0">
-      <div><span class="dot ${state}"></span><b>${esc(t.host)}</b>
-        <span class="tag b">${esc(l.action ?? '—')}</span></div>
-      <div class="sub">round ${esc(l.round ?? '—')} · ${age == null ? '无记录' : age + ' 秒前'}${l.served_by ? ' · ' + esc(l.served_by) : ''}</div>
-    </div>${l.goal ? `<div class="sub" style="margin:0 0 4px 14px">${esc(l.goal)}</div>` : ''}`;
-  }).join('') || `<div class="empty">没有可读的 proposer ledger。</div>`;
-  const mail = pr.map(p => `<div class="rowline" style="justify-content:space-between;padding:3px 0">
-      <div><span class="dot ok"></span><span class="mono">${esc(p.author)}</span></div>
-      <div class="sub">${esc(p.count)} 条提案 · 最近 ${esc(ago(p.last_at))}</div>
-    </div>`).join('');
-  $('#thinkd').innerHTML = led + (mail ? `<div class="grp">mailbox 可见的提案者</div>` + mail : '');
-
   const all = st.chat || [];
   const want = $('#filter').value;
   const chat = want === 'all' ? all : all.filter(m => m.kind === want);
-  const nChat = all.filter(m => m.kind === 'chat').length;
-  $('#cc').textContent = all.length ? `${nChat} 对话 / ${all.length - nChat} 提案` : '';
+  const kinds = [...new Set(all.map(m => m.kind).filter(Boolean))];
+  if ($('#filter').dataset.kinds !== kinds.join(',')) {
+    const cur = $('#filter').value || 'all';
+    $('#filter').innerHTML = '<option value="all">全部</option>'
+      + kinds.map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join('');
+    $('#filter').value = [...$('#filter').options].some(o => o.value === cur) ? cur : 'all';
+    $('#filter').dataset.kinds = kinds.join(',');
+  }
+  const counts = kinds.map(k => `${all.filter(m => m.kind === k).length} ${k}`).join(' · ');
+  $('#cc').textContent = counts;
   const feed = $('#chat');
   const stick = feed.scrollTop + feed.clientHeight >= feed.scrollHeight - 48 || !feed.dataset.ready;
   feed.innerHTML = chat.length ? chat.map(renderMessage).join('')
@@ -1119,7 +1260,7 @@ async function refresh(){
   const units = (st.local_units || {}).services || [];
   $('#lcc').textContent = units.length ? `${units.filter(u=>u.alive).length}/${units.length} 运行中` : '';
   $('#local').innerHTML = units.length
-    ? units.map(u => `<dt>${esc(String(u.name).replace(/^com\.(jewelroam|pandosi)\./,''))}</dt>
+    ? units.map(u => `<dt>${esc(u.name)}</dt>
         <dd class="${u.alive?'ok-text':'bad-text'}">${u.alive ? '运行中' : '未运行'}${u.pid ? ' · pid ' + esc(u.pid) : ''}</dd>`).join('')
     : `<dt>—</dt><dd>无 launchd/systemd 记录</dd>`;
 
@@ -1134,9 +1275,9 @@ async function refresh(){
 }
 
 $('#kind').onchange = () => {
-  const prop = $('#kind').value === 'proposal';
-  $('#sender').disabled = prop;
-  $('#sendhint').textContent = prop ? '将用本机 proposer 身份签名发布' : '';
+  const signed = new Set(window.__signedKinds || []);
+  $('#sender').disabled = false;
+  $('#sendhint').textContent = signed.has($('#kind').value) ? '签名后发布' : '';
 };
 $('#send').onclick = async () => {
   const text = $('#text').value.trim();
@@ -1201,8 +1342,10 @@ def main() -> int:
         "pairing_token": discover_pairing_token(None),
         "think_ledgers": hosts.get("think_ledgers"),
         "extra_services": hosts.get("services"),
-        "sender": str(hosts.get("sender") or "mac-codex"),
-        "proposer_id": str(hosts.get("proposer_id") or "mac-proposer"),
+        "sender": str(hosts.get("sender") or ""),
+        "recipient": str(hosts.get("recipient") or "all"),
+        "compose": compose_kinds(hosts),
+        "proposer_id": str(hosts.get("proposer_id") or ""),
         "identity_path": hosts.get("identity_path"),
     }
 

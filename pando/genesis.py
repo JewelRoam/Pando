@@ -388,7 +388,7 @@ def verify_reaction(record, expected_pubkey: str | None = None) -> dict | None:
     stance = str(payload.get("stance") or "")
     target = str(payload.get("target_id") or "")
     node = str(payload.get("node_id") or "")
-    if not target or not node or stance not in REACTION_STANCES:
+    if not target or not node or not stance.strip():
         return None
     pubkey = str(record.get("pubkey", ""))
     if expected_pubkey is not None and pubkey != expected_pubkey:
