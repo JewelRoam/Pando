@@ -85,6 +85,19 @@ def _prefer(current: dict | None, incoming: dict) -> dict:
     return current
 
 
+def mailbox_brief(payload) -> dict:
+    """A failed listing must not dump every task into the log."""
+    if isinstance(payload, dict) and isinstance(payload.get("tasks"), list):
+        return {"tasks": len(payload["tasks"])}
+    if isinstance(payload, dict) and "error" in payload:
+        brief = {"error": str(payload["error"])}
+        detail = payload.get("detail")
+        if detail:
+            brief["detail"] = str(detail)[:200]
+        return brief
+    return {"type": type(payload).__name__}
+
+
 def replication_ids(source_rows: list, dest_rows: list) -> dict:
     """Ids to send. Listings only carry status, so "behind" means status rank.
 
@@ -439,7 +452,8 @@ def replicate(args) -> int:
                                       "token_file": args.to_token_file or args.token_file})
     dest = _request(dest_args, "GET", "/tasks?status=all")
     if "tasks" not in source or "tasks" not in dest:
-        print(json.dumps({"source": source, "dest": dest}, ensure_ascii=False),
+        print(json.dumps({"source": mailbox_brief(source), "dest": mailbox_brief(dest)},
+                         ensure_ascii=False),
               file=sys.stderr)
         return 1
     plan = replication_ids(source["tasks"], dest["tasks"])

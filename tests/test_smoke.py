@@ -3041,6 +3041,11 @@ class TestMailboxReplica(unittest.TestCase):
                  {"id": "mid", "status": "claimed"}])
             self.assertEqual(plan["missing"], ["new"])
             self.assertEqual(plan["behind"], ["old"])
+            self.assertEqual(module.mailbox_brief({"tasks": [{"id": "a"}, {"id": "b"}]}),
+                             {"tasks": 2})
+            self.assertEqual(
+                module.mailbox_brief({"error": "unreachable: no route", "detail": "x" * 300}),
+                {"error": "unreachable: no route", "detail": "x" * 200})
 
 
 class TestLedgerMirror(unittest.TestCase):
