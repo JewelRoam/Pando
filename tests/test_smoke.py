@@ -1812,9 +1812,11 @@ class TestResidentThinker(unittest.TestCase):
             def __init__(self, script):
                 self.script = list(script)
                 self.calls = 0
+                self.users = []
 
             def complete(self, system, user):
                 self.calls += 1
+                self.users.append(user)
                 item = self.script.pop(0) if self.script else {"action": ""}
                 if isinstance(item, Exception):
                     raise item
@@ -2101,6 +2103,8 @@ class TestResidentThinker(unittest.TestCase):
             self.assertTrue(round_.published)
             self.assertEqual(sent[-1].destination, "win")
             self.assertEqual(proposer.calls, 2)
+            self.assertIn("JSON 里的一个字段", proposer.users[-1])
+            self.assertIn("只把名字写进 goal 不算", proposer.users[-1])
 
             thinker, proposer, sent = self._thinker(
                 [{"action": "seed.replicate", "goal": "carry"},

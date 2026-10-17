@@ -86,7 +86,7 @@ SYSTEM_PROMPT = f"""你是 PandoSI 殖民地的一名提案者。这个群体是
    上一轮写进 cites。那不是进化，是自言自语。如果你要重复，必须在这一轮明确指出
    上一次和这一次到底有什么不同。
 5. 优先选择能让群体多一个能思考的落脚点、或减少单点的动作。
-6. seed.replicate 可以带 destination：一个主机名，只能是字母、数字、点、短横线，例如 "win" 或 "pi5"。不知道目的地就不要这个字段，不要写 URL。
+6. 选了 seed.replicate 时，destination 是单独的 JSON 字段，不是 goal 里的一句话。后文如果给出主机名单，值必须是其中之一。只把名字写进 goal 不算。不要写 URL。
 """
 
 
@@ -721,8 +721,8 @@ class Thinker:
             why = f"destination {proposal.destination!r} 不在已知主机里。"
         retry_user = (
             user + "\n\n【上一轮你的回答被拒绝】" + why
-            + f"destination 必须是这些名字之一：{names}。或者换一个动作。"
-            + "只输出一行 JSON。")
+            + f"destination 必须是 JSON 里的一个字段，值只能是：{names}。"
+            + "只把名字写进 goal 不算。或者换一个动作。只输出一行 JSON。")
         try:
             text2, usage2 = self.proposer.complete(SYSTEM_PROMPT, retry_user)
         except Exception:  # noqa: BLE001 - a failed retry holds the round
