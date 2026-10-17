@@ -2723,6 +2723,10 @@ class TestExecution(unittest.TestCase):
             next_seed_export([foreign, local], reactions, set(), "local-key").proposal_id,
             "ours")
         self.assertIsNone(next_seed_export([foreign], reactions, set(), "local-key"))
+        from pando.execute import foreign_adopted_seeds
+        self.assertEqual(
+            foreign_adopted_seeds([foreign, local], reactions, set(), "local-key"),
+            ["theirs"])
 
 
 class TestChat(unittest.TestCase):

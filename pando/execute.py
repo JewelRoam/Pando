@@ -182,6 +182,20 @@ def next_seed_export(proposals: list[Proposal], reactions: list[dict],
     return None
 
 
+def foreign_adopted_seeds(proposals: list[Proposal], reactions: list[dict],
+                          done: set[str], signer: str) -> list[str]:
+    """Adopted seed.export ids this host must not seal."""
+    found = []
+    for proposal in proposals:
+        if proposal.proposal_id in done or proposal.action != "seed.export":
+            continue
+        if proposal.pubkey == signer:
+            continue
+        if judge(proposal, reactions, actuators={})["adopted"]:
+            found.append(proposal.proposal_id)
+    return found
+
+
 def dry_run(proposals: list[Proposal], reactions: list[dict], **policy) -> dict:
     """Judge every proposal. No actuator, no write."""
     results = [judge(proposal, reactions, actuators={}, **policy)
@@ -230,7 +244,10 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
         Path(args.identity).expanduser().read_text(encoding="utf-8"))).public_key
     chosen = next_seed_export(proposals, reactions, done_ids(ledger), signer)
     if chosen is None:
-        print("idle", flush=True)
+        foreign = foreign_adopted_seeds(
+            proposals, reactions, done_ids(ledger), signer)
+        print(json.dumps({"did": "idle", "foreign_seed_exports": foreign},
+                         ensure_ascii=False), flush=True)
         return 0
     home = Path("~/.pandosi/seed-home-empty").expanduser()
     home.mkdir(parents=True, exist_ok=True)
