@@ -2404,3 +2404,27 @@ class TestProposerSpool(unittest.TestCase):
             rows = thinker.ledger.tail(10)
             self.assertEqual(len(rows), 3)
             self.assertEqual([r["round"] for r in rows], [1, 2, 3])
+
+
+class TestProposalView(unittest.TestCase):
+    def test_a_signed_envelope_is_read_as_fields_not_json(self):
+        import json
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        from observatory import proposal_view
+
+        view = proposal_view(json.dumps({
+            "kind": "proposal", "version": 1,
+            "pubkey": "abc", "sig": "def",
+            "payload": {
+                "proposal_id": "p1", "author": "pi5-proposer",
+                "goal": "存活", "action": "seed.replicate",
+                "expected_effect": "少一个单点", "cost": 0.6,
+                "cites": ["r3"],
+            },
+        }))
+        self.assertEqual(view["action"], "seed.replicate")
+        self.assertEqual(view["goal"], "存活")
+        self.assertEqual(view["cost"], 0.6)
+        self.assertEqual(view["cites"], ["r3"])
+        self.assertTrue(view["signed"])
+        self.assertIsNone(proposal_view("not a proposal"))

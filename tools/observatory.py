@@ -328,6 +328,45 @@ def _short(value: str | None, keep: int = 12) -> str | None:
     return value if len(value) <= keep else f"{value[:keep]}..."
 
 
+
+def proposal_view(body: str) -> dict | None:
+    """Turn a signed proposal envelope into the fields a person reads.
+
+    The mailbox stores ``{kind, version, payload, pubkey, sig}``. Goal, action,
+    expected effect, cost and cites live under ``payload``; the signature is
+    proof, not content. Returns None when the body is ordinary text.
+    """
+    try:
+        record = json.loads(body)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    if not isinstance(record, dict):
+        return None
+    payload = record.get("payload")
+    if not isinstance(payload, dict):
+        alt = record.get("proposal")
+        payload = alt if isinstance(alt, dict) else None
+    if not isinstance(payload, dict):
+        return None
+    if not any(payload.get(key) for key in
+               ("goal", "action", "expected_effect", "proposal_id")):
+        return None
+    cites = payload.get("cites") or []
+    if not isinstance(cites, list):
+        cites = [cites]
+    return {
+        "proposal_id": str(payload.get("proposal_id") or ""),
+        "author": str(payload.get("author") or ""),
+        "goal": str(payload.get("goal") or ""),
+        "action": str(payload.get("action") or ""),
+        "expected_effect": str(payload.get("expected_effect") or ""),
+        "cost": payload.get("cost"),
+        "cites": [str(item) for item in cites if item not in (None, "")],
+        "signed": bool(record.get("sig") and record.get("pubkey")),
+        "pubkey": _short(str(record.get("pubkey") or ""), 16) or "",
+    }
+
+
 def collect_state(cfg: dict) -> dict:
     started = time.monotonic()
     state: dict = {
@@ -409,6 +448,14 @@ def collect_state(cfg: dict) -> dict:
         for record in state["chat"]:
             body = fetched.get(str(record.get("id")))
             if body is not None:
+                if record.get("kind") == "proposal":
+                    view = proposal_view(body)
+                    if view is not None:
+                        record["proposal"] = view
+                        # The page renders the fields. The envelope (pubkey,
+                        # signature, raw JSON) is not something to print.
+                        record["body"] = ""
+                        continue
                 record["body"] = body
 
     # --- island roots: participants, quorum, playbooks ----------------
@@ -757,6 +804,11 @@ tr:last-child td{border-bottom:0}
 .msg.prop{background:#0d1620}
 .msg .meta{margin-top:6px;color:var(--faint);font-size:11px;
   font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.msg .goal{margin-top:7px;font-weight:600}
+.msg .effect{margin-top:3px;white-space:pre-wrap;word-break:break-word;color:#d7e0ea}
+.msg .facts{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px}
+.msg .pid{margin-left:auto;color:var(--faint);font-size:11px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .composer{border-top:1px solid var(--line);padding:11px 13px;background:#0c131b}
 .composer .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
 input,select,textarea,button{font:inherit;color:var(--ink);background:#0e161f;
@@ -860,35 +912,35 @@ const ago = (s) => {
   if (d < 86400) return Math.round(d/3600) + ' 小时前';
   return Math.round(d/86400) + ' 天前';
 };
-function messageText(m){
-  const body = String(m.body || '').trim();
-  if (m.kind === 'proposal' && body) {
-    try {
-      const j = JSON.parse(body);
-      const p = j.proposal || j;
-      if (p && typeof p === 'object') {
-        const out = [];
-        if (p.expected_effect) out.push(String(p.expected_effect));
-        else if (p.goal) out.push(String(p.goal));
-        if (p.action) out.push('action: ' + p.action + (p.cost ? ' · cost ' + p.cost : ''));
-        if (out.length) return out.join('\n');
-      }
-    } catch (e) {}
+function renderMessage(m){
+  const p = m.proposal;
+  if (m.kind === 'proposal' && p) {
+    const goal = String(p.goal || '').trim();
+    const effect = String(p.expected_effect || '').trim();
+    const showGoal = goal && goal !== effect;
+    const cites = (p.cites || []).map(c => `<span class="tag">${esc(c)}</span>`).join('');
+    const cost = (p.cost === 0 || p.cost) ? `<span class="tag">代价 ${esc(p.cost)}</span>` : '';
+    return `<div class="msg prop">
+      <div class="hd"><span class="who">${esc(p.author || m.from)}</span>
+        <span class="tag b">${esc(p.action || '提案')}</span>
+        ${p.signed ? `<span class="tag g" title="${esc(p.pubkey || '')}">已签名</span>`
+                   : '<span class="tag w">未签名</span>'}
+        <span class="ts">${esc(when(m.created_at))}</span></div>
+      ${showGoal ? `<div class="goal">${esc(goal)}</div>` : ''}
+      ${effect ? `<div class="effect">${esc(effect)}</div>` : (showGoal ? '' : `<div class="effect">${esc(goal)}</div>`)}
+      <div class="facts">${cost}${cites}
+        ${p.proposal_id ? `<span class="pid">${esc(p.proposal_id)}</span>` : ''}</div>
+    </div>`;
   }
-  return body || chatBody(m.title) || titleRest(m.title);
-}
-function messageMeta(m){
-  if (m.kind !== 'proposal') return '';
-  try {
-    const j = JSON.parse(String(m.body || ''));
-    const p = j.proposal || j;
-    const bits = [];
-    if (p.proposal_id) bits.push(p.proposal_id);
-    if (p.action) bits.push(p.action);
-    if (p.cost) bits.push('cost ' + p.cost);
-    if (j.signature || j.proof) bits.push('signed');
-    return bits.join(' · ');
-  } catch (e) { return ''; }
+  const to = chatTo(m.title);
+  const text = String(m.body || '').trim() || chatBody(m.title) || titleRest(m.title);
+  return `<div class="msg">
+    <div class="hd"><span class="who">${esc(m.from)}</span>
+      ${to ? `<span class="to">@${esc(to)}</span>` : ''}
+      <span class="tag">消息</span>
+      <span class="ts">${esc(when(m.created_at))}</span></div>
+    <div class="tx">${esc(text)}</div>
+  </div>`;
 }
 
 async function refresh(){
@@ -977,17 +1029,8 @@ async function refresh(){
   $('#cc').textContent = all.length ? `${nChat} 对话 / ${all.length - nChat} 提案` : '';
   const feed = $('#chat');
   const stick = feed.scrollTop + feed.clientHeight >= feed.scrollHeight - 48 || !feed.dataset.ready;
-  feed.innerHTML = chat.length ? chat.map(m => {
-    const to = chatTo(m.title);
-    const meta = messageMeta(m);
-    return `<div class="msg ${m.kind === 'proposal' ? 'prop' : ''}">
-      <div class="hd"><span class="who">${esc(m.from)}</span>
-        ${to ? `<span class="to">@${esc(to)}</span>` : ''}
-        <span class="tag ${m.kind==='proposal'?'b':''}">${m.kind==='proposal'?'提案':'消息'}</span>
-        <span class="ts">${esc(when(m.created_at))}</span></div>
-      <div class="tx">${esc(messageText(m))}</div>
-      ${meta ? `<div class="meta">${esc(meta)}</div>` : ''}
-    </div>`; }).join('') : `<div class="empty">没有匹配的消息。</div>`;
+  feed.innerHTML = chat.length ? chat.map(renderMessage).join('')
+    : `<div class="empty">没有匹配的消息。</div>`;
   feed.dataset.ready = '1';
   if (stick) feed.scrollTop = feed.scrollHeight;
 
