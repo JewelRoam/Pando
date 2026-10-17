@@ -304,6 +304,13 @@ def build_handler(mailbox: Mailbox, token: str):
     return MailboxHandler
 
 
+class _MailboxServer(ThreadingHTTPServer):
+    # A restart must be able to bind 8776 while the previous socket is still
+    # in TIME_WAIT. Without this, a one-second cutover becomes an outage.
+    allow_reuse_address = True
+    daemon_threads = True
+
+
 def serve(args) -> int:
     directory = Path(args.dir).expanduser()
     token_file = Path(args.token_file).expanduser()
@@ -314,8 +321,8 @@ def serve(args) -> int:
         print(f"generated a new token into {token_file}: {generated}")
     token = token_file.read_text(encoding="utf-8").strip()
     mailbox = Mailbox(directory)
-    server = ThreadingHTTPServer((args.host, args.port),
-                                 build_handler(mailbox, token))
+    server = _MailboxServer((args.host, args.port),
+                            build_handler(mailbox, token))
     print(f"agent mailbox serving on http://{args.host}:{args.port} "
           f"(dir {directory}, {len(mailbox.list(OPEN))} open task(s))",
           flush=True)
