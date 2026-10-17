@@ -37,14 +37,14 @@ $mailboxArgs = @("$repo\tools\agent_mailbox.py", 'serve', '--port', '8778',
 # The resident proposer: the Windows node must initiate on its own, not only
 # answer polled work. Multi-mailbox: publish to both, read the union, so a
 # sleeping Mac-hosted mailbox can no longer silence the colony (2026-10-17).
-$thinkArgs = @('-m', 'pando.thinkd', '--node-id', 'win-proposer',
+$thinkArgs = @('-m', 'pando.thinkd', '--node-id', 'win-gpu-proposer',
   '--base-url', 'http://127.0.0.1:8086/v1', '--model', 'gemma-4-12b-it-Q4_K_M',
   '--fallback-base-url', 'http://127.0.0.1:8087/v1',
   '--fallback-model', 'yi-1.5-9b-q4km',
   '--mailbox', 'http://192.168.31.41:8776',
   '--mailbox-fallback', 'http://127.0.0.1:8778',
   '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
-  '--ledger', 'D:\pando-models\win-think-ledger.jsonl',
+  '--ledger', 'D:\pando-models\win-gpu-think-ledger.jsonl',
   '--interval', '240', '--explore-every', '5', '--activity-every', '4')
 # Yi-1.5-9B on CPU: a second, different-bloodline local model. It votes as a
 # fabric member and runs its own proposer so the win node initiates with two
@@ -59,12 +59,12 @@ $yiStemArgs = @('-m', 'pando.stemd', '--node-id', 'win-yi-9b', '--backend',
   'yi-1.5-9b-q4km', '--root', 'http://127.0.0.1:8790',
   '--pairing-token-file', $token, '--host', '0.0.0.0', '--advertise-host',
   '192.168.31.100')
-$yiThinkArgs = @('-m', 'pando.thinkd', '--node-id', 'win-yi-proposer',
+$yiThinkArgs = @('-m', 'pando.thinkd', '--node-id', 'win-cpu-proposer',
   '--base-url', 'http://127.0.0.1:8087/v1', '--model', 'yi-1.5-9b-q4km',
   '--mailbox', 'http://192.168.31.41:8776',
   '--mailbox-fallback', 'http://127.0.0.1:8778',
   '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
-  '--ledger', 'D:\pando-models\win-yi-think-ledger.jsonl',
+  '--ledger', 'D:\pando-models\win-cpu-think-ledger.jsonl',
   '--interval', '300', '--explore-every', '5', '--activity-every', '4')
 
 $names = @('llama-3070', 'stem-gemma', 'stem-laya', 'worker', 'win-mailbox',
