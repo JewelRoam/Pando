@@ -8,7 +8,7 @@ Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
 Get-CimInstance Win32_Process -Filter "Name='llama-server.exe'" |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
-  Where-Object { $_.CommandLine -match 'pando\.stemd|win_worker|agent_mailbox|pando\.thinkd' } |
+  Where-Object { $_.CommandLine -match 'pando\.stemd|win_worker|agent_mailbox|pando\.thinkd|observatory\.py|pando\.chatd|execute_loop\.py' } |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 Start-Sleep -Seconds 3
 Start-Process -FilePath 'powershell.exe' `

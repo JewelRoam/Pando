@@ -78,15 +78,18 @@ $chatArgs = @('-m', 'pando.chatd',
   '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
   '--ledger', 'D:\pando-models\chat-ledger.jsonl',
   '--interval', '20')
+$executorArgs = @("$repo\tools\execute_loop.py", '300')
 
 $names = @('llama-3070', 'stem-gemma', 'stem-laya', 'worker', 'win-mailbox',
-  'llama-yi-cpu', 'stem-yi', 'think-proposer', 'think-yi', 'observatory', 'chat')
+  'llama-yi-cpu', 'stem-yi', 'think-proposer', 'think-yi', 'observatory', 'chat',
+  'executor-loop')
 $exes = @($llamaExe, $python, $python, $python, $python, $llamaExe, $python,
-  $python, $python, $python, $python)
+  $python, $python, $python, $python, $python)
 $argsList = @($llamaArgs, $gemmaArgs, $layaArgs, $workerArgs, $mailboxArgs,
-  $yiLlamaArgs, $yiStemArgs, $thinkArgs, $yiThinkArgs, $observatoryArgs, $chatArgs)
+  $yiLlamaArgs, $yiStemArgs, $thinkArgs, $yiThinkArgs, $observatoryArgs, $chatArgs,
+  $executorArgs)
 $cwds = @('D:\pando-models\llama-cuda', $repo, $repo, $repo, $repo,
-  'D:\pando-models\llama-cuda', $repo, $repo, $repo, $repo, $repo)
+  'D:\pando-models\llama-cuda', $repo, $repo, $repo, $repo, $repo, $repo)
 
 $procs = @{}
 while ($true) {
