@@ -57,6 +57,7 @@ import os
 import random
 import sys
 import time
+import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -85,6 +86,7 @@ SYSTEM_PROMPT = f"""你是 PandoSI 殖民地的一名提案者。这个群体是
    上一轮写进 cites。那不是进化，是自言自语。如果你要重复，必须在这一轮明确指出
    上一次和这一次到底有什么不同。
 5. 优先选择能让群体多一个能思考的落脚点、或减少单点的动作。
+6. seed.replicate 可以带 destination：一个主机名，只能是字母、数字、点、短横线，例如 "win" 或 "pi5"。不知道目的地就不要这个字段，不要写 URL。
 """
 
 
@@ -337,6 +339,25 @@ def _as_cites(value) -> list[str]:
     return [str(value)]
 
 
+_DESTINATION_OK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+def destination_of(action: str, value) -> tuple[str, str]:
+    """A host name, or empty. Only seed.replicate may carry one.
+
+    Anything else (a URL, a path, a sentence) is refused. Omitting the field
+    is allowed: the executor then records that there is nowhere to send it.
+    """
+    if value in (None, ""):
+        return "", ""
+    text = str(value).strip()
+    if not text or action != "seed.replicate":
+        return "", ""
+    if not _DESTINATION_OK.fullmatch(text):
+        return "", f"destination {text!r} is not a host name"
+    return text, ""
+
+
 def proposal_from_obj(obj: dict, author: str, node_id: str,
                       round_no: int) -> tuple[Proposal | None, str]:
     """Validate one model answer against ACTION_SPACE. Returns (proposal, why-not)."""
@@ -353,6 +374,9 @@ def proposal_from_obj(obj: dict, author: str, node_id: str,
     except (TypeError, ValueError):
         cost = 0.0
     cost = min(max(cost, 0.0), 1.0)
+    destination, why = destination_of(action, obj.get("destination"))
+    if why:
+        return None, why
     return Proposal(
         proposal_id=f"{node_id}-r{round_no}-{int(time.time())}",
         author=author,
@@ -361,6 +385,7 @@ def proposal_from_obj(obj: dict, author: str, node_id: str,
         expected_effect=str(obj.get("expected_effect") or "").strip()[:400],
         cost=cost,
         cites=_as_cites(obj.get("cites")),
+        destination=destination,
     ), ""
 
 

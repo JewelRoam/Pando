@@ -63,10 +63,13 @@ class Proposal:
     # The key that signed this record. Empty on objects built in-process.
     # It is not part of payload(); the signature covers payload only.
     pubkey: str = ""
+    # Host name for seed.replicate. Empty stays out of the signed payload so
+    # older signatures, which never had the key, still verify.
+    destination: str = ""
 
     def payload(self) -> dict:
         """The content a signature covers (everything but the proof)."""
-        return {
+        body = {
             "proposal_id": self.proposal_id,
             "author": self.author,
             "goal": self.goal,
@@ -75,6 +78,9 @@ class Proposal:
             "cost": self.cost,
             "cites": list(self.cites),
         }
+        if self.destination:
+            body["destination"] = self.destination
+        return body
 
 
 @dataclass
@@ -447,6 +453,7 @@ def verify_proposal(record, expected_pubkey: str | None = None) -> Proposal | No
             cost=float(payload.get("cost", 0.0)),
             cites=list(payload.get("cites", [])),
             pubkey=pubkey,
+            destination=str(payload.get("destination") or ""),
         )
     except (KeyError, TypeError, ValueError):
         return None

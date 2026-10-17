@@ -554,6 +554,7 @@ def proposal_view(body: str) -> dict | None:
         "goal": str(payload.get("goal") or ""),
         "action": str(payload.get("action") or ""),
         "expected_effect": str(payload.get("expected_effect") or ""),
+        "destination": str(payload.get("destination") or ""),
         "cost": payload.get("cost"),
         "cites": [str(item) for item in cites if item not in (None, "")],
         "signed": bool(record.get("sig") and record.get("pubkey")),
@@ -685,6 +686,8 @@ def present_messages(messages: list[dict]) -> list[dict]:
         meta = [str(item) for item in cites if item]
         if fields.get("cost") not in (None, ""):
             meta.insert(0, str(fields.get("cost")))
+        if fields.get("destination"):
+            meta.append(str(fields.get("destination")))
         if fields.get("proposal_id"):
             meta.append(str(fields.get("proposal_id")))
         reactions = []

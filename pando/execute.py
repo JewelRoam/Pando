@@ -276,15 +276,32 @@ def foreign_replications(proposals: list[Proposal], reactions: list[dict],
 
 def local_replications(proposals: list[Proposal], reactions: list[dict],
                        done: set[str], signer: str) -> list[str]:
-    """Adopted seed.replicate ids signed here. None names a destination."""
+    """Adopted seed.replicate ids signed here that name no destination."""
     found = []
     for proposal in proposals:
         if proposal.proposal_id in done or proposal.action != "seed.replicate":
             continue
-        if proposal.pubkey != signer:
+        if proposal.pubkey != signer or proposal.destination:
             continue
         if judge(proposal, reactions, actuators={})["adopted"]:
             found.append(proposal.proposal_id)
+    return found
+
+
+def addressed_replications(proposals: list[Proposal], reactions: list[dict],
+                           done: set[str], signer: str) -> list[tuple[str, str]]:
+    """Adopted seed.replicate ids signed here that name a host.
+
+    Naming a host is not permission to send. There is still no transport.
+    """
+    found = []
+    for proposal in proposals:
+        if proposal.proposal_id in done or proposal.action != "seed.replicate":
+            continue
+        if proposal.pubkey != signer or not proposal.destination:
+            continue
+        if judge(proposal, reactions, actuators={})["adopted"]:
+            found.append((proposal.proposal_id, proposal.destination))
     return found
 
 
@@ -362,9 +379,10 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
         seen = done_ids(ledger) | left_ids(ledger)
         foreign = foreign_adopted_seeds(proposals, reactions, seen, signer)
         replicates = local_replications(proposals, reactions, seen, signer)
+        addressed = addressed_replications(proposals, reactions, seen, signer)
         foreign_repl = foreign_replications(proposals, reactions, seen, signer)
         unacted = local_unacted(proposals, reactions, seen, signer)
-        if foreign or replicates or unacted or foreign_repl:
+        if foreign or replicates or addressed or unacted or foreign_repl:
             ledger.parent.mkdir(parents=True, exist_ok=True)
             with ledger.open("a", encoding="utf-8") as handle:
                 for proposal_id in foreign:
@@ -380,6 +398,14 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                         "action": "seed.replicate",
                         "executed": False,
                         "skipped": "no-destination",
+                    }, sort_keys=True) + "\n")
+                for proposal_id, destination in addressed:
+                    handle.write(json.dumps({
+                        "proposal_id": proposal_id,
+                        "action": "seed.replicate",
+                        "destination": destination,
+                        "executed": False,
+                        "skipped": "no-transport",
                     }, sort_keys=True) + "\n")
                 for proposal_id in foreign_repl:
                     handle.write(json.dumps({
@@ -397,6 +423,7 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                     }, sort_keys=True) + "\n")
         payload = {"did": "idle", "foreign_seed_exports": foreign,
                    "replication_without_destination": replicates,
+                   "replication_not_sent": [item[0] for item in addressed],
                    "foreign_replications": foreign_repl,
                    "no_actuator": [item[0] for item in unacted]}
         print(json.dumps(payload, ensure_ascii=False), flush=True)
