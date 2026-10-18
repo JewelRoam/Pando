@@ -138,6 +138,35 @@ def weakens(name: str, old, new) -> bool:
     raise PolicyError(f"no weakening rule for knob {name!r}")
 
 
+def validate(params) -> tuple[dict | None, str]:
+    """Is this a well-formed ``policy.set`` intent? Returns (knobs, why-not).
+
+    This is the *only* place the shape of the intent is defined. The proposer
+    asks it before it signs an intent and the executor asks it before it
+    writes one, so the two cannot drift: a proposal that passed here composes,
+    and one that failed here is refused rather than signed and dropped later.
+
+    The weakening brake is deliberately not applied. Whether a change is
+    allowed depends on how many adopters carried it, and a proposal that has
+    not been voted on yet has none. This answers "is this a well-formed
+    request", not "may it proceed".
+    """
+    if not isinstance(params, dict) or set(params) != {"set"}:
+        return None, 'params must be {"set": {"<knob>": <value>}}'
+    wanted = params["set"]
+    if not isinstance(wanted, dict) or not wanted:
+        return None, "params.set must name at least one knob"
+    for name in sorted(wanted):
+        knob = KNOBS.get(name)
+        if knob is None:
+            return None, (f"unknown knob {name!r}; settable: "
+                          + ", ".join(sorted(KNOBS)))
+        ok, why = check(knob, wanted[name])
+        if not ok:
+            return None, why
+    return {name: wanted[name] for name in sorted(wanted)}, ""
+
+
 def set_knobs(values: dict, params, *, adopters: int = 0) -> tuple[dict, dict]:
     """Validate one signed ``params`` block against ``values``. Pure.
 
@@ -146,22 +175,14 @@ def set_knobs(values: dict, params, *, adopters: int = 0) -> tuple[dict, dict]:
     so a proposal that names one good knob and one impossible one changes
     neither. All knobs are checked before any is written for the same reason.
     """
-    if not isinstance(params, dict) or set(params) != {"set"}:
-        raise PolicyError('params must be {"set": {"<knob>": <value>}}')
-    wanted = params["set"]
-    if not isinstance(wanted, dict) or not wanted:
-        raise PolicyError("params.set must name at least one knob")
+    wanted, why = validate(params)
+    if wanted is None:
+        raise PolicyError(why)
     new = dict(values)
     applied: dict[str, dict] = {}
     for name in sorted(wanted):
-        knob = KNOBS.get(name)
-        if knob is None:
-            raise PolicyError(f"unknown knob {name!r}; settable: "
-                              + ", ".join(sorted(KNOBS)))
+        knob = KNOBS[name]
         value = wanted[name]
-        ok, why = check(knob, value)
-        if not ok:
-            raise PolicyError(why)
         old = new.get(name, knob.default)
         if weakens(name, old, value) and int(adopters) < WEAKEN_ADOPTERS:
             raise PolicyError(

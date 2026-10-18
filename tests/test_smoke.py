@@ -1890,6 +1890,41 @@ class TestResidentThinker(unittest.TestCase):
         self.assertIsNone(proposal)
         self.assertIn("not a host name", why)
 
+    def test_thinkd_requires_valid_signed_params_for_policy_set(self):
+        """The proposer and executor must agree on the one typed action intent.
+
+        A ``policy.set`` with prose but no valid params is not a rule change;
+        publishing it would only create an unexecutable loop entry. The same
+        validator is used here and by the executor, so the intent shape cannot
+        drift between the two.
+        """
+        from pando.thinkd import proposal_from_obj
+
+        proposal, why = proposal_from_obj(
+            {"action": "policy.set", "goal": "raise the adoption floor",
+             "params": {"set": {"min_adopt": 3}}},
+            "n1", "n1", 7)
+        self.assertEqual(why, "")
+        self.assertEqual(proposal.params, {"set": {"min_adopt": 3}})
+        self.assertEqual(proposal.payload()["params"],
+                         {"set": {"min_adopt": 3}})
+
+        for raw in (None, {}, {"set": {}}, {"set": {"min_adopt": 9}},
+                    {"set": {"nope": 1}}, {"min_adopt": 3},
+                    {"set": {"min_adopt": True}}):
+            bad, why = proposal_from_obj(
+                {"action": "policy.set", "goal": "change a rule",
+                 "params": raw},
+                "n1", "n1", 7)
+            self.assertIsNone(bad)
+            self.assertIn("policy.set params invalid", why)
+
+        bad, why = proposal_from_obj(
+            {"action": "seed.export", "goal": "seal", "params": {"set": {}}},
+            "n1", "n1", 7)
+        self.assertIsNone(bad)
+        self.assertIn("does not accept params", why)
+
     def test_thinkd_keeps_thinking_through_model_and_mailbox_failures(self):
         """A dead model, dead mailbox, or bad JSON is a recorded round, not an end."""
         with tempfile.TemporaryDirectory() as tmp:

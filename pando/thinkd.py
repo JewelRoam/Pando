@@ -65,11 +65,16 @@ from pathlib import Path
 
 from .genesis import ACTION_SPACE, Proposal
 from .identity import load_or_create
+from .policy import KNOBS, validate as validate_policy
 from .net import open_url
 from .proposal_mail import fetch_proposals, publish_proposal
 
 # Actions we hand the model, in a stable order so prompts are reproducible.
 ACTION_MENU = "\n".join(f"{name}: {desc}" for name, desc in ACTION_SPACE.items())
+POLICY_KNOB_HELP = "；".join(
+    (f"{name} 是 {knob.low}~{knob.high} 的整数"
+     if knob.kind is int else f"{name} 是 true/false")
+    for name, knob in KNOBS.items())
 
 SYSTEM_PROMPT = f"""你是 PandoSI 殖民地的一名提案者。这个群体是一台台物理设备上的模型组成的文明，唯一使命是存活和扩张。
 没有人从外面给它选项：候选方案必须由你从群体自己的历史里提出来。
@@ -87,6 +92,11 @@ SYSTEM_PROMPT = f"""你是 PandoSI 殖民地的一名提案者。这个群体是
    上一次和这一次到底有什么不同。
 5. 优先选择能让群体多一个能思考的落脚点、或减少单点的动作。
 6. 选了 seed.replicate 时，destination 是单独的 JSON 字段，不是 goal 里的一句话。后文如果给出主机名单，值必须是其中之一。只把名字写进 goal 不算。不要写 URL。
+7. 只有选了 policy.set 时才写 params，且必须是单独的 JSON 字段，形如
+   {{"set": {{"min_adopt": 3}}}}。params.set 至少写一个可调的键，不能写其他字段。
+   当前可调：{POLICY_KNOB_HELP}。降低 min_adopt 或把 veto 改成 false 会让门槛
+   更容易通过，至少需要 3 个决策模型赞同；不要靠 goal 的措辞绕过。
+   其他 action 不要写 params。
 """
 
 
@@ -385,6 +395,15 @@ def proposal_from_obj(obj: dict, author: str, node_id: str,
     destination, why = destination_of(action, obj.get("destination"))
     if why:
         return None, why
+    raw_params = obj.get("params")
+    params = {}
+    if action == "policy.set":
+        checked, why = validate_policy(raw_params)
+        if checked is None:
+            return None, f"policy.set params invalid: {why}"
+        params = raw_params
+    elif raw_params not in (None, {}, []):
+        return None, f"{action} does not accept params"
     return Proposal(
         proposal_id=f"{node_id}-r{round_no}-{int(time.time())}",
         author=author,
@@ -394,6 +413,7 @@ def proposal_from_obj(obj: dict, author: str, node_id: str,
         cost=cost,
         cites=_as_cites(obj.get("cites")),
         destination=destination,
+        params=params,
     ), ""
 
 
