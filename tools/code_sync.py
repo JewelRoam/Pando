@@ -91,7 +91,28 @@ def _head(repo: Path, env: dict[str, str]) -> str:
 
 
 def _dirty(repo: Path, env: dict[str, str]) -> bool:
-    got = _git(repo, ["status", "--porcelain"], env)
+    """True only when the fast-forward could destroy a person's *tracked* edit.
+
+    ``--untracked-files=no`` is the whole point of this function. Plain
+    ``git status --porcelain`` also lists untracked files, but the question
+    here is not "is the tree pristine" -- it is "would moving HEAD forward
+    throw away work". A stray untracked artifact is not work the fast-forward
+    destroys, and counting it turns that artifact into a permanent, silent
+    wedge.
+
+    That is not hypothetical. ``node_code_watch`` runs this guard every five
+    minutes on the Windows node, and the bootstrap command that installs that
+    watcher downloads ``code.bundle`` **into the checkout root**. With
+    untracked files counted, every later round would report ``dirty`` and
+    never move -- a node whose ledger shows a live, healthy updater, frozen
+    forever. The updater failing in its own uniform is the one failure mode
+    it exists to make impossible.
+
+    The protection is relocated, not dropped: a merge that would overwrite an
+    untracked file is refused by git itself, and that refusal now surfaces as
+    ``not-fast-forward`` with git's stderr recorded, never as silence.
+    """
+    got = _git(repo, ["status", "--porcelain", "--untracked-files=no"], env)
     return bool(got.stdout.strip())
 
 
@@ -162,6 +183,11 @@ def sync_repo(repo, *, remote: str = "origin", peer: str = "",
     result["after"] = after
     if merged.returncode != 0:
         result["reason"] = "not-fast-forward"
+        # Keep git's own words. "Refused" and "nothing to do" are different
+        # facts, and the ledger is the only place a headless node can say
+        # which one happened -- e.g. an untracked file the incoming commit
+        # now tracks.
+        result["error"] = (merged.stderr or merged.stdout or "").strip()[:300]
         return result
     result["reason"] = "fast-forward" if after != before else "already"
     result["updated"] = after != before

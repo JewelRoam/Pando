@@ -6725,6 +6725,49 @@ class TestCodeSync(unittest.TestCase):
             self.assertEqual(head, moved["after"])
             self.assertEqual((client / "README").read_text(), "local edit\n")
 
+    def test_an_untracked_file_does_not_wedge_the_updater(self):
+        """A stray artifact must not freeze every later round, and must not
+        be silently clobbered either.
+
+        Regression against `_dirty` using plain `git status --porcelain`,
+        which lists untracked files. `node_code_watch` calls this guard every
+        five minutes on a node with no operator, and its own bootstrap writes
+        `code.bundle` into the checkout root -- so counting untracked files
+        would freeze the Windows node permanently while its ledger read
+        `dirty`, which looks like a healthy, working updater.
+
+        Two halves, because "ignore untracked" must not become "clobber
+        untracked": an untracked file that no commit mentions is left alone
+        and does not block; the same path appearing in the incoming commit is
+        refused by git and reported as `not-fast-forward`, with stderr kept.
+        """
+        sync = self._load()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env, src, bare, client = self._world(root)
+            stray = client / "code.bundle"
+            stray.write_bytes(b"not a git object\n")
+            (src / "README").write_text("two\n")
+            self._run(env, "git", "-C", str(src), "add", "README")
+            self._run(env, "git", "-C", str(src), "commit", "-m", "two")
+            self._run(env, "git", "-C", str(src), "push", str(bare), "main")
+
+            moved = sync.sync_repo(client)
+            self.assertTrue(moved["updated"])
+            self.assertEqual(moved["reason"], "fast-forward")
+            self.assertEqual(stray.read_bytes(), b"not a git object\n")
+
+            (src / "code.bundle").write_text("now tracked\n", encoding="utf-8")
+            self._run(env, "git", "-C", str(src), "add", "code.bundle")
+            self._run(env, "git", "-C", str(src), "commit", "-m", "track it")
+            self._run(env, "git", "-C", str(src), "push", str(bare), "main")
+
+            blocked = sync.sync_repo(client)
+            self.assertFalse(blocked["updated"])
+            self.assertEqual(blocked["reason"], "not-fast-forward")
+            self.assertTrue(blocked.get("error"), "git's refusal must be kept")
+            self.assertEqual(stray.read_bytes(), b"not a git object\n")
+
     def test_a_fork_is_not_merged_and_a_model_unit_is_not_restarted(self):
         sync = self._load()
         with tempfile.TemporaryDirectory() as tmp:

@@ -31,6 +31,7 @@ playbook.private.toml
 artifacts/
 *.onnx.data
 docs/dashboard.html
+*.bundle
 reg_join_log.txt
 spore_join_log.txt
 spore-cache/

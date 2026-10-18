@@ -402,6 +402,19 @@ model server is never reloaded, and a fast-forward that changed the supervisor's
 to the full restart, because a supervisor that is already running cannot learn a new service name.
 A dirty tree, a diverged history, or a failed fetch is left exactly as it was.
 
+One near-miss belongs here because it would have reproduced the same bug *after* the fix, and the
+bootstrap is what would have triggered it. The command that installs this watcher downloads
+`code.bundle` into the checkout root, and the first version of the dirty check ran plain
+`git status --porcelain` -- which lists **untracked** files. So the act of installing the updater would
+have left the tree permanently "dirty": every later round reports that one reason, the checkout never
+moves again, and the ledger reads like a live updater doing its job five minutes at a time. The guard
+now asks the narrower, correct question -- `--untracked-files=no`, "would moving HEAD forward destroy
+a *tracked* edit" -- and the protection it gives up is relocated, not dropped: a merge that would
+overwrite an untracked file is refused by git itself, and that refusal is now recorded as
+`not-fast-forward` together with git's own stderr instead of being discarded. Falsifier:
+`tests.test_smoke.TestCodeSync.test_an_untracked_file_does_not_wedge_the_updater` fails on
+`moved["updated"] is False` against the old check -- which is the wedge, reproduced in a temp dir.
+
 The second half is the lesson the colony has already paid for twice: **liveness is not progress.** The
 supervisor's loop answers "did the child exit?" and cannot answer "did the proposer stop thinking?"
 A wedged `thinkd` stays running with a frozen ledger. With no cloud operator left on that node, nothing
