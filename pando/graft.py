@@ -40,6 +40,29 @@ def total_ram_gb() -> float:
     return 0.0
 
 
+#: A pip-installed member has no checkout to ask. Whoever runs the install
+#: leaves this file beside the module it copied, and it is the only honest
+#: answer available there. Pinned against ``tools/code_sync.py`` by a test.
+CODE_HEAD_STAMP = "_code_head.txt"
+
+
+def installed_code_head(package_dir: Path | None = None) -> str:
+    """The commit recorded beside an installed copy of this package.
+
+    ``code_head()`` probes ``git`` from the directory the module lives in, so
+    it cannot answer for a pip-installed member: pip copies the tree and never
+    copies ``.git``. Measured 2026-10-19 -- every pi5 stem reported an empty
+    ``code_head`` for that reason alone, while its venv was in fact current.
+    "Cannot say" and "out of date" then look identical from every peer, which
+    is a worse failure than being out of date.
+    """
+    stamp = (package_dir or Path(__file__).resolve().parent) / CODE_HEAD_STAMP
+    try:
+        return stamp.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
 def code_head(root: Path | None = None) -> str:
     """The commit a checkout is on, so a peer can see who is running old code.
 
@@ -52,6 +75,11 @@ def code_head(root: Path | None = None) -> str:
     yield "". GIT_DIR / GIT_WORK_TREE are stripped first, because a git hook
     (the pre-push gate runs this same tree) exports both and would otherwise
     make an unrelated repository answer for us.
+
+    When there is no checkout to probe *and* the question is about this very
+    module, fall back to the installer's stamp. An explicit ``root`` is a
+    question about that checkout and is never answered with somebody else's
+    commit.
     """
     env = dict(os.environ)
     for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
@@ -61,11 +89,12 @@ def code_head(root: Path | None = None) -> str:
             ["git", "rev-parse", "HEAD"],
             cwd=str(root or ROOT), env=env,
             capture_output=True, text=True, timeout=5)
+        head = done.stdout.strip() if done.returncode == 0 else ""
     except (OSError, subprocess.SubprocessError):
-        return ""
-    if done.returncode != 0:
-        return ""
-    return done.stdout.strip()
+        head = ""
+    if head:
+        return head
+    return "" if root is not None else installed_code_head()
 
 
 _CODE_HEAD: str | None = None

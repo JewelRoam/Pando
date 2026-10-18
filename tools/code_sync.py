@@ -9,7 +9,9 @@ and it must be the same branch, not a second history.
 *outside* the checkout on a headless node. See ``refresh_self``.
 ``--install-units`` is the same hop one level up: the systemd units are also
 files outside the checkout, and nothing rewrote them either. See
-``install_units``.
+``install_units``. ``--install-python`` is the same hop again: a pip-installed
+member cannot probe ``git`` for its commit, so the install leaves a stamp
+beside the copy. See ``stamp_installed_head``.
 """
 from __future__ import annotations
 
@@ -280,13 +282,57 @@ def install_units(source, target, names: list[str] | None = None) -> dict:
 
 
 
+#: Must equal ``pando.graft.CODE_HEAD_STAMP``; a test pins the pair. Duplicated
+#: rather than imported because the deployed copy of this file runs outside the
+#: checkout, under an interpreter that need not have pando installed.
+INSTALLED_HEAD_STAMP = "_code_head.txt"
+
+
+def installed_package_dir(python: str) -> Path | None:
+    """Where ``python`` imports pando from, or None if it cannot say."""
+    got = subprocess.run(
+        [python, "-c",
+         "import pathlib,pando;"
+         "print(pathlib.Path(pando.__file__).resolve().parent)"],
+        capture_output=True, text=True, timeout=60)
+    out = got.stdout.strip()
+    return Path(out) if got.returncode == 0 and out else None
+
+
+def stamp_installed_head(python: str, repo: Path,
+                         package_dir: Path | None = None) -> str:
+    """Record the installed copy's commit beside the copy itself.
+
+    ``graft.code_head()`` probes ``git`` where the module lives, and a pip
+    install copies the tree without ``.git``. pi5 runs that way, so every stem
+    there answered ``code_head: ""`` -- which makes a stale member and a
+    current one indistinguishable from every peer. The stamp is written after
+    a successful install, so it describes the bytes that were copied, not
+    whatever the checkout has moved on to since.
+    """
+    head = _head(repo, _env())
+    if not head:
+        return ""
+    where = package_dir if package_dir is not None else installed_package_dir(python)
+    if where is None:
+        return ""
+    try:
+        (where / INSTALLED_HEAD_STAMP).write_text(head + "\n", encoding="utf-8")
+    except OSError:
+        return ""
+    return head
+
+
 def install_checkout(python: str, repo: Path) -> bool:
     """Install this checkout into ``python`` without fetching new dependencies."""
     got = subprocess.run(
         [python, "-m", "pip", "install", "--no-deps",
          "--disable-pip-version-check", str(repo)],
         capture_output=True, text=True, timeout=180)
-    return got.returncode == 0
+    if got.returncode != 0:
+        return False
+    stamp_installed_head(python, repo)
+    return True
 
 
 def refresh_self(source: Path, target: Path) -> dict:

@@ -6740,6 +6740,51 @@ class TestCodeIdentity(unittest.TestCase):
             finally:
                 graft.ROOT, graft._CODE_HEAD = saved_root, saved_head
 
+    def test_an_installed_copy_answers_with_its_stamp(self):
+        # pip copies the tree and never copies .git, so git cannot answer for
+        # an installed member. Measured 2026-10-19: every pi5 stem reported an
+        # empty code_head while its venv was in fact current -- "cannot say"
+        # and "out of date" looked identical from every peer.
+        with tempfile.TemporaryDirectory() as tmp:
+            package = Path(tmp)
+            (package / graft.CODE_HEAD_STAMP).write_text("abc123\n",
+                                                         encoding="utf-8")
+            self.assertEqual(graft.installed_code_head(package), "abc123")
+
+    def test_a_missing_stamp_says_nothing_rather_than_guessing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(graft.installed_code_head(Path(tmp)), "")
+
+    def test_the_installer_stamps_the_copy_it_just_made(self):
+        from tools import code_sync
+
+        # The writer lives in a file that runs outside the checkout, so it
+        # cannot import the reader. Pin the two literals instead of trusting
+        # that they were kept in step.
+        self.assertEqual(code_sync.INSTALLED_HEAD_STAMP, graft.CODE_HEAD_STAMP)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _env, head = self._repo(root / "repo")
+            package = root / "site-packages" / "pando"
+            package.mkdir(parents=True)
+            self.assertEqual(
+                code_sync.stamp_installed_head(sys.executable, root / "repo",
+                                               package), head)
+            self.assertEqual(graft.installed_code_head(package), head)
+
+    def test_a_stamp_is_never_written_for_a_repo_with_no_commit(self):
+        from tools import code_sync
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package = root / "site-packages" / "pando"
+            package.mkdir(parents=True)
+            (root / "repo").mkdir()
+            self.assertEqual(
+                code_sync.stamp_installed_head(sys.executable, root / "repo",
+                                               package), "")
+            self.assertEqual(list(package.iterdir()), [])
+
     def _load_observatory(self):
         import importlib.util
         spec = importlib.util.spec_from_file_location(
