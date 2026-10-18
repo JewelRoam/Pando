@@ -6192,7 +6192,12 @@ class TestCodeSync(unittest.TestCase):
             # or pi5 keeps running the previous module from memory.
             self.assertIn("pandosi-react.service", sync.SAFE_UNITS)
             self.assertNotIn("pandosi-llama.service", sync.SAFE_UNITS)
-            self.assertNotIn("pandosi-stem-laya.service", sync.SAFE_UNITS)
+            # A stem is the client that *calls* capability(); it is not the
+            # model server. Leaving it out is how pi5 kept reporting
+            # code_head=None while its checkout was already at the tip.
+            self.assertIn("pandosi-stem-laya.service", sync.SAFE_UNITS)
+            self.assertIn("pandosi-stem-text.service", sync.SAFE_UNITS)
+            self.assertIn("pandosi-stem-llm.service", sync.SAFE_UNITS)
             # rootd holds the live member registry; it is not auto-restarted.
             self.assertNotIn("pandosi-root.service", sync.SAFE_UNITS)
             peer = sync.sync_repo(root / "missing", peer=str(bare))
@@ -6907,6 +6912,35 @@ class TestPi5UnitTemplates(unittest.TestCase):
         self.assertEqual(restarted - set(code_sync.SAFE_UNITS), set())
         # And what it does restart must be a unit this repo can rebuild.
         self.assertEqual(restarted - set(units), set())
+
+    def test_every_voter_stem_is_restarted_by_the_fast_forward(self):
+        """The allow-list and the deployed unit must not drift apart.
+
+        ``SAFE_UNITS`` is the guard and ``--restart`` is the order. A unit
+        added to one and not the other fails silently in opposite directions:
+        in the guard only, it is never restarted; in the order only,
+        ``restart_units`` refuses the whole batch and *no* unit restarts.
+
+        Measured 2026-10-19: all three pi5 stems reported ``code_head=None``
+        with the checkout at ``9e69dea``, while their unit files had not been
+        touched since Oct 17. The stems are the voters -- restarting them is
+        a re-registration, and is charged at zero model memory.
+        """
+        from tools import code_sync
+
+        restarted = set(re.findall(
+            r"--restart\s+(\S+)", self._units()["pandosi-code-sync.service"]))
+        wants = {name for name in code_sync.SAFE_UNITS
+                 if name.startswith("pandosi-stem-")}
+        self.assertEqual(wants, {
+            "pandosi-stem-text.service",
+            "pandosi-stem-laya.service",
+            "pandosi-stem-llm.service",
+        })
+        self.assertEqual(wants - restarted, set(),
+                         "a stem the guard allows is never actually restarted")
+        self.assertNotIn("pandosi-llama.service", restarted,
+                         "the fast-forward must never reload a model")
 
 
     def test_the_updater_running_on_pi5_can_receive_its_own_fixes(self):

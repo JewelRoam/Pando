@@ -37,6 +37,19 @@ from pathlib import Path
 # drafts through actuators whose contracts this repo has since changed. A
 # restart is how the loop's next round picks up the new module.
 #
+# The three ``pandosi-stem-*`` units belong here, and their absence was a
+# measured bug, not a caution. A *stem* is a client: it is the process that
+# imports ``pando.graft`` and calls ``capability()``, while ``pandosi-llama``
+# is the model server the stem talks to. On 2026-10-19 pi5's checkout and venv
+# were at ``9e69dea`` while all three stems had been running since Oct 18
+# 16:42 -- so every one of them reported ``code_head: None``, because
+# ``10f5043`` added that key to ``graft.capability()`` and the running process
+# was holding the previous module in memory. Restarting a stem re-registers it
+# with rootd; it does not reload a model and costs no memory.
+#
+# ``pandosi-llama`` is the exception the boundary is really about: restarting
+# it would reload a 2.33 GB model on a 4 GB board.
+#
 # ``rootd`` is deliberately absent: it registers members at startup only and
 # restarting it would drop the live registry for every local stem.
 SAFE_UNITS = frozenset({
@@ -45,6 +58,9 @@ SAFE_UNITS = frozenset({
     "pandosi-react.service",
     "pandosi-seed-pull.service",
     "pandosi-execute.service",
+    "pandosi-stem-text.service",
+    "pandosi-stem-laya.service",
+    "pandosi-stem-llm.service",
 })
 
 
