@@ -7405,6 +7405,104 @@ class TestVoteAblation(unittest.TestCase):
         self.assertLess(va.bonferroni_z(4), va.bonferroni_z(20))
 
 
+class TestBracketHoldsTheHeldArmStill(unittest.TestCase):
+    """tools/equal_budget_check.py --reuse-arm-b - a bracket moves one arm.
+
+    equal-budget-002 pre-registered a bracket arm (8B-Q4_K_M, 4.683 GiB) that
+    sits on the *other* side of the committee's 5.112 GiB, so parity would be
+    bracketed instead of asserted from a single 1.066x point estimate. Running
+    that bracket means varying arm A and holding arm B to the votes of the run
+    being bracketed. Re-harvesting the held arm would re-roll it -- the same
+    configuration can answer differently on a second pass, and a timeout on one
+    pass would then read as a difference between arms. So the held arm is
+    adopted from a named file, and adoption is refused the moment that file
+    answers a different question.
+    """
+
+    def _tool(self):
+        import importlib.util
+        path = Path(__file__).resolve().parents[1] / "tools" / "equal_budget_check.py"
+        spec = importlib.util.spec_from_file_location("equal_budget_check", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    SUITE = "assets/heldout4_test.jsonl,assets/heldout5_test.jsonl"
+    URLS = ["http://b1", "http://b2", "http://b3", "http://b4"]
+
+    def _donor(self, td, suite=None, n_rows=4, urls=None):
+        path = Path(td) / "donor.raw.json"
+        urls = self.URLS if urls is None else list(urls)
+        path.write_text(json.dumps({
+            "suite": self.SUITE if suite is None else suite,
+            "n_rows": n_rows,
+            "arm_a_url": "http://a-the-old-big-arm",
+            "arm_b_urls": urls,
+            "arm_a": {},
+            "arm_b": {u: [{"ok": True, "task_id": f"big6-{i:04d}",
+                           "expected": "a", "choice": "a"}
+                          for i in range(n_rows)] for u in urls},
+        }), encoding="utf-8")
+        return path
+
+    def test_a_matching_donor_is_adopted_verbatim(self):
+        """The held arm must be the *same votes*, not an equivalent config."""
+        eb = self._tool()
+        with tempfile.TemporaryDirectory() as td:
+            donor = self._donor(td)
+            arm_b, reason = eb.adopt_arm_b(donor, self.SUITE, 4, self.URLS)
+        self.assertEqual(reason, "")
+        self.assertEqual(sorted(arm_b), sorted(self.URLS))
+        self.assertEqual(len(arm_b["http://b1"]), 4)
+
+    def test_a_donor_that_answered_a_different_question_is_refused(self):
+        """A longer suite or another member set is a different experiment.
+
+        Adopting one of these would silently compare arm A against votes from a
+        question arm A never saw, which is the failure this refusal exists to
+        prevent -- and it must be a refusal, not a quiet fallback to a fresh
+        arm B, because a fresh arm B is not a bracket.
+        """
+        eb = self._tool()
+        with tempfile.TemporaryDirectory() as td:
+            short = self._donor(td, n_rows=3)
+            arm_b, reason = eb.adopt_arm_b(short, self.SUITE, 4, self.URLS)
+            self.assertIsNone(arm_b)
+            self.assertIn("n_rows 3 != 4", reason)
+
+            other = self._donor(td, suite="assets/heldout5_test.jsonl")
+            arm_b, reason = eb.adopt_arm_b(other, self.SUITE, 4, self.URLS)
+            self.assertIsNone(arm_b)
+            self.assertIn("suite", reason)
+
+            fewer = self._donor(td, urls=self.URLS[:3])
+            arm_b, reason = eb.adopt_arm_b(fewer, self.SUITE, 4, self.URLS)
+            self.assertIsNone(arm_b)
+            self.assertIn("arm_b_urls differ", reason)
+
+    def test_a_missing_or_unreadable_donor_is_refused_not_improvised(self):
+        """No donor means no bracket. Saying so beats a plausible number."""
+        eb = self._tool()
+        with tempfile.TemporaryDirectory() as td:
+            missing = Path(td) / "absent.json"
+            arm_b, reason = eb.adopt_arm_b(missing, self.SUITE, 4, self.URLS)
+            self.assertIsNone(arm_b)
+            self.assertIn("does not exist", reason)
+
+            broken = Path(td) / "broken.json"
+            broken.write_text("{not json", encoding="utf-8")
+            arm_b, reason = eb.adopt_arm_b(broken, self.SUITE, 4, self.URLS)
+            self.assertIsNone(arm_b)
+            self.assertIn("not JSON", reason)
+
+            empty = Path(td) / "empty.json"
+            empty.write_text(json.dumps({"suite": self.SUITE, "n_rows": 4,
+                                         "arm_b_urls": self.URLS}), encoding="utf-8")
+            arm_b, reason = eb.adopt_arm_b(empty, self.SUITE, 4, self.URLS)
+            self.assertIsNone(arm_b)
+            self.assertIn("no arm_b", reason)
+
+
 class TestVoteVerdictOnThePage(unittest.TestCase):
     """The page reads the judgement; it must never re-derive it.
 

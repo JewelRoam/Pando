@@ -1,0 +1,92 @@
+{
+  "experiment": "equal-budget-003",
+  "title": "The bracket arm A': the same 4-member committee vs one 8B-Q4_K_M that is SMALLER than the committee",
+  "date": "2026-10-19",
+  "author": "mac-codex",
+  "origin": "equal-budget-002 pre-registered this exact arm as `arm_a.bracket` and then did not run it: 'the :8084 slot went to Phi-3.5-mini instead, which was the more valuable use of it. Parity here is a single point estimate (1.066x), not a bracket.' This run is that owed arm. It changes nothing else.",
+  "preregistered_before_any_harvest": true,
+  "this_is_a_bracket_not_a_new_experiment": {
+    "what_moves": "arm A only: Q6_K_M (5.449 GiB) -> Q4_K_M (4.683 GiB), same family, same flags, same stem code path",
+    "what_is_held_frozen": "arm B is adopted verbatim from equal-budget-002.raw.json via tools/equal_budget_check.py --reuse-arm-b; the tool refuses the donor unless suite, row count and member URLs match one for one",
+    "why_holding_it_matters": "re-harvesting the held arm would re-roll it (a timeout or a sampler decision on the second pass), and a between-runs delta would then be read as a between-arms delta"
+  },
+  "host": {
+    "machine": "Apple arm64, 10 cpu, 16 GiB",
+    "swap_at_preregistration": "total = 18432.00M  used = 17778.75M  free = 653.25M  (encrypted)",
+    "note": "swap was 95.9% used when this was written; the sequencing below still lowers the model-server weight below today's"
+  },
+  "suites": [
+    {
+      "path": "assets/heldout4_test.jsonl",
+      "family": "big6",
+      "rows": 240,
+      "sha256": "fad4bdf844b55d208ddf35e737be0e6f4821417bc919d5647edb3e40531db7ff"
+    },
+    {
+      "path": "assets/heldout5_test.jsonl",
+      "family": "big7",
+      "rows": 120,
+      "sha256": "2b9613c7504febfa6df63295bc775b68798350182c3cbe70df535cabfb247048"
+    }
+  ],
+  "rows_total": 360,
+  "arm_a_bracket": {
+    "role": "one big model, alone, on the far side of the committee's budget",
+    "checkpoint": "mac-llm-8b-q4",
+    "model_file": "~/.pandosi/models/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M.gguf",
+    "model_sha256_verified_at_preregistration": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+    "model_sha256_pre_registered_in_002": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+    "sha256_matches_002_pre_registration": true,
+    "weight_bytes": 5027783488,
+    "weight_gib": 4.682,
+    "llama_server_port": 8084,
+    "transient_stem": "http://127.0.0.1:8771 (transient, started WITHOUT --root so no sentinel sees a new node)",
+    "server_flags": "identical to the live Q6 launcher (~/.pandosi/bin/llm-8b.sh) apart from -m and --port: --jinja --chat-template-kwargs {\"enable_thinking\": false} -ngl 99 -c 4096 --parallel 1 --temp 0"
+  },
+  "arm_b": {
+    "role": "the same committee, its votes taken from 002 rather than re-asked",
+    "source": "assets/votes/equal-budget-002.raw.json",
+    "source_sha256": "c56f658b040253acdac89bf5b098e317aa2be52e559c2534fcec5cc0049baa81",
+    "members": [
+      "http://127.0.0.1:8767",
+      "http://127.0.0.1:8770",
+      "http://127.0.0.1:8769",
+      "http://127.0.0.1:8766"
+    ],
+    "total_weight_gib": 5.112,
+    "note": "these members were harvested 2026-10-19 03:34-03:43; the suite bytes are re-verified above, so the question is identical even though the wall clock is not"
+  },
+  "budget_relation": {
+    "arm_b_over_arm_a_bracket": 1.0917,
+    "reading": "arm B carries 109.2% of the bracket's weight, so THE COMMITTEE IS BUDGET-FAVOURED BY 9.2% in this run -- the mirror image of 002, where arm B was handicapped by 6.2%. Together the two runs bracket parity instead of asserting it."
+  },
+  "memory_sequencing_decision": {
+    "hard_constraint": "this Mac is not to carry a fourth concurrent local model",
+    "decision": "the live 8B Q6 server and its stem are booted out for the duration and restored afterwards with the same labels; the Q4 server and its stem are transient processes owned by this run, created with no launchd job",
+    "count_check": "today: Q6 + 4B + laya = 3 model servers, ~8.65 GiB of weights. bracket: Q4 + 4B + laya = 3 model servers, ~7.89 GiB. never more than today, and ~0.75 GiB less",
+    "proposer_continuity": "thinkd has --fallback-base-url :8080, so booting the 8B out degrades the proposer to the 4B rather than stalling it",
+    "cost_accepted": "the mac 8B member (mac-llm-8b-local, role=proposal, so not a voter) is offline for the duration; no quorum is affected"
+  },
+  "endpoints": {
+    "metric": "accuracy on the same 360 rows is the primary endpoint; the paired d on rows both arms answered is the decision statistic",
+    "not_comparable": "latency is reported but is NOT a between-arm endpoint -- the two arms were harvested in different residency configurations and at different times"
+  },
+  "decision_rule_fixed_before_the_run": {
+    "same_as_002": "d = (B right, A wrong) - (A right, B wrong) over rows both answered; |d| > 1.96*SE to claim a winner",
+    "d<=0": "a single Qwen3-8B-Q4_K_M wins while carrying LESS memory than the 4-member committee: the many-small-at-equal-budget claim is refuted on this family, not merely unsupported",
+    "d>0 and |d|>1.96*SE": "the committee beats a same-family single model that has less memory than it does, so the 002 verdict is budget-sensitive rather than a property of committees",
+    "otherwise": "inconclusive at this n; the 002 point estimate stays unbracketed"
+  },
+  "pre_committed_caveats": [
+    "internal labels only: every expected label comes from this project's own generation pipeline, so nothing here is externally anchored",
+    "arm A and arm B share the Qwen3 family and tokenizer (arm B contains Qwen3-4B); a same-family bracket cannot speak to different-bloodline big models",
+    "one host, one prompt path, one temperature (0.0), no per-arm tuning, no split selection after the fact",
+    "this run still has no single-4B arm and no majority-of-two arm as pre-registered baselines; those remain owed",
+    "a Q4 bracket is a *weaker model* at lower memory, so a committee loss here is not the same statement as a committee loss to Q6"
+  ],
+  "artifacts_planned": {
+    "raw": "assets/votes/equal-budget-003.raw.json",
+    "report": "assets/votes/equal-budget-003.json",
+    "doc": "docs/EXPERIMENT-equal-budget-003.md"
+  }
+}

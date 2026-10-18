@@ -157,6 +157,41 @@ def arm_b_decision(rows: list[dict], per_member: dict, urls: list[str],
     return decisions
 
 
+def adopt_arm_b(path: Path, suite: str, n_rows: int,
+                small_urls: list[str]) -> tuple[dict | None, str]:
+    """Arm B from an earlier harvest, if that harvest answers this question.
+
+    A bracket varies *one* arm and holds the other still. Re-harvesting the
+    held arm silently re-rolls it: the same configuration can return different
+    votes on a second pass (a timeout, a sampler), and then a between-arm delta
+    is partly a between-runs delta. So the held arm is adopted from a named
+    file, and adoption is refused the moment it would compare two different
+    questions -- a longer suite, another member set, a reordered one.
+
+    Returns (arm_b, "") on success and (None, reason) on refusal. The reason is
+    the diagnostic; the caller prints it and stops rather than harvasting a
+    fresh arm B and calling the result a bracket.
+    """
+    if not path.exists():
+        return None, f"{path} does not exist"
+    try:
+        saved = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        return None, f"{path} is not JSON: {exc}"
+    reasons = []
+    if saved.get("suite") != suite:
+        reasons.append(f"suite {saved.get('suite')!r} != {suite!r}")
+    if saved.get("n_rows") != n_rows:
+        reasons.append(f"n_rows {saved.get('n_rows')} != {n_rows}")
+    if saved.get("arm_b_urls") != small_urls:
+        reasons.append("arm_b_urls differ (members must match one for one)")
+    if not saved.get("arm_b"):
+        reasons.append("no arm_b in it")
+    if reasons:
+        return None, "; ".join(reasons)
+    return saved["arm_b"], ""
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--suite", required=True, help="comma-separated suites")
@@ -174,6 +209,10 @@ def main() -> int:
     parser.add_argument("--votes", default="",
                         help="path for the raw per-row harvest; reused if it "
                              "already exists and its suite/row count match")
+    parser.add_argument("--reuse-arm-b", default="",
+                        help="path to an earlier raw harvest whose arm B this "
+                             "run must hold fixed (a bracket moves one arm); "
+                             "refused unless suite, row count and members match")
     parser.add_argument("--fresh", action="store_true",
                         help="ignore a cached --votes file and re-harvest")
     args = parser.parse_args()
@@ -197,18 +236,37 @@ def main() -> int:
             print(f"reusing the raw harvest in {cache} (--fresh to redo)")
         else:
             print(f"{cache} is for a different run; re-harvesting")
+    donor = ""
+    if args.reuse_arm_b and not reuse and not args.fresh:
+        donor_path = Path(args.reuse_arm_b)
+        if not donor_path.is_absolute():
+            donor_path = ROOT / donor_path
+        adopted, reason = adopt_arm_b(donor_path, args.suite, len(rows),
+                                      small_urls)
+        if adopted is None:
+            print(f"--reuse-arm-b refused: {reason}", file=sys.stderr)
+            return 2
+        donor = str(donor_path)
+        print(f"arm B frozen from {donor} (harvesting arm A only)")
+
     if not reuse:
         print("harvesting arm A (big)")
         big = collect([args.big], rows, args.timeout, "A")
-        print("harvesting arm B (small)")
-        per_member = collect(small_urls, rows, args.timeout, "B")
+        if donor:
+            per_member = adopt_arm_b(Path(donor), args.suite, len(rows),
+                                     small_urls)[0]
+        else:
+            print("harvesting arm B (small)")
+            per_member = collect(small_urls, rows, args.timeout, "B")
         if cache is not None:
             cache.parent.mkdir(parents=True, exist_ok=True)
-            cache.write_text(json.dumps(
-                {"suite": args.suite, "n_rows": len(rows),
-                 "arm_a_url": args.big, "arm_b_urls": small_urls,
-                 "arm_a": big, "arm_b": per_member}, indent=2) + "\n",
-                encoding="utf-8")
+            raw = {"suite": args.suite, "n_rows": len(rows),
+                   "arm_a_url": args.big, "arm_b_urls": small_urls,
+                   "arm_a": big, "arm_b": per_member}
+            if donor:
+                raw["arm_b_reused_from"] = donor
+            cache.write_text(json.dumps(raw, indent=2) + "\n",
+                             encoding="utf-8")
             print(f"wrote raw votes to {cache}")
 
     big_votes = big[args.big]
