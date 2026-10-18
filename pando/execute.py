@@ -28,6 +28,12 @@ HOLD = "搁置"
 DECLINE = "反对"
 STANCES = (ADOPT, HOLD, DECLINE)
 
+#: The actions this program can actually carry out. Everything else in
+#: ``ACTION_SPACE`` is a declared intent: adopted, never executed. Kept as
+#: one list so the boundary is readable from outside and cannot drift
+#: between the judge, the executor and the ledger.
+ACTUATORS: tuple[str, ...] = ("seed.export", "seed.replicate")
+
 
 
 def _titled(title: str, prefix: str) -> tuple[str, str] | None:
@@ -422,14 +428,15 @@ def local_unacted(proposals: list[Proposal], reactions: list[dict],
                   done: set[str], signer: str) -> list[tuple[str, str]]:
     """Adopted proposals this host signed that have no actuator.
 
-    seed.export is sealed. seed.replicate is recorded separately, because
-    the missing piece is a destination, not the lack of a verb.
+    Anything in ``ACTUATORS`` is left out: those are recorded by their own
+    path (seed.export seals, seed.replicate wants a destination), so calling
+    them unactuated here would double-count them as failures.
     """
     found = []
     for proposal in proposals:
         if proposal.proposal_id in done or proposal.pubkey != signer:
             continue
-        if proposal.action in ("seed.export", "seed.replicate"):
+        if proposal.action in ACTUATORS:
             continue
         if judge(proposal, reactions, actuators={})["adopted"]:
             found.append((proposal.proposal_id, proposal.action))
@@ -492,18 +499,29 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
     if chosen is not None:
         home = Path("~/.pandosi/seed-home-empty").expanduser()
         home.mkdir(parents=True, exist_ok=True)
-        sealed = export_seed(
-            chosen, home=home, identity=args.identity,
-            rollout_dir=home / "rollouts", out_root=args.out_root,
-            passphrase_file=phrase)
+        try:
+            sealed = export_seed(
+                chosen, home=home, identity=args.identity,
+                rollout_dir=home / "rollouts", out_root=args.out_root,
+                passphrase_file=phrase)
+            failure = ""
+        except Exception as exc:  # noqa: BLE001 - one action must not end the loop
+            sealed = None
+            failure = f"{type(exc).__name__}: {exc}"
         ledger.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "proposal_id": chosen.proposal_id,
+            "action": "seed.export",
+            "executed": bool(sealed),
+            "sealed": bool(sealed),
+        }
+        if not sealed:
+            # No ``skipped``: a failed seal is retried next round, so the
+            # adopted proposal is not dropped. The reason still travels, or
+            # a broken actuator is indistinguishable from an idle one.
+            record["failed"] = failure or "export wrote no manifest"
         with ledger.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps({
-                "proposal_id": chosen.proposal_id,
-                "action": "seed.export",
-                "executed": bool(sealed),
-                "sealed": bool(sealed),
-            }, sort_keys=True) + "\n")
+            handle.write(json.dumps(record, sort_keys=True) + "\n")
     # An export must not crowd out a replicate. Both are recorded.
     if True:
         seen = done_ids(ledger) | left_ids(ledger)

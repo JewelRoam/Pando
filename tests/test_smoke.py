@@ -3055,6 +3055,101 @@ class TestExecution(unittest.TestCase):
         self.assertIsNone(result["success"])
         self.assertIn("disk full", result["detail"])
 
+    def _execute_args(self, tmp, identity_path):
+        import types
+        return types.SimpleNamespace(
+            passphrase_file=str(Path(tmp) / "phrase"),
+            ledger=str(Path(tmp) / "execute-ledger.jsonl"),
+            identity=str(identity_path),
+            out_root=str(Path(tmp) / "out"),
+            hosts=None, pull=[], outbox=str(Path(tmp) / "outbox"))
+
+    def test_a_raising_export_is_recorded_rather_than_ending_the_loop(self):
+        """One broken actuator must not take the executor down with it.
+
+        Before this was guarded, ``export_seed`` was called bare inside
+        ``run_once``: a raise escaped, nothing was written, and the same
+        adopted proposal was re-attempted (and re-crashed) every round.
+        """
+        import tempfile
+        from pando.execute import ACTUATORS, run_once
+        from pando.identity import Identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = Identity.generate()
+            ident_path = Path(tmp) / "identity.json"
+            ident_path.write_text(json.dumps(identity.to_json()),
+                                  encoding="utf-8")
+            (Path(tmp) / "phrase").write_text("pw\n", encoding="utf-8")
+            proposal = self._proposal(pid="p-raise")
+            proposal.pubkey = identity.public_key
+            votes = [self._vote("mac-text", "赞同", "p-raise"),
+                     self._vote("mac-laya-int8", "赞同", "p-raise")]
+
+            import pando.execute as module
+            original = module.export_seed
+            module.export_seed = lambda *a, **k: (_ for _ in ()).throw(
+                RuntimeError("disk full"))
+            try:
+                args = self._execute_args(tmp, ident_path)
+                code = run_once([proposal], votes, args)
+                rows = [json.loads(line) for line in
+                        Path(args.ledger).read_text(encoding="utf-8").splitlines()]
+            finally:
+                module.export_seed = original
+
+        self.assertIsInstance(code, int)
+        self.assertEqual(len(rows), 1)
+        self.assertFalse(rows[0]["executed"])
+        self.assertFalse(rows[0]["sealed"])
+        self.assertIn("disk full", rows[0]["failed"])
+        # No ``skipped``: a failed seal is retried, not quietly retired.
+        self.assertNotIn("skipped", rows[0])
+        self.assertIn(rows[0]["action"], ACTUATORS)
+
+    def test_a_failed_export_is_not_treated_as_handled(self):
+        import tempfile
+        from pando.execute import done_ids, left_ids
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Path(tmp) / "execute-ledger.jsonl"
+            ledger.write_text(json.dumps({
+                "proposal_id": "p-raise", "action": "seed.export",
+                "executed": False, "sealed": False,
+                "failed": "RuntimeError: disk full"}) + "\n",
+                encoding="utf-8")
+            self.assertEqual(done_ids(ledger), set())
+            self.assertEqual(left_ids(ledger), set())
+
+    def test_the_unactuated_list_follows_the_actuator_registry(self):
+        """Every action is either carried out or named as unactuated.
+
+        The list of implemented actions used to be a literal tuple inside
+        ``local_unacted``; a new actuator could be added and still be
+        reported as ``no-actuator``. Both sides now read ``ACTUATORS``.
+        """
+        from pando.execute import ACTUATORS, local_unacted
+        from pando.genesis import ACTION_SPACE
+
+        signer = "ourkey"
+        proposals = []
+        for i, action in enumerate(sorted(ACTION_SPACE)):
+            proposal = self._proposal(action=action, pid=f"p-{i}")
+            proposal.pubkey = signer
+            proposals.append(proposal)
+        reactions = []
+        for i, action in enumerate(sorted(ACTION_SPACE)):
+            target = f"p-{i}"
+            reactions.append({"target_id": target, "node_id": "mac-text",
+                              "stance": "赞同"})
+            reactions.append({"target_id": target, "node_id": "mac-laya-int8",
+                              "stance": "赞同"})
+        unacted = dict(local_unacted(proposals, reactions, set(), signer))
+        for action in ACTUATORS:
+            self.assertNotIn(action, set(unacted.values()))
+        for action in ACTION_SPACE:
+            if action not in ACTUATORS:
+                self.assertIn(action, set(unacted.values()))
+
     def test_seed_export_writes_a_bundle_only_after_two_votes(self):
         import tempfile
         from pando.execute import export_seed, judge

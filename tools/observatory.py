@@ -587,6 +587,7 @@ def read_execution_ledger(path: Path) -> dict[str, dict]:
             "action": str(row.get("action") or ""),
             "executed": bool(row.get("executed")),
             "skipped": str(row.get("skipped") or ""),
+            "failed": str(row.get("failed") or ""),
             "destination": str(row.get("destination") or ""),
             "sealed": bool(row.get("sealed")),
         }
@@ -605,7 +606,12 @@ def execution_text(row: dict | None) -> str:
     destination = str(row.get("destination") or "")
     if skipped and destination:
         return f"{skipped} {destination}"
-    return skipped
+    if skipped:
+        return skipped
+    failed = str(row.get("failed") or "")
+    if failed:
+        return f"failed: {failed}"
+    return ""
 
 
 def attach_executions(messages: list[dict], executions: dict[str, dict]) -> None:
