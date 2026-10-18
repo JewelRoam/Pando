@@ -31,10 +31,16 @@ def _env() -> dict[str, str]:
     return env
 
 
-def _git(repo: Path, args: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-C", str(repo), *args],
-        capture_output=True, text=True, env=env, timeout=90)
+def _git(repo: Path, args: list[str], env: dict[str, str],
+         timeout: int = 90) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            ["git", "-C", str(repo), *args],
+            capture_output=True, text=True, env=env, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        # A stalled fetch must become a failed fetch, so the peer is tried.
+        return subprocess.CompletedProcess(
+            ["git", "-C", str(repo), *args], 124, "", "timeout")
 
 
 def _head(repo: Path, env: dict[str, str]) -> str:
@@ -82,7 +88,7 @@ def _fetch(repo: Path, env: dict[str, str], remote: str, token: str = "") -> boo
         ref = "HEAD" if str(source).endswith(".bundle") else "main"
         got = _git(repo, ["-c", "http.lowSpeedLimit=1000",
                           "-c", "http.lowSpeedTime=20",
-                          "fetch", source, ref], env)
+                          "fetch", source, ref], env, timeout=25)
         return got.returncode == 0
     finally:
         if temporary is not None:
