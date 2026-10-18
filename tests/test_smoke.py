@@ -6368,6 +6368,9 @@ class TestSeedReceive(unittest.TestCase):
             self.assertEqual(result["copied"], ["repl-1"])
             self.assertEqual(again["copied"], [])
             self.assertEqual(again["refused"], [])
+            # The second round re-delivered one bundle the inbox already had.
+            # That is a dedupe, not an idle round, and it has to say so.
+            self.assertEqual(again["duplicate"], ["repl-1"])
             self.assertFalse(result["unwrapped"])
             self.assertFalse(result["started_model"])
             stored = json.loads((root / "inbox" / "mac-proposer-r9" / "identity" /
@@ -6377,6 +6380,153 @@ class TestSeedReceive(unittest.TestCase):
             self.assertNotIn(live.to_json()["secret_key"], json.dumps(stored))
             self.assertTrue((outbox / "repl-1.ack.json").is_file())
             self.assertFalse((root / "inbox" / "repl-plain").exists())
+
+
+    def test_an_offer_that_arrives_rotted_is_refused_and_never_kept(self):
+        """A byte that rots on the way must not be kept, and must not be eaten.
+
+        Only the sender's own refusal had ever been measured: ``offer_dirs``
+        hides a bundle that no longer judges clean, so a rotted artifact never
+        reached the wire in the first place. Here the sender packs a good
+        bundle and the bytes rot after that -- a flipped payload byte, a
+        truncated tar, and an offer the sender itself cannot hand over. Each
+        has to end in ``refused``, leave the inbox untouched, and leave the
+        offer on the shelf so a later round can still deliver it.
+        """
+        import importlib.util
+        import tarfile
+
+        seed = self._seed()
+        root_dir = Path(__file__).resolve().parents[1]
+
+        def load(name, filename):
+            spec = importlib.util.spec_from_file_location(
+                name, root_dir / "tools" / filename)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+
+        outbox_mod = load("outbox_rot_under_test", "seed_outbox.py")
+        pull_mod = load("pull_rot_under_test", "seed_pull.py")
+
+        def flip_one_payload_byte(packed):
+            """Rot a byte of the sealed payload, leaving the tar readable."""
+            archive = tarfile.open(fileobj=io.BytesIO(packed), mode="r:")
+            out = io.BytesIO()
+            with tarfile.open(fileobj=out, mode="w") as dst:
+                for member in archive.getmembers():
+                    handle = archive.extractfile(member)
+                    data = handle.read() if handle is not None else b""
+                    if data and member.name != seed.MANIFEST:
+                        data = bytes([data[0] ^ 0x01]) + data[1:]
+                    member.size = len(data)
+                    dst.addfile(member, io.BytesIO(data))
+            return out.getvalue()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            phrase = root / "pass.txt"
+            phrase.write_text("correct horse battery staple\n")
+            home = root / "home"
+            (home / "mailbox" / "tasks").mkdir(parents=True)
+            (home / "mailbox" / "tasks" / "note.json").write_text(
+                json.dumps({"task": "hello"}))
+            from pando.identity import Identity
+            identity_path = root / "pando" / "identity.json"
+            identity_path.parent.mkdir(parents=True, exist_ok=True)
+            identity_path.write_text(
+                json.dumps(Identity.generate().to_json(), indent=2))
+
+            def export(proposal_id):
+                out = root / f"bundle-{proposal_id}"
+                rc = seed.cmd_export(argparse.Namespace(
+                    out=str(out), home=str(home),
+                    identity=str(identity_path),
+                    rollout_dir=str(root / "rollouts"), force=True,
+                    passphrase_file=str(phrase), proposal_id=proposal_id,
+                    author="mac-proposer"))
+                self.assertEqual(rc, 0)
+                return out
+
+            from pando.execute import offer_replication
+            outbox = root / "outbox"
+            offers = {"repl-good": "mac-proposer-good",
+                      "repl-rot": "mac-proposer-rot",
+                      "repl-garbled": "mac-proposer-garbled",
+                      "repl-unpackable": "mac-proposer-unpackable"}
+            for offer_id, proposal_id in offers.items():
+                offered = offer_replication(offer_id, "pi5",
+                                            bundle=export(proposal_id),
+                                            outbox=outbox)
+                self.assertEqual(offered["skipped"], "offered")
+
+            real_pack = outbox_mod.pack_offer
+
+            def pack_with_rot(src):
+                packed = real_pack(src)
+                if packed is None:
+                    return None
+                if src.name == "repl-rot":
+                    return flip_one_payload_byte(packed)
+                if src.name == "repl-garbled":
+                    return packed[: len(packed) // 2]
+                if src.name == "repl-unpackable":
+                    return None
+                return packed
+
+            def serve(packer):
+                outbox_mod.pack_offer = packer
+                server = outbox_mod.ThreadingHTTPServer(
+                    ("127.0.0.1", 0),
+                    outbox_mod.make_handler(outbox, "rot-token"))
+                threading.Thread(target=server.serve_forever,
+                                 daemon=True).start()
+                return server
+
+            try:
+                server = serve(pack_with_rot)
+                try:
+                    rotted = pull_mod.pull_once(
+                        f"http://127.0.0.1:{server.server_address[1]}",
+                        "rot-token", root / "inbox")
+                finally:
+                    server.shutdown()
+            finally:
+                outbox_mod.pack_offer = real_pack
+
+            self.assertEqual(rotted["copied"], ["repl-good"])
+            self.assertEqual(rotted["duplicate"], [])
+            self.assertEqual(sorted(rotted["refused"]),
+                             ["repl-garbled", "repl-rot", "repl-unpackable"])
+            # A refusal is not a receipt. Nothing was consumed, so the sender
+            # keeps the artifact and a later round can still deliver it.
+            for offer_id in ("repl-rot", "repl-garbled", "repl-unpackable"):
+                self.assertFalse((outbox / f"{offer_id}.ack.json").exists())
+            self.assertTrue((outbox / "repl-good.ack.json").is_file())
+            inbox = root / "inbox"
+            self.assertEqual(sorted(path.name for path in inbox.iterdir()),
+                             ["mac-proposer-good"])
+            kept = seed.judge_bundle(inbox / "mac-proposer-good")
+            self.assertTrue(kept["accepted"])
+            self.assertEqual(kept["reason"], "sealed")
+
+            server = serve(real_pack)
+            try:
+                healed = pull_mod.pull_once(
+                    f"http://127.0.0.1:{server.server_address[1]}",
+                    "rot-token", inbox)
+            finally:
+                server.shutdown()
+            self.assertEqual(healed["refused"], [])
+            self.assertEqual(sorted(healed["copied"]),
+                             ["repl-garbled", "repl-rot", "repl-unpackable"])
+            # The offer the first round took is now a duplicate, and the round
+            # says so instead of reporting that nothing happened.
+            self.assertEqual(healed["duplicate"], ["repl-good"])
+            for proposal_id in ("mac-proposer-rot", "mac-proposer-garbled",
+                                "mac-proposer-unpackable"):
+                self.assertTrue(
+                    seed.judge_bundle(inbox / proposal_id)["accepted"])
 
 
 class TestWindowsSeedPull(unittest.TestCase):

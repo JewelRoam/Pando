@@ -7,6 +7,7 @@ import io
 import json
 import tarfile
 import tempfile
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -32,20 +33,31 @@ def _request(url: str, token: str, method: str = "GET", body: bytes | None = Non
 
 
 def _extract(packed: bytes, dest: Path, seed) -> bool:
+    """Unpack the offered tar. A tar that rotted on the way is not an exception.
+
+    ``tarfile`` raises a truncated archive only while the members are being
+    walked, so the guard has to cover the loop and not just the open. One
+    truncated offer used to raise ``ReadError`` out of ``pull_once`` and stop
+    the whole round: every offer behind it in sort order was never fetched,
+    which is how one bad artifact starves the landing point.
+    """
     dest.mkdir(parents=True, exist_ok=True)
     try:
         archive = tarfile.open(fileobj=io.BytesIO(packed), mode="r:")
     except tarfile.TarError:
         return False
-    for member in archive.getmembers():
-        if not seed._rel_is_safe(member.name) or not member.isfile():
-            return False
-        target = dest / member.name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        source = archive.extractfile(member)
-        if source is None:
-            return False
-        target.write_bytes(source.read())
+    try:
+        for member in archive.getmembers():
+            if not seed._rel_is_safe(member.name) or not member.isfile():
+                return False
+            target = dest / member.name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            source = archive.extractfile(member)
+            if source is None:
+                return False
+            target.write_bytes(source.read())
+    except (tarfile.TarError, OSError):
+        return False
     return (dest / seed.MANIFEST).is_file()
 
 
@@ -56,12 +68,19 @@ def pull_once(base: str, token: str, inbox: Path, ledger: Path | None = None) ->
     listing = json.loads(_request(f"{base}/offers", token).decode("utf-8"))
     copied = []
     refused = []
+    duplicates = []
     for row in listing.get("offers") or []:
         proposal_id = str(row.get("proposal_id") or "")
         if seed._INBOX_NAME.fullmatch(proposal_id) is None:
             refused.append(proposal_id or "?")
             continue
-        packed = _request(f"{base}/offer/{proposal_id}.tar", token)
+        try:
+            packed = _request(f"{base}/offer/{proposal_id}.tar", token)
+        except urllib.error.HTTPError:
+            # The peer listed an offer it will not hand over. That is one bad
+            # offer, not a dead mailbox: record it and keep pulling the rest.
+            refused.append(proposal_id)
+            continue
         with tempfile.TemporaryDirectory() as tmp:
             src = Path(tmp) / "bundle"
             if not _extract(packed, src, seed):
@@ -69,6 +88,13 @@ def pull_once(base: str, token: str, inbox: Path, ledger: Path | None = None) ->
                 continue
             kept = seed.receive_bundle(src, inbox, ledger=ledger)
         if kept.get("reason") == "already-received":
+            # The bytes verify and the delivery is complete; the inbox simply
+            # holds this bundle already. Counted, not acked -- nothing prunes
+            # the sender's shelf, so a duplicate offer would sit there unacked
+            # anyway (measured on the mac shelf 2026-10-19: 51 offers carrying
+            # 16 distinct bundles, 16 acks). Skipping it silently made a round
+            # that dropped 35 deliveries print "copied: []" and nothing else.
+            duplicates.append(proposal_id)
             continue
         if not kept.get("copied"):
             refused.append(proposal_id)
@@ -76,8 +102,8 @@ def pull_once(base: str, token: str, inbox: Path, ledger: Path | None = None) ->
         ack = json.dumps({"by": "pull"}).encode("utf-8")
         _request(f"{base}/offer/{proposal_id}/ack", token, method="POST", body=ack)
         copied.append(proposal_id)
-    return {"copied": copied, "refused": refused, "unwrapped": False,
-            "started_model": False}
+    return {"copied": copied, "refused": refused, "duplicate": duplicates,
+            "unwrapped": False, "started_model": False}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -93,7 +119,8 @@ def main(argv: list[str] | None = None) -> int:
 
     def run(announce: bool) -> int:
         result = pull_once(args.base, token, Path(args.inbox), ledger)
-        if announce or result["copied"] or result["refused"]:
+        if (announce or result["copied"] or result["refused"]
+                or result["duplicate"]):
             print(json.dumps(result, ensure_ascii=False, sort_keys=True), flush=True)
         return 0
 
