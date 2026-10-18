@@ -259,6 +259,31 @@ def failure_counts(ledger: Path) -> Counter:
     return found
 
 
+def deferred_reasons(ledger: Path) -> set[tuple[str, str]]:
+    """``(proposal_id, reason)`` pairs the ledger has already explained.
+
+    A deferral is neither a failure nor a settlement: the proposal stays
+    unsettled and is re-attempted next round, because the reason may be a
+    precondition a human can satisfy (a passphrase) rather than a defect in
+    the proposal. Writing the row every round would grow the ledger without
+    adding information, so the pair is written once and the per-round status
+    file carries it afterwards.
+    """
+    found: set[tuple[str, str]] = set()
+    try:
+        lines = ledger.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return found
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if row.get("deferred") and row.get("proposal_id"):
+            found.add((str(row["proposal_id"]), str(row["deferred"])))
+    return found
+
+
 def settle_after_failure(record: dict, failures: Counter) -> dict:
     """Turn a repeatedly-failing record into a settled refusal, in place.
 
@@ -936,16 +961,13 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
     which keeps the ledger from describing a rule that never held. A culture
     candidate is only staged, never loaded, so it cannot change this round.
     """
-    phrase = Path(args.passphrase_file).expanduser()
-    if not phrase.is_file():
-        print("no passphrase file; refusing to write a plaintext key", flush=True)
-        return 2
     ledger = Path(args.ledger).expanduser()
     from .identity import Identity
     identity = Identity.from_json(json.loads(
         Path(args.identity).expanduser().read_text(encoding="utf-8")))
     signer = identity.public_key
     failures = failure_counts(ledger)
+    deferred = deferred_reasons(ledger)
 
     def record_row(record: dict) -> None:
         """One ledger append, with the retry budget applied first."""
@@ -957,8 +979,24 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
     knobs = load_policy(getattr(args, "policy_path", DEFAULT_POLICY_PATH))
     chosen = next_seed_export(proposals, reactions, done_ids(ledger), signer,
                               knobs)
+    # A missing passphrase is a property of this host, not a defect in the
+    # proposal, so it must not end the round: only the seal needs a key, and
+    # none of the six stage-only actuators do. The proposal is left unsettled
+    # -- a passphrase typed tomorrow has to release it -- and the reason is
+    # written once per pair, so a host that cannot seal does not grow a ledger
+    # row every round. It travels in the status file either way.
+    phrase = Path(args.passphrase_file).expanduser()
+    deferred_export = chosen is not None and not phrase.is_file()
     sealed = None
-    if chosen is not None:
+    if deferred_export:
+        print("no passphrase file; refusing to write a plaintext key",
+              flush=True)
+        if (chosen.proposal_id, "no-passphrase") not in deferred:
+            record_row({"proposal_id": chosen.proposal_id,
+                        "action": "seed.export",
+                        "executed": False,
+                        "deferred": "no-passphrase"})
+    elif chosen is not None:
         home = Path("~/.pandosi/seed-home-empty").expanduser()
         home.mkdir(parents=True, exist_ok=True)
         try:
@@ -1260,6 +1298,8 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                         "skipped": "no-actuator",
                     }, sort_keys=True) + "\n")
         payload = {"did": "idle", "foreign_seed_exports": foreign,
+                   "seed_export_deferred": ("no-passphrase"
+                                            if deferred_export else None),
                    "replication_without_destination": replicates,
                    "replication_not_sent": [item[0] for item in addressed],
                    "foreign_replications": foreign_repl,
@@ -1277,7 +1317,9 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
         offered = [item[0] for item in addressed
                    if item[1] in (getattr(args, "pull", None) or set())]
         done = {"did": "executed", "proposal_id": chosen.proposal_id,
-                "executed": bool(sealed), "offered": offered}
+                "executed": bool(sealed), "offered": offered,
+                "seed_export_deferred": ("no-passphrase"
+                                         if deferred_export else None)}
         print(json.dumps(done, sort_keys=True), flush=True)
         write_status(ledger.with_name("execute-status.json"), done)
         return 0 if sealed else 1

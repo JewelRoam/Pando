@@ -3567,6 +3567,62 @@ class TestExecution(unittest.TestCase):
             store.write_text(json.dumps({"min_adopt": 99}), encoding="utf-8")
             self.assertEqual(load(store)["min_adopt"], 2)
 
+    def test_a_missing_passphrase_defers_only_the_seal(self):
+        """No key stops the seal, and nothing else.
+
+        Before this, ``run_once`` returned 2 at the top when the passphrase
+        file was absent: every actuator was skipped and the ledger recorded
+        nothing at all, so a host that owns no key was indistinguishable from
+        an idle one -- and the six stage-only actuators, which need no key,
+        never ran there either.
+        """
+        import tempfile
+        from pando.execute import done_ids, left_ids, run_once
+        from pando.identity import Identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = Identity.generate()
+            ident_path = Path(tmp) / "identity.json"
+            ident_path.write_text(json.dumps(identity.to_json()),
+                                  encoding="utf-8")
+            # No (Path(tmp) / "phrase"): the host owns no key on purpose.
+            export = self._proposal(action="seed.export", pid="p-seal")
+            export.pubkey = identity.public_key
+            refine = self._proposal(action="culture.refine", pid="p-stage")
+            refine.pubkey = identity.public_key
+            refine.params = {"playbook": {"meta": {"name": "x", "version": 1}}}
+            votes = [self._vote("mac-text", "赞同", "p-seal"),
+                     self._vote("mac-laya-int8", "赞同", "p-seal"),
+                     self._vote("mac-text", "赞同", "p-stage"),
+                     self._vote("mac-laya-int8", "赞同", "p-stage")]
+            args = self._execute_args(tmp, ident_path)
+
+            self.assertEqual(run_once([export, refine], votes, args), 0)
+            ledger = Path(args.ledger)
+            rows = [json.loads(line) for line in
+                    ledger.read_text(encoding="utf-8").splitlines()]
+            pairs = [row for row in rows if row.get("deferred")]
+            self.assertEqual(len(pairs), 1)
+            self.assertEqual(pairs[0]["proposal_id"], "p-seal")
+            self.assertEqual(pairs[0]["deferred"], "no-passphrase")
+            self.assertEqual(pairs[0]["action"], "seed.export")
+            self.assertFalse(pairs[0]["executed"])
+            # A deferral is not a settlement: the seal is still owed.
+            self.assertNotIn("skipped", pairs[0])
+            self.assertNotIn("p-seal", done_ids(ledger))
+            self.assertNotIn("p-seal", left_ids(ledger))
+            # And the actuator that needs no key still ran in the same round.
+            staged = [row for row in rows if row.get("action") == "culture.refine"
+                      and row.get("executed")]
+            self.assertEqual(len(staged), 1)
+
+            # Second round: the pair is already explained, so no new row and
+            # the ledger cannot grow one row per round for ever.
+            self.assertEqual(run_once([export, refine], votes, args), 0)
+            again = [json.loads(line) for line in
+                     ledger.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len([row for row in again if row.get("deferred")]), 1)
+
     def test_an_adopted_policy_set_is_applied_once_and_not_retried(self):
         import tempfile
         from pando.execute import run_once
