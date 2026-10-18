@@ -105,18 +105,36 @@ $seedPullArgs = @("$repo\tools\seed_pull.py", '--from',
   '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
   '--inbox', 'D:\pando-models\seed-inbox',
   '--ledger', 'D:\pando-models\seed-receive-ledger.jsonl')
+# The missing local half of "who updates the code". The node has no cloud
+# operator any more, so nothing would fetch a pushed commit. This process
+# fast-forwards the checkout itself -- GitHub first, the Mac's /code.bundle
+# peer when GitHub is unreachable -- then stops the client processes so the
+# supervisor respawns them from the new tree. A model is never reloaded by a
+# plain fast-forward; the full restart is used only when this roster file
+# itself changed, because a running supervisor cannot learn a new service.
+$codeWatchArgs = @("$repo\tools\node_code_watch.py", '--repo', "$repo",
+  '--remote', 'origin',
+  '--peer', 'http://192.168.31.41:8478/code.bundle',
+  '--peer-token-file', "$repo\metrics\lan-check\mac-mailbox.token",
+  '--on-update', 'clients',
+  '--client-cmd', "powershell -NoProfile -ExecutionPolicy Bypass -File $repo\tools\win_restart_clients.ps1",
+  '--node-cmd', "powershell -NoProfile -ExecutionPolicy Bypass -File $repo\tools\win_stack_restart.ps1",
+  '--supervisor', "$repo\tools\win_node_supervisor.ps1",
+  '--ledger', 'D:\pando-models\code-sync-ledger.jsonl',
+  '--interval', '300')
 
 $names = @('llama-3070', 'stem-gemma', 'stem-laya', 'worker', 'win-mailbox',
   'llama-yi-cpu', 'stem-yi', 'think-proposer', 'think-yi', 'observatory', 'chat',
-  'react', 'executor-loop', 'rootd', 'seed-pull')
+  'react', 'executor-loop', 'rootd', 'seed-pull', 'code-watch')
 $exes = @($llamaExe, $python, $python, $python, $python, $llamaExe, $python,
-  $python, $python, $python, $python, $python, $python, $python, $python)
+  $python, $python, $python, $python, $python, $python, $python, $python,
+  $python)
 $argsList = @($llamaArgs, $gemmaArgs, $layaArgs, $workerArgs, $mailboxArgs,
   $yiLlamaArgs, $yiStemArgs, $thinkArgs, $yiThinkArgs, $observatoryArgs, $chatArgs,
-  $reactArgs, $executorArgs, $rootArgs, $seedPullArgs)
+  $reactArgs, $executorArgs, $rootArgs, $seedPullArgs, $codeWatchArgs)
 $cwds = @('D:\pando-models\llama-cuda', $repo, $repo, $repo, $repo,
   'D:\pando-models\llama-cuda', $repo, $repo, $repo, $repo, $repo, $repo, $repo,
-  $repo, $repo)
+  $repo, $repo, $repo)
 
 $procs = @{}
 while ($true) {

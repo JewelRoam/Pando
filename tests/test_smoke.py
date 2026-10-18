@@ -4915,6 +4915,12 @@ class TestWindowsSeedPull(unittest.TestCase):
         self.assertIn("tools\\seed_pull.py", supervisor)
         self.assertIn("'seed-pull'", supervisor)
         self.assertIn("seed_pull\\.py", restart)
+        # The code watcher is the only thing that updates the checkout once no
+        # cloud operator is left to run git by hand.
+        self.assertIn("$codeWatchArgs", supervisor)
+        self.assertIn("tools\\node_code_watch.py", supervisor)
+        self.assertIn("'code-watch'", supervisor)
+        self.assertIn("node_code_watch\\.py", restart)
         self.assertNotIn("New-ScheduledTask", supervisor)
 
         def item_count(name):
@@ -4926,7 +4932,7 @@ class TestWindowsSeedPull(unittest.TestCase):
         lengths = {name: item_count(name)
                    for name in ("names", "exes", "argsList", "cwds")}
         self.assertEqual(len(set(lengths.values())), 1, lengths)
-        self.assertEqual(lengths["names"], 15)
+        self.assertEqual(lengths["names"], 16)
 
 
 class TestCodeSync(unittest.TestCase):
@@ -5051,3 +5057,93 @@ class TestCodeSync(unittest.TestCase):
             self.assertTrue(fetched["updated"])
             self.assertEqual(fetched["via"], "peer")
             self.assertEqual((client / "README").read_text(), "peer\n")
+
+    def _load_watch(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "node_code_watch_under_test",
+            Path(__file__).resolve().parents[1] / "tools" / "node_code_watch.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def _advance_origin(self, env, src, bare, text="two\n"):
+        (src / "README").write_text(text)
+        self._run(env, "git", "-C", str(src), "add", "README")
+        self._run(env, "git", "-C", str(src), "commit", "-m", text.strip())
+        self._run(env, "git", "-C", str(src), "push", str(bare), "main")
+
+    def test_a_fast_forward_stops_clients_but_a_dirty_tree_does_not(self):
+        watch = self._load_watch()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env, src, bare, client = self._world(root)
+            ledger = root / "code-sync-ledger.jsonl"
+            self._advance_origin(env, src, bare)
+
+            seen = []
+            watch._spawn = lambda command: seen.append(command) or {
+                "ran": True, "pid": 1}
+
+            row = watch.watch_round(repo=client, on_update="clients",
+                                    client_cmd="stop-clients",
+                                    node_cmd="full-restart", ledger=ledger)
+            self.assertTrue(row["updated"])
+            self.assertEqual(row["action"], "client-restart")
+            self.assertEqual(seen, ["stop-clients"])
+            # A model is never reloaded by a plain fast-forward.
+
+            # The ledger is a peer-readable record, one JSON object per line.
+            lines = [json.loads(line)
+                     for line in ledger.read_text().splitlines()]
+            self.assertEqual(lines[-1]["action"], "client-restart")
+
+            (client / "README").write_text("local edit\n")
+            quiet = watch.watch_round(repo=client, on_update="clients",
+                                      client_cmd="stop-clients", ledger=ledger)
+            self.assertFalse(quiet["updated"])
+            self.assertEqual(quiet["reason"], "dirty")
+            self.assertEqual(quiet["action"], "none")
+            self.assertEqual(seen, ["stop-clients"])
+
+    def test_a_roster_change_forces_a_node_restart(self):
+        watch = self._load_watch()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env, src, bare, client = self._world(root)
+            ledger = root / "code-sync-ledger.jsonl"
+            # The roster lives inside the fast-forwarded checkout, so the file
+            # on disk is old before the merge and new after it. Here README
+            # stands in for tools/win_node_supervisor.ps1.
+            roster = client / "README"
+            self._advance_origin(env, src, bare)
+
+            seen = []
+            watch._spawn = lambda command: seen.append(command) or {
+                "ran": True, "pid": 2}
+
+            # A running supervisor cannot learn a new service name, so a change
+            # in its roster must escalate to the full restart even though
+            # --on-update asked only for the client restart.
+            row = watch.watch_round(repo=client, on_update="clients",
+                                    client_cmd="stop-clients",
+                                    node_cmd="full-restart",
+                                    supervisor=roster, ledger=ledger)
+            self.assertTrue(row["roster_changed"])
+            self.assertEqual(row["action"], "node-restart")
+            self.assertEqual(seen, ["full-restart"])
+
+    def test_an_unchanged_tree_stays_quiet(self):
+        watch = self._load_watch()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env, src, bare, client = self._world(root)
+            seen = []
+            watch._spawn = lambda command: seen.append(command) or {
+                "ran": True, "pid": 3}
+            row = watch.watch_round(repo=client, on_update="clients",
+                                    client_cmd="stop-clients")
+            self.assertFalse(row["updated"])
+            self.assertEqual(row["reason"], "already")
+            self.assertEqual(row["action"], "none")
+            self.assertEqual(seen, [])
