@@ -9,6 +9,7 @@ end-to-end vote including node death and checkpoint-diverse quorum picking.
 import argparse
 import base64
 import json
+import os
 import shutil
 import sys
 import subprocess
@@ -3333,6 +3334,17 @@ class TestLocalCi(unittest.TestCase):
 class TestSeedReceive(unittest.TestCase):
     """A bundle already on disk may be kept. It may not be unwrapped or sent."""
 
+    def setUp(self):
+        # The pre-push hook exports GIT_DIR. Receive must still use a temp inbox.
+        self._old_git_dir = os.environ.get("GIT_DIR")
+        os.environ["GIT_DIR"] = str(Path(__file__).resolve().parents[1] / ".git")
+
+    def tearDown(self):
+        if self._old_git_dir is None:
+            os.environ.pop("GIT_DIR", None)
+        else:
+            os.environ["GIT_DIR"] = self._old_git_dir
+
     def _seed(self):
         import importlib.util
         spec = importlib.util.spec_from_file_location(
@@ -3465,8 +3477,71 @@ class TestSeedReceive(unittest.TestCase):
             self.assertEqual(refused["reason"], "git-worktree")
             self.assertFalse((repo / "inbox-must-not-exist").exists())
 
-    def test_the_executor_does_not_call_the_receiver(self):
-        text = (Path(__file__).resolve().parents[1] / "pando" /
-                "execute.py").read_text(encoding="utf-8")
-        self.assertNotIn("receive_bundle", text)
-        self.assertNotIn("cmd_receive", text)
+    def test_the_executor_stages_a_copy_without_opening_a_socket(self):
+        source = (Path(__file__).resolve().parents[1] / "pando" /
+                  "execute.py").read_text(encoding="utf-8")
+        self.assertIn("offer_replication", source)
+        self.assertNotIn("urlopen", source)
+        self.assertNotIn("import socket", source)
+
+    def test_a_peer_pulls_a_sealed_offer_and_a_plain_key_is_not_offered(self):
+        import importlib.util
+        import threading
+        seed = self._seed()
+        root_dir = Path(__file__).resolve().parents[1]
+
+        def load(name, filename):
+            spec = importlib.util.spec_from_file_location(
+                name, root_dir / "tools" / filename)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+
+        outbox_mod = load("outbox_under_test", "seed_outbox.py")
+        pull_mod = load("pull_under_test", "seed_pull.py")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            phrase = root / "pass.txt"
+            phrase.write_text("correct horse battery staple\n")
+            bundle, live = self._export(seed, root, phrase, "mac-proposer-r9")
+            plain = root / "plain"
+            self.assertEqual(seed.cmd_export(argparse.Namespace(
+                out=str(plain), home=str(root / "home"),
+                identity=str(root / "pando" / "identity.json"),
+                rollout_dir=str(root / "rollouts"), force=True,
+                passphrase_file=None, proposal_id="mac-proposer-plain",
+                author="mac-proposer")), 0)
+            outbox = root / "outbox"
+            from pando.execute import offer_replication, pull_destinations
+            from pando.thinkd import host_names_from
+            offered = offer_replication("repl-1", "pi5", bundle=bundle, outbox=outbox)
+            self.assertEqual(offered["skipped"], "offered")
+            self.assertFalse(seed.receive_bundle(plain, outbox, name="repl-plain")["copied"])
+            hosts = root / "hosts.json"
+            hosts.write_text(json.dumps({"roots": [
+                {"name": "pi5", "seed": "pull"},
+                {"name": "win", "url": "http://win:8790"},
+            ]}))
+            self.assertEqual(pull_destinations(json.loads(hosts.read_text())), {"pi5"})
+            self.assertEqual(host_names_from(hosts), ["pi5", "win"])
+            token = "test-token"
+            server = outbox_mod.ThreadingHTTPServer(
+                ("127.0.0.1", 0), outbox_mod.make_handler(outbox, token))
+            port = server.server_address[1]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                result = pull_mod.pull_once(
+                    f"http://127.0.0.1:{port}", token, root / "inbox")
+            finally:
+                server.shutdown()
+            self.assertEqual(result["copied"], ["repl-1"])
+            self.assertFalse(result["unwrapped"])
+            self.assertFalse(result["started_model"])
+            stored = json.loads((root / "inbox" / "mac-proposer-r9" / "identity" /
+                                  "identity.json").read_text())
+            self.assertEqual(stored["kind"], "encrypted-identity")
+            self.assertNotIn("secret_key", stored)
+            self.assertNotIn(live.to_json()["secret_key"], json.dumps(stored))
+            self.assertTrue((outbox / "repl-1.ack.json").is_file())
+            self.assertFalse((root / "inbox" / "repl-plain").exists())

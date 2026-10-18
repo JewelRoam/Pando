@@ -174,11 +174,21 @@ def _signer(identity_path: Path):
 
 
 def _inside_git_worktree(path: Path) -> bool:
+    """True when ``path`` itself is inside a worktree.
+
+    A pre-push hook exports ``GIT_DIR``. Left in the environment, git would
+    report that a temporary inbox is inside this repo, and a sealed bundle
+    would be refused for the wrong reason.
+    """
     probe = path if path.exists() else path.parent
+    env = os.environ.copy()
+    env.pop("GIT_DIR", None)
+    env.pop("GIT_WORK_TREE", None)
     try:
         out = subprocess.run(["git", "-C", str(probe), "rev-parse",
                               "--is-inside-work-tree"],
-                             capture_output=True, text=True, timeout=5)
+                             capture_output=True, text=True, timeout=5,
+                             env=env)
         return out.returncode == 0 and out.stdout.strip() == "true"
     except Exception:
         return False
@@ -645,13 +655,15 @@ def _append_receive_ledger(ledger, result: dict) -> None:
         handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
 
 
-def receive_bundle(src, inbox, *, force: bool = False, ledger=None) -> dict:
+def receive_bundle(src, inbox, *, force: bool = False, ledger=None,
+                   name: str | None = None) -> dict:
     """Keep a sealed bundle under ``inbox``.
 
     Refuses a missing signature, a bad signature, a digest mismatch, a
     plaintext ``secret_key``, and a destination inside a git worktree.
-    The kept bytes stay encrypted. This is not a transport: it does not
-    open a socket, and ``pando.execute`` does not call it.
+    The kept bytes stay encrypted. This does not open a socket and it does
+    not unwrap the key. ``name`` chooses the directory; the default is the
+    proposal id already signed into the manifest.
     """
     verdict = judge_bundle(src)
     if not verdict["accepted"]:
@@ -667,8 +679,8 @@ def receive_bundle(src, inbox, *, force: bool = False, ledger=None) -> dict:
         verdict["accepted"] = False
         verdict["reason"] = "git-worktree"
         return verdict
-    name = _inbox_name(manifest)
-    if name is None:
+    name = str(name) if name else _inbox_name(manifest)
+    if not name or _INBOX_NAME.fullmatch(name) is None:
         verdict["accepted"] = False
         verdict["reason"] = "bad-name"
         return verdict

@@ -551,8 +551,9 @@ def host_names_from(path: Path) -> list[str]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return []
-    from .execute import known_hosts
-    found = known_hosts(data) or {}
+    from .execute import known_hosts, pull_destinations
+    found = set(known_hosts(data) or {})
+    found.update(pull_destinations(data))
     return sorted(found)
 
 

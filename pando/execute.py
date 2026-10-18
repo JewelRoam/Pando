@@ -144,14 +144,8 @@ def export_seed(proposal: Proposal, *, home, identity, rollout_dir, out_root,
     bare private key, which is only acceptable inside a test directory.
     """
     import argparse
-    import importlib.util
 
-    tool = Path(__file__).resolve().parents[1] / "tools" / "seed.py"
-    spec = importlib.util.spec_from_file_location("pandosi_seed", tool)
-    if spec is None or spec.loader is None:
-        raise RuntimeError("seed tool is missing")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = _seed_module()
     out = Path(out_root).expanduser() / proposal.proposal_id
     rc = module.cmd_export(argparse.Namespace(
         out=str(out),
@@ -303,15 +297,108 @@ def known_hosts(data: dict | None) -> dict[str, str] | None:
     return found
 
 
+def pull_destinations(data: dict | None) -> set[str]:
+    """Hosts that pull a sealed bundle. A pull host needs no root URL."""
+    if not isinstance(data, dict):
+        return set()
+    found = set()
+    for row in data.get("roots") or []:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("name") or "").strip()
+        if name and str(row.get("seed") or "").strip() == "pull":
+            found.add(name)
+    return found
+
+
 def replication_skip(destination: str, hosts: dict[str, str] | None) -> str:
     """Why this named copy is not sent. This function does not open the URL.
 
-    A bundle that is already on disk can be kept by ``tools/seed.py receive``.
-    That command is not a transport, and this function does not call it.
+    A pull host is handled by ``offer_replication``, which copies a sealed
+    bundle into a local outbox. Neither function opens a socket.
     """
     if hosts is not None and destination not in hosts:
         return "unknown-host"
     return "no-transport"
+
+
+def _seed_module():
+    import importlib.util
+    tool = Path(__file__).resolve().parents[1] / "tools" / "seed.py"
+    spec = importlib.util.spec_from_file_location("pandosi_seed", tool)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("seed tool is missing")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def latest_sealed(out_root) -> Path | None:
+    """Newest bundle under ``out_root`` that is still sealed and signed."""
+    root = Path(out_root).expanduser()
+    if not root.is_dir():
+        return None
+    seed = _seed_module()
+    found = [child for child in root.iterdir()
+             if child.is_dir() and seed.judge_bundle(child).get("accepted")]
+    if not found:
+        return None
+    return max(found, key=lambda child: child.stat().st_mtime)
+
+
+def offer_replication(proposal_id: str, destination: str, *, bundle, outbox) -> dict:
+    """Stage one sealed bundle for a pull host. Does not open a socket."""
+    row = {"proposal_id": proposal_id, "action": "seed.replicate",
+           "destination": destination, "executed": False}
+    if bundle is None:
+        row["skipped"] = "no-bundle"
+        return row
+    seed = _seed_module()
+    kept = seed.receive_bundle(bundle, outbox, name=proposal_id)
+    if not kept.get("copied"):
+        if kept.get("reason") == "already-received":
+            row["skipped"] = "offered"
+            row["bundle"] = Path(bundle).name
+            return row
+        row["skipped"] = str(kept.get("reason") or "no-bundle")
+        return row
+    row["skipped"] = "offered"
+    row["bundle"] = Path(bundle).name
+    return row
+
+
+def received_acks(ledger: Path, outbox) -> list[dict]:
+    """Offers whose peer has acked, and which are not yet marked received."""
+    offered: list[tuple[str, str]] = []
+    done: set[str] = set()
+    try:
+        lines = ledger.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        proposal_id = str(row.get("proposal_id") or "")
+        if not proposal_id:
+            continue
+        if row.get("received"):
+            done.add(proposal_id)
+        elif row.get("skipped") == "offered":
+            offered.append((proposal_id, str(row.get("destination") or "")))
+    outbox = Path(outbox).expanduser()
+    found = []
+    for proposal_id, destination in offered:
+        if proposal_id in done:
+            continue
+        ack = outbox / f"{proposal_id}.ack.json"
+        if not ack.is_file():
+            continue
+        found.append({"proposal_id": proposal_id, "action": "seed.replicate",
+                      "destination": destination, "executed": True,
+                      "received": True})
+    return found
 
 
 def addressed_replications(proposals: list[Proposal], reactions: list[dict],
@@ -409,7 +496,10 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
         hosts = getattr(args, "hosts", None)
         foreign_repl = foreign_replications(proposals, reactions, seen, signer)
         unacted = local_unacted(proposals, reactions, seen, signer)
-        if foreign or replicates or addressed or unacted or foreign_repl:
+        pulls = getattr(args, "pull", None) or set()
+        outbox = getattr(args, "outbox", "~/.pandosi/outbox")
+        acks = received_acks(ledger, outbox)
+        if foreign or replicates or addressed or unacted or foreign_repl or acks:
             ledger.parent.mkdir(parents=True, exist_ok=True)
             with ledger.open("a", encoding="utf-8") as handle:
                 for proposal_id in foreign:
@@ -426,14 +516,24 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                         "executed": False,
                         "skipped": "no-destination",
                     }, sort_keys=True) + "\n")
+                bundle = latest_sealed(args.out_root) if pulls else None
                 for proposal_id, destination in addressed:
-                    handle.write(json.dumps({
-                        "proposal_id": proposal_id,
-                        "action": "seed.replicate",
-                        "destination": destination,
-                        "executed": False,
-                        "skipped": replication_skip(destination, hosts),
-                    }, sort_keys=True) + "\n")
+                    if destination in pulls:
+                        record = offer_replication(
+                            proposal_id, destination, bundle=bundle, outbox=outbox)
+                        if record.get("skipped") != "offered":
+                            continue
+                    else:
+                        record = {
+                            "proposal_id": proposal_id,
+                            "action": "seed.replicate",
+                            "destination": destination,
+                            "executed": False,
+                            "skipped": replication_skip(destination, hosts),
+                        }
+                    handle.write(json.dumps(record, sort_keys=True) + "\n")
+                for record in received_acks(ledger, outbox):
+                    handle.write(json.dumps(record, sort_keys=True) + "\n")
                 for proposal_id in foreign_repl:
                     handle.write(json.dumps({
                         "proposal_id": proposal_id,
@@ -503,9 +603,12 @@ def main() -> int:
     if args.once:
         path = Path("~/.pandosi/hosts.json").expanduser()
         try:
-            args.hosts = known_hosts(json.loads(path.read_text(encoding="utf-8")))
+            table = json.loads(path.read_text(encoding="utf-8"))
+            args.hosts = known_hosts(table)
+            args.pull = pull_destinations(table)
         except (OSError, json.JSONDecodeError):
             args.hosts = None
+            args.pull = set()
         return run_once(proposals, reactions, args)
     report = dry_run(proposals, reactions)
     summary = report["summary"]
