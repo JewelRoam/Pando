@@ -8,6 +8,9 @@ end-to-end vote including node death and checkpoint-diverse quorum picking.
 
 import argparse
 import base64
+import contextlib
+import hashlib
+import io
 import json
 import os
 import re
@@ -6304,7 +6307,88 @@ class TestCodeSync(unittest.TestCase):
             source.unlink()
             gone = sync.refresh_self(source, target)
             self.assertEqual(gone["reason"], "no-source")
-            self.assertEqual(target.read_text(encoding="utf-8"), "print('two')\n")
+
+    def test_a_checkout_that_did_not_move_is_not_authority_to_rewrite_us(self):
+        """Adopt the checkout's updater only from a checkout we confirmed.
+
+        ``refresh_self`` overwrites the copy of this file that is *running*.
+        That is safe exactly when the round just established where the
+        checkout stands. A fetch that failed, a tree a human left dirty, or a
+        history that will not fast-forward can all sit at an **older** commit,
+        and adopting from one of those rolls the updater backwards -- deleting
+        the very ``--self-source``/``--self-target`` flags this line needs,
+        until the node is left with no updater at all. Standing still is not
+        one of those cases: "already at the tip" is a confirmation.
+        """
+        sync = self._load()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env, src, bare, client = self._world(root)
+            # The updater lives inside the checkout; the copy that *runs* is
+            # the one outside it.
+            (src / "tools").mkdir()
+            (src / "tools" / "code_sync.py").write_text(
+                "print('checkout')\n", encoding="utf-8")
+            self._run(env, "git", "-C", str(src), "add", "tools/code_sync.py")
+            self._run(env, "git", "-C", str(src), "commit", "-m", "updater")
+            self._run(env, "git", "-C", str(src), "push", str(bare), "main")
+            self._run(env, "git", "-C", str(client), "pull", "--ff-only",
+                      str(bare), "main")
+            source = client / "tools" / "code_sync.py"
+            target = root / "deployed" / "code_sync.py"
+            target.parent.mkdir(parents=True)
+            target.write_text("print('deployed')\n", encoding="utf-8")
+
+            def run():
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    sync.main(["--repo", str(client),
+                               "--self-source", str(source),
+                               "--self-target", str(target)])
+                return json.loads(out.getvalue())
+
+            # At the tip with nothing to fetch: still the best copy we have.
+            already = run()
+            self.assertEqual(already["reason"], "already")
+            self.assertTrue(already["self"]["adopted"])
+            self.assertEqual(target.read_text(encoding="utf-8"),
+                             "print('checkout')\n")
+            self.assertEqual(already["self"]["sha256"],
+                             hashlib.sha256(
+                                 b"print('checkout')\n").hexdigest()[:12])
+
+            # A dirty tree: the guard must not read "we looked" as "we know".
+            target.write_text("print('deployed')\n", encoding="utf-8")
+            (client / "README").write_text("local edit\n", encoding="utf-8")
+            dirty = run()
+            self.assertEqual(dirty["reason"], "dirty")
+            self.assertFalse(dirty["self"]["adopted"])
+            self.assertEqual(dirty["self"]["reason"], "checkout-not-confirmed")
+            self.assertEqual(dirty["self"]["checkout"], "dirty")
+            self.assertEqual(target.read_text(encoding="utf-8"),
+                             "print('deployed')\n")
+
+            # A fetch that failed leaves the checkout behind the tip -- this is
+            # the case that would delete the self-adopt flags themselves.
+            self._run(env, "git", "-C", str(client), "checkout", "--", "README")
+            self._run(env, "git", "-C", str(client), "remote", "set-url",
+                      "origin", str(root / "missing.git"))
+            missed = run()
+            self.assertEqual(missed["reason"], "fetch-failed")
+            self.assertFalse(missed["self"]["adopted"])
+            self.assertEqual(missed["self"]["reason"], "checkout-not-confirmed")
+            self.assertEqual(target.read_text(encoding="utf-8"),
+                             "print('deployed')\n")
+
+            # A real fast-forward is the case the flag exists for.
+            self._run(env, "git", "-C", str(client), "remote", "set-url",
+                      "origin", str(bare))
+            self._advance_origin(env, src, bare)
+            moved = run()
+            self.assertEqual(moved["reason"], "fast-forward")
+            self.assertTrue(moved["self"]["adopted"])
+            self.assertEqual(target.read_text(encoding="utf-8"),
+                             "print('checkout')\n")
 
 
 class TestCodeIdentity(unittest.TestCase):

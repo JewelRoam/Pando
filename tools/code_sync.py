@@ -248,10 +248,19 @@ def main(argv: list[str] | None = None) -> int:
         result["restarted"] = done["restarted"]
         result["restart"] = done["reason"]
     if args.self_source and args.self_target:
-        # Unconditional: the checkout may already be ahead of the deployed copy
-        # from an earlier pass, and "already up to date" is not a reason to keep
-        # running yesterday's updater.
-        result["self"] = refresh_self(args.self_source, args.self_target)
+        # Only adopt from a checkout we just confirmed is current. A fetch that
+        # failed leaves the checkout at an older commit, and adopting *that*
+        # copy would roll the updater backwards -- taking the very flags this
+        # line needs with it, which is how a node ends up with no updater at
+        # all. "Already at the tip" is still a confirmation, so an up-to-date
+        # checkout that merely sat still is not a reason to keep running
+        # yesterday's bytes.
+        if result.get("reason") in ("fast-forward", "already"):
+            result["self"] = refresh_self(args.self_source, args.self_target)
+        else:
+            result["self"] = {"adopted": False,
+                              "reason": "checkout-not-confirmed",
+                              "checkout": result.get("reason")}
     print(json.dumps(result, ensure_ascii=False, sort_keys=True), flush=True)
     return 0 if result["reason"] in ("already", "fast-forward") else 2
 
