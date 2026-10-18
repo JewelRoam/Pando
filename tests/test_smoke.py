@@ -2558,7 +2558,7 @@ class TestThinkWatchdogVoteDelivery(unittest.TestCase):
         token_file.write_text(token, encoding="utf-8")
         return f"http://127.0.0.1:{port}", token_file, box, server, thread
 
-    def _run(self, wd, tmp, vote_cmd, alarm_url="", token_file=""):
+    def _run(self, wd, tmp, vote_cmd, alarm_url="", token_file="", extra=()):
         ledger = Path(tmp) / "think.jsonl"
         ledger.write_text("{}\n", encoding="utf-8")
         return wd.main([
@@ -2570,6 +2570,7 @@ class TestThinkWatchdogVoteDelivery(unittest.TestCase):
             "--vote-cmd", vote_cmd,
             "--alarm-url", alarm_url,
             "--alarm-token-file", str(token_file) if token_file else "",
+            *extra,
         ])
 
     def test_a_wedge_becomes_exactly_one_claimable_task(self):
@@ -2699,6 +2700,141 @@ class TestThinkWatchdogVoteDelivery(unittest.TestCase):
         self.assertEqual(wd.vote_alarms(None), [])
         self.assertEqual(wd.vote_alarms({"members": "nope"}), [])
         self.assertEqual(wd.vote_alarms({"members": {"m": {"status": "ok"}}}), [])
+
+    # --- the alarm task has to stay true while the fault lasts ----------
+    #
+    # win-laya-int8 sat wedged from 2026-10-18 ~23:00 while its alarm task kept
+    # reading as if it had just been filed, and the body kept instructing a
+    # restart that nobody with access to the host ever performed. Both halves
+    # of that are pager defects: a body with no age hides how long the fault
+    # has run, and an instruction with no stated precondition asks for the
+    # impossible. These four tests pin the repair.
+
+    def _ongoing(self):
+        """The same wedge, as a later poll sees it: rc=0, already paged."""
+        payload = json.loads(json.dumps(self.WEDGE))
+        payload["members"]["win-laya-int8"]["seen"] = "ongoing"
+        return payload
+
+    def test_an_open_alarm_is_rechecked_in_place_not_duplicated(self):
+        wd = self._tool()
+        with tempfile.TemporaryDirectory() as tmp:
+            url, token_file, box, server, thread = self._alarm_stub(tmp)
+            state = Path(tmp) / "alarms.json"
+            try:
+                first = self._run(wd, tmp, self._vote_cmd(tmp, self.WEDGE, 2),
+                                  url, token_file,
+                                  extra=("--alarm-state-file", str(state)))
+                after_first = box.list(None)
+                # A later poll: same member, still wedged, already paged.
+                second = self._run(wd, tmp, self._vote_cmd(tmp, self._ongoing(), 0),
+                                   url, token_file,
+                                   extra=("--alarm-state-file", str(state),
+                                          "--alarm-refresh-seconds", "0"))
+                after_second = box.list(None)
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=3)
+
+            self.assertEqual((first, second), (0, 0))
+            self.assertEqual(len(after_first), 1)
+            self.assertEqual(len(after_second), 1,
+                             "a still-open alarm must not open a second task")
+            out = after_second[0].get("output") or ""
+            self.assertIn("RE-CHECK", out,
+                          "the open task must carry a dated re-check, not just "
+                          "the numbers from the day it was filed")
+            self.assertIn("still WEDGE", out)
+
+    def test_a_recheck_inside_the_refresh_window_is_skipped(self):
+        """Dedupe is the point: a job every 300s must not flood one task."""
+        wd = self._tool()
+        with tempfile.TemporaryDirectory() as tmp:
+            url, token_file, box, server, thread = self._alarm_stub(tmp)
+            state = Path(tmp) / "alarms.json"
+            try:
+                self._run(wd, tmp, self._vote_cmd(tmp, self.WEDGE, 2), url,
+                          token_file, extra=("--alarm-state-file", str(state)))
+                before = (box.list(None)[0].get("output") or "")
+                self._run(wd, tmp, self._vote_cmd(tmp, self._ongoing(), 0), url,
+                          token_file, extra=("--alarm-state-file", str(state)))
+                after = (box.list(None)[0].get("output") or "")
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=3)
+            self.assertEqual(before, after,
+                             "a second poll minutes later must not append again")
+
+    def test_an_overdue_alarm_says_nothing_automatic_will_clear_it(self):
+        """Past the deadline the body must stop implying help is coming.
+
+        There is no escalation target configured here, and the body has to say
+        so rather than let a reader assume something ran.
+        """
+        wd = self._tool()
+        with tempfile.TemporaryDirectory() as tmp:
+            url, token_file, box, server, thread = self._alarm_stub(tmp)
+            state = Path(tmp) / "alarms.json"
+            try:
+                self._run(wd, tmp, self._vote_cmd(tmp, self.WEDGE, 2), url,
+                          token_file, extra=("--alarm-state-file", str(state)))
+                self._run(wd, tmp, self._vote_cmd(tmp, self._ongoing(), 0), url,
+                          token_file,
+                          extra=("--alarm-state-file", str(state),
+                                 "--alarm-refresh-seconds", "0",
+                                 "--alarm-overdue-seconds", "0"))
+                out = box.list(None)[0].get("output") or ""
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=3)
+            self.assertIn("Escalation", out)
+            self.assertIn("human hand is needed", out)
+            self.assertIn("no escalation target configured", out)
+
+    def test_a_recovered_member_is_forgotten_and_can_page_again(self):
+        """Clearing the state on recovery is what keeps the second wedge loud."""
+        wd = self._tool()
+        clean = {"members": {"win-laya-int8": {"status": "ok", "slope": -0.01,
+                                               "samples": 40}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            url, token_file, box, server, thread = self._alarm_stub(tmp)
+            state = Path(tmp) / "alarms.json"
+            try:
+                self._run(wd, tmp, self._vote_cmd(tmp, self.WEDGE, 2), url,
+                          token_file, extra=("--alarm-state-file", str(state)))
+                self.assertTrue(state.exists())
+                self._run(wd, tmp, self._vote_cmd(tmp, clean, 0), url,
+                          token_file, extra=("--alarm-state-file", str(state)))
+                self.assertEqual(json.loads(state.read_text()), {},
+                                 "a recovered member must be forgotten")
+                self._run(wd, tmp, self._vote_cmd(tmp, self.WEDGE, 2), url,
+                          token_file, extra=("--alarm-state-file", str(state)))
+                tasks = box.list(None)
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=3)
+            self.assertEqual(len(tasks), 2,
+                             "a second wedge after a recovery is a new alarm")
+
+    def test_the_body_states_who_can_actually_do_the_restart(self):
+        """The instruction has a precondition; saying it is the whole fix."""
+        wd = self._tool()
+        body = wd.alarm_body(wd.vote_alarms(self.WEDGE), "{}", 1_800_000_000.0)
+        self.assertIn("ON THE HOST THAT", body)
+        self.assertIn("may have neither", body)
+        self.assertIn("Waiting does not clear it", body)
+
+    def test_the_recheck_names_the_age_and_the_issuer_note(self):
+        wd = self._tool()
+        alarms = wd.vote_alarms(self.WEDGE)
+        block = wd.recheck_block(alarms, 1_800_000_000.0, 7200.0, False,
+                                 note="mac cannot reach win")
+        self.assertIn("2.0h", block)          # the age, not a bare "still open"
+        self.assertIn("mac cannot reach win", block)
+        self.assertNotIn("Escalation", block)  # not overdue yet: say nothing
+
+    def test_an_overdue_body_says_no_escalation_target_is_configured(self):
+        wd = self._tool()
+        self.assertIn("no escalation target configured", wd.escalate("", True))
+        self.assertIn("not due yet", wd.escalate("true", False))
+        self.assertIn("rc=0", wd.escalate("true", True))
+
 
 class TestThinkStats(unittest.TestCase):
     """tools/think_stats.py - say only what the ledger can support.

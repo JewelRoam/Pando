@@ -52,6 +52,14 @@
     <string>/Users/zhengenrong/.pandosi/mailbox.token</string>
     <string>--alarm-by</string>
     <string>vote-watchdog</string>
+    <string>--alarm-state-file</string>
+    <string>/Users/zhengenrong/.pandosi/think-watchdog-alarms.json</string>
+    <string>--alarm-refresh-seconds</string>
+    <string>21600</string>
+    <string>--alarm-overdue-seconds</string>
+    <string>43200</string>
+    <string>--alarm-note</string>
+    <string>members on hosts this Mac cannot reach (win-laya-int8: no shell, no pairing path) cannot be restarted from here; those need a human at that host</string>
   </array>
   <key>WorkingDirectory</key>
   <string>/Users/zhengenrong/Downloads/PandoSI-island</string>
