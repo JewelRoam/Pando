@@ -1,10 +1,11 @@
 """The bounded self-modification store: which knobs may move, and how far.
 
 ``policy.set`` is the one action in ``ACTION_SPACE`` that changes the rules the
-colony runs under — *"change a voting rule, gate threshold, or role grant"*. That
-makes it the most dangerous verb in the space, so its backing store is the most
-conservative thing in the repo. Five decisions, each of which we can be wrong
-about:
+colony runs under — *"change a bounded voting rule or gate threshold"*. The
+action name advertises only the knobs that exist; a "role grant" is not yet one
+of them. That makes policy.set the most dangerous verb in the space, so its
+backing store is the most conservative thing in the repo. Five decisions, each
+of which we can be wrong about:
 
 - **The knob set is closed.** ``KNOBS`` is the whitelist. An unknown knob does
   not get ignored, it fails the whole proposal: a proposal whose author and

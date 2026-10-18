@@ -42,7 +42,7 @@ ACTION_SPACE: dict[str, str] = {
     "seed.replicate": "carry a seed bundle to another host",
     "recruit.invite": "issue an invitation to a candidate member",
     "reproduce.spawn": "spawn a replica of an existing member (spore/graft)",
-    "policy.set": "change a voting rule, gate threshold, or role grant",
+    "policy.set": "change a bounded voting rule or gate threshold (min_adopt, veto)",
     "culture.refine": "refine/retrain a member, distribute a playbook update",
     "resource.rebalance": "move a member to a different host",
     "meta.propose": "propose a new proposal operator (the seed of Tier 2)",

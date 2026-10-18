@@ -139,6 +139,23 @@ def culture_skeleton() -> dict:
     return skeleton
 
 
+def policy_skeleton() -> dict:
+    """A minimal ``policy.set`` params block the executor accepts.
+
+    Measured on the Mac mailbox (2026-10-19): all 304 visible ``policy.set``
+    proposals carried no ``params`` at all. The proposer had learned the verb
+    from the action menu but was never shown the typed object the executor
+    validates. The retry hands over this example; ``validate_policy`` is called
+    here as well, so a prompt example cannot drift from the signed wire
+    contract.
+    """
+    skeleton = {"set": {"min_adopt": 3}}
+    checked, why = validate_policy(skeleton)
+    if checked is None:
+        raise ValueError(why)
+    return skeleton
+
+
 @dataclass
 class Round:
     """One think -> validate -> sign -> publish -> record cycle."""
@@ -165,6 +182,10 @@ class Round:
     # for the same reason as ``call_retried``: handing over a schema is not the
     # model changing its mind, and a rate that mixes them measures nothing.
     params_repaired: bool = False
+    # The round chose policy.set without the typed params block. Kept separate
+    # from ``params_repaired`` (culture.refine) because the two repairs ask for
+    # different artifacts; mixing them would make the repair-rate unreadable.
+    policy_params_repaired: bool = False
     # Did this round land on the same action as the one before it? Recorded even
     # when the goal was reworded, because "same verb, new sentence" is still the
     # organism walking into the same wall - and measuring that rate is the only
@@ -200,6 +221,7 @@ class Round:
             "call_retried": self.call_retried,
             "novelty_forced": self.novelty_forced,
             "params_repaired": self.params_repaired,
+            "policy_params_repaired": self.policy_params_repaired,
             "repeated": self.repeated,
             "served_by": self.served_by,
         }
@@ -832,6 +854,46 @@ class Thinker:
             return None
         return proposal2, text2
 
+    def _ask_for_policy_params(self, user: str, round_no: int, round_, why: str):
+        """One more call, with the exact ``policy.set`` object.
+
+        Returns ``(proposal, raw_text)`` or ``None``. Any valid action is
+        accepted on the retry, not just the one that failed, because the model
+        may have chosen ``policy.set`` for a change the bounded knob set cannot
+        express. The validator is unchanged: this is a schema handover, not a
+        looser gate.
+        """
+        try:
+            skeleton = policy_skeleton()
+        except (TypeError, ValueError):  # pragma: no cover - contract drift
+            return None
+        example = {
+            "action": "policy.set",
+            "goal": "write the rule change you intend",
+            "params": skeleton,
+        }
+        retry_user = (
+            user + "\n\n【上一轮你的回答被拒绝】" + why
+            + "。params 必须是 JSON 对象，不是字符串；正确形状如下：\n"
+            + json.dumps(example, ensure_ascii=False)
+            + "\n当前只能改这些键：" + POLICY_KNOB_HELP
+            + "。params.set 至少写一个键，不能写其他字段。"
+              "降低 min_adopt 或把 veto 改成 false 会让门槛更容易通过，"
+              "至少需要 3 个决策模型赞同；不要靠 goal 的措辞绕过。"
+              "如果你要做的不是有界规则改动，就换一个动作。"
+              "只输出一行 JSON。")
+        try:
+            text2, usage2 = self.proposer.complete(SYSTEM_PROMPT, retry_user)
+        except Exception:  # noqa: BLE001 - a failed retry holds the round
+            return None
+        round_.prompt_tokens += int(usage2.get("prompt_tokens") or 0)
+        round_.completion_tokens += int(usage2.get("completion_tokens") or 0)
+        proposal2, _why2 = proposal_from_obj(
+            extract_json(text2) or {}, self.node_id, self.node_id, round_no)
+        if proposal2 is None:
+            return None
+        return proposal2, text2
+
     def _user_prompt(self, round_no: int, group: list[dict]) -> str:
         own = self.ledger.tail(self.history_window)
         lines = [f"这是你的第 {round_no} 轮思考。", "", "【你自己的历史】"]
@@ -936,6 +998,18 @@ class Thinker:
                 proposal, text = repaired
                 why = ""
                 round_.params_repaired = True
+
+        # policy.set is the only actuator that rewrites the rules, and its
+        # params shape was never handed to the model. Measured 2026-10-19:
+        # every visible policy.set proposal had ``params: null``. Show the
+        # object once; if the model still cannot produce it, hold the round
+        # rather than signing prose the executor must reject later.
+        if proposal is None and why.startswith("policy.set params invalid"):
+            repaired = self._ask_for_policy_params(user, round_no, round_, why)
+            if repaired is not None:
+                proposal, text = repaired
+                why = ""
+                round_.policy_params_repaired = True
 
         # Measured: a 4B model repeats the previous round almost verbatim.
         # Asking for novelty in the prompt is a request, not a constraint, so

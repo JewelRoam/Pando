@@ -1927,6 +1927,61 @@ class TestResidentThinker(unittest.TestCase):
         self.assertIsNone(bad)
         self.assertIn("does not accept params", why)
 
+    def test_the_policy_skeleton_is_a_params_block_the_executor_accepts(self):
+        """The repair example must be the exact shape the executor validates.
+
+        A skeleton that drifted from ``pando.policy.validate`` would be worse
+        than none: the model would copy it faithfully and still be refused.
+        """
+        from pando.policy import validate as validate_policy
+        from pando.thinkd import policy_skeleton
+
+        skeleton = policy_skeleton()
+        checked, why = validate_policy(skeleton)
+        self.assertEqual(why, "")
+        self.assertEqual(checked, {"min_adopt": 3})
+
+    def test_a_policy_set_without_params_is_repaired_once(self):
+        """Measured on the Mac mailbox (2026-10-19): all 304 visible policy.set
+        proposals carried no params, so the rule-change actuator could not run.
+        The proposer is shown the typed object once; the validator is unchanged.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            thinker, proposer, _sent = self._thinker(
+                [{"action": "policy.set", "goal": "lower the gate",
+                  "params": None},
+                 {"action": "policy.set", "goal": "lower the gate",
+                  "expected_effect": "faster adoption",
+                  "params": {"set": {"min_adopt": 3}}}],
+                Path(tmp) / "think.jsonl")
+            round_ = thinker.think(1)
+
+            self.assertTrue(round_.policy_params_repaired)
+            self.assertTrue(round_.published)
+            self.assertEqual(round_.proposal.action, "policy.set")
+            self.assertEqual(round_.proposal.params, {"set": {"min_adopt": 3}})
+            self.assertEqual(proposer.calls, 2)
+            # The retry must carry the shape, not just repeat the prose.
+            self.assertIn('"set"', proposer.users[1])
+            self.assertIn("min_adopt", proposer.users[1])
+
+    def test_a_policy_set_that_never_gets_params_is_held_not_signed(self):
+        """The repair is one call, not a loop. If the model still cannot produce
+        the typed object, the round is held and nothing signed reaches the wire.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            thinker, proposer, sent = self._thinker(
+                [{"action": "policy.set", "goal": "change a rule"},
+                 {"action": "policy.set", "goal": "still prose"}],
+                Path(tmp) / "think.jsonl")
+            round_ = thinker.think(1)
+
+            self.assertFalse(round_.policy_params_repaired)
+            self.assertFalse(round_.published)
+            self.assertIsNone(round_.proposal)
+            self.assertIn("policy.set params invalid", round_.error)
+            self.assertEqual(proposer.calls, 2)
+            self.assertEqual(sent, [])
 
     def test_thinkd_requires_valid_signed_params_for_culture_refine(self):
         """The proposer and executor share one culture.refine intent shape.
