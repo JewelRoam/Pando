@@ -1925,6 +1925,37 @@ class TestResidentThinker(unittest.TestCase):
         self.assertIsNone(bad)
         self.assertIn("does not accept params", why)
 
+
+    def test_thinkd_requires_valid_signed_params_for_culture_refine(self):
+        """The proposer and executor share one culture.refine intent shape.
+
+        A ``culture.refine`` whose params are not ``{"playbook": <full
+        playbook>}`` is not a culture change; publishing it would only create an
+        unexecutable loop entry. Both sides call ``pando.culture.validate``, so
+        the shape the model is asked for cannot drift from what runs.
+        """
+        from pando.thinkd import proposal_from_obj
+
+        good = {"meta": {"name": "loop", "version": 2},
+                "gating": {"quorum_floor": 3}}
+        proposal, why = proposal_from_obj(
+            {"action": "culture.refine", "goal": "raise the culture floor",
+             "params": {"playbook": good}},
+            "n1", "n1", 9)
+        self.assertEqual(why, "")
+        self.assertEqual(proposal.params, {"playbook": good})
+        self.assertEqual(proposal.payload()["params"], {"playbook": good})
+
+        for raw in (None, {}, {"playbook": {}}, {"playbook": "patch"},
+                    {"playbook": {"meta": {"name": "x", "version": 1},
+                                  "unknown_table": 1}},
+                    {"set": {"min_adopt": 3}}):
+            bad, why = proposal_from_obj(
+                {"action": "culture.refine", "goal": "refine", "params": raw},
+                "n1", "n1", 9)
+            self.assertIsNone(bad, raw)
+            self.assertIn("culture.refine params invalid", why)
+
     def test_thinkd_keeps_thinking_through_model_and_mailbox_failures(self):
         """A dead model, dead mailbox, or bad JSON is a recorded round, not an end."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -1991,7 +2022,8 @@ class TestResidentThinker(unittest.TestCase):
         """Self-repetition is repaired once, and the repair is visible."""
         with tempfile.TemporaryDirectory() as tmp:
             ledger = Path(tmp) / "think.jsonl"
-            same = {"action": "culture.refine", "goal": "tune the voter"}
+            same = {"action": "culture.refine", "goal": "tune the voter",
+                    "params": {"playbook": {"meta": {"name": "tune", "version": 2}}}}
             thinker, proposer, sent = self._thinker(
                 [same, dict(same),
                  {"action": "resource.rebalance", "goal": "move the member",
@@ -2248,9 +2280,11 @@ class TestResidentThinker(unittest.TestCase):
         from pando.thinkd import Round
         with tempfile.TemporaryDirectory() as tmp:
             thinker, _proposer, sent = self._thinker(
-                [{"action": "culture.refine", "goal": "again"},
+                [{"action": "culture.refine", "goal": "again",
+                  "params": {"playbook": {"meta": {"name": "a", "version": 1}}}},
                  {"action": "seed.replicate", "goal": "carry"},
-                 {"action": "culture.refine", "goal": "back again"}],
+                 {"action": "culture.refine", "goal": "back again",
+                  "params": {"playbook": {"meta": {"name": "b", "version": 1}}}}],
                 Path(tmp) / "think.jsonl", host_names=["mac", "win"])
             prior = Round(1, 0.0)
             prior.proposal = Proposal("p0", "mac", "old", "culture.refine")
@@ -2464,7 +2498,8 @@ class TestProposerSpool(unittest.TestCase):
             thinker, _ = self._thinker(
                 [{"action": "seed.export", "goal": "carry a seed"},
                  {"action": "recruit.invite", "goal": "invite a member"},
-                 {"action": "culture.refine", "goal": "refine culture"}],
+                 {"action": "culture.refine", "goal": "refine culture",
+                  "params": {"playbook": {"meta": {"name": "c", "version": 1}}}}],
                 Path(tmp) / "think.jsonl", spool_path, published=publish)
 
             # The Mac is off. The proposer keeps thinking; nothing is delivered.
@@ -3098,7 +3133,8 @@ class TestExecution(unittest.TestCase):
             identity=str(identity_path),
             out_root=str(Path(tmp) / "out"),
             policy_path=str(Path(tmp) / "policy.json"),
-            hosts=None, pull=[], outbox=str(Path(tmp) / "outbox"))
+            hosts=None, pull=[], outbox=str(Path(tmp) / "outbox"),
+            culture_outbox=str(Path(tmp) / "culture-outbox"))
 
     def test_a_raising_export_is_recorded_rather_than_ending_the_loop(self):
         """One broken actuator must not take the executor down with it.
@@ -3369,6 +3405,159 @@ class TestExecution(unittest.TestCase):
             self.assertEqual(rows[0]["skipped"], "other-host")
             self.assertEqual(rows[0]["action"], "policy.set")
             self.assertFalse(Path(args.policy_path).exists())
+
+
+    def test_a_culture_refine_candidate_is_staged_signed_and_not_applied(self):
+        """An adopted culture.refine writes three files and nothing else.
+
+        Staging is the whole actuator: a signed, validated candidate lands in
+        the outbox marked ``applied = False``. The running playbook, policy and
+        models are untouched, so adopting a culture change can never rewrite the
+        rules in the same round it was proposed.
+        """
+        import tempfile
+        from pando.execute import run_once
+        from pando.identity import Identity, verify
+
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = Identity.generate()
+            ident_path = Path(tmp) / "identity.json"
+            ident_path.write_text(json.dumps(identity.to_json()),
+                                  encoding="utf-8")
+            (Path(tmp) / "phrase").write_text("pw\n", encoding="utf-8")
+            playbook = {"meta": {"name": "loop", "version": 2}}
+            proposal = self._proposal(action="culture.refine", pid="p-culture")
+            proposal.pubkey = identity.public_key
+            proposal.params = {"playbook": playbook}
+            votes = [self._vote("mac-text", "赞同", "p-culture"),
+                     self._vote("mac-laya-int8", "赞同", "p-culture")]
+            args = self._execute_args(tmp, ident_path)
+
+            self.assertEqual(run_once([proposal], votes, args), 0)
+            rows = [json.loads(line) for line in
+                    Path(args.ledger).read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(rows), 1)
+            row = rows[0]
+            self.assertTrue(row["executed"])
+            self.assertEqual(row["action"], "culture.refine")
+            self.assertNotIn("skipped", row)
+
+            root = Path(row["directory"])
+            manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+            self.assertFalse(manifest["applied"])
+            self.assertEqual(manifest["playbook_hash"], row["playbook_hash"])
+            candidate = json.loads((root / "candidate.json").read_text(encoding="utf-8"))
+            self.assertEqual(candidate["playbook"], playbook)
+            attestation = json.loads((root / "attestation.json").read_text(encoding="utf-8"))
+            self.assertEqual(attestation["status"], "staged-not-applied")
+            self.assertEqual(attestation["playbook_hash"], row["playbook_hash"])
+            proof = attestation["proof"]
+            self.assertTrue(verify(proof["pubkey"], candidate, proof["sig"]))
+            # Nothing live changed: no policy store, no sealed bundle.
+            self.assertFalse(Path(args.policy_path).exists())
+
+    def test_a_culture_refine_is_staged_once_and_not_restaged(self):
+        """The ledger row marks the candidate done, so a later round is a no-op."""
+        import tempfile
+        from pando.execute import run_once
+        from pando.identity import Identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = Identity.generate()
+            ident_path = Path(tmp) / "identity.json"
+            ident_path.write_text(json.dumps(identity.to_json()),
+                                  encoding="utf-8")
+            (Path(tmp) / "phrase").write_text("pw\n", encoding="utf-8")
+            proposal = self._proposal(action="culture.refine", pid="p-once")
+            proposal.pubkey = identity.public_key
+            proposal.params = {"playbook": {"meta": {"name": "x", "version": 1}}}
+            votes = [self._vote("mac-text", "赞同", "p-once"),
+                     self._vote("mac-laya-int8", "赞同", "p-once")]
+            args = self._execute_args(tmp, ident_path)
+
+            run_once([proposal], votes, args)
+            run_once([proposal], votes, args)
+            rows = [json.loads(line) for line in
+                    Path(args.ledger).read_text(encoding="utf-8").splitlines()]
+            staged = [r for r in rows if r.get("action") == "culture.refine"
+                      and r.get("executed")]
+            self.assertEqual(len(staged), 1)
+
+    def test_a_culture_refine_with_bad_params_is_recorded_and_not_staged(self):
+        """A candidate the executor cannot validate is refused, with the reason.
+
+        No ``skipped``: a refused candidate is retried next round, so a proposal
+        that can never be staged stays visible rather than looking handled.
+        """
+        import tempfile
+        from pando.execute import run_once
+        from pando.identity import Identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = Identity.generate()
+            ident_path = Path(tmp) / "identity.json"
+            ident_path.write_text(json.dumps(identity.to_json()),
+                                  encoding="utf-8")
+            (Path(tmp) / "phrase").write_text("pw\n", encoding="utf-8")
+            proposal = self._proposal(action="culture.refine", pid="p-badcul")
+            proposal.pubkey = identity.public_key
+            proposal.params = {"playbook": {"meta": {"name": "x"}}}  # missing version
+            votes = [self._vote("mac-text", "赞同", "p-badcul"),
+                     self._vote("mac-laya-int8", "赞同", "p-badcul")]
+            args = self._execute_args(tmp, ident_path)
+
+            run_once([proposal], votes, args)
+            rows = [json.loads(line) for line in
+                    Path(args.ledger).read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(rows), 1)
+            self.assertFalse(rows[0]["executed"])
+            self.assertNotIn("skipped", rows[0])
+            self.assertIn("CultureError", rows[0]["failed"])
+            self.assertFalse((Path(args.culture_outbox) / "p-badcul").exists())
+
+    def test_a_foreign_culture_refine_is_recorded_and_not_staged_here(self):
+        """Another host's culture candidate is named, never written locally."""
+        import tempfile
+        from pando.execute import run_once
+        from pando.identity import Identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = Identity.generate()
+            ident_path = Path(tmp) / "identity.json"
+            ident_path.write_text(json.dumps(identity.to_json()),
+                                  encoding="utf-8")
+            (Path(tmp) / "phrase").write_text("pw\n", encoding="utf-8")
+            proposal = self._proposal(action="culture.refine", pid="p-theirs-c")
+            proposal.pubkey = "someone-elses-key"
+            proposal.params = {"playbook": {"meta": {"name": "x", "version": 1}}}
+            votes = [self._vote("mac-text", "赞同", "p-theirs-c"),
+                     self._vote("mac-laya-int8", "赞同", "p-theirs-c")]
+            args = self._execute_args(tmp, ident_path)
+
+            run_once([proposal], votes, args)
+            rows = [json.loads(line) for line in
+                    Path(args.ledger).read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["skipped"], "other-host")
+            self.assertEqual(rows[0]["action"], "culture.refine")
+            self.assertFalse((Path(args.culture_outbox) / "p-theirs-c").exists())
+
+    def test_culture_validate_is_pure_and_refuses_a_patchy_candidate(self):
+        """The typed intent is a whole playbook, not a patch or a stray field."""
+        from pando.culture import validate
+
+        candidate, why = validate({"playbook": {"meta": {"name": "x", "version": 1}}})
+        self.assertIsNotNone(candidate)
+        self.assertEqual(why, "")
+
+        for raw in (None, {}, {"playbook": "not a mapping"},
+                    {"playbook": {"meta": {"name": "x", "version": 1}, "bogus": 1}},
+                    {"playbook": {"gating": {"quorum_floor": 2}}},   # no meta
+                    {"playbook": {"meta": {"name": "x", "version": "1"}}},
+                    {"set": {"min_adopt": 3}}):
+            bad, why = validate(raw)
+            self.assertIsNone(bad, raw)
+            self.assertTrue(why, raw)
 
     def test_the_threshold_the_executor_uses_comes_from_the_policy_file(self):
         """The same votes, two stores, two outcomes. This is the closed loop.

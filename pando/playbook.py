@@ -48,12 +48,16 @@ class Playbook:
         return hashlib.sha256(self.canonical_json().encode()).hexdigest()
 
 
-def load_playbook(path: Path) -> Playbook:
-    """Load and validate a playbook TOML file. Raises ValueError on any
-    structural problem - a malformed playbook must never reach the swarm."""
-    with open(path, "rb") as fh:
-        raw = tomllib.load(fh)
+def parse_playbook(raw: dict, source_path: str | None = None) -> Playbook:
+    """Validate an already-parsed playbook mapping. Raises ValueError.
 
+    ``load_playbook`` is the file-backed entry point; keeping the validator
+    separate lets callers validate a candidate before it is written anywhere.
+    A malformed playbook must never reach the swarm, including through an
+    actuator that stages it for later review.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError("playbook must be a mapping")
     meta = raw.get("meta") or {}
     missing = REQUIRED_META - set(meta)
     if missing:
@@ -212,8 +216,16 @@ def load_playbook(path: Path) -> Playbook:
         lineages=lineages,
         combiner=combiner,
         question_categories=categories,
-        source_path=str(path),
+        source_path=source_path,
     )
+
+
+def load_playbook(path: Path) -> Playbook:
+    """Load and validate a playbook TOML file. Raises ValueError on any
+    structural problem - a malformed playbook must never reach the swarm."""
+    with open(path, "rb") as fh:
+        raw = tomllib.load(fh)
+    return parse_playbook(raw, source_path=str(path))
 
 
 def resolve_blocs(pb: Playbook | None) -> dict[str, str]:

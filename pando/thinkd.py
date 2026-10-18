@@ -63,6 +63,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .culture import validate as validate_culture
 from .genesis import ACTION_SPACE, Proposal
 from .identity import load_or_create
 from .policy import KNOBS, validate as validate_policy
@@ -96,6 +97,12 @@ SYSTEM_PROMPT = f"""你是 PandoSI 殖民地的一名提案者。这个群体是
    {{"set": {{"min_adopt": 3}}}}。params.set 至少写一个可调的键，不能写其他字段。
    当前可调：{POLICY_KNOB_HELP}。降低 min_adopt 或把 veto 改成 false 会让门槛
    更容易通过，至少需要 3 个决策模型赞同；不要靠 goal 的措辞绕过。
+   选了 culture.refine 时，params 必须是单独的 JSON 字段，形如
+   {{"playbook": {{<一份完整 playbook>}}}}：给的是完整的候选 playbook，不是补丁，
+   不是一段文字。它必须是和本机运行中的 playbook 同构的结构（meta/gating/
+   questions/actions/lineages/combiner），否则会被执行器拒绝；params.playbook
+   里出现的未知字段一样会被拒绝。这个动作只是把候选签名后放进评审 outbox，
+   不会当场改写规则，所以不要指望它在同一轮生效。
    其他 action 不要写 params。
 """
 
@@ -402,6 +409,11 @@ def proposal_from_obj(obj: dict, author: str, node_id: str,
         if checked is None:
             return None, f"policy.set params invalid: {why}"
         params = raw_params
+    elif action == "culture.refine":
+        checked, why = validate_culture(raw_params)
+        if checked is None:
+            return None, f"culture.refine params invalid: {why}"
+        params = {"playbook": checked}
     elif raw_params not in (None, {}, []):
         return None, f"{action} does not accept params"
     return Proposal(

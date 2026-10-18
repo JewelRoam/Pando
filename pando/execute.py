@@ -14,14 +14,19 @@ tested actuator for that exact action exists.
   to a transport that does not exist; naming a host is not permission to send.
 - ``policy.set`` — move a knob in ``pando/policy.py``. Wired, bounded, and the
   only actuator that changes what the gate does next round.
-- ``recruit.invite``, ``reproduce.spawn``, ``culture.refine``,
-  ``resource.rebalance``, ``meta.propose`` — no actuator. An adopted proposal
-  with one of these actions is recorded as ``no-actuator``: a hold on the
-  world, not a success and not a silence.
+- ``culture.refine`` — stage a signed, validated playbook *candidate* into a
+  local outbox. Wired up to a review queue, not to a hot swap: nothing loads
+  the candidate, so adopting a culture change can never rewrite the rules in
+  the same breath as proposing it. Applying stays a human/gate step.
+- ``recruit.invite``, ``reproduce.spawn``, ``resource.rebalance``,
+  ``meta.propose`` — no actuator. An adopted proposal with one of these actions
+  is recorded as ``no-actuator``: a hold on the world, not a success and not a
+  silence.
 
 Nothing here starts itself, and nothing here opens a socket. A dry run reads
-the mailbox and prints counts. A ``--once`` round seals at most one seed and
-applies at most one rule change, each recorded in an append-only ledger.
+the mailbox and prints counts. A ``--once`` round seals at most one seed,
+applies at most one rule change, and stages at most one culture candidate, each
+recorded in an append-only ledger.
 """
 from __future__ import annotations
 
@@ -30,6 +35,9 @@ import json
 from collections import Counter
 from pathlib import Path
 
+from .culture import DEFAULT_OUTBOX as DEFAULT_CULTURE_OUTBOX
+from .culture import CultureError
+from .culture import stage as stage_culture
 from .genesis import ACTION_SPACE, Proposal
 from .policy import DEFAULT_PATH as DEFAULT_POLICY_PATH
 from .policy import PolicyError
@@ -46,7 +54,12 @@ STANCES = (ADOPT, HOLD, DECLINE)
 #: ``ACTION_SPACE`` is a declared intent: adopted, never executed. Kept as
 #: one list so the boundary is readable from outside and cannot drift
 #: between the judge, the executor and the ledger.
-ACTUATORS: tuple[str, ...] = ("seed.export", "seed.replicate", "policy.set")
+ACTUATORS: tuple[str, ...] = (
+    "seed.export",
+    "seed.replicate",
+    "policy.set",
+    "culture.refine",
+)
 
 
 
@@ -186,6 +199,48 @@ def next_policy_set(proposals: list[Proposal], reactions: list[dict],
         if adopted(proposal, reactions, knobs):
             return proposal
     return None
+
+
+def next_culture_refine(proposals: list[Proposal], reactions: list[dict],
+                        done: set[str], signer: str | None = None,
+                        knobs: dict | None = None) -> Proposal | None:
+    """Oldest adopted ``culture.refine`` this host authored and not yet staged.
+
+    Staging is one-way: once a candidate is written to the outbox the ledger
+    row marks it done, so a later round will not restage the same proposal.
+    Only the signer's own proposals are staged — a foreign culture change is
+    recorded, never written locally, for the same reason a foreign seed is not
+    sealed here.
+    """
+    for proposal in proposals:
+        if proposal.proposal_id in done or proposal.action != "culture.refine":
+            continue
+        if signer is not None and proposal.pubkey != signer:
+            continue
+        if adopted(proposal, reactions, knobs):
+            return proposal
+    return None
+
+
+def foreign_culture_refines(proposals: list[Proposal], reactions: list[dict],
+                            done: set[str], signer: str,
+                            knobs: dict | None = None) -> list[str]:
+    """Adopted ``culture.refine`` ids another host authored.
+
+    Recorded rather than dropped: a foreign culture candidate that is neither
+    staged here nor named here would leave the ledger silent about a culture
+    change the group adopted. It is not staged locally — the authoring host
+    owns its own outbox.
+    """
+    found = []
+    for proposal in proposals:
+        if proposal.proposal_id in done or proposal.action != "culture.refine":
+            continue
+        if proposal.pubkey == signer:
+            continue
+        if adopted(proposal, reactions, knobs):
+            found.append(proposal.proposal_id)
+    return found
 
 
 def export_seed(proposal: Proposal, *, home, identity, rollout_dir, out_root,
@@ -561,7 +616,8 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
 
     The policy store is read once at the top, so every judgment in a round uses
     the same rules. A rule change applied here is in force from the next round,
-    which keeps the ledger from describing a rule that never held.
+    which keeps the ledger from describing a rule that never held. A culture
+    candidate is only staged, never loaded, so it cannot change this round.
     """
     phrase = Path(args.passphrase_file).expanduser()
     if not phrase.is_file():
@@ -569,8 +625,9 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
         return 2
     ledger = Path(args.ledger).expanduser()
     from .identity import Identity
-    signer = Identity.from_json(json.loads(
-        Path(args.identity).expanduser().read_text(encoding="utf-8"))).public_key
+    identity = Identity.from_json(json.loads(
+        Path(args.identity).expanduser().read_text(encoding="utf-8")))
+    signer = identity.public_key
     knobs = load_policy(getattr(args, "policy_path", DEFAULT_POLICY_PATH))
     chosen = next_seed_export(proposals, reactions, done_ids(ledger), signer,
                               knobs)
@@ -628,6 +685,34 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
         ledger.parent.mkdir(parents=True, exist_ok=True)
         with ledger.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, sort_keys=True) + "\n")
+    # A culture change is staged after the export and rule change. Staging is
+    # one-way and inert: it writes a signed, validated candidate into the
+    # outbox for later review and never loads it, so it cannot rewrite the
+    # rules this round.
+    refine = next_culture_refine(proposals, reactions, done_ids(ledger),
+                                 signer, knobs)
+    if refine is not None:
+        record = {"proposal_id": refine.proposal_id, "action": "culture.refine"}
+        try:
+            staged = stage_culture(
+                refine, identity=identity,
+                outbox=getattr(args, "culture_outbox", DEFAULT_CULTURE_OUTBOX))
+        except CultureError as exc:
+            # No ``skipped``: a refused candidate is retried next round and
+            # refused again, and the reason travels, so a candidate that can
+            # never be staged stays visible instead of looking handled.
+            record["executed"] = False
+            record["failed"] = f"CultureError: {exc}"
+        except Exception as exc:  # noqa: BLE001 - one action must not end the loop
+            record["executed"] = False
+            record["failed"] = f"{type(exc).__name__}: {exc}"
+        else:
+            record["executed"] = True
+            record["playbook_hash"] = staged["playbook_hash"]
+            record["directory"] = staged["directory"]
+        ledger.parent.mkdir(parents=True, exist_ok=True)
+        with ledger.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, sort_keys=True) + "\n")
     # An export must not crowd out a replicate. Both are recorded.
     if True:
         seen = done_ids(ledger) | left_ids(ledger)
@@ -642,12 +727,14 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                                             knobs)
         foreign_policy = foreign_policy_sets(proposals, reactions, seen, signer,
                                              knobs)
+        foreign_culture = foreign_culture_refines(proposals, reactions, seen,
+                                                  signer, knobs)
         unacted = local_unacted(proposals, reactions, seen, signer, knobs)
         pulls = getattr(args, "pull", None) or set()
         outbox = getattr(args, "outbox", "~/.pandosi/outbox")
         acks = received_acks(ledger, outbox)
         if (foreign or replicates or addressed or unacted or foreign_repl
-                or foreign_policy or acks):
+                or foreign_policy or foreign_culture or acks):
             ledger.parent.mkdir(parents=True, exist_ok=True)
             with ledger.open("a", encoding="utf-8") as handle:
                 for proposal_id in foreign:
@@ -696,6 +783,13 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                         "executed": False,
                         "skipped": "other-host",
                     }, sort_keys=True) + "\n")
+                for proposal_id in foreign_culture:
+                    handle.write(json.dumps({
+                        "proposal_id": proposal_id,
+                        "action": "culture.refine",
+                        "executed": False,
+                        "skipped": "other-host",
+                    }, sort_keys=True) + "\n")
                 for proposal_id, action in unacted:
                     handle.write(json.dumps({
                         "proposal_id": proposal_id,
@@ -708,6 +802,7 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                    "replication_not_sent": [item[0] for item in addressed],
                    "foreign_replications": foreign_repl,
                    "foreign_policy_sets": foreign_policy,
+                   "foreign_culture_refines": foreign_culture,
                    "no_actuator": [item[0] for item in unacted]}
         print(json.dumps(payload, ensure_ascii=False), flush=True)
         write_status(ledger.with_name("execute-status.json"), payload)
@@ -738,6 +833,8 @@ def main() -> int:
     parser.add_argument("--ledger", default="~/.pandosi/execute-ledger.jsonl")
     parser.add_argument("--policy", default=DEFAULT_POLICY_PATH,
                         help="the bounded self-modification store")
+    parser.add_argument("--culture-outbox", default=DEFAULT_CULTURE_OUTBOX,
+                        help="where staged culture.refine candidates are written")
     args = parser.parse_args()
     args.policy_path = args.policy
     if args.dry_run == args.once:
