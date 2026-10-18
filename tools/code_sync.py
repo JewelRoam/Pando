@@ -4,10 +4,14 @@
 A dirty tree or a history that is not a fast-forward is left untouched.
 GitHub is the first remote. ``--peer`` is tried only when that fetch fails,
 and it must be the same branch, not a second history.
+
+``--self-source``/``--self-target`` exist for the copy of this file that lives
+*outside* the checkout on a headless node. See ``refresh_self``.
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -169,6 +173,49 @@ def install_checkout(python: str, repo: Path) -> bool:
     return got.returncode == 0
 
 
+def refresh_self(source: Path, target: Path) -> dict:
+    """Let the deployed updater adopt the checkout's copy of itself.
+
+    The copy that runs on a headless node sits outside the checkout on purpose:
+    it has to run while the tree is mid-fast-forward, dirty, or broken. The trap
+    is that nothing rewrites it. On 2026-10-19 the copy on pi5 was current only
+    because a human had copied it by hand (sha256 equal to this file, mtime
+    00:53), so any later fix *here* would have landed in the repo and never
+    taken effect on the node that needed it. That is the same one-level-up trap
+    that left win's supervisor without its ``code-watch`` service: an updater
+    that cannot receive its own fixes.
+
+    Adoption is guarded, because the opposite failure is worse than a stale
+    updater: a candidate that does not compile leaves the working copy exactly
+    where it is, so a bad commit cannot leave a node with no updater at all.
+    """
+    source = Path(source).expanduser()
+    target = Path(target).expanduser()
+    try:
+        text = source.read_text(encoding="utf-8")
+    except OSError as exc:
+        return {"adopted": False, "reason": "no-source",
+                "error": str(exc)[:120]}
+    try:
+        compile(text, str(source), "exec")
+    except SyntaxError as exc:
+        return {"adopted": False, "reason": "candidate-does-not-compile",
+                "line": exc.lineno}
+    try:
+        if target.read_text(encoding="utf-8") == text:
+            return {"adopted": False, "reason": "same"}
+    except OSError:
+        pass
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+    except OSError as exc:
+        return {"adopted": False, "reason": "write-failed",
+                "error": str(exc)[:120]}
+    return {"adopted": True, "reason": "adopted",
+            "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--repo", required=True)
@@ -181,6 +228,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="after a fast-forward, pip install --no-deps into this interpreter")
     parser.add_argument("--restart", action="append", default=[],
                         help="client unit to restart after a fast-forward; repeatable")
+    parser.add_argument("--self-source", default="",
+                        help="updater inside the checkout; adopted by --self-target")
+    parser.add_argument("--self-target", default="",
+                        help="the copy of this file that is running on the node")
     args = parser.parse_args(argv)
     token = ""
     if args.peer_token_file:
@@ -196,6 +247,11 @@ def main(argv: list[str] | None = None) -> int:
         done = restart_units(args.restart)
         result["restarted"] = done["restarted"]
         result["restart"] = done["reason"]
+    if args.self_source and args.self_target:
+        # Unconditional: the checkout may already be ahead of the deployed copy
+        # from an earlier pass, and "already up to date" is not a reason to keep
+        # running yesterday's updater.
+        result["self"] = refresh_self(args.self_source, args.self_target)
     print(json.dumps(result, ensure_ascii=False, sort_keys=True), flush=True)
     return 0 if result["reason"] in ("already", "fast-forward") else 2
 

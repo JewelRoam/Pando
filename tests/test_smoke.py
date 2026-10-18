@@ -6258,6 +6258,55 @@ class TestCodeSync(unittest.TestCase):
             self.assertEqual(stamp.read_text(encoding="utf-8").strip(), second_head)
 
 
+    def test_the_deployed_updater_adopts_a_newer_copy_only_if_it_compiles(self):
+        """The copy that runs on a headless node has to receive its own fixes.
+
+        2026-10-19: pi5's ten-minute job ran /home/admin/.pandosi/code_sync.py,
+        a file *outside* the checkout it fast-forwards. It was current only
+        because someone had copied it there by hand -- same sha256 as
+        tools/code_sync.py, mtime 00:53 -- which means a later fix to the
+        updater would land in the repo and never take effect on the node that
+        needed it. Same one-level-up trap that left win's supervisor without
+        its ``code-watch`` service.
+
+        The guard is the other direction: a candidate that does not compile must
+        never replace a working copy, or one bad commit leaves a node with no
+        updater and no operator.
+        """
+        sync = self._load()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "pandosi-src" / "tools" / "code_sync.py"
+            target = root / ".pandosi" / "code_sync.py"
+            source.parent.mkdir(parents=True)
+            target.parent.mkdir(parents=True)
+
+            source.write_text("print('one')\n", encoding="utf-8")
+            target.write_text("print('one')\n", encoding="utf-8")
+            same = sync.refresh_self(source, target)
+            self.assertFalse(same["adopted"])
+            self.assertEqual(same["reason"], "same")
+
+            source.write_text("print('two')\n", encoding="utf-8")
+            fresh = sync.refresh_self(source, target)
+            self.assertTrue(fresh["adopted"])
+            self.assertEqual(fresh["reason"], "adopted")
+            self.assertEqual(target.read_text(encoding="utf-8"), "print('two')\n")
+
+            # A candidate that cannot even be parsed leaves the working one.
+            source.write_text("def broken(:\n", encoding="utf-8")
+            refused = sync.refresh_self(source, target)
+            self.assertFalse(refused["adopted"])
+            self.assertEqual(refused["reason"], "candidate-does-not-compile")
+            self.assertEqual(target.read_text(encoding="utf-8"), "print('two')\n")
+
+            # A missing source is not an adoption either.
+            source.unlink()
+            gone = sync.refresh_self(source, target)
+            self.assertEqual(gone["reason"], "no-source")
+            self.assertEqual(target.read_text(encoding="utf-8"), "print('two')\n")
+
+
 class TestCodeIdentity(unittest.TestCase):
     """A member that cannot say which commit it runs is a member nobody can audit.
 
@@ -6525,6 +6574,26 @@ class TestPi5UnitTemplates(unittest.TestCase):
         self.assertEqual(restarted - set(code_sync.SAFE_UNITS), set())
         # And what it does restart must be a unit this repo can rebuild.
         self.assertEqual(restarted - set(units), set())
+
+
+    def test_the_updater_running_on_pi5_can_receive_its_own_fixes(self):
+        """The ten-minute job must not run a hand-copied, frozen updater.
+
+        It runs a copy outside the checkout (it has to: the checkout is what
+        gets rewritten), so the copy is told where its successor lives. Source
+        inside the checkout, target outside it -- and adopt only what compiles,
+        which ``refresh_self`` enforces.
+        """
+        units = self._units()
+        line = units["pandosi-code-sync.service"]
+        source = re.search(r"--self-source\s+(\S+)", line)
+        target = re.search(r"--self-target\s+(\S+)", line)
+        self.assertIsNotNone(source, "the updater is never told about its successor")
+        self.assertIsNotNone(target, "no deployed copy to refresh")
+        self.assertTrue(source.group(1).startswith("/home/admin/pandosi-src/"))
+        self.assertTrue(target.group(1).startswith("/home/admin/.pandosi/"))
+        # And the file it adopts is the one this repo can rebuild.
+        self.assertEqual(Path(source.group(1)).name, "code_sync.py")
 
 
 class TestExecuteStateResolution(unittest.TestCase):
