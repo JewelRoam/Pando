@@ -11,7 +11,9 @@ import argparse
 import hmac
 import io
 import json
+import subprocess
 import tarfile
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -75,8 +77,35 @@ def write_ack(outbox: Path, proposal_id: str, body: dict) -> bool:
     return True
 
 
-def make_handler(outbox: Path, token: str):
+
+def code_bundle(repo: Path, dest: Path, max_age: float = 600) -> Path | None:
+    """A git bundle of ``main``. Rebuilt when the cached file is old.
+
+    This is the same history as origin, served only when a peer cannot
+    fetch GitHub. It is not a second branch.
+    """
+    repo = Path(repo)
+    dest = Path(dest)
+    if dest.is_file() and time.time() - dest.stat().st_mtime < max_age:
+        return dest
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    partial = dest.with_suffix(".partial")
+    got = subprocess.run(
+        ["git", "-C", str(repo), "bundle", "create", str(partial), "HEAD"],
+        capture_output=True, text=True, timeout=60)
+    if got.returncode != 0 or not partial.is_file():
+        partial.unlink(missing_ok=True)
+        return None
+    if partial.stat().st_size > 30 * 1024 * 1024:
+        partial.unlink(missing_ok=True)
+        return None
+    partial.replace(dest)
+    return dest
+
+
+def make_handler(outbox: Path, token: str, repo: Path | None = None):
     outbox = Path(outbox).expanduser()
+    repo = Path(repo) if repo is not None else Path(__file__).resolve().parents[1]
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
@@ -104,6 +133,18 @@ def make_handler(outbox: Path, token: str):
                 self._send(200, {"ok": True, "service": "seed-outbox"})
                 return
             if not self._authed():
+                return
+            if path == "/code.bundle":
+                built = code_bundle(repo, Path.home() / ".pandosi" / "code.bundle")
+                if built is None:
+                    self._send(404, {"error": "no bundle"})
+                    return
+                raw = built.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
                 return
             if path == "/offers":
                 rows = []
@@ -151,8 +192,8 @@ def make_handler(outbox: Path, token: str):
     return Handler
 
 
-def serve(outbox: Path, token: str, host: str, port: int) -> None:
-    server = ThreadingHTTPServer((host, port), make_handler(outbox, token))
+def serve(outbox: Path, token: str, host: str, port: int, repo: Path | None = None) -> None:
+    server = ThreadingHTTPServer((host, port), make_handler(outbox, token, repo))
     print(f"seed-outbox on {host}:{port}", flush=True)
     server.serve_forever()
 
@@ -163,12 +204,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--token-file", default="~/.pandosi/mailbox.token")
     parser.add_argument("--bind", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8478)
+    parser.add_argument("--repo", default="")
     args = parser.parse_args(argv)
     token = Path(args.token_file).expanduser().read_text(encoding="utf-8").strip()
     if not token:
         print("refusing to serve without a token", flush=True)
         return 2
-    serve(Path(args.outbox), token, args.bind, args.port)
+    repo = Path(args.repo).expanduser() if args.repo else None
+    serve(Path(args.outbox), token, args.bind, args.port, repo)
     return 0
 
 

@@ -11,6 +11,9 @@ import argparse
 import json
 import os
 import subprocess
+import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 # Client processes only. A model server is not on this list, on purpose.
@@ -44,12 +47,50 @@ def _dirty(repo: Path, env: dict[str, str]) -> bool:
     return bool(got.stdout.strip())
 
 
-def _fetch(repo: Path, env: dict[str, str], remote: str) -> bool:
-    got = _git(repo, ["fetch", remote, "main"], env)
-    return got.returncode == 0
+def _download(url: str, token: str, dest: Path) -> bool:
+    request = urllib.request.Request(url)
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            data = response.read(30 * 1024 * 1024 + 1)
+    except (OSError, urllib.error.URLError):
+        return False
+    if len(data) > 30 * 1024 * 1024:
+        return False
+    dest.write_bytes(data)
+    return True
 
 
-def sync_repo(repo, *, remote: str = "origin", peer: str = "") -> dict:
+def _fetch(repo: Path, env: dict[str, str], remote: str, token: str = "") -> bool:
+    """Fetch ``main``. A URL is downloaded as a bundle first.
+
+    ``http.lowSpeedTime`` stops a stalled GitHub fetch instead of leaving
+    the timer hung.
+    """
+    source = remote
+    temporary = None
+    if remote.startswith(("http://", "https://")):
+        handle, name = tempfile.mkstemp(prefix="pandosi-", suffix=".bundle")
+        os.close(handle)
+        temporary = Path(name)
+        if not _download(remote, token, temporary):
+            temporary.unlink(missing_ok=True)
+            return False
+        source = str(temporary)
+    try:
+        ref = "HEAD" if str(source).endswith(".bundle") else "main"
+        got = _git(repo, ["-c", "http.lowSpeedLimit=1000",
+                          "-c", "http.lowSpeedTime=20",
+                          "fetch", source, ref], env)
+        return got.returncode == 0
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def sync_repo(repo, *, remote: str = "origin", peer: str = "",
+              peer_token: str = "") -> dict:
     """Fetch ``main`` and fast-forward. Never discards local edits."""
     repo = Path(repo).expanduser()
     env = _env()
@@ -62,7 +103,7 @@ def sync_repo(repo, *, remote: str = "origin", peer: str = "") -> dict:
         result["reason"] = "dirty"
         return result
     if not _fetch(repo, env, remote):
-        if not peer or not _fetch(repo, env, peer):
+        if not peer or not _fetch(repo, env, peer, peer_token):
             result["reason"] = "fetch-failed"
             return result
         result["via"] = "peer"
@@ -111,18 +152,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--remote", default="origin")
     parser.add_argument("--peer", default="",
                         help="used only when --remote cannot be fetched")
+    parser.add_argument("--peer-token-file", default="",
+                        help="bearer token for an http peer bundle")
     parser.add_argument("--install-python", default="",
                         help="after a fast-forward, pip install --no-deps into this interpreter")
     parser.add_argument("--restart", action="append", default=[],
                         help="client unit to restart after a fast-forward; repeatable")
     args = parser.parse_args(argv)
-    result = sync_repo(args.repo, remote=args.remote, peer=args.peer)
+    token = ""
+    if args.peer_token_file:
+        token = Path(args.peer_token_file).expanduser().read_text(encoding="utf-8").strip()
+    result = sync_repo(args.repo, remote=args.remote, peer=args.peer, peer_token=token)
     if result.get("updated") and args.install_python:
         result["installed"] = install_checkout(args.install_python, Path(args.repo))
         if result["installed"] and args.restart:
-            result.update(restart_units(args.restart))
+            done = restart_units(args.restart)
+            result["restarted"] = done["restarted"]
+            result["restart"] = done["reason"]
     elif args.restart and result.get("updated"):
-        result.update(restart_units(args.restart))
+        done = restart_units(args.restart)
+        result["restarted"] = done["restarted"]
+        result["restart"] = done["reason"]
     print(json.dumps(result, ensure_ascii=False, sort_keys=True), flush=True)
     return 0 if result["reason"] in ("already", "fast-forward") else 2
 
