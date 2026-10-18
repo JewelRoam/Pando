@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from pando.backend import (MockBackend, OpenAIChoiceBackend,
                             parse_openai_choice)
 from pando.common import (DecisionRequest, Vote, aggregate,
-                            canonical_question)
+                            canonical_question, mcnemar_test)
 from pando.rootd import (Coordinator, INITIAL_STEM_TIMEOUT,
                             Root, load_accuracy_registry)
 from pando.stemd import Stem
@@ -7966,6 +7966,69 @@ class TestVoteAblation(unittest.TestCase):
         va = self._tool()
         self.assertLess(va.bonferroni_z(1), va.bonferroni_z(4))
         self.assertLess(va.bonferroni_z(4), va.bonferroni_z(20))
+
+
+class TestPairedDifferenceStandardError(unittest.TestCase):
+    """The paired SE is sqrt(b + c), never half of it.
+
+    Both equal-budget tools computed the McNemar standard error as
+    ``sqrt(n) / 2``. That is the SE of a *difference of two independent*
+    proportions; for a *paired* comparison the difference is b - c out of
+    b + c discordant rows, so var(b - c) = b + c and SE = sqrt(b + c).
+    Halving it doubled every z and shipped two "beyond noise" verdicts that
+    were actually ties: 002 is b=21, c=15, which is z = -1.00 / exact
+    p = 0.41, not the published z = -2.00. The test is deliberately a
+    falsifier for the cheap fix ("just divide by two"), so it pins the
+    arithmetic *and* one regenerated report, not only the code path.
+    """
+
+    def test_the_paired_se_is_the_root_of_the_discordant_count(self):
+        """21 vs 15 is one SE of 6, so a six-row gap is one SE, not two."""
+        paired = mcnemar_test(21, 15)
+        self.assertEqual(paired["discordant"], 36)
+        self.assertEqual(paired["delta"], -6)
+        self.assertAlmostEqual(paired["se"], 6.0)
+        self.assertAlmostEqual(paired["z"], -1.0)
+        self.assertAlmostEqual(paired["p_exact"], 0.405, places=3)
+        # The exact test must agree with the direction, not the old claim.
+        self.assertGreater(paired["p_exact"], 0.05,
+                           "002 was published as beyond noise; it is a tie")
+
+    def test_a_significant_pair_stays_significant_but_weaker(self):
+        """005 (23 vs 7) survives the correction -- it was not a fluke of it.
+
+        The fix must not be a blanket "everything is noise" either: this pins
+        a case where the honest SE still clears 5%.
+        """
+        paired = mcnemar_test(23, 7)
+        self.assertAlmostEqual(paired["se"], 5.477, places=3)
+        self.assertAlmostEqual(paired["z"], -2.921, places=3)
+        self.assertLess(paired["p_exact"], 0.01)
+
+    def test_no_discordant_rows_is_not_a_division_by_zero(self):
+        """Unanimous arms have no paired evidence, so there is no z to report."""
+        paired = mcnemar_test(0, 0)
+        self.assertEqual(paired["discordant"], 0)
+        self.assertEqual(paired["delta"], 0)
+        self.assertIsNone(paired["z"])
+        self.assertIsNone(paired["p_exact"])
+
+    def test_the_stored_report_carries_the_corrected_standard_error(self):
+        """The regenerated artifact, not just the function, must be fixed.
+
+        Reading this from the committed report is the point: the bug lived in
+        a *number on the page*, so a unit test that only calls the helper
+        would have passed while the published table stayed wrong.
+        """
+        report = json.loads((Path(__file__).resolve().parents[1] /
+                             "assets" / "votes" /
+                             "equal-budget-002.json").read_text(encoding="utf-8"))
+        paired = report["paired"]
+        self.assertEqual(paired["a_right_b_wrong"], 21)
+        self.assertEqual(paired["b_right_a_wrong"], 15)
+        self.assertAlmostEqual(paired["se_delta"], 6.0)
+        self.assertAlmostEqual(paired["delta_in_se"], -1.0)
+        self.assertGreater(paired["mcnemar_exact_p"], 0.05)
 
 
 class TestBracketHoldsTheHeldArmStill(unittest.TestCase):

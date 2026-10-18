@@ -6577,8 +6577,9 @@
     "a_right_b_wrong": 14,
     "b_right_a_wrong": 32,
     "delta_b_minus_a": 18,
-    "se_delta": 3.391164991562634,
-    "delta_in_se": 5.307910421576297
+    "se_delta": 6.782329983125268,
+    "delta_in_se": 2.6539552107881486,
+    "mcnemar_exact_p": 0.011351591436778108
   },
   "per_suite": {
     "big6": {

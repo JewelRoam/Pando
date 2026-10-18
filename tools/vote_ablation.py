@@ -43,6 +43,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from pando.common import mcnemar_test  # noqa: E402
+
 DEFAULT_VOTES = "assets/votes/equal-budget-002.raw.json"
 
 #: Two-sided z a single test must clear at 5% for the number of hypotheses
@@ -144,8 +146,12 @@ def variants(raw: dict) -> dict[str, dict]:
                 a_wrong += 1
             if b_ok and not a_ok:
                 b_wrong += 1
-        delta = b_wrong - a_wrong
-        se = math.sqrt(a_wrong + b_wrong) / 2 if (a_wrong + b_wrong) else float("nan")
+        # a_wrong counts (A right, B wrong) = b; b_wrong counts (B right, A
+        # wrong) = c. Name them by position in the call, not by their variable
+        # names here. See pando.common.mcnemar_test for why SE is sqrt(b + c).
+        paired = mcnemar_test(a_wrong, b_wrong)
+        delta = paired["delta"]
+        se = paired["se"] if paired["discordant"] else float("nan")
         out[name] = {
             "members": picked,
             "n_paired": n,
@@ -156,7 +162,8 @@ def variants(raw: dict) -> dict[str, dict]:
             "b_right_a_wrong": b_wrong,
             "delta": delta,
             "se_delta": se,
-            "z": (delta / se) if se and not math.isnan(se) else float("nan"),
+            "z": paired["z"] if paired["z"] is not None else float("nan"),
+            "mcnemar_exact_p": paired["p_exact"],
         }
     return out
 

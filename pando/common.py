@@ -208,6 +208,37 @@ def collapse_lineages(votes: list[Vote],
     return collapsed
 
 
+def mcnemar_test(a_right_b_wrong: int, b_right_a_wrong: int) -> dict:
+    """Paired two-arm comparison over the *discordant* rows (McNemar).
+
+    `a_right_b_wrong` is b (arm A right, arm B wrong), `b_right_a_wrong` is c.
+    The difference in counts is (c - b). Under H0 every discordant row is a
+    coin flip, so var(b - c) = b + c and the standard error is sqrt(b + c).
+
+    Do NOT "simplify" that to sqrt(b + c) / 2. The halved SE doubles every z,
+    and it shipped: equal_budget_check.py and vote_ablation.py both carried it
+    until 2026-10-19, which is what turned 002 (b=21, c=15) from a p=0.41 tie
+    into the published "z = -2.00, beyond noise". One definition, one place.
+
+    Returns delta, se, z and the exact two-sided McNemar p (no scipy): the
+    exact test conditions on the discordant count, so it needs no normal
+    approximation and is the honest companion for small b + c.
+    """
+    import math
+
+    b, c = int(a_right_b_wrong), int(b_right_a_wrong)
+    discordant = b + c
+    delta = c - b
+    if discordant == 0:
+        return {"b": b, "c": c, "discordant": 0, "delta": 0,
+                "se": 0.0, "z": None, "p_exact": None}
+    se = math.sqrt(discordant)
+    lo = min(b, c)
+    tail = sum(math.comb(discordant, i) for i in range(lo + 1)) / 2 ** discordant
+    return {"b": b, "c": c, "discordant": discordant, "delta": delta,
+            "se": se, "z": delta / se, "p_exact": min(1.0, 2.0 * tail)}
+
+
 def read_secret_file(path: str | Path) -> str:
     """Read a small newline-terminated secret from a user-owned file."""
     from pathlib import Path as SecretPath

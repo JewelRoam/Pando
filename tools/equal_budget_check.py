@@ -54,7 +54,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pando.common import Vote, aggregate  # noqa: E402
+from pando.common import Vote, aggregate, mcnemar_test  # noqa: E402
 
 
 def load_suite(spec: str, limit: int | None) -> list[dict]:
@@ -331,15 +331,17 @@ def main() -> int:
             a_right_b_wrong += 1
         elif b_ok and not a_ok:
             b_right_a_wrong += 1
-    n = a_right_b_wrong + b_right_a_wrong
-    se = (n ** 0.5 / 2.0) if n else 0.0  # SE of the paired difference
-    delta = b_right_a_wrong - a_right_b_wrong
+    paired = mcnemar_test(a_right_b_wrong, b_right_a_wrong)
+    n = paired["discordant"]          # discordant rows, not rows scored
+    se = paired["se"]                 # sqrt(b + c); see pando.common.mcnemar_test
+    delta = paired["delta"]           # b_right_a_wrong - a_right_b_wrong
     report["paired"] = {
         "rows_scored_by_both": both,
         "a_right_b_wrong": a_right_b_wrong,
         "b_right_a_wrong": b_right_a_wrong,
         "delta_b_minus_a": delta, "se_delta": se,
-        "delta_in_se": (delta / se) if se else None}
+        "delta_in_se": paired["z"],
+        "mcnemar_exact_p": paired["p_exact"]}
     coverage = report["arm_b"]["coverage_calibrated"]
     # Denominator = every row B chose to answer, NOT only the rows A also
     # answered. Otherwise an arm-A abstention on a B-decided row silently
