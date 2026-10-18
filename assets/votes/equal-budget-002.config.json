@@ -1,0 +1,137 @@
+{
+  "experiment": "equal-budget-002",
+  "title": "Equal-memory-budget control: a 4-member small committee vs one big model",
+  "date": "2026-10-19",
+  "author": "mac-codex",
+  "origin": "CIVILIZATION-NOTES 待办 「等预算对照：多台小模型 vs 一台大模型」; pilot 001 (not the control) at 2.343x budget mismatch",
+  "preregistered_before_any_harvest": true,
+  "host": {
+    "machine": "Apple arm64, 10 cpu, 16 GiB",
+    "note": "swap 17370 MB of 18432 MB used at pre-registration; residency is not a stable budget measure on this host, weight bytes are"
+  },
+  "suites": [
+    {
+      "path": "assets/heldout4_test.jsonl",
+      "family": "big6",
+      "rows": 240,
+      "sha256": "fad4bdf844b55d208ddf35e737be0e6f4821417bc919d5647edb3e40531db7ff"
+    },
+    {
+      "path": "assets/heldout5_test.jsonl",
+      "family": "big7",
+      "rows": 120,
+      "sha256": "2b9613c7504febfa6df63295bc775b68798350182c3cbe70df535cabfb247048"
+    }
+  ],
+  "rows_total": 360,
+  "arm_a": {
+    "role": "one big model, alone",
+    "primary": {
+      "stem": "http://127.0.0.1:8768",
+      "node_id": "mac-llm-8b-local",
+      "checkpoint": "mac-llm-8b-q6",
+      "model_file": "~/.pandosi/models/Qwen3-8B-GGUF/Qwen3-8B-Q5_K_M.gguf",
+      "model_sha256": "068bae163faa96ad48032daf4e071a6a28fe67d8dcc95367609c2ff165e52738",
+      "weight_bytes": 5851112224,
+      "weight_gib": 5.449,
+      "llama_server_port": 8086
+    },
+    "bracket": {
+      "why": "arm A' sits on the other side of arm B's budget so parity is bracketed, not asserted",
+      "model_file": "~/.pandosi/models/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M.gguf",
+      "model_sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+      "weight_bytes": 5027783488,
+      "weight_gib": 4.683,
+      "planned_llama_server_port": 8084
+    }
+  },
+  "arm_b": {
+    "role": "the small committee this host can actually field at the same budget",
+    "combiner": "pando.common.aggregate (the live root's own gate), min_quorum=3",
+    "quorum_policy_stated_up_front": "4 members, min_quorum = 3, i.e. 3-of-4 for the rows where all four answer. The tool raises the quorum to 'all who answered' when fewer than 3 answered, so a timeout on a row turns that row into unanimity. Timeouts are therefore a first-class failure mode, not a rounding error, and are reported per member.",
+    "members": [
+      {
+        "stem": "http://127.0.0.1:8767",
+        "node_id": "mac-llm-4b-local",
+        "checkpoint": "mac-llm-4b",
+        "backend": "openai (llama-server /v1/chat/completions)",
+        "model_file": "~/.pandosi/models/Qwen3-4B-Instruct-2507-GGUF/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+        "model_sha256": "3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597",
+        "weight_bytes": 2497281120,
+        "weight_gib": 2.326,
+        "llama_server_port": 8081
+      },
+      {
+        "stem": "http://127.0.0.1:8770",
+        "node_id": "mac-phi-35-mini",
+        "checkpoint": "phi-3.5-mini-q4km",
+        "backend": "openai (llama-server /v1/chat/completions)",
+        "model_file": "~/.pandosi/models/Phi-3.5-mini-instruct-GGUF/Phi-3.5-mini-instruct-Q4_K_M.gguf",
+        "model_sha256": "e4165e3a71af97f1b4820da61079826d8752a2088e313af0c7d346796c38eff5",
+        "weight_bytes": 2393232672,
+        "weight_gib": 2.229,
+        "planned_llama_server_port": 8084,
+        "note": "the resource the pilot named as missing: a second small LLM of distinct lineage"
+      },
+      {
+        "stem": "http://127.0.0.1:8769",
+        "node_id": "mac-laya-int8",
+        "checkpoint": "laya-en",
+        "backend": "onnx",
+        "model_file": "~/.pandosi/models/laya-en.int8.onnx",
+        "model_sha256": "854abee1c235ffc7bd74f401dbd14753d265b9d9495fbea25d70c14008647f92",
+        "weight_bytes": 598429064,
+        "weight_gib": 0.557
+      },
+      {
+        "stem": "http://127.0.0.1:8766",
+        "node_id": "mac-text",
+        "checkpoint": "text-nb-v1",
+        "backend": "text (multinomial naive Bayes)",
+        "model_file": "assets/textmodel.json",
+        "weight_bytes": 0,
+        "weight_gib": 0.0,
+        "note": "the only always-probability-bearing member; carried over from pilot 001 so the delta is the committee's composition, not the gate"
+      }
+    ],
+    "total_weight_bytes": 5488942856,
+    "total_weight_gib": 5.112
+  },
+  "budget_match": {
+    "arm_a_primary_over_arm_b": 1.0659816247866583,
+    "arm_a_primary_vs_b": "arm B has 93.8% of arm A's weight; the committee is budget-handicapped by 6.2%",
+    "arm_a_bracket_vs_b": "arm B has 109.2% of the Q4 bracket's weight; the committee is budget-favoured by 9.2%",
+    "pilot_001_for_contrast": "arm B had 42.7% of arm A (2.343x mismatch)",
+    "closed_gap": "pilot 001's stated block was 'this machine holds only one small LLM weight set'. Phi-3.5-mini Q4_K_M landed on disk 2026-10-17 04:27 and closes it."
+  },
+  "memory_sequencing_decision": {
+    "hard_constraint": "this Mac is not to carry a fourth concurrent local model",
+    "decision": "arms run sequentially and never co-resident; no new launchd job is created, the two extra servers/stems are transient processes owned by this run",
+    "arm_a_config": "8B stem up; 4B server and laya/text stems remain up (they cost ~2.9 GB combined but arm A is scored on its own vote, not on theirs)",
+    "arm_b_config": "8B server + stem booted out for the duration; 4B and Phi servers plus laya/text stems resident = 3 model servers, the same count this host runs today",
+    "count_check": "today: 8B + 4B + laya (3 model servers). arm B: 4B + Phi + laya (3 model servers). never more than today, and ~3.2 GB less weight than today",
+    "proposer_continuity": "mac thinkd has --fallback-base-url :8080 (4B), so booting the 8B out degrades the proposer to the 4B instead of stalling it; verified in com.jewelroam.pandosi-think.plist"
+  },
+  "endpoints": {
+    "metric": "accuracy on 360 rows is the primary endpoint",
+    "not_comparable": "per-arm latency is reported but is NOT a between-arm endpoint: the two arms were harvested in different residency configurations, so a latency delta would measure this host's memory pressure, not the models"
+  },
+  "decision_rule_fixed_before_the_run": {
+    "d": "(rows where arm B is right and arm A is wrong) - (rows where arm A is right and arm B is wrong), over rows both answered",
+    "d<=0": "the many-small-at-equal-budget claim is not supported",
+    "d>0 and |d|>1.96*SE": "many-small ahead beyond noise ON THE ROWS IT ANSWERED",
+    "coverage<0.9": "claim not supported regardless of d: the arm picked its own denominator",
+    "otherwise": "inconclusive at this n"
+  },
+  "pre_committed_caveats": [
+    "internal labels only; every expected label comes from this project's own generation pipeline, so no result here is externally anchored",
+    "one host, one prompt path, one temperature (0.0), no per-arm tuning, no split selection after the fact",
+    "arm B mixes model classes (2 neural LLMs + 1 ONNX classifier + 1 n-gram), so a committee win is not evidence about neural committees specifically",
+    "a 2-member subcommittee under this gate needs unanimity and abstains on every disagreement; that is a property of the live gate, not of committees in general, and it is reported separately if computed"
+  ],
+  "artifacts_planned": {
+    "raw": "assets/votes/equal-budget-002.raw.json",
+    "report": "assets/votes/equal-budget-002.json",
+    "doc": "docs/EXPERIMENT-equal-budget-002.md"
+  }
+}
