@@ -7,6 +7,9 @@ and it must be the same branch, not a second history.
 
 ``--self-source``/``--self-target`` exist for the copy of this file that lives
 *outside* the checkout on a headless node. See ``refresh_self``.
+``--install-units`` is the same hop one level up: the systemd units are also
+files outside the checkout, and nothing rewrote them either. See
+``install_units``.
 """
 from __future__ import annotations
 
@@ -164,6 +167,103 @@ def restart_units(units: list[str]) -> dict:
     return {"restarted": restarted, "reason": "restarted"}
 
 
+#: Only units this project ships are ever written. A name outside the prefix is
+#: not copied, so ``--install-units`` cannot be pointed at an arbitrary file.
+UNIT_PREFIX = "pandosi-"
+UNIT_SUFFIXES = (".service", ".timer")
+
+
+def install_units(source, target, names: list[str] | None = None) -> dict:
+    """Adopt the checkout's systemd units, then reload systemd.
+
+    The units live outside the checkout for the same reason the updater does --
+    they describe how the checkout is *run*, so they have to survive a tree that
+    is mid-fast-forward or broken. And they share its trap: nothing rewrites
+    them. On 2026-10-19 the pi5 code-sync unit **on disk** carried
+    ``--self-source``/``--self-target`` while the **loaded** unit did not -- the
+    file had been overwritten with ``cat >`` and ``systemctl --user
+    daemon-reload`` was never run. The timer then fired, fast-forwarded the
+    checkout, and silently declined to adopt its own successor, because the
+    process that would have done the adopting was never given the flag. On a
+    host with no journal that round left no trace at all.
+
+    Three bounds, each answering a specific way this could go wrong:
+
+    * The input is the checkout's own directory -- a commit someone reviewed --
+      never a name, path, or body taken from a proposal.
+    * Only ``pandosi-*`` files with a ``.service``/``.timer`` suffix are
+      written. Everything else in the directory is ignored, not copied.
+    * Nothing here enables, disables, starts, or stops a unit. The whole action
+      is "write the file, reload systemd", so a template that changes
+      ``ExecStart`` cannot restart a model as a side effect of an update.
+
+    A previous copy is left beside the new one as ``<name>.bak``: the one
+    artifact that makes a bad template recoverable without another commit.
+
+    The reload runs even when nothing was rewritten. "The file matches" and
+    "systemd loaded the file" are different facts and only the second one runs;
+    a round that wrote a file and then failed to reload is otherwise
+    indistinguishable from a round that was already in sync -- which is exactly
+    how the pi5 unit stayed stale. This removes the cause we have actually
+    observed. It does not *prove* systemd took the new bytes: a reload that
+    returns 0 is not a read-back, so a template that fails to take effect still
+    needs the ledger, not this function, to say so.
+    """
+    source = Path(source).expanduser()
+    target = Path(target).expanduser()
+    if not source.is_dir():
+        return {"changed": [], "reloaded": False, "reason": "no-source"}
+    if names is None:
+        names = sorted(entry.name for entry in source.iterdir()
+                       if entry.is_file() and entry.suffix in UNIT_SUFFIXES)
+    changed = []
+    for name in names:
+        if not name.startswith(UNIT_PREFIX) or name.endswith(".bak"):
+            continue
+        if "/" in name or "\\" in name or name in (".", ".."):
+            continue
+        template = source / name
+        if template.suffix not in UNIT_SUFFIXES or not template.is_file():
+            continue
+        try:
+            text = template.read_text(encoding="utf-8")
+        except OSError as exc:
+            return {"changed": changed, "reloaded": False,
+                    "reason": "unreadable-source", "unit": name,
+                    "error": str(exc)[:120]}
+        deployed = target / name
+        try:
+            if deployed.read_text(encoding="utf-8") == text:
+                continue
+            previous = deployed.read_text(encoding="utf-8")
+        except OSError:
+            previous = None
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+            if previous is not None:
+                (target / (name + ".bak")).write_text(previous, encoding="utf-8")
+            deployed.write_text(text, encoding="utf-8")
+        except OSError as exc:
+            return {"changed": changed, "reloaded": False,
+                    "reason": "write-failed", "unit": name,
+                    "error": str(exc)[:120]}
+        changed.append(name)
+    try:
+        got = subprocess.run(["systemctl", "--user", "daemon-reload"],
+                             capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as exc:
+        # A host without systemctl must report the gap, not lose the updater.
+        return {"changed": changed, "reloaded": False,
+                "reason": "reload-failed", "error": str(exc)[:120]}
+    if got.returncode != 0:
+        return {"changed": changed, "reloaded": False,
+                "reason": "reload-failed"}
+    return {"changed": changed, "reloaded": True,
+            "reason": "installed" if changed else "same"}
+
+
+
+
 def install_checkout(python: str, repo: Path) -> bool:
     """Install this checkout into ``python`` without fetching new dependencies."""
     got = subprocess.run(
@@ -232,6 +332,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="updater inside the checkout; adopted by --self-target")
     parser.add_argument("--self-target", default="",
                         help="the copy of this file that is running on the node")
+    parser.add_argument("--install-units", default="",
+                        help="checkout directory of systemd unit templates")
+    parser.add_argument("--install-units-target", default="",
+                        help="where this node's units are deployed")
     args = parser.parse_args(argv)
     token = ""
     if args.peer_token_file:
@@ -247,20 +351,27 @@ def main(argv: list[str] | None = None) -> int:
         done = restart_units(args.restart)
         result["restarted"] = done["restarted"]
         result["restart"] = done["reason"]
+    # Adopt our own successor, and our own units, from a checkout we just
+    # confirmed is current. A fetch that failed leaves the checkout at an older
+    # commit; adopting from *that* copy would roll the updater (and the units)
+    # backwards, taking the very flags this line needs with it -- which is how a
+    # node ends up with no updater at all. "Already at the tip" is still a
+    # confirmation, so a checkout that merely sat still is not a reason to keep
+    # running yesterday's bytes.
+    confirmed = result.get("reason") in ("fast-forward", "already")
+    unconfirmed = {"reason": "checkout-not-confirmed",
+                   "checkout": result.get("reason")}
     if args.self_source and args.self_target:
-        # Only adopt from a checkout we just confirmed is current. A fetch that
-        # failed leaves the checkout at an older commit, and adopting *that*
-        # copy would roll the updater backwards -- taking the very flags this
-        # line needs with it, which is how a node ends up with no updater at
-        # all. "Already at the tip" is still a confirmation, so an up-to-date
-        # checkout that merely sat still is not a reason to keep running
-        # yesterday's bytes.
-        if result.get("reason") in ("fast-forward", "already"):
+        if confirmed:
             result["self"] = refresh_self(args.self_source, args.self_target)
         else:
-            result["self"] = {"adopted": False,
-                              "reason": "checkout-not-confirmed",
-                              "checkout": result.get("reason")}
+            result["self"] = {"adopted": False, **unconfirmed}
+    if args.install_units and args.install_units_target:
+        if confirmed:
+            result["units"] = install_units(args.install_units,
+                                            args.install_units_target)
+        else:
+            result["units"] = {"changed": [], "reloaded": False, **unconfirmed}
     print(json.dumps(result, ensure_ascii=False, sort_keys=True), flush=True)
     return 0 if result["reason"] in ("already", "fast-forward") else 2
 

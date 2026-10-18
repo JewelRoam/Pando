@@ -6390,6 +6390,156 @@ class TestCodeSync(unittest.TestCase):
             self.assertEqual(target.read_text(encoding="utf-8"),
                              "print('checkout')\n")
 
+    @staticmethod
+    def _systemctl_stub(calls, rc=0):
+        """Answer ``systemctl`` and let every other subprocess run for real."""
+        real = subprocess.run
+
+        def fake(argv, **kwargs):
+            if isinstance(argv, (list, tuple)) and argv and argv[0] == "systemctl":
+                calls.append(list(argv))
+                return subprocess.CompletedProcess(argv, rc, "", "")
+            return real(argv, **kwargs)
+
+        return fake
+
+    def test_a_unit_template_outside_the_checkout_is_installed_and_backed_up(self):
+        """The units live outside the checkout, so nothing rewrote them either.
+
+        2026-10-19: pi5's ``pandosi-code-sync.service`` on disk carried
+        ``--self-source``/``--self-target`` while the unit *systemd had loaded*
+        did not. The file had been overwritten with ``cat >`` and
+        ``systemctl --user daemon-reload`` was never run, so the ten-minute
+        timer kept running the old ExecStart and the round left no trace -- the
+        host has no journal at all. "The file is right" and "systemd loaded the
+        file" are different facts, and only the second one runs.
+        """
+        sync = self._load()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "checkout" / "tools" / "pi5-systemd"
+            target = root / ".config" / "systemd" / "user"
+            source.mkdir(parents=True)
+            target.mkdir(parents=True)
+            (source / "pandosi-code-sync.service").write_text("ExecStart=/new\n")
+            (target / "pandosi-code-sync.service").write_text("ExecStart=/live\n")
+            # Anything this project does not ship stays where it is: a wrong
+            # prefix, a wrong suffix, a nested path, and a stale backup.
+            (source / "notes.md").write_text("notes\n")
+            (source / "pandosi-notes.txt").write_text("notes\n")
+            (source / "pandosi-old.service.bak").write_text("stale\n")
+            (source / "nested").mkdir()
+            (source / "nested" / "pandosi-evil.service").write_text("evil\n")
+
+            calls = []
+            real = subprocess.run
+            subprocess.run = self._systemctl_stub(calls)
+            try:
+                first = sync.install_units(source, target)
+                second = sync.install_units(source, target)
+            finally:
+                subprocess.run = real
+
+            self.assertEqual(first["changed"], ["pandosi-code-sync.service"])
+            self.assertEqual(first["reason"], "installed")
+            self.assertTrue(first["reloaded"])
+            self.assertEqual((target / "pandosi-code-sync.service").read_text(),
+                             "ExecStart=/new\n")
+            self.assertEqual(
+                (target / "pandosi-code-sync.service.bak").read_text(),
+                "ExecStart=/live\n")
+            for junk in ("notes.md", "pandosi-notes.txt", "nested",
+                         "pandosi-old.service.bak"):
+                self.assertFalse((target / junk).exists())
+
+            # Nothing left to rewrite -- and the reload still runs, because
+            # "the file matches" is indistinguishable from "a previous round
+            # wrote it and systemd never read it".
+            self.assertEqual(second["changed"], [])
+            self.assertEqual(second["reason"], "same")
+            self.assertTrue(second["reloaded"])
+            self.assertEqual(calls,
+                             [["systemctl", "--user", "daemon-reload"]] * 2)
+
+            # A reload that fails is reported, and the bytes that were written
+            # are named, so a peer can tell "not adopted" from "not written".
+            calls.clear()
+            (source / "pandosi-code-sync.service").write_text("ExecStart=/newer\n")
+            subprocess.run = self._systemctl_stub(calls, rc=1)
+            try:
+                failed = sync.install_units(source, target)
+            finally:
+                subprocess.run = real
+            self.assertEqual(failed["reason"], "reload-failed")
+            self.assertFalse(failed["reloaded"])
+            self.assertEqual(failed["changed"], ["pandosi-code-sync.service"])
+            self.assertEqual((target / "pandosi-code-sync.service").read_text(),
+                             "ExecStart=/newer\n")
+
+    def test_a_dirty_checkout_cannot_rewrite_the_units_either(self):
+        """The confirmation that gates the updater gates the units.
+
+        A tree a human left dirty can sit at an older commit. Adopting its
+        templates would push yesterday's ``ExecStart`` onto a node running
+        today's -- the same rollback the ``--self-*`` guard exists to stop.
+        """
+        sync = self._load()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env, src, bare, client = self._world(root)
+            units = src / "tools" / "pi5-systemd"
+            units.mkdir(parents=True)
+            (units / "pandosi-code-sync.service").write_text("ExecStart=/new\n")
+            self._run(env, "git", "-C", str(src), "add", "-A")
+            self._run(env, "git", "-C", str(src), "commit", "-m", "units")
+            self._run(env, "git", "-C", str(src), "push", str(bare), "main")
+            self._run(env, "git", "-C", str(client), "pull", "--ff-only",
+                      str(bare), "main")
+            target = root / "deployed-units"
+            target.mkdir()
+            (target / "pandosi-code-sync.service").write_text("ExecStart=/live\n")
+
+            def run():
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    sync.main(["--repo", str(client),
+                               "--install-units",
+                               str(client / "tools" / "pi5-systemd"),
+                               "--install-units-target", str(target)])
+                return json.loads(out.getvalue())
+
+            calls = []
+            real = subprocess.run
+            subprocess.run = self._systemctl_stub(calls)
+            try:
+                (client / "README").write_text("local edit\n")
+                dirty = run()
+                self.assertEqual(dirty["reason"], "dirty")
+                self.assertEqual(dirty["units"]["reason"],
+                                 "checkout-not-confirmed")
+                self.assertEqual(dirty["units"]["checkout"], "dirty")
+                self.assertEqual(dirty["units"]["changed"], [])
+                self.assertFalse(dirty["units"]["reloaded"])
+                self.assertEqual(calls, [])
+                self.assertEqual(
+                    (target / "pandosi-code-sync.service").read_text(),
+                    "ExecStart=/live\n")
+
+                # At the tip: the templates may now be adopted.
+                self._run(env, "git", "-C", str(client), "checkout", "--",
+                          "README")
+                moved = run()
+                self.assertEqual(moved["reason"], "already")
+                self.assertEqual(moved["units"]["reason"], "installed")
+                self.assertEqual(moved["units"]["changed"],
+                                 ["pandosi-code-sync.service"])
+                self.assertTrue(moved["units"]["reloaded"])
+                self.assertEqual(
+                    (target / "pandosi-code-sync.service").read_text(),
+                    "ExecStart=/new\n")
+            finally:
+                subprocess.run = real
+
 
 class TestCodeIdentity(unittest.TestCase):
     """A member that cannot say which commit it runs is a member nobody can audit.
