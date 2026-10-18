@@ -3435,7 +3435,10 @@ class TestLocalCi(unittest.TestCase):
         hook = Path(__file__).resolve().parents[1] / "tools" / "githooks" / "pre-push"
         text = hook.read_text(encoding="utf-8")
         self.assertIn("tools/local_ci.py", text)
-        self.assertTrue(hook.stat().st_mode & 0o111)
+        if os.name != "nt":
+            # Windows has no POSIX exec bit (stat never reports 0o111 on
+            # NTFS); git runs hooks through sh there, so the bit is moot.
+            self.assertTrue(hook.stat().st_mode & 0o111)
 
 
 class TestSeedReceive(unittest.TestCase):

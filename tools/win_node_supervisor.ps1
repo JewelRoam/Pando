@@ -88,18 +88,26 @@ $reactArgs = @('-m', 'pando.reactd',
   '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
   '--ledger', 'D:\pando-models\reaction-ledger.jsonl',
   '--interval', '40')
+# The island root runs under the same logon supervisor as everything else:
+# before this entry it was a hand-started process that would not survive a
+# reboot (found 2026-10-18 when auditing auto-start paths).
+$rootArgs = @('-m', 'pando.rootd', '--port', '8790',
+  '--pairing-token-file', "$repo\artifacts\lan-experiment\root-pairing.token",
+  '--lan', '--require-identity', '--quorum-k', '3',
+  '--stem-call-timeout', '120', '--initial-stem-timeout', '30')
 $executorArgs = @("$repo\tools\execute_loop.py", '300')
 
 $names = @('llama-3070', 'stem-gemma', 'stem-laya', 'worker', 'win-mailbox',
   'llama-yi-cpu', 'stem-yi', 'think-proposer', 'think-yi', 'observatory', 'chat',
-  'react', 'executor-loop')
+  'react', 'executor-loop', 'rootd')
 $exes = @($llamaExe, $python, $python, $python, $python, $llamaExe, $python,
-  $python, $python, $python, $python, $python, $python, $python)
+  $python, $python, $python, $python, $python, $python, $python, $python)
 $argsList = @($llamaArgs, $gemmaArgs, $layaArgs, $workerArgs, $mailboxArgs,
   $yiLlamaArgs, $yiStemArgs, $thinkArgs, $yiThinkArgs, $observatoryArgs, $chatArgs,
-  $reactArgs, $executorArgs)
+  $reactArgs, $executorArgs, $rootArgs)
 $cwds = @('D:\pando-models\llama-cuda', $repo, $repo, $repo, $repo,
-  'D:\pando-models\llama-cuda', $repo, $repo, $repo, $repo, $repo, $repo, $repo)
+  'D:\pando-models\llama-cuda', $repo, $repo, $repo, $repo, $repo, $repo, $repo,
+  $repo)
 
 $procs = @{}
 while ($true) {
