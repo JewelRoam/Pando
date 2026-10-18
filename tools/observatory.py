@@ -446,7 +446,7 @@ def build_people(participants: list[dict], ledgers: list[dict],
         row = {
             "name": name, "roots": [], "lineage": "", "host": "",
             "capability": {}, "stats": {}, "pubkey": "", "chat": None,
-            "activity": None, "seen": None,
+            "role": "", "activity": None, "seen": None,
         }
         rows.append(row)
         if name:
@@ -462,6 +462,8 @@ def build_people(participants: list[dict], ledgers: list[dict],
         row["stats"] = part.get("stats") or {}
         row["pubkey"] = part.get("pubkey_fingerprint") if part.get("has_pubkey") else ""
         row["chat"] = normalize_chat(part.get("chat"))
+        if not row["role"]:
+            row["role"] = str(part.get("role") or "")
     for ledger in ledgers:
         last = ledger.get("last") or {}
         name = str(ledger.get("host") or "")
@@ -664,6 +666,10 @@ def present_people(rows: list[dict]) -> list[dict]:
             record = f"{seen['count']} 条"
         else:
             record = "—"
+        role = {"decision": "决策", "proposal": "提案"}.get(
+            str(row.get("role") or ""))
+        if not role and row.get("chat"):
+            role = "提案"
         chat = row.get("chat") if isinstance(row.get("chat"), dict) else {}
         model = str(chat.get("model") or "").strip() or row.get("lineage") or activity.get("served_by") or ""
         presented.append({
@@ -671,6 +677,7 @@ def present_people(rows: list[dict]) -> list[dict]:
             "from": ", ".join(roots) if roots else "—",
             "host": _dash(row.get("host")),
             "model": _dash(model),
+            "role": role or "—",
             "record": record,
             "detail": str(activity.get("error") or activity.get("goal") or ""),
             "mark": str(row.get("pubkey") or ""),
@@ -860,6 +867,7 @@ def participant_from_node(node_id: str, info: dict, root: str) -> dict:
         "lineage": info.get("checkpoint") or info.get("lineage") or "?",
         "endpoint": info.get("url") or info.get("addr") or "?",
         "host": info.get("host") or "?",
+        "role": info.get("role") or "",
         "chat": normalize_chat(info.get("chat")),
         "capability": {
             "platform": cap.get("platform"),
@@ -1435,9 +1443,10 @@ const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function peopleTable(rows){
   if (!rows.length) return '<div class="empty">没有人。</div>';
-  return `<table><thead><tr><th>名字</th><th>来自</th><th>主机</th><th>模型</th><th>记录</th></tr></thead><tbody>`
+  return `<table><thead><tr><th>名字</th><th>角色</th><th>来自</th><th>主机</th><th>模型</th><th>记录</th></tr></thead><tbody>`
     + rows.map(p => `<tr>
       <td${p.mark ? ` title="${esc(p.mark)}"` : ''}>${esc(p.name)}</td>
+      <td>${esc(p.role)}</td>
       <td>${esc(p.from)}</td>
       <td>${esc(p.host)}</td>
       <td>${esc(p.model)}</td>

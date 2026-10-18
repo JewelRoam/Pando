@@ -2848,6 +2848,31 @@ class TestObservatoryFeed(unittest.TestCase):
         self.assertEqual(placed[0]["host"], "192.168.31.22")
 
 
+    def test_the_participants_panel_names_each_member_role(self):
+        """A reader sees who decides and who proposes, read off the record."""
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        from observatory import (build_people, participant_from_node,
+                                 present_people)
+
+        part = participant_from_node(
+            "mac-text",
+            {"url": "http://127.0.0.1:8766", "host": "127.0.0.1",
+             "checkpoint": "text-nb-v1", "role": "decision"},
+            "mac")
+        self.assertEqual(part["role"], "decision")
+        rows = build_people(
+            [part,
+             participant_from_node(
+                 "mac-llm", {"url": "http://127.0.0.1:8768",
+                             "host": "127.0.0.1",
+                             "checkpoint": "mac-llm-8b-q6",
+                             "role": "proposal",
+                             "chat": {"model": "qwen"}}, "mac")],
+            [], [])
+        shown = {row["name"]: row for row in present_people(rows)}
+        self.assertEqual(shown["mac-text"]["role"], "决策")
+        self.assertEqual(shown["mac-llm"]["role"], "提案")
+
     def test_a_column_is_one_field(self):
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
         from observatory import audit_view, present_people
