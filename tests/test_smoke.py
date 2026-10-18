@@ -2487,6 +2487,216 @@ class TestThinkWatchdog(unittest.TestCase):
             self.assertIn("no ledger", why)
 
 
+class TestThinkWatchdogVoteDelivery(unittest.TestCase):
+    """think_watchdog's vote leg - the caller that turns a wedge into work.
+
+    tools/vote_watchdog.py measured the win-laya-int8 wedge correctly for a
+    full day and nobody acted on it, because a signal with no *caller* is a
+    docstring. This is the caller. The contract it must keep:
+
+      * exit 2 (a member started falling behind) becomes exactly one
+        claimable ``[alarm]`` task in the mailbox - not a log line;
+      * a feed that cannot be read creates **nothing**. Inventing an alarm
+        from our own parse error is how a pager starts crying wolf;
+      * no failure path may make the job exit non-zero. Its exit code is a
+        health signal of its own, so a noisy red job would trade one silent
+        fault for another;
+      * with no ``--vote-cmd`` it behaves exactly as before.
+    """
+
+    WEDGE = {
+        "now": 1_800_000_000.0,
+        "members": {
+            "win-laya-int8": {
+                "status": "wedge", "slope": 0.54, "slope_max": 0.2,
+                "samples": 43, "span_s": 5280.0, "window_s": 5400.0,
+                "first_lag_s": 126000.0, "last_lag_s": 128880.0},
+            "mac-text": {
+                "status": "ok", "slope": -15.22, "samples": 129,
+                "span_s": 5340.0, "window_s": 5400.0,
+                "first_lag_s": 81720.0, "last_lag_s": 720.0},
+        },
+        "unnamed_silent": [],
+    }
+
+    def _tool(self):
+        import importlib.util
+        path = Path(__file__).resolve().parents[1] / "tools" / "think_watchdog.py"
+        spec = importlib.util.spec_from_file_location("think_watchdog", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def _vote_cmd(self, tmp, payload, rc):
+        """A stand-in for vote_watchdog: print one JSON line, exit with rc."""
+        script = Path(tmp) / f"vote_{rc}.py"
+        script.write_text(
+            "import json, sys\n"
+            f"sys.stdout.write(json.dumps({payload!r}))\n"
+            f"sys.exit({rc})\n",
+            encoding="utf-8")
+        return f"{sys.executable} {script}"
+
+    def _alarm_stub(self, tmp, token="tok"):
+        """A real mailbox on a real port - the page has to actually land."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "agent_mailbox_think_watchdog_test",
+            Path(__file__).resolve().parents[1] / "tools" / "agent_mailbox.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        box = module.Mailbox(Path(tmp) / "box")
+        server = module.ThreadingHTTPServer(
+            ("127.0.0.1", 0), module.build_handler(box, token))
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        token_file = Path(tmp) / "alarm.token"
+        token_file.write_text(token, encoding="utf-8")
+        return f"http://127.0.0.1:{port}", token_file, box, server, thread
+
+    def _run(self, wd, tmp, vote_cmd, alarm_url="", token_file=""):
+        ledger = Path(tmp) / "think.jsonl"
+        ledger.write_text("{}\n", encoding="utf-8")
+        return wd.main([
+            "--ledger", str(ledger),
+            # Far past any real ledger age: the proposer leg must stay quiet so
+            # anything we see in the box was the vote leg's doing.
+            "--stall-seconds", "999999999",
+            "--restart-cmd", "true",
+            "--vote-cmd", vote_cmd,
+            "--alarm-url", alarm_url,
+            "--alarm-token-file", str(token_file) if token_file else "",
+        ])
+
+    def test_a_wedge_becomes_exactly_one_claimable_task(self):
+        wd = self._tool()
+        with tempfile.TemporaryDirectory() as tmp:
+            url, token_file, box, server, thread = self._alarm_stub(tmp)
+            try:
+                rc = self._run(wd, tmp, self._vote_cmd(tmp, self.WEDGE, 2),
+                               url, token_file)
+                tasks = box.list(None)
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=3)
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(tasks), 1)
+            task = tasks[0]
+            self.assertTrue(task["title"].startswith("[alarm]"),
+                            f"a wedged member is work, not a message: {task['title']!r}")
+            # [chat] and [proposal] mean "message, never work" to the claim
+            # automation, so an alarm must not borrow either prefix.
+            self.assertNotIn("[chat]", task["title"])
+            self.assertNotIn("[proposal]", task["title"])
+            self.assertIn("win-laya-int8", task["title"])
+            self.assertEqual(task["status"], "open")
+
+    def test_an_unreadable_feed_pages_nobody(self):
+        """rc=1 is *our* feed failing, not a member. Two different faults."""
+        wd = self._tool()
+        with tempfile.TemporaryDirectory() as tmp:
+            url, token_file, box, server, thread = self._alarm_stub(tmp)
+            try:
+                # rc=1 and no JSON at all: the feed could not be read.
+                script = Path(tmp) / "vote_broken.py"
+                script.write_text("import sys\nsys.exit(1)\n", encoding="utf-8")
+                rc = self._run(wd, tmp, f"{sys.executable} {script}",
+                               url, token_file)
+                tasks = box.list(None)
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=3)
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(tasks, [], "an unreadable feed must not page anyone")
+
+    def test_a_clean_feed_creates_no_task(self):
+        wd = self._tool()
+        healthy = {"now": 1_800_000_000.0,
+                   "members": {"mac-text": {"status": "ok", "slope": -15.2,
+                                            "samples": 129}},
+                   "unnamed_silent": []}
+        with tempfile.TemporaryDirectory() as tmp:
+            url, token_file, box, server, thread = self._alarm_stub(tmp)
+            try:
+                rc = self._run(wd, tmp, self._vote_cmd(tmp, healthy, 0),
+                               url, token_file)
+                tasks = box.list(None)
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=3)
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(tasks, [])
+
+    def test_a_suppressed_alarm_is_named_not_called_ok(self):
+        """rc=0 with --page-new-only means "nothing new", not "all healthy".
+
+        The live win-laya-int8 wedge is exactly this shape: already paged, so
+        the poll exits 0. A bare "ok, 9 members measured" over it would be a
+        green light on a dead node - the failure this whole file exists to
+        prevent - so the log has to name what it is suppressing.
+        """
+        wd = self._tool()
+        payload = {"members": {
+            "win-laya-int8": {"status": "wedge", "slope": 0.54, "seen": "ongoing",
+                              "slope_max": 0.2, "samples": 43, "span_s": 5280.0,
+                              "window_s": 5400.0,
+                              "first_lag_s": 126000.0, "last_lag_s": 128880.0},
+            "mac-text": {"status": "ok", "slope": -15.2, "samples": 129}}}
+        alarms = wd.vote_alarms(payload)
+        ongoing = [row["member"] for row in alarms if row.get("seen") == "ongoing"]
+        self.assertEqual(ongoing, ["win-laya-int8"])
+
+    def test_a_dead_pager_still_exits_zero(self):
+        """The job's exit code is a health signal; a delivery bug must not make
+        it red, or the red *becomes* the story and the wedge is forgotten."""
+        wd = self._tool()
+        with tempfile.TemporaryDirectory() as tmp:
+            # A port nothing is listening on: post_alarm must fail *inside*.
+            dead = "http://127.0.0.1:1"
+            rc = self._run(wd, tmp, self._vote_cmd(tmp, self.WEDGE, 2), dead, "")
+            self.assertEqual(rc, 0)
+
+    def test_no_vote_cmd_keeps_the_original_behaviour(self):
+        wd = self._tool()
+        with tempfile.TemporaryDirectory() as tmp:
+            url, token_file, box, server, thread = self._alarm_stub(tmp)
+            try:
+                rc = self._run(wd, tmp, "", url, token_file)
+                tasks = box.list(None)
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=3)
+            self.assertEqual(rc, 0)
+            self.assertEqual(tasks, [])
+
+    def test_the_body_carries_the_numbers_and_the_falsifier(self):
+        """A reader has to be able to disagree with the alarm from the task."""
+        wd = self._tool()
+        alarms = wd.vote_alarms(self.WEDGE)
+        self.assertEqual([row["member"] for row in alarms], ["win-laya-int8"])
+        body = wd.alarm_body(alarms, json.dumps(self.WEDGE), 1_800_000_000.0)
+        self.assertIn("Falsifier", body)
+        self.assertIn("win-laya-int8", body)
+        self.assertIn("+0.54", body)        # the slope that tripped it
+        self.assertIn("43", body)           # the sample size behind it
+        self.assertIn("35.0h", body)        # first lag, in hours
+        self.assertIn("35.8h", body)        # last lag, in hours
+
+    def test_silent_outranks_nothing_but_wedge_sorts_first(self):
+        wd = self._tool()
+        payload = {"members": {
+            "quiet": {"status": "silent", "why": "named but never voted"},
+            "slow": {"status": "wedge", "slope": 0.3},
+            "slower": {"status": "wedge", "slope": 0.9}}}
+        got = [row["member"] for row in wd.vote_alarms(payload)]
+        self.assertEqual(got, ["slower", "slow", "quiet"])
+
+    def test_a_garbage_payload_yields_no_alarms(self):
+        wd = self._tool()
+        self.assertEqual(wd.vote_alarms(None), [])
+        self.assertEqual(wd.vote_alarms({"members": "nope"}), [])
+        self.assertEqual(wd.vote_alarms({"members": {"m": {"status": "ok"}}}), [])
+
 class TestThinkStats(unittest.TestCase):
     """tools/think_stats.py - say only what the ledger can support.
 
