@@ -6837,6 +6837,93 @@ class TestVoteWatchdog(unittest.TestCase):
         self.assertEqual(verdicts["b"]["seen"], "new")
 
 
+class TestVoteAblation(unittest.TestCase):
+    """tools/vote_ablation.py - the questions the headline hides.
+
+    The equal-budget control reported one number per arm. That number cannot
+    say whether a member died on one distribution, whether a subset of the
+    same votes would have won, or whether the weakest member is weak or merely
+    answering with two labels swapped. This tool asks those three, so the test
+    that matters is: does a genuinely relabelled member get *rescued*, and is
+    a member that is simply bad never reported as rescued.
+    """
+
+    def _tool(self):
+        import importlib.util
+        path = Path(__file__).resolve().parents[1] / "tools" / "vote_ablation.py"
+        spec = importlib.util.spec_from_file_location("vote_ablation", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    @staticmethod
+    def _rows(expected: list[str], choice: list[str]) -> list[dict]:
+        return [{"task_id": f"big6-{i}", "ok": True,
+                 "expected": e, "choice": c}
+                for i, (e, c) in enumerate(zip(expected, choice))]
+
+    def _raw(self, expected, choice) -> dict:
+        """The smallest harvest shape vote_ablation will accept."""
+        return {
+            "suite": "synthetic",
+            "n_rows": len(expected),
+            "arm_a_url": "http://a",
+            "arm_a": {"http://a": self._rows(expected, expected)},
+            "arm_b": {"http://b": self._rows(expected, choice)},
+        }
+
+    def test_a_swapped_member_is_rescued_and_a_weak_member_is_not(self):
+        """The two members this test must tell apart.
+
+        ``swapped`` answers the truth with exactly two labels exchanged, so a
+        single named swap restores it. ``weak`` answers at one third by
+        guessing, so no swap rescues it and some should be reported as
+        significantly *worse*. Collapsing these into one "survivors" list is
+        the bug this asserts against.
+        """
+        va = self._tool()
+        labels = ["a", "b", "c"]
+        expected = [labels[i % 3] for i in range(90)]
+        swapped = [{"a": "b", "b": "a"}.get(e, e) for e in expected]
+
+        swap_arm = self._raw(expected, swapped)["arm_b"]["http://b"]
+        verdict = va.swap_test(swap_arm)
+        self.assertEqual(verdict["rescued"], [["a", "b"]])
+        self.assertEqual(verdict["worsened"], [])
+
+        # A member that is merely confused must not be reported as a fix.
+        weak = [expected[i] if i % 3 else labels[(i + 1) % 3]
+                for i in range(len(expected))]
+        weak_verdict = va.swap_test(self._raw(expected, weak)["arm_b"]["http://b"])
+        self.assertEqual(weak_verdict["rescued"], [],
+                         "a chance-level member must never be called rescued")
+
+    def test_rows_for_does_not_depend_on_the_arm_letter_case(self):
+        """Regression: the raw harvest keys arms lower case, readers do not.
+
+        ``per_member`` names members ``"B <url>"``; the harvest stores them
+        under ``arm_b``. Joining those two spellings by hand is what crashed
+        this tool on every run, so the lookup goes through the member's own
+        fields and this pins that they stay paired.
+        """
+        va = self._tool()
+        # Arm B is deliberately the weaker one, so ``weakest`` has one answer.
+        raw = self._raw(["a", "b"], ["a", "c"])
+        per = va.per_member(raw)
+        self.assertIn("B http://b", per)
+        rows = va.rows_for(raw, per["B http://b"])
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["expected"], "a")
+        self.assertEqual(per["B http://b"]["accuracy"], 0.5)
+        self.assertEqual(va.weakest(per), "B http://b")
+
+    def test_the_bonferroni_bar_rises_with_the_number_of_hypotheses(self):
+        """More variants, a higher bar -- so a subset cannot win by shopping."""
+        va = self._tool()
+        self.assertLess(va.bonferroni_z(1), va.bonferroni_z(4))
+        self.assertLess(va.bonferroni_z(4), va.bonferroni_z(20))
+
+
 class TestVoteVerdictOnThePage(unittest.TestCase):
     """The page reads the judgement; it must never re-derive it.
 
