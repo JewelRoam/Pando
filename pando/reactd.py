@@ -16,6 +16,13 @@ for itself.
 One proposal per pass. Walking the whole history through the resident model
 would spend the machine on display, not on thought. The first pass answers
 the newest proposal and marks the older ones seen.
+
+A reactor that only walks forward from the oldest unseen proposal wedges as
+soon as it falls behind: every pass spends a model forward-pass on a proposal
+that was already decided hours ago, and the feed keeps producing new ones. So
+a proposal older than ``--max-age`` is marked skipped instead of answered.
+Age travels in the id the proposer stamped, so the sweep needs the listing
+only, never a signed body.
 """
 from __future__ import annotations
 
@@ -31,7 +38,9 @@ from .genesis import REACTION_STANCES, sign_reaction
 from .identity import load_or_create
 from .net import local_addresses, open_url
 from .proposal_mail import (delivery_failed, fetch_proposals_any,
-                            mailbox_chain, publish_reaction)
+                            is_proposal_task, mailbox_chain,
+                            proposal_age_seconds, proposal_id_from_title,
+                            publish_reaction, _request)
 
 
 def select_local_stems(nodes: dict, addresses: set[str]) -> list[dict]:
@@ -80,6 +89,73 @@ def load_seen(path: Path) -> set[str]:
         if target and (row.get("skip") or row.get("done")):
             seen.add(target)
     return seen
+
+
+#: Most stale proposals one pass will retire. A backlog is bounded by how
+#: long the reactor was down, and one pass should not write an unbounded
+#: ledger row count; the next pass sweeps whatever is left.
+STALE_SWEEP_LIMIT = 2000
+
+#: A proposal older than this is history, not an open question. An hour is
+#: long enough for a proposal to cross three mailboxes and for every host to
+#: poll, and short enough that a vote still lands while the proposal matters.
+DEFAULT_MAX_AGE = 3600.0
+
+
+def stale_ids(proposal_ids, seen, max_age: float, now: float | None = None):
+    """Unanswered proposal ids older than *max_age*, oldest first.
+
+    An id with no stamp (a genesis seed) has no age and is never swept: it is
+    not stale, it is unattributable, and guessing would drop the seed's own
+    proposals.
+    """
+    moment = time.time() if now is None else now
+    found = []
+    for pid in proposal_ids:
+        pid = str(pid)
+        if not pid or pid in seen:
+            continue
+        age = proposal_age_seconds(pid, moment)
+        if age is not None and age > max_age:
+            found.append((age, pid))
+    found.sort(reverse=True)
+    return [pid for _age, pid in found]
+
+
+def sweep_stale(mailboxes, token: str | None, seen: set[str],
+                max_age: float, ledger: Path, timeout: float,
+                now: float | None = None) -> int:
+    """Retire every proposal in the chain that is too old to answer.
+
+    Reads titles only. Returns how many ids were newly marked skipped.
+    """
+    if not max_age or max_age <= 0:
+        return 0
+    rows = []
+    for url in mailboxes:
+        listing = _request(url, "/tasks?status=all", token, "GET",
+                           timeout=timeout)
+        if isinstance(listing, dict) and listing.get("error"):
+            continue
+        rows = listing.get("tasks") if isinstance(listing, dict) else None
+        if rows:
+            break
+    if not rows:
+        return 0
+    stamped = [proposal_id_from_title(str(row.get("title") or ""))
+               for row in rows
+               if isinstance(row, dict)
+               and is_proposal_task(str(row.get("title") or ""))]
+    moment = time.time() if now is None else now
+    swept = 0
+    for pid in stale_ids(stamped, seen, max_age, moment):
+        if swept >= STALE_SWEEP_LIMIT:
+            break
+        append_ledger(ledger, {"target_id": pid, "skip": True,
+                               "stale": True, "at": moment})
+        seen.add(pid)
+        swept += 1
+    return swept
 
 
 def append_ledger(path: Path, row: dict) -> None:
@@ -210,13 +286,17 @@ def ask_stem(stem: dict, proposal, timeout: float) -> dict:
 
 def react_once(proposals, stems: list[dict], identity, mailbox,
                token: str | None, ledger: Path, timeout: float,
-               mailbox_fallbacks=None) -> dict:
+               mailbox_fallbacks=None, max_age: float | None = None) -> dict:
     """Answer one not-yet-answered proposal.
 
     On the first run, every proposal but the newest is marked skipped, so a
     restart does not walk history through the models. A reaction is only
     counted as done after a mailbox accepted it; a failed post leaves the
     proposal retryable instead of silently treating a lost vote as a vote.
+
+    ``max_age`` retires proposals that are already history. Without it a
+    reactor that fell behind answers the oldest unseen proposal for ever and
+    never reaches a current one.
     """
     seen = load_seen(ledger)
     ordered = [item for item in proposals if getattr(item, "proposal_id", "")]
@@ -228,8 +308,21 @@ def react_once(proposals, stems: list[dict], identity, mailbox,
                                    "at": time.time()})
             seen.add(old.proposal_id)
     pending = [item for item in ordered if item.proposal_id not in seen]
+    retired: list[str] = []
+    if max_age and max_age > 0:
+        retired = stale_ids([item.proposal_id for item in pending], seen,
+                            max_age)
+        for pid in retired:
+            append_ledger(ledger, {"target_id": pid, "skip": True,
+                                   "stale": True, "at": time.time()})
+            seen.add(pid)
+        if retired:
+            expired = set(retired)
+            pending = [item for item in pending
+                       if item.proposal_id not in expired]
     if not pending:
-        return {"did": "idle", "reason": "caught up", "seen": len(seen)}
+        return {"did": "idle", "reason": "caught up", "seen": len(seen),
+                "stale": len(retired)}
     if not stems:
         return {"did": "idle", "reason": "no local stems"}
     proposal = pending[0]
@@ -290,6 +383,9 @@ def main() -> int:
     parser.add_argument("--ledger", default="~/.pandosi/reaction-ledger.jsonl")
     parser.add_argument("--interval", type=float, default=40)
     parser.add_argument("--timeout", type=float, default=50)
+    parser.add_argument("--max-age", type=float, default=DEFAULT_MAX_AGE,
+                        help="retire proposals older than this many seconds "
+                             "instead of answering them (0 = no limit)")
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
 
@@ -299,17 +395,24 @@ def main() -> int:
     ledger = Path(args.ledger).expanduser()
     addresses = local_addresses()
     mailboxes = mailbox_chain(args.mailbox, args.mailbox_fallback)
+    max_age = args.max_age if args.max_age and args.max_age > 0 else None
     while True:
         try:
             nodes = fetch_nodes(args.root, pairing)
             stems = select_local_stems(nodes, addresses)
+            seen = load_seen(ledger)
+            swept = sweep_stale(mailboxes, token, seen, max_age, ledger,
+                                args.timeout)
             proposals, _source, read_error = fetch_proposals_any(
-                mailboxes, token, status="all", max_items=30,
-                timeout=args.timeout)
+                mailboxes, token, status="all", timeout=args.timeout,
+                skip_ids=seen)
             if read_error and not proposals:
                 raise RuntimeError(read_error)
             report = react_once(proposals, stems, identity, mailboxes,
-                                token, ledger, args.timeout)
+                                token, ledger, args.timeout,
+                                max_age=max_age)
+            if swept:
+                report["swept"] = swept
             print(time.strftime("%H:%M:%S"),
                   json.dumps(report, ensure_ascii=False), flush=True)
         except Exception as exc:  # noqa: BLE001 - a pass must not kill the loop

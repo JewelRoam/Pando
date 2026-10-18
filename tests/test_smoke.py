@@ -2981,7 +2981,8 @@ class TestReactions(unittest.TestCase):
         seen = []
 
         def fake_fetch(url, token=None, pinned=None, status="all",
-                       timeout=15, max_items=None, rows=None):
+                       timeout=15, max_items=None, rows=None,
+                       skip_ids=None):
             seen.append(url)
             return ["proposal-from-fallback"] if url == "http://fallback" else []
 
@@ -3053,6 +3054,239 @@ class TestReactions(unittest.TestCase):
         self.assertEqual(asks, ["p1", "p1"])
         self.assertEqual(posts, ["http://primary", "http://primary"])
 
+
+
+    def test_a_reactor_that_fell_behind_answers_now_not_yesterday(self):
+        """The oldest unseen proposal must not be answered for ever.
+
+        Walking forward from the oldest unseen is right while the reactor
+        keeps up and a wedge the moment it does not: every pass spends a
+        model forward-pass on a proposal the group decided hours ago and the
+        feed keeps producing new ones. A stale proposal is retired, and the
+        pass goes to a current one.
+        """
+        import time as _t
+        from types import SimpleNamespace
+        from unittest import mock
+        from pathlib import Path as _P
+        from pando import reactd
+        from pando.identity import load_or_create
+
+        now = _t.time()
+        stale = SimpleNamespace(proposal_id=f"p-old-r1-{int(now) - 7200}",
+                                author="other", goal="goal", action="action")
+        fresh = SimpleNamespace(proposal_id=f"p-new-r2-{int(now) - 60}",
+                                author="other", goal="goal", action="action")
+        stems = [{"node_id": "neck-a", "url": "http://a", "checkpoint": "c-a"}]
+        asked = []
+
+        def fake_ask(stem, proposal, timeout):
+            asked.append(proposal.proposal_id)
+            return {"stance": "赞同", "probability": None}
+
+        with tempfile.TemporaryDirectory() as td, \
+                mock.patch.object(reactd, "ask_stem", fake_ask), \
+                mock.patch.object(reactd, "publish_reaction",
+                                  lambda *a, **k: {"claimed": True}):
+            identity = load_or_create(_P(td) / "identity.json")
+            ledger = _P(td) / "ledger.jsonl"
+            # A ledger with history, so the one-shot first-pass branch (which
+            # skips everything but the newest) cannot be what is measured.
+            reactd.append_ledger(ledger, {"target_id": "already",
+                                          "skip": True, "at": now})
+            report = reactd.react_once([stale, fresh], stems, identity,
+                                       "http://mailbox", None, ledger, 5,
+                                       max_age=3600)
+            rows = [json.loads(line)
+                    for line in ledger.read_text().splitlines() if line]
+
+        self.assertEqual(asked, [fresh.proposal_id])
+        self.assertEqual(report["did"], "reacted")
+        retired = {r["target_id"] for r in rows if r.get("skip")}
+        self.assertIn(stale.proposal_id, retired)
+        self.assertNotIn(fresh.proposal_id, retired)
+
+    def test_a_proposal_with_no_stamp_has_no_age_and_is_never_swept(self):
+        """Genesis seeds carry no stamp: unattributable is not stale."""
+        import time as _t
+        from types import SimpleNamespace
+        from unittest import mock
+        from pathlib import Path as _P
+        from pando import reactd
+        from pando.identity import load_or_create
+
+        now = _t.time()
+        seed = SimpleNamespace(proposal_id="live-1", author="other",
+                               goal="goal", action="action")
+        fresh = SimpleNamespace(proposal_id=f"p-new-r2-{int(now) - 60}",
+                                author="other", goal="goal", action="action")
+        stems = [{"node_id": "neck-a", "url": "http://a", "checkpoint": "c-a"}]
+        asked = []
+
+        def fake_ask(stem, proposal, timeout):
+            asked.append(proposal.proposal_id)
+            return {"stance": "赞同", "probability": None}
+
+        with tempfile.TemporaryDirectory() as td, \
+                mock.patch.object(reactd, "ask_stem", fake_ask), \
+                mock.patch.object(reactd, "publish_reaction",
+                                  lambda *a, **k: {"claimed": True}):
+            identity = load_or_create(_P(td) / "identity.json")
+            ledger = _P(td) / "ledger.jsonl"
+            reactd.append_ledger(ledger, {"target_id": "already",
+                                          "skip": True, "at": now})
+            reactd.react_once([seed, fresh], stems, identity,
+                              "http://mailbox", None, ledger, 5,
+                              max_age=3600)
+            rows = [json.loads(line)
+                    for line in ledger.read_text().splitlines() if line]
+
+        self.assertEqual(asked, ["live-1"])
+        self.assertNotIn("live-1",
+                         {r["target_id"] for r in rows if r.get("skip")})
+
+    def test_a_settled_proposal_body_is_not_fetched_again(self):
+        """One signed-body GET per proposal ever made is what wedges a poll.
+
+        The listing is how a reactor learns a proposal exists; the body is
+        only worth a round trip while the proposal is still open.
+        """
+        from unittest import mock
+        from pathlib import Path as _P
+        from pando import proposal_mail
+        from pando.genesis import Proposal, sign_proposal
+        from pando.identity import load_or_create
+
+        rows = [{"id": "t1", "title": "[proposal] p1 do.a by ann"},
+                {"id": "t2", "title": "[proposal] p2 do.b by ann"}]
+        ids = {row["id"]: row["title"].split()[1] for row in rows}
+        paths = []
+
+        with tempfile.TemporaryDirectory() as td:
+            ident = load_or_create(_P(td) / "identity.json")
+
+            def body_for(pid):
+                return json.dumps(sign_proposal(
+                    Proposal(proposal_id=pid, author="ann", goal="goal",
+                             action="do.a"), ident))
+
+            def fake_request(url, path, token, method, payload=None,
+                             timeout=15):
+                paths.append(path)
+                return {"task": {"body": body_for(ids[path.rsplit("/", 1)[-1]])}}
+
+            with mock.patch.object(proposal_mail, "_request", fake_request):
+                found = proposal_mail.fetch_proposals(
+                    "http://mailbox", None, rows=rows, skip_ids={"p2"})
+
+        self.assertEqual(paths, ["/task/t1"])
+        self.assertEqual([p.proposal_id for p in found], ["p1"])
+
+    def test_a_bounded_poll_reads_the_newest_rows_only(self):
+        """``max_items`` has to bound the work, not just the returned list.
+
+        reactd asked for the newest thirty rows and silently got every row
+        the mailbox ever held, which is thousands of signed-body GETs a pass.
+        """
+        from unittest import mock
+        from pathlib import Path as _P
+        from pando import proposal_mail
+        from pando.genesis import Proposal, sign_proposal
+        from pando.identity import load_or_create
+
+        rows = [{"id": f"t{i}", "title": f"[proposal] p{i} do.a by ann"}
+                for i in range(5)]
+        ids = {row["id"]: row["title"].split()[1] for row in rows}
+        paths = []
+
+        with tempfile.TemporaryDirectory() as td:
+            ident = load_or_create(_P(td) / "identity.json")
+
+            def fake_request(url, path, token, method, payload=None,
+                             timeout=15):
+                if path.startswith("/tasks"):
+                    return {"tasks": rows}
+                paths.append(path)
+                return {"task": {"body": json.dumps(sign_proposal(
+                    Proposal(proposal_id=ids[path.rsplit("/", 1)[-1]],
+                             author="ann", goal="goal", action="do.a"),
+                    ident))}}
+
+            with mock.patch.object(proposal_mail, "_request", fake_request):
+                found, _source, _error = proposal_mail.fetch_proposals_any(
+                    ["http://mailbox"], None, max_items=2, timeout=5)
+
+        self.assertEqual(paths, ["/task/t3", "/task/t4"])
+        self.assertEqual([p.proposal_id for p in found], ["p3", "p4"])
+
+    def test_the_sweep_reads_titles_and_retires_the_backlog(self):
+        """A wedged reactor heals in one pass without reading a body."""
+        import time as _t
+        from unittest import mock
+        from pathlib import Path as _P
+        from pando import reactd
+
+        now = _t.time()
+        old = f"p-old-r1-{int(now) - 7200}"
+        new = f"p-new-r2-{int(now) - 60}"
+        rows = [{"id": "t1", "title": f"[proposal] {old} do.a by ann"},
+                {"id": "t2", "title": f"[proposal] {new} do.a by ann"},
+                {"id": "t3", "title": "[chat] hello"}]
+        paths = []
+
+        def fake_request(url, path, token, method, payload=None, timeout=15):
+            paths.append(path)
+            return {"tasks": rows}
+
+        with tempfile.TemporaryDirectory() as td, \
+                mock.patch.object(reactd, "_request", fake_request):
+            ledger = _P(td) / "ledger.jsonl"
+            seen = reactd.load_seen(ledger)
+            swept = reactd.sweep_stale(["http://mailbox"], None, seen, 3600.0,
+                                       ledger, 5)
+            rows_written = [json.loads(line)
+                            for line in ledger.read_text().splitlines() if line]
+
+        self.assertEqual(swept, 1)
+        self.assertEqual(paths, ["/tasks?status=all"])
+        self.assertEqual([r["target_id"] for r in rows_written], [old])
+        self.assertTrue(rows_written[0]["stale"])
+        self.assertNotIn(new, seen)
+
+    def test_a_sweep_without_a_limit_retires_nothing(self):
+        """``--max-age 0`` is the escape hatch back to no sweeping."""
+        import time as _t
+        from unittest import mock
+        from pathlib import Path as _P
+        from pando import reactd
+
+        now = _t.time()
+        old = f"p-old-r1-{int(now) - 7200}"
+        rows = [{"id": "t1", "title": f"[proposal] {old} do.a by ann"}]
+
+        with tempfile.TemporaryDirectory() as td, \
+                mock.patch.object(reactd, "_request",
+                                  lambda *a, **k: {"tasks": rows}):
+            ledger = _P(td) / "ledger.jsonl"
+            seen = reactd.load_seen(ledger)
+            swept = reactd.sweep_stale(["http://mailbox"], None, seen, 0,
+                                       ledger, 5)
+
+        self.assertEqual(swept, 0)
+        self.assertFalse(ledger.exists())
+
+    def test_an_unstamped_id_never_looks_stale(self):
+        """Age comes from the id; an id without one has no age to compare."""
+        from pando.proposal_mail import (proposal_age_seconds,
+                                         proposal_id_from_title)
+
+        self.assertIsNone(proposal_age_seconds("live-1"))
+        self.assertEqual(proposal_id_from_title("[proposal] p1 do.a by ann"),
+                         "p1")
+        self.assertEqual(proposal_id_from_title("[chat] hello"), "")
+        self.assertEqual(proposal_id_from_title(""), "")
+        self.assertGreater(proposal_age_seconds("p-r1-1000000000", 1000000060),
+                           59)
 
 
 class TestChatMailboxPartition(unittest.TestCase):

@@ -23,6 +23,8 @@ The convention, by the same rule as ``[chat]``:
 from __future__ import annotations
 
 import json
+import time
+import re
 import urllib.error
 import urllib.request
 
@@ -37,6 +39,34 @@ PROPOSAL_PREFIX = TITLE_PREFIX
 def is_proposal_task(title: str) -> bool:
     """True when a mailbox task title marks a message rather than work."""
     return str(title).lstrip().startswith(TITLE_PREFIX)
+
+
+#: Proposer-generated ids end in the unix second they were stamped:
+#: ``<node>-r<round>-<unix>``. Genesis seeds (``live-1``) carry no stamp, so
+#: their age is unknown rather than negative.
+_ID_STAMP = re.compile(r"-(\d{9,})$")
+
+
+def proposal_id_from_title(title: str) -> str:
+    """The proposal id a ``[proposal]`` title carries, or ``""``.
+
+    The title is ``[proposal] <id> <action> by <author>``; reading the id out
+    of it means a reader can tell how old a proposal is without fetching and
+    verifying the signed body.
+    """
+    text = str(title or "").lstrip()
+    if not text.startswith(TITLE_PREFIX):
+        return ""
+    rest = text[len(TITLE_PREFIX):].strip()
+    return rest.split()[0] if rest else ""
+
+
+def proposal_age_seconds(proposal_id: str, now: float | None = None):
+    """Seconds since the proposer stamped this id, or ``None`` if unstamped."""
+    match = _ID_STAMP.search(str(proposal_id or ""))
+    if match is None:
+        return None
+    return (time.time() if now is None else now) - float(match.group(1))
 
 
 REACTION_PREFIX = "[reaction]"
@@ -99,7 +129,8 @@ def delivery_failed(result) -> bool:
 def fetch_proposals_any(urls, token: str | None = None,
                         pinned: dict[str, str] | None = None,
                         status: str = "all", timeout: float = 15,
-                        max_items: int | None = None):
+                        max_items: int | None = None,
+                        skip_ids=None):
     """Read the first non-empty proposal feed in *urls*.
 
     Returns ``(proposals, source_url, last_error)``. An empty feed is not a
@@ -123,9 +154,14 @@ def fetch_proposals_any(urls, token: str | None = None,
         last_error = None
         rows = listing.get("tasks") if isinstance(listing, dict) else None
         rows = rows if isinstance(rows, list) else []
+        if max_items is not None:
+            # A caller that asked for the newest N rows must get them: the
+            # listing can be thousands of rows long, and one signed-body GET
+            # per row is what turns a poll into a minute of work.
+            rows = rows[-max_items:]
         proposals = fetch_proposals(url, token, pinned=pinned, status=status,
                                     timeout=timeout, max_items=max_items,
-                                    rows=rows)
+                                    rows=rows, skip_ids=skip_ids)
         if proposals:
             return proposals, url, None
     return [], None, None if answered else last_error
@@ -201,7 +237,8 @@ def fetch_proposals(url: str, token: str | None = None,
                     pinned: dict[str, str] | None = None,
                     status: str = "all", timeout: float = 15,
                     max_items: int | None = None,
-                    rows: list | None = None) -> list[Proposal]:
+                    rows: list | None = None,
+                    skip_ids=None) -> list[Proposal]:
     """Every verifiable proposal on the mailbox, in the order it was left.
 
     Unverifiable ones are dropped rather than raising, so a mixed feed (chat,
@@ -211,6 +248,10 @@ def fetch_proposals(url: str, token: str | None = None,
 
     ``rows`` is a listing already chosen by the caller. When it is given,
     this does not list the mailbox again and does not apply ``max_items``.
+
+    ``skip_ids`` names proposals the caller has already dealt with. Their
+    bodies are not fetched, which is the difference between a poll that costs
+    one request and one that costs one request per proposal ever made.
     """
     if rows is None:
         listing = _request(url, f"/tasks?status={status}", token, "GET",
@@ -220,11 +261,18 @@ def fetch_proposals(url: str, token: str | None = None,
             tasks = tasks[-max_items:]
     else:
         tasks = rows
+    skip = {str(s) for s in (skip_ids or ())}
     records = []
     for task in tasks:
         if not isinstance(task, dict):
             continue
-        if not is_proposal_task(str(task.get("title", ""))):
+        title = str(task.get("title", ""))
+        if not is_proposal_task(title):
+            continue
+        stamped = proposal_id_from_title(title)
+        if stamped and stamped in skip:
+            # Already answered or skipped: reading its body again every poll
+            # buys nothing and costs one round trip per row.
             continue
         full = _request(url, f"/task/{task.get('id')}", token, "GET",
                         timeout=timeout)
