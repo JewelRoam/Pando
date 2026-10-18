@@ -10,8 +10,9 @@ tested actuator for that exact action exists.
 ``ACTUATORS`` is that boundary, and it is short on purpose. As of today:
 
 - ``seed.export`` — seal this host's identity into a bundle. Wired.
-- ``seed.replicate`` — stage that bundle for a host that pulls it. Wired up
-  to a transport that does not exist; naming a host is not permission to send.
+- ``seed.replicate`` — stage that bundle for a host that pulls it. The offer
+  waits in the local outbox; there is no push transport, and naming a host is
+  not permission to open a socket to it.
 - ``policy.set`` — move a knob in ``pando/policy.py``. Wired, bounded, and the
   only actuator that changes what the gate does next round.
 - ``culture.refine`` — stage a signed, validated playbook *candidate* into a
@@ -717,7 +718,8 @@ def addressed_replications(proposals: list[Proposal], reactions: list[dict],
                            knobs: dict | None = None) -> list[tuple[str, str]]:
     """Adopted seed.replicate ids signed here that name a host.
 
-    Naming a host is not permission to send. There is still no transport.
+    A pull host gets an offer in the outbox. For every other named host there
+    is no push transport; naming it is not permission to open a socket.
     """
     found = []
     for proposal in proposals:

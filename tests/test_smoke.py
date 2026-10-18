@@ -10,6 +10,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import shutil
 import sys
 import subprocess
@@ -4901,6 +4902,31 @@ class TestSeedReceive(unittest.TestCase):
             self.assertNotIn(live.to_json()["secret_key"], json.dumps(stored))
             self.assertTrue((outbox / "repl-1.ack.json").is_file())
             self.assertFalse((root / "inbox" / "repl-plain").exists())
+
+
+class TestWindowsSeedPull(unittest.TestCase):
+    def test_windows_supervisor_starts_and_restarts_the_seed_pull_client(self):
+        root = Path(__file__).resolve().parents[1]
+        supervisor = (root / "tools" / "win_node_supervisor.ps1").read_text(
+            encoding="utf-8")
+        restart = (root / "tools" / "win_stack_restart.ps1").read_text(
+            encoding="utf-8")
+        self.assertIn("$seedPullArgs", supervisor)
+        self.assertIn("tools\\seed_pull.py", supervisor)
+        self.assertIn("'seed-pull'", supervisor)
+        self.assertIn("seed_pull\\.py", restart)
+        self.assertNotIn("New-ScheduledTask", supervisor)
+
+        def item_count(name):
+            match = re.search(
+                rf"\${name}\s*=\s*@\((.*?)\)\r?\n", supervisor, re.S)
+            self.assertIsNotNone(match, name)
+            return len([part for part in match.group(1).split(",") if part.strip()])
+
+        lengths = {name: item_count(name)
+                   for name in ("names", "exes", "argsList", "cwds")}
+        self.assertEqual(len(set(lengths.values())), 1, lengths)
+        self.assertEqual(lengths["names"], 15)
 
 
 class TestCodeSync(unittest.TestCase):

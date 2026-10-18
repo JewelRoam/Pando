@@ -317,8 +317,9 @@ The Mac's full answer lives in mailbox task t-20261017-001001-f790. Load-bearing
 ## 2026-10-18 - policy.set: the first actuator that moves the gate itself
 
 - The execution layer is now three actions deep, not one: `seed.export` (seals 43 times in the
-  live ledger), `seed.replicate` (stages a bundle; the transport it names still does not exist,
-  so `no-transport` is the honest outcome), and `policy.set` (moves a knob in
+  live ledger), `seed.replicate` (stages a sealed bundle for a pull destination; the Mac outbox
+  and pi5 pull service completed that path, while a named URL host still has no push transport,
+  so `no-transport` remains the honest outcome there), and `policy.set` (moves a knob in
   `~/.pandosi/policy.json`, applied once per round).
 - `policy.set` is the only verb that changes what the gate does next round, so its store is the
   most conservative thing in the repo. The knob set is closed (`min_adopt`, `veto`); a proposal

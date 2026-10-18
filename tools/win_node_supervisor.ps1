@@ -97,18 +97,26 @@ $rootArgs = @('-m', 'pando.rootd', '--port', '8790',
   '--lan', '--require-identity', '--quorum-k', '3',
   '--stem-call-timeout', '120', '--initial-stem-timeout', '30')
 $executorArgs = @("$repo\tools\execute_loop.py", '300')
+# The receive side of seed.replicate. The Mac executor stages sealed bundles
+# in its outbox; this process pulls and verifies them into a local inbox. It
+# never decrypts a seed, starts a model, or accepts a non-sealed bundle.
+$seedPullArgs = @("$repo\tools\seed_pull.py", '--from',
+  'http://192.168.31.41:8478',
+  '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
+  '--inbox', 'D:\pando-models\seed-inbox',
+  '--ledger', 'D:\pando-models\seed-receive-ledger.jsonl')
 
 $names = @('llama-3070', 'stem-gemma', 'stem-laya', 'worker', 'win-mailbox',
   'llama-yi-cpu', 'stem-yi', 'think-proposer', 'think-yi', 'observatory', 'chat',
-  'react', 'executor-loop', 'rootd')
+  'react', 'executor-loop', 'rootd', 'seed-pull')
 $exes = @($llamaExe, $python, $python, $python, $python, $llamaExe, $python,
   $python, $python, $python, $python, $python, $python, $python, $python)
 $argsList = @($llamaArgs, $gemmaArgs, $layaArgs, $workerArgs, $mailboxArgs,
   $yiLlamaArgs, $yiStemArgs, $thinkArgs, $yiThinkArgs, $observatoryArgs, $chatArgs,
-  $reactArgs, $executorArgs, $rootArgs)
+  $reactArgs, $executorArgs, $rootArgs, $seedPullArgs)
 $cwds = @('D:\pando-models\llama-cuda', $repo, $repo, $repo, $repo,
   'D:\pando-models\llama-cuda', $repo, $repo, $repo, $repo, $repo, $repo, $repo,
-  $repo)
+  $repo, $repo)
 
 $procs = @{}
 while ($true) {
