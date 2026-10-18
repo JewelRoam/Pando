@@ -22,6 +22,7 @@ from pathlib import Path
 from .chat import message_text, next_reply, normalize_chat
 from .common import PROPOSING_ROLE
 from .net import local_addresses, open_url
+from .proposal_mail import delivery_failed, mailbox_chain
 
 
 def _read(path: str | None) -> str | None:
@@ -34,7 +35,7 @@ def _read(path: str | None) -> str | None:
     return text or None
 
 
-def load_hosts(path: str) -> tuple[list[dict], str | None]:
+def load_hosts(path: str) -> tuple[list[dict], list[str]]:
     data = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
     roots = []
     for row in data.get("roots") or []:
@@ -45,9 +46,13 @@ def load_hosts(path: str) -> tuple[list[dict], str | None]:
             "url": str(row["url"]).rstrip("/"),
             "token": _read(row.get("token_file")),
         })
-    mailboxes = data.get("mailboxes") or []
-    mailbox = str(mailboxes[0]).rstrip("/") if mailboxes else None
-    return roots, mailbox
+    # A single primary is a partition hole: when the local mailbox is the one
+    # that is down, the replica is the only place a chat can land. hosts.json
+    # may name a chain, and the whole chain is kept in order.
+    mailboxes = [str(url).rstrip("/") for url in (data.get("mailboxes") or [])
+                 if str(url).strip()]
+    return roots, mailbox_chain(mailboxes[0] if mailboxes else "",
+                                mailboxes[1:])
 
 
 def fetch_nodes(root: str, token: str | None, timeout: float) -> dict:
@@ -216,6 +221,14 @@ def publish(mailbox: str, token: str | None, sender: str, to: str,
     return {"id": task_id, "claimed": "task" in claim, "claim": claim}
 
 
+def _mailboxes(urls) -> list[str]:
+    """Ordered, deduplicated mailbox chain. Accepts one url or a list."""
+    if isinstance(urls, str):
+        return mailbox_chain(urls)
+    urls = list(urls or [])
+    return mailbox_chain(urls[0] if urls else "", urls[1:])
+
+
 def list_tasks(mailbox: str, token: str | None, timeout: float) -> list[dict]:
     listed = _request(mailbox.rstrip("/") + "/tasks?status=all", token,
                       "GET", None, timeout)
@@ -223,6 +236,32 @@ def list_tasks(mailbox: str, token: str | None, timeout: float) -> list[dict]:
     if not isinstance(tasks, list):
         raise RuntimeError(listed.get("error", "bad task list") if isinstance(listed, dict) else "bad task list")
     return tasks
+
+
+def fetch_tasks_any(urls, token: str | None, timeout: float):
+    """Read the first non-empty chat feed in *urls*.
+
+    Returns ``(tasks, source_url, last_error)``. An empty feed is not a
+    successful answer while another mailbox remains: replication can lag, and
+    a quiet primary must not hide the messages that arrived on the replica
+    during a partition. An empty feed from a mailbox that did answer is a
+    real answer -- this machine having nothing to say is not an error.
+    """
+    last_error = None
+    answered = False
+    for url in _mailboxes(urls):
+        listing = _request(url.rstrip("/") + "/tasks?status=all", token,
+                           "GET", None, timeout)
+        if isinstance(listing, dict) and listing.get("error"):
+            last_error = str(listing.get("error"))
+            continue
+        answered = True
+        last_error = None
+        rows = listing.get("tasks") if isinstance(listing, dict) else None
+        rows = rows if isinstance(rows, list) else []
+        if rows:
+            return rows, url, None
+    return [], None, None if answered else last_error
 
 
 def full_task(mailbox: str, token: str | None, task: dict, timeout: float) -> dict:
@@ -234,21 +273,63 @@ def full_task(mailbox: str, token: str | None, task: dict, timeout: float) -> di
     return full if isinstance(full, dict) else task
 
 
+def full_task_any(urls, token: str | None, task: dict, timeout: float) -> dict:
+    """Fetch a task body from whichever mailbox in the chain carries it.
+
+    A listing can come from the replica while the body fetch lands on a
+    primary that has not caught up; both are the same id after replication,
+    so trying the chain is what keeps a lagging partition from silently
+    turning a chat message into an empty one.
+    """
+    if str(task.get("body") or "").strip():
+        return task
+    for url in _mailboxes(urls):
+        full = full_task(url, token, task, timeout)
+        if str(full.get("body") or "").strip():
+            return full
+    return task
+
+
+def publish_any(urls, token: str | None, sender: str, to: str,
+                text: str, timeout: float) -> dict:
+    """Post one chat reply to the first mailbox that hears it.
+
+    A dead mailbox and a 5xx go to the next URL; a 4xx is a final refusal and
+    is returned without asking another host. A reply posted to a replica
+    replicates back to the primary within one pass, which is what "queued"
+    means here. A reply posted nowhere is gone, and a chat member that goes
+    quiet during a partition is indistinguishable from one that has nothing
+    to say.
+    """
+    last = {"error": "unreachable: no mailbox configured"}
+    for url in _mailboxes(urls):
+        result = publish(url, token, sender, to, text, timeout)
+        if not delivery_failed(result):
+            if isinstance(result, dict):
+                result.setdefault("mailbox", url)
+            return result
+        last = result
+    return last
+
+
 def bootstrap_ids(tasks: list[dict]) -> list[str]:
     return [str(task.get("id")) for task in tasks
             if str(task.get("id") or "") and str(task.get("title") or "").startswith("[chat]")]
 
 
-def pass_once(mailbox: str, token: str | None, members: list[dict],
+def pass_once(urls, token: str | None, members: list[dict],
               chat_ids: set[str], answered: set[tuple[str, str]],
               peers: dict[str, list[str]], timeout: float,
               bootstrapped: bool) -> dict:
-    tasks = list_tasks(mailbox, token, timeout)
+    tasks, read_from, read_error = fetch_tasks_any(urls, token, timeout)
+    if read_error and not tasks:
+        raise RuntimeError(read_error)
     if not bootstrapped:
         ids = bootstrap_ids(tasks)
-        for source in ids:
-            answered.add(("*", source))
-        return {"did": "bootstrap", "seen": len(ids), "ids": ids}
+        for task_id in ids:
+            answered.add(("*", task_id))
+        return {"did": "bootstrap", "seen": len(ids), "ids": ids,
+                "read_from": read_from}
     # "*" marks bootstrapped history. A node-specific pair marks a real reply.
     visible = []
     for task in tasks:
@@ -259,7 +340,7 @@ def pass_once(mailbox: str, token: str | None, members: list[dict],
             continue
         if members and all((member["node_id"], source) in answered for member in members):
             continue
-        visible.append(full_task(mailbox, token, task, timeout))
+        visible.append(full_task_any(urls, token, task, timeout))
     choice = next_reply(members, chat_ids, visible, answered, peers)
     if choice is None:
         return {"did": "idle", "members": [item["node_id"] for item in members]}
@@ -273,12 +354,13 @@ def pass_once(mailbox: str, token: str | None, members: list[dict],
             RuntimeError, KeyError, ValueError) as exc:
         return {"did": "error", "member": member["node_id"], "source": task.get("id"),
                 "sender": sender, "error": str(exc)}
-    posted = publish(mailbox, token, member["node_id"], sender, reply, timeout)
+    posted = publish_any(urls, token, member["node_id"], sender, reply, timeout)
     if not posted.get("id"):
         return {"did": "error", "member": member["node_id"], "post": posted}
     return {"did": "spoke", "member": member["node_id"], "model": member["model"],
             "source": task.get("id"), "sender": sender, "id": posted["id"],
-            "claimed": posted.get("claimed")}
+            "claimed": posted.get("claimed"), "mailbox": posted.get("mailbox"),
+            "read_from": read_from}
 
 
 def main() -> int:
@@ -287,6 +369,9 @@ def main() -> int:
     parser.add_argument("--root", action="append", default=[])
     parser.add_argument("--pairing-token-file", default=None)
     parser.add_argument("--mailbox", default=os.environ.get("PANDOSI_MAILBOX_URL"))
+    parser.add_argument("--mailbox-fallback", action="append", default=[],
+                        help="read from, and post to, this mailbox if the "
+                             "primary does not answer (repeatable)")
     parser.add_argument("--token-file", default=os.environ.get(
         "PANDOSI_MAILBOX_TOKEN_FILE", "~/.pandosi/mailbox.token"))
     parser.add_argument("--ledger", default="~/.pandosi/chat-ledger.jsonl")
@@ -296,15 +381,17 @@ def main() -> int:
     args = parser.parse_args()
 
     roots = []
-    mailbox = args.mailbox
+    host_mailboxes: list[str] = []
     if args.hosts:
-        loaded, host_mailbox = load_hosts(args.hosts)
+        loaded, host_mailboxes = load_hosts(args.hosts)
         roots.extend(loaded)
-        mailbox = mailbox or host_mailbox
     token = args.pairing_token_file and _read(args.pairing_token_file)
     for url in args.root:
         roots.append({"name": url, "url": url.rstrip("/"), "token": token})
+    # The CLI mailbox wins, then whatever hosts.json named, then --mailbox-fallback.
+    mailbox = args.mailbox or (host_mailboxes[0] if host_mailboxes else None)
     mailbox = mailbox or "http://127.0.0.1:8776"
+    mailboxes = mailbox_chain(mailbox, host_mailboxes[1:] + args.mailbox_fallback)
     mail_token = _read(args.token_file)
     ledger = Path(args.ledger).expanduser()
     addresses = local_addresses()
@@ -323,8 +410,8 @@ def main() -> int:
             members, known = local_chat_members(
                 nodes, addresses,
                 health_of=lambda url: fetch_health(url, min(4, args.timeout)))
-            report = pass_once(mailbox, mail_token, members, known, answered,
-                               peers, args.timeout, bootstrapped)
+            report = pass_once(mailboxes, mail_token, members, known,
+                               answered, peers, args.timeout, bootstrapped)
             if report.get("did") == "bootstrap":
                 append_ledger(ledger, {"bootstrap": True, "at": time.time(),
                                        "ids": report.get("ids") or []})

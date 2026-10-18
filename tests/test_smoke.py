@@ -3054,6 +3054,184 @@ class TestReactions(unittest.TestCase):
         self.assertEqual(posts, ["http://primary", "http://primary"])
 
 
+
+class TestChatMailboxPartition(unittest.TestCase):
+    """A chat reply posted nowhere is not queued; it is gone.
+
+    chatd was the last writer in the colony with a single mailbox and no
+    fallback: during a partition a present member looked exactly like a mute
+    one. These pin the chain that closes that hole.
+    """
+
+    def test_a_reply_uses_the_fallback_mailbox_when_the_primary_is_deaf(self):
+        from unittest import mock
+        from pando import chatd
+
+        calls = []
+
+        def fake_request(url, token, method, payload, timeout):
+            calls.append(url)
+            if url.startswith("http://primary"):
+                return {"error": "unreachable: primary"}
+            if url.endswith("/task"):
+                return {"task": {"id": "t1"}}
+            return {"task": {"id": "t1"}}
+
+        with mock.patch.object(chatd, "_request", fake_request):
+            posted = chatd.publish_any(["http://primary", "http://fallback"],
+                                       None, "mac-llm", "mac-codex", "在。", 5)
+
+        self.assertEqual(posted["id"], "t1")
+        self.assertEqual(posted["mailbox"], "http://fallback")
+        self.assertTrue(posted["claimed"])
+        self.assertEqual([u for u in calls if u.startswith("http://primary")],
+                         ["http://primary/task"])
+
+    def test_a_refusal_is_final_and_not_retried_elsewhere(self):
+        """A 4xx means the mailbox heard the reply and refused it."""
+        from unittest import mock
+        from pando import chatd
+
+        calls = []
+
+        def fake_request(url, token, method, payload, timeout):
+            calls.append(url)
+            return {"error": "HTTP 403", "detail": "no"}
+
+        with mock.patch.object(chatd, "_request", fake_request):
+            posted = chatd.publish_any(["http://primary", "http://fallback"],
+                                       None, "mac-llm", "mac-codex", "在。", 5)
+
+        self.assertEqual(calls, ["http://primary/task"])
+        self.assertIn("HTTP 403", posted["error"])
+
+    def test_reading_chat_falls_through_an_unreachable_primary(self):
+        from unittest import mock
+        from pando import chatd
+
+        seen = []
+
+        def fake_request(url, token, method, payload, timeout):
+            seen.append(url)
+            if url.startswith("http://primary"):
+                return {"error": "unreachable: primary"}
+            return {"tasks": [{"id": "t1", "title": "[chat] @mac-llm: hi"}]}
+
+        with mock.patch.object(chatd, "_request", fake_request):
+            rows, source, error = chatd.fetch_tasks_any(
+                ["http://primary", "http://fallback"], None, 5)
+
+        self.assertEqual(seen, ["http://primary/tasks?status=all",
+                                "http://fallback/tasks?status=all"])
+        self.assertEqual([row["id"] for row in rows], ["t1"])
+        self.assertEqual(source, "http://fallback")
+        self.assertIsNone(error)
+
+    def test_an_empty_fallback_is_healthy_even_if_primary_is_down(self):
+        """This machine having nothing to say is idle, not a failed poll."""
+        from unittest import mock
+        from pando import chatd
+
+        def fake_request(url, token, method, payload, timeout):
+            if url.startswith("http://primary"):
+                return {"error": "unreachable: primary"}
+            return {"tasks": []}
+
+        with mock.patch.object(chatd, "_request", fake_request):
+            rows, source, error = chatd.fetch_tasks_any(
+                ["http://primary", "http://fallback"], None, 5)
+
+        self.assertEqual(rows, [])
+        self.assertIsNone(source)
+        self.assertIsNone(error)
+
+    def test_a_listing_from_the_replica_still_yields_a_body_from_the_chain(self):
+        """The listing can land on the replica while the body fetch lags."""
+        from unittest import mock
+        from pando import chatd
+
+        def fake_request(url, token, method, payload, timeout):
+            if url.startswith("http://primary") and "/task/t1" in url:
+                return {"task": {"id": "t1", "body": ""}}
+            if "/task/t1" in url:
+                return {"task": {"id": "t1", "body": "hello"}}
+            return {"error": "unreachable: nope"}
+
+        with mock.patch.object(chatd, "_request", fake_request):
+            full = chatd.full_task_any(["http://primary", "http://fallback"],
+                                       None, {"id": "t1", "body": ""}, 5)
+
+        self.assertEqual(full["body"], "hello")
+
+    def test_a_quiet_but_answered_feed_is_idle_not_an_error(self):
+        from unittest import mock
+        from pando import chatd
+
+        def fake_request(url, token, method, payload, timeout):
+            return {"tasks": []}
+
+        with mock.patch.object(chatd, "_request", fake_request):
+            report = chatd.pass_once(["http://mailbox"], None, [], set(), set(),
+                                     {}, 5, True)
+
+        self.assertEqual(report["did"], "idle")
+
+    def test_every_mailbox_down_is_an_error_not_a_silent_idle(self):
+        """A partition must not look like a colony with nothing to say."""
+        from unittest import mock
+        from pando import chatd
+
+        def fake_request(url, token, method, payload, timeout):
+            return {"error": "unreachable: nope"}
+
+        with mock.patch.object(chatd, "_request", fake_request):
+            with self.assertRaises(RuntimeError):
+                chatd.pass_once(["http://a", "http://b"], None, [], set(),
+                                set(), {}, 5, True)
+
+    def test_hosts_json_may_name_a_chain_not_just_one_mailbox(self):
+        """The Mac passes --hosts, not --mailbox: hosts.json is its chain.
+
+        Reading only mailboxes[0] was the same partition hole as a missing
+        --mailbox-fallback, just spelled in a config file instead of a flag.
+        """
+        import json as _json
+        import tempfile
+        from pando import chatd
+
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "hosts.json"
+            path.write_text(_json.dumps({
+                "mailboxes": ["http://127.0.0.1:8776",
+                              "http://192.168.31.100:8778",
+                              "http://192.168.31.100:8778"],
+                "roots": [],
+            }), encoding="utf-8")
+            roots, chain = chatd.load_hosts(str(path))
+
+        self.assertEqual(chain, ["http://127.0.0.1:8776",
+                                 "http://192.168.31.100:8778"])
+        self.assertEqual(roots, [])
+
+    def test_a_bootstrap_reports_which_mailbox_answered(self):
+        """bootstrap must not shadow the mailbox source with a task id."""
+        from unittest import mock
+        from pando import chatd
+
+        def fake_request(url, token, method, payload, timeout):
+            if url.startswith("http://primary"):
+                return {"error": "unreachable: primary"}
+            return {"tasks": [{"id": "h1", "title": "[chat] @mac-llm: hi"}]}
+
+        with mock.patch.object(chatd, "_request", fake_request):
+            report = chatd.pass_once(["http://primary", "http://fallback"],
+                                     None, [], set(), set(), {}, 5, False)
+
+        self.assertEqual(report["did"], "bootstrap")
+        self.assertEqual(report["ids"], ["h1"])
+        self.assertEqual(report["read_from"], "http://fallback")
+
+
 class TestObservatoryFeed(unittest.TestCase):
     def test_an_address_is_stored_once(self):
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
@@ -5054,6 +5232,8 @@ class TestWindowsSeedPull(unittest.TestCase):
         self.assertIn("'--mailbox-fallback'", react)
         think = supervisor.split("$thinkArgs = @(")[1].split("\n#")[0]
         self.assertIn("'--mailbox-fallback'", think)
+        chat = supervisor.split("$chatArgs = @(")[1].split("\n#")[0]
+        self.assertIn("'--mailbox-fallback'", chat)
         self.assertIn("$codeWatchArgs", supervisor)
         self.assertIn("tools\\node_code_watch.py", supervisor)
         self.assertIn("'code-watch'", supervisor)
@@ -5537,7 +5717,8 @@ class TestPi5UnitTemplates(unittest.TestCase):
         """
         units = self._units()
         writers = [name for name, text in units.items()
-                   if "pando.reactd" in text or "pando.thinkd" in text]
+                   if "pando.reactd" in text or "pando.thinkd" in text
+                   or "pando.chatd" in text]
         self.assertTrue(writers, "no pi5 writer units at all")
         for name in writers:
             self.assertIn("--mailbox-fallback", units[name],

@@ -75,6 +75,7 @@ $chatArgs = @('-m', 'pando.chatd',
   '--root', 'http://127.0.0.1:8790',
   '--pairing-token-file', $token,
   '--mailbox', 'http://192.168.31.41:8776',
+  '--mailbox-fallback', 'http://127.0.0.1:8778',
   '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
   '--ledger', 'D:\pando-models\chat-ledger.jsonl',
   '--interval', '20')
