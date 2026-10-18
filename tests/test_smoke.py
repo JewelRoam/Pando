@@ -5080,6 +5080,15 @@ class TestCodeSync(unittest.TestCase):
         spec.loader.exec_module(module)
         return module
 
+    def _load_outbox(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "seed_outbox_under_test",
+            Path(__file__).resolve().parents[1] / "tools" / "seed_outbox.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
     def _advance_origin(self, env, src, bare, text="two\n"):
         (src / "README").write_text(text)
         self._run(env, "git", "-C", str(src), "add", "README")
@@ -5160,3 +5169,43 @@ class TestCodeSync(unittest.TestCase):
             self.assertEqual(row["reason"], "already")
             self.assertEqual(row["action"], "none")
             self.assertEqual(seen, [])
+
+    def test_code_bundle_follows_head_not_the_cache_age(self):
+        outbox = self._load_outbox()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env, src, _bare, _client = self._world(root)
+            dest = root / "cache" / "code.bundle"
+
+            # A pre-push hook exports GIT_DIR. That must not redirect the
+            # bundle away from the repository handed to code_bundle().
+            previous = os.environ.get("GIT_DIR")
+            os.environ["GIT_DIR"] = str(Path(__file__).resolve().parents[1] / ".git")
+            try:
+                first = outbox.code_bundle(src, dest, max_age=3600)
+            finally:
+                if previous is None:
+                    os.environ.pop("GIT_DIR", None)
+                else:
+                    os.environ["GIT_DIR"] = previous
+            self.assertEqual(first, dest)
+            first_head = subprocess.run(
+                ["git", "bundle", "list-heads", str(dest)],
+                check=True, capture_output=True, text=True, env=env
+            ).stdout.split()[0]
+            stamp = root / "cache" / "code.bundle.head"
+            self.assertEqual(stamp.read_text(encoding="utf-8").strip(), first_head)
+
+            # A new commit is younger than max_age, so an mtime-only cache would
+            # keep serving the previous commit. The bundle cache must key on HEAD.
+            (src / "README").write_text("new head\n")
+            self._run(env, "git", "-C", str(src), "add", "README")
+            self._run(env, "git", "-C", str(src), "commit", "-m", "new head")
+            second = outbox.code_bundle(src, dest, max_age=3600)
+            self.assertEqual(second, dest)
+            second_head = subprocess.run(
+                ["git", "bundle", "list-heads", str(dest)],
+                check=True, capture_output=True, text=True, env=env
+            ).stdout.split()[0]
+            self.assertNotEqual(second_head, first_head)
+            self.assertEqual(stamp.read_text(encoding="utf-8").strip(), second_head)

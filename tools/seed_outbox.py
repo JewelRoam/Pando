@@ -11,6 +11,7 @@ import argparse
 import hmac
 import io
 import json
+import os
 import subprocess
 import tarfile
 import time
@@ -78,21 +79,56 @@ def write_ack(outbox: Path, proposal_id: str, body: dict) -> bool:
 
 
 
+def _git_env() -> dict[str, str]:
+    """Prevent an invoking git hook from redirecting bundle operations."""
+    env = os.environ.copy()
+    env.pop("GIT_DIR", None)
+    env.pop("GIT_WORK_TREE", None)
+    return env
+
+
+def _repo_head(repo: Path, env: dict[str, str]) -> str:
+    """The commit the bundle would be built from, or "" if git cannot say."""
+    try:
+        got = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                             capture_output=True, text=True, env=env, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return got.stdout.strip() if got.returncode == 0 else ""
+
+
 def code_bundle(repo: Path, dest: Path, max_age: float = 600) -> Path | None:
-    """A git bundle of ``main``. Rebuilt when the cached file is old.
+    """A git bundle of ``main``. Rebuilt when HEAD moves, or when it is old.
 
     This is the same history as origin, served only when a peer cannot
     fetch GitHub. It is not a second branch.
+
+    The cache is keyed on HEAD, not only on age. A peer that has no route to
+    GitHub reads this file as its *only* source of new code, so a commit that
+    landed a minute ago must not sit unserved for the remaining nine minutes
+    of an age-based window.
     """
     repo = Path(repo)
     dest = Path(dest)
+    stamp = dest.parent / (dest.name + ".head")
+    env = _git_env()
+    head = _repo_head(repo, env)
     if dest.is_file() and time.time() - dest.stat().st_mtime < max_age:
-        return dest
+        try:
+            served = stamp.read_text(encoding="utf-8").strip()
+        except OSError:
+            served = ""
+        if head and served == head:
+            return dest
+        if not head and served == "":
+            # git could not answer; fall back to the age window rather than
+            # rebuilding a bundle on every single request.
+            return dest
     dest.parent.mkdir(parents=True, exist_ok=True)
     partial = dest.with_suffix(".partial")
     got = subprocess.run(
         ["git", "-C", str(repo), "bundle", "create", str(partial), "HEAD"],
-        capture_output=True, text=True, timeout=60)
+        capture_output=True, text=True, env=env, timeout=60)
     if got.returncode != 0 or not partial.is_file():
         partial.unlink(missing_ok=True)
         return None
@@ -100,6 +136,11 @@ def code_bundle(repo: Path, dest: Path, max_age: float = 600) -> Path | None:
         partial.unlink(missing_ok=True)
         return None
     partial.replace(dest)
+    if head:
+        try:
+            stamp.write_text(head + "\n", encoding="utf-8")
+        except OSError:
+            pass
     return dest
 
 
