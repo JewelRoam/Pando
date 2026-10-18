@@ -6380,3 +6380,193 @@ class TestExecuteLoop(unittest.TestCase):
         loop = self._load()
         self.assertTrue(hasattr(loop, "time"),
                         "tools/execute_loop.py must import time")
+
+
+class TestVoteWatchdog(unittest.TestCase):
+    """tools/vote_watchdog.py - the difference between voting and voting *now*.
+
+    On 2026-10-19 win-laya-int8 cast a vote every two minutes for 35 hours.
+    The process was up, the ledger grew, the stances varied -- and every
+    target it named was stamped 2026-10-17. The panel's only staleness test
+    was an absolute six-hour age, so the member read "fresh" for the first
+    five hours of that wedge, and the reactor's own `--max-age` fix was 26
+    commits away from the machine that needed it.
+
+    The contract this tool must keep: catch a member whose answer-lag is
+    growing, even while its lag is still numerically young, and never report
+    "fine" for a member it could not actually measure.
+    """
+
+    def _tool(self):
+        import importlib.util
+        path = Path(__file__).resolve().parents[1] / "tools" / "vote_watchdog.py"
+        spec = importlib.util.spec_from_file_location("vote_watchdog", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    @staticmethod
+    def _at(epoch: float) -> str:
+        """A mailbox-shaped naive local timestamp for an epoch."""
+        return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(epoch))
+
+    def _reaction(self, member: str, stamp: int, delivered: float) -> dict:
+        return {
+            "from": member,
+            "title": f"[reaction] prop-r1-{stamp} 赞同 by {member}",
+            "created_at": self._at(delivered),
+        }
+
+    def test_a_young_lag_that_keeps_climbing_is_a_wedge(self):
+        """The six-hour badge cannot see this; the slope can.
+
+        Every lag here is under 30 minutes, so ``VOTE_STALE_S`` would render
+        the member fresh on every poll. The targets are frozen and the clock
+        is not, so the gap grows 1:1 -- the reactor is answering a fixed
+        point in the past and will never reach the present.
+        """
+        wd = self._tool()
+        now = 1_800_000_000.0
+        frozen = int(now - 1800)
+        rows = [(now - 5400 + i * 300, (now - 5400 + i * 300) - frozen)
+                for i in range(18)]
+        verdict = wd.member_slope(rows, now)
+        self.assertEqual(verdict["status"], wd.WEDGED)
+        self.assertAlmostEqual(verdict["slope"], 1.0, places=2)
+        self.assertLess(verdict["last_lag_s"], wd.DEFAULT_WINDOW_S)
+
+    def test_a_flat_lag_is_a_working_reactor_however_old_it_is(self):
+        """A bounded lag means it is keeping up, whatever the number says."""
+        wd = self._tool()
+        now = 1_800_000_000.0
+        rows = [(now - 5400 + i * 300, 1500.0) for i in range(18)]
+        verdict = wd.member_slope(rows, now)
+        self.assertEqual(verdict["status"], wd.OK)
+
+    def test_draining_a_backlog_is_not_a_wedge(self):
+        """A catching-up reactor has a *negative* slope and must stay ok.
+
+        This is the live shape of mac-text and pandosi-pi5-x right after the
+        ``--max-age`` commit landed: lag fell from 23-34h to under an hour
+        inside the window. Calling that a wedge would have alarmed on the fix.
+        """
+        wd = self._tool()
+        now = 1_800_000_000.0
+        gone = now - 5400
+        rows = [(gone + i * 300, max(600.0, 82800.0 - i * 4800.0))
+                for i in range(18)]
+        verdict = wd.member_slope(rows, now)
+        self.assertEqual(verdict["status"], wd.OK)
+        self.assertLess(verdict["slope"], 0)
+
+    def test_too_few_votes_is_unknown_never_ok(self):
+        """Silence is not evidence of health."""
+        wd = self._tool()
+        now = 1_800_000_000.0
+        rows = [(now - 60, 30.0), (now - 30, 31.0)]
+        verdict = wd.member_slope(rows, now)
+        self.assertEqual(verdict["status"], wd.UNKNOWN)
+        self.assertIn("need", verdict["why"])
+
+    def test_a_burst_inside_one_instant_is_not_a_trend(self):
+        """Six votes in four seconds span no wall-clock to measure against."""
+        wd = self._tool()
+        now = 1_800_000_000.0
+        rows = [(now - 4 + i * 0.8, 10.0 + i) for i in range(6)]
+        verdict = wd.member_slope(rows, now)
+        self.assertEqual(verdict["status"], wd.UNKNOWN)
+        self.assertIn("span", verdict["why"])
+
+    def test_a_named_decision_member_that_stops_voting_is_silent(self):
+        """Having no slope is its own finding when the caller said "must vote"."""
+        wd = self._tool()
+        now = 1_800_000_000.0
+        rows = {"mac-text": [(now - 600 + i * 60, 20.0) for i in range(12)]}
+        verdicts = wd.survey(rows, ["mac-text", "win-laya-int8"], now)
+        self.assertEqual(verdicts["mac-text"]["status"], wd.OK)
+        self.assertEqual(verdicts["win-laya-int8"]["status"], wd.SILENT)
+
+    def test_a_member_with_no_stamp_in_its_id_is_skipped_not_counted(self):
+        """An id nobody can age must not be quietly rendered as fresh."""
+        wd = self._tool()
+        now = 1_800_000_000.0
+        tasks = [
+            {"from": "m", "title": "[reaction] prop-without-a-stamp 赞同 by m",
+             "created_at": self._at(now - 30)},
+            self._reaction("m", int(now - 100), now - 20),
+            {"from": "m", "title": "[chat] hello", "created_at": self._at(now)},
+        ]
+        rows = wd.lag_rows(tasks)
+        self.assertEqual(len(rows["m"]), 1)
+        self.assertIsNone(wd.proposal_stamp("prop-without-a-stamp"))
+        self.assertIsNotNone(wd.proposal_stamp("prop-r1-1792219880"))
+
+    def test_the_wedge_that_cost_the_colony_a_night_is_reproduced(self):
+        """The 2026-10-19 shape, as measured: 43 votes over 87m at +0.50.
+
+        A regression fixture, not a mock. The numbers are the live mailbox
+        values (win-laya-int8, 02:25), rounded to the shape that matters: the
+        target epoch advances at ~0.585x of wall-clock, so the lag grows at
+        the complement.
+        """
+        wd = self._tool()
+        now = 1_800_000_000.0
+        start = now - 87 * 60
+        rows = []
+        for i in range(43):
+            delivered = start + i * (87 * 60 / 43.0)
+            elapsed = delivered - start
+            target = int(start - 34.8 * 3600 + elapsed * 0.585)
+            rows.append((delivered, delivered - target))
+        verdict = wd.member_slope(rows, now)
+        self.assertEqual(verdict["status"], wd.WEDGED)
+        self.assertAlmostEqual(verdict["slope"], 0.415, places=2)
+
+    def test_an_alarm_reads_new_once_then_ongoing(self):
+        """The same wedge must not page every ten minutes until it is buried.
+
+        A watchdog that repeats itself is a watchdog nobody reads: the second
+        poll of an unfixed fault is not news. The state file is what lets a
+        caller page on ``new`` and stay quiet on ``ongoing``.
+        """
+        wd = self._tool()
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "vote-watchdog.json"
+            first = {"win-laya-int8": {"status": wd.WEDGED, "slope": 0.5}}
+            wd.track_first_seen(state, first, 1_800_000_000.0)
+            self.assertEqual(first["win-laya-int8"]["seen"], "new")
+            self.assertEqual(first["win-laya-int8"]["first_seen"], 1_800_000_000.0)
+            second = {"win-laya-int8": {"status": wd.WEDGED, "slope": 0.5}}
+            wd.track_first_seen(state, second, 1_800_000_600.0)
+            self.assertEqual(second["win-laya-int8"]["seen"], "ongoing")
+            self.assertEqual(second["win-laya-int8"]["first_seen"], 1_800_000_000.0)
+
+    def test_a_recovered_member_is_forgotten_so_a_second_wedge_pages(self):
+        """Suppression must be scoped to one outage, not one member forever.
+
+        A member that comes back and then wedges again is a *new* fault. If
+        the entry survived recovery, the second wedge would be swallowed by
+        the first one's memory.
+        """
+        wd = self._tool()
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "vote-watchdog.json"
+            wd.track_first_seen(state, {"m": {"status": wd.WEDGED}}, 1000.0)
+            wd.track_first_seen(state, {"m": {"status": wd.OK, "slope": 0.0}}, 1060.0)
+            self.assertEqual(json.loads(state.read_text())["members"], {})
+            again = {"m": {"status": wd.WEDGED}}
+            wd.track_first_seen(state, again, 1120.0)
+            self.assertEqual(again["m"]["seen"], "new")
+            self.assertEqual(again["m"]["first_seen"], 1120.0)
+
+    def test_without_a_state_file_an_alarm_is_never_suppressed(self):
+        """No state file means no memory -- every poll is a first alarm.
+
+        This is the safe default: a caller that forgets to pass --state-file
+        gets noisy paging, never silence.
+        """
+        wd = self._tool()
+        verdicts = {"a": {"status": wd.WEDGED}, "b": {"status": wd.SILENT}}
+        wd.track_first_seen(None, verdicts, 1_800_000_000.0)
+        self.assertEqual(verdicts["a"]["seen"], "new")
+        self.assertEqual(verdicts["b"]["seen"], "new")
