@@ -43,7 +43,7 @@
     <string>--restart-cmd</string>
     <string>launchctl kickstart -k gui/501/com.jewelroam.pandosi-think</string>
     <string>--vote-cmd</string>
-    <string>/Users/zhengenrong/Downloads/PandoSI-island/.venv/bin/python /Users/zhengenrong/Downloads/PandoSI-island/tools/vote_watchdog.py --url http://127.0.0.1:8776 --token-file /Users/zhengenrong/.pandosi/mailbox.token --decision mac-text --decision mac-laya-int8 --decision pandosi-pi5-x --decision pandosi-pi5-laya --decision win-laya-int8 --json --state-file /Users/zhengenrong/.pandosi/vote-watchdog-state.json --page-new-only</string>
+    <string>/Users/zhengenrong/Downloads/PandoSI-island/.venv/bin/python /Users/zhengenrong/Downloads/PandoSI-island/tools/vote_watchdog.py --url http://127.0.0.1:8776 --token-file /Users/zhengenrong/.pandosi/mailbox.token --decision mac-text --decision mac-laya-int8 --decision pandosi-pi5-x --decision pandosi-pi5-laya --decision win-laya-int8 --json --state-file /Users/zhengenrong/.pandosi/vote-watchdog-state.json --snapshot-file /Users/zhengenrong/.pandosi/vote-watchdog.json --page-new-only</string>
     <string>--vote-timeout</string>
     <string>120</string>
     <string>--alarm-url</string>

@@ -437,6 +437,115 @@ def is_annotation(fields: dict | None) -> bool:
 #: minute, and a false alarm here would teach a reader to ignore the column.
 VOTE_STALE_S = 6 * 3600.0
 
+#: How old the published vote judgement may be before the page stops calling it
+#: current. The watchdog runs every 300s, so three missed passes is a stopped
+#: judge rather than a slow one.
+VOTE_VERDICT_STALE_S = 900.0
+
+#: Written by tools/vote_watchdog.py. Overridable, so a non-default install
+#: does not have to guess.
+DEFAULT_VOTE_VERDICT = PANDO_DIR / "vote-watchdog.json"
+
+#: The four states the watchdog may report, and how the page says each one.
+#: Only ``ok`` is calm: "we measured it and it is fine" and "we could not
+#: measure it at all" must not wear the same face.
+VERDICT_TEXT = {"ok": "正常", "wedge": "落后", "silent": "沉默", "unknown": "未知"}
+#: The two that are an alarm rather than a reading.
+VERDICT_ALARM = ("wedge", "silent")
+
+
+def _verdict_lag(seconds) -> str:
+    if isinstance(seconds, (int, float)) and not isinstance(seconds, bool):
+        return f"{seconds / 3600.0:.1f} 小时"
+    return "—"
+
+
+def verdict_why(verdict: dict | None) -> str:
+    """The numbers behind a verdict, in the smallest honest form.
+
+    An alarm that says only "落后" teaches a reader to distrust it; an alarm
+    that prints the slope it measured can be checked and argued with.
+    """
+    row = verdict or {}
+    slope = row.get("slope")
+    if isinstance(slope, (int, float)) and not isinstance(slope, bool):
+        text = (f"slope {slope:+.2f} · "
+                f"{_verdict_lag(row.get('first_lag_s'))} → "
+                f"{_verdict_lag(row.get('last_lag_s'))}")
+        span = row.get("span_s")
+        if isinstance(span, (int, float)) and not isinstance(span, bool):
+            text += f" · {row.get('samples', '?')} 票 / {span / 60.0:.0f} 分"
+        return text
+    return str(row.get("why") or "")
+
+
+def verdict_line(verdict: dict, alarms: list[dict] | None = None) -> str:
+    """Who judged, how long ago, and whether that judgement is still current."""
+    if not verdict.get("available"):
+        return f"表态判定不可用（{verdict.get('error') or '未写出'}）"
+    age = verdict.get("age_s")
+    if age is None:
+        when = "时间未知"
+    elif age < 120:
+        when = f"{age:.0f} 秒前"
+    else:
+        when = f"{age / 60.0:.0f} 分钟前"
+    head = f"判定 {when}"
+    if verdict.get("stale"):
+        head += "（已过期）"
+    count = len(alarms or [])
+    return head + (f" · {count} 个告警" if count else " · 无告警")
+
+
+def read_vote_verdict(path: Path | None = None,
+                      now: float | None = None) -> dict:
+    """The vote_watchdog's last judgement, carrying its own age.
+
+    The page does not judge votes. It fetches the last 120 messages, so a
+    judgement computed here would be fitted over minutes of evidence while the
+    watchdog fits the same column name over the whole feed -- one name, two
+    questions. The difference is silent and lands on the reassuring side:
+    fewer samples means ``unknown``, and ``unknown`` reads like ``no alarm``.
+    So this reads the published snapshot instead.
+
+    A missing or unreadable file is ``available: False`` with a reason. It is
+    never rendered as an empty column, because "no alarm" and "no judge" must
+    not look alike.
+    """
+    moment = time.time() if now is None else now
+    target = Path(path) if path else DEFAULT_VOTE_VERDICT
+    result = {"available": False, "path": str(target), "error": None,
+              "written": None, "age_s": None, "stale": True,
+              "members": {}, "decision": [], "window_s": None, "counts": {}}
+    try:
+        payload = json.loads(target.expanduser().read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        result["error"] = "never written"
+        return result
+    except (OSError, json.JSONDecodeError) as exc:
+        result["error"] = f"{type(exc).__name__}: {exc}"
+        return result
+    if not isinstance(payload, dict) or not isinstance(payload.get("members"), dict):
+        result["error"] = "not a verdict snapshot"
+        return result
+    result["available"] = True
+    result["members"] = payload["members"]
+    result["decision"] = [str(name) for name in (payload.get("decision") or [])]
+    result["window_s"] = payload.get("window_s")
+    written = payload.get("written")
+    if isinstance(written, (int, float)) and not isinstance(written, bool):
+        result["written"] = float(written)
+        result["age_s"] = max(0.0, moment - float(written))
+        result["stale"] = result["age_s"] > VOTE_VERDICT_STALE_S
+    else:
+        result["error"] = "snapshot has no timestamp"
+    counts: dict[str, int] = {}
+    for verdict in result["members"].values():
+        status = str((verdict or {}).get("status") or "?")
+        counts[status] = counts.get(status, 0) + 1
+    result["counts"] = counts
+    return result
+
 
 def newest_vote_age(reactions: list[dict],
                     now: float | None = None) -> dict[str, float]:
@@ -741,6 +850,36 @@ def _fresh_cell(vote_age_s, role: str) -> dict:
     return {"fresh": "—", "fresh_stale": False}
 
 
+def _verdict_cell(verdict: dict | None, role: str) -> dict:
+    """The judged state, or an honest blank when there is no judgement.
+
+    A proposer has no vote to be late with, so it gets a dash. A *decision*
+    member with no verdict is a gap in the evidence rather than a quiet
+    member, and it is labelled as one -- that is the whole point of putting
+    the judgement on the page instead of a number to eyeball.
+    """
+    status = str((verdict or {}).get("status") or "").strip()
+    invited_to_vote = str(role or "") == "decision"
+    if status in VERDICT_ALARM:
+        return {"verdict": VERDICT_TEXT[status], "verdict_bad": True,
+                "verdict_status": status}
+    if status == "ok":
+        return {"verdict": VERDICT_TEXT["ok"], "verdict_bad": False,
+                "verdict_status": status}
+    if status == "unknown":
+        # An LLM that casts no vote is ``unknown`` by design -- the watchdog
+        # counts it as unnamed_silent and says so. Printing "未知" for every
+        # proposer would put a permanent, meaningless badge on the page and
+        # teach the reader to ignore the column.
+        if invited_to_vote:
+            return {"verdict": VERDICT_TEXT["unknown"], "verdict_bad": False,
+                    "verdict_status": status}
+        return {"verdict": "—", "verdict_bad": False, "verdict_status": status}
+    if invited_to_vote:
+        return {"verdict": "无判", "verdict_bad": True, "verdict_status": ""}
+    return {"verdict": "—", "verdict_bad": False, "verdict_status": ""}
+
+
 def _majority_head(rows: list[dict]) -> str:
     """The commit most members report, or "" when nobody reports one."""
     heads = [str((row.get("capability") or {}).get("code_head") or "").strip()
@@ -751,9 +890,11 @@ def _majority_head(rows: list[dict]) -> str:
     return max(set(heads), key=lambda head: (heads.count(head), head))
 
 
-def present_people(rows: list[dict]) -> list[dict]:
+def present_people(rows: list[dict],
+                   verdicts: dict | None = None) -> list[dict]:
     """One display string per column. The page does not assemble these."""
     majority = _majority_head(rows)
+    verdicts = verdicts or {}
     presented = []
     for row in rows:
         roots = [str(item) for item in (row.get("roots") or []) if item]
@@ -787,6 +928,8 @@ def present_people(rows: list[dict]) -> list[dict]:
             "mark": str(row.get("pubkey") or ""),
             **_code_cell((row.get("capability") or {}).get("code_head"), majority),
             **_fresh_cell(row.get("vote_age_s"), row.get("role")),
+            **_verdict_cell(verdicts.get(str(row.get("name") or "")),
+                            row.get("role")),
         })
     return presented
 
@@ -866,7 +1009,20 @@ def present_services(services: list[dict]) -> list[dict]:
 
 def present(state: dict) -> dict:
     """The only object the page reads."""
-    people = present_people(state.get("people") or [])
+    verdict = state.get("vote_verdict") or {}
+    alarms = []
+    for name, row in sorted((verdict.get("members") or {}).items()):
+        status = str((row or {}).get("status") or "")
+        if status in VERDICT_ALARM:
+            alarms.append({
+                "name": str(name),
+                "status": status,
+                "label": VERDICT_TEXT.get(status, status),
+                "seen": str((row or {}).get("seen") or ""),
+                "why": verdict_why(row),
+            })
+    people = present_people(state.get("people") or [],
+                            verdict.get("members") or {})
     messages = present_messages(state.get("chat") or [])
     roots = state.get("roots") or []
     services = state.get("services") or []
@@ -918,6 +1074,9 @@ def present(state: dict) -> dict:
         "headline": f"{root_up}/{len(roots)} root · {len(people)} 人 · {service_up}/{len(services)} 服务",
         "service_count": f"{service_up}/{len(services)}" if services else "",
         "error": " · ".join(state.get("collector", {}).get("errors") or []),
+        "verdict_line": verdict_line(verdict, alarms),
+        "verdict_available": bool(verdict.get("available")),
+        "alarms": alarms,
         "kinds": kinds,
         "kind_counts": " · ".join(f"{counts[kind]} {kind}" for kind in kinds),
         "compose": list(state.get("compose") or []),
@@ -954,6 +1113,11 @@ def audit_view(view: dict) -> list[str]:
         fresh = row.get("fresh") or ""
         if fresh not in ("—", "无票") and "小时" not in fresh:
             problems.append(f"fresh has no unit: {row.get('name')} {fresh}")
+        verdict = row.get("verdict") or ""
+        if not verdict:
+            problems.append(f"verdict is blank: {row.get('name')}")
+        elif row.get("role") == "决策" and verdict == "—":
+            problems.append(f"decision member has no verdict: {row.get('name')}")
     for message in view.get("messages") or []:
         address = message.get("to") or ""
         if address.startswith("@@") or (address.startswith("@") and address[1:].startswith("@")):
@@ -1304,6 +1468,28 @@ def collect_state(cfg: dict) -> dict:
             "latency_ms": pms, "status": pstatus,
         })
 
+    # --- the vote judgement: read it, do not re-derive it -------------
+    verdict_path = cfg.get("vote_verdict")
+    state["vote_verdict"] = read_vote_verdict(
+        Path(verdict_path) if verdict_path else None)
+    verdict = state["vote_verdict"]
+    verdict_alarms = [row for row in (verdict.get("members") or {}).values()
+                      if str((row or {}).get("status") or "") in VERDICT_ALARM]
+    state["services"].append({
+        "group": "watchdog",
+        "name": "表态判定 (vote_watchdog)",
+        "url": verdict["path"],
+        "alive": bool(verdict["available"]) and not verdict.get("stale"),
+        "detail": verdict.get("error") or verdict_line(verdict, verdict_alarms),
+        "latency_ms": None, "status": None,
+    })
+    if not verdict["available"]:
+        state["collector"]["errors"].append(
+            f"表态判定不可用: {verdict.get('error') or 'unavailable'}")
+    elif verdict.get("stale"):
+        state["collector"]["errors"].append(
+            f"表态判定已过期 ({verdict.get('age_s') or 0:.0f}s)")
+
     state["local_units"] = local_units()
     state["collector"]["ms"] = round((time.monotonic() - started) * 1000, 1)
     state["view"] = present(state)
@@ -1518,6 +1704,7 @@ button:disabled{opacity:.5}
   <div id="hdr">…</div>
 </header>
 <div id="errbox"></div>
+<div id="alarmbox"></div>
 <div class="grid">
   <div class="card">
     <h2>对话 <span class="sub" id="cc"></span>
@@ -1536,7 +1723,7 @@ button:disabled{opacity:.5}
   </div>
   <div class="col">
     <div class="card">
-      <h2>参与者 <span class="sub" id="pc"></span></h2>
+      <h2>参与者 <span class="sub" id="pc"></span> <span class="sub" id="vl"></span></h2>
       <div class="body" id="participants"></div>
     </div>
     <div class="card">
@@ -1556,7 +1743,7 @@ const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function peopleTable(rows){
   if (!rows.length) return '<div class="empty">没有人。</div>';
-  return `<table><thead><tr><th>名字</th><th>角色</th><th>来自</th><th>主机</th><th>模型</th><th>代码</th><th>表态龄</th><th>记录</th></tr></thead><tbody>`
+  return `<table><thead><tr><th>名字</th><th>角色</th><th>来自</th><th>主机</th><th>模型</th><th>代码</th><th>表态龄</th><th>表态</th><th>记录</th></tr></thead><tbody>`
     + rows.map(p => `<tr>
       <td${p.mark ? ` title="${esc(p.mark)}"` : ''}>${esc(p.name)}</td>
       <td>${esc(p.role)}</td>
@@ -1565,6 +1752,7 @@ function peopleTable(rows){
       <td>${esc(p.model)}</td>
       <td class="mono">${esc(p.code)}${p.code_stale ? ' <span class="bad">旧</span>' : ''}</td>
       <td>${esc(p.fresh)}${p.fresh_stale ? ' <span class="bad">旧</span>' : ''}</td>
+      <td class="mono">${p.verdict_bad ? `<span class="bad">${esc(p.verdict)}</span>` : esc(p.verdict)}</td>
       <td>${esc(p.record)}${p.detail ? `<div class="sub">${esc(p.detail)}</div>` : ''}</td>
     </tr>`).join('') + '</tbody></table>';
 }
@@ -1601,6 +1789,11 @@ async function refresh(){
   }
   $('#hdr').textContent = v.headline || '';
   $('#errbox').innerHTML = v.error ? `<div class="banner">${esc(v.error)}</div>` : '';
+  $('#vl').textContent = v.verdict_line || '';
+  const alarms = v.alarms || [];
+  $('#alarmbox').innerHTML = alarms.length ? `<div class="banner">${
+    alarms.map(a => `${esc(a.name)} <b>${esc(a.label)}</b>${a.seen === 'ongoing' ? '（持续）' : ''} — ${esc(a.why)}`).join('<br>')
+  }</div>` : '';
   const people = v.people || [];
   $('#pc').textContent = people.length ? String(people.length) : '';
   $('#participants').innerHTML = peopleTable(people);

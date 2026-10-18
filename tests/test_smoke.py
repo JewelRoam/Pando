@@ -6835,3 +6835,177 @@ class TestVoteWatchdog(unittest.TestCase):
         wd.track_first_seen(None, verdicts, 1_800_000_000.0)
         self.assertEqual(verdicts["a"]["seen"], "new")
         self.assertEqual(verdicts["b"]["seen"], "new")
+
+
+class TestVoteVerdictOnThePage(unittest.TestCase):
+    """The page reads the judgement; it must never re-derive it.
+
+    ``CHAT_VIEW_LIMIT`` is 120 messages -- about seventeen minutes of feed --
+    while ``vote_watchdog`` fits the same question over the whole mailbox. Two
+    fitters, one column name, and the disagreement lands on the reassuring
+    side: fewer samples means ``unknown``, and ``unknown`` reads like "no
+    alarm". So the judgement has exactly one owner, it publishes on every pass
+    including the all-clear ones, and the page renders a *missing* judgement as
+    missing rather than as a clean column.
+    """
+
+    def _obs(self):
+        import importlib.util
+        path = Path(__file__).resolve().parents[1] / "tools" / "observatory.py"
+        spec = importlib.util.spec_from_file_location(
+            "observatory_verdict_under_test", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def _wd(self):
+        import importlib.util
+        path = Path(__file__).resolve().parents[1] / "tools" / "vote_watchdog.py"
+        spec = importlib.util.spec_from_file_location(
+            "vote_watchdog_verdict_under_test", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def _write(self, path, *, written, members, decision=()):
+        path.write_text(json.dumps({
+            "written": written, "written_at": "2026-10-19 03:00:00",
+            "window_s": 5400.0, "decision": list(decision), "members": members,
+        }, ensure_ascii=False), encoding="utf-8")
+
+    # --- what the watchdog publishes ---------------------------------
+
+    def test_an_all_clear_pass_is_published_too(self):
+        """A file that only appears when something breaks cannot be told apart
+        from a watchdog that stopped running."""
+        wd = self._wd()
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "vote-watchdog.json"
+            wd.write_snapshot(out, {"mac-text": {"status": wd.OK, "slope": -0.6}},
+                              1_800_000_000.0, ["mac-text"], 5400.0)
+            payload = json.loads(out.read_text(encoding="utf-8"))
+            self.assertEqual(payload["decision"], ["mac-text"])
+            self.assertEqual(payload["members"]["mac-text"]["status"], wd.OK)
+            self.assertEqual(payload["written"], 1_800_000_000.0)
+
+    def test_the_snapshot_and_the_state_file_remember_opposite_things(self):
+        """The state file forgets a recovered member so a second wedge pages
+        again; the snapshot has to go on saying ``ok``, because that is the
+        reading. Same member, same recovery, two files, two rules."""
+        wd = self._wd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state.json"
+            snap = Path(tmp) / "snap.json"
+            wedged = {"m": {"status": wd.WEDGED, "slope": 0.5}}
+            wd.track_first_seen(state, wedged, 1000.0)
+            wd.write_snapshot(snap, wedged, 1000.0, [], 5400.0)
+            healed = {"m": {"status": wd.OK, "slope": -0.1}}
+            wd.track_first_seen(state, healed, 1060.0)
+            wd.write_snapshot(snap, healed, 1060.0, [], 5400.0)
+            self.assertEqual(json.loads(state.read_text())["members"], {})
+            self.assertEqual(
+                json.loads(snap.read_text())["members"]["m"]["status"], wd.OK)
+
+    def test_no_snapshot_path_publishes_nothing_and_does_not_raise(self):
+        wd = self._wd()
+        wd.write_snapshot(None, {"m": {"status": wd.OK}}, 1000.0, [], 5400.0)
+
+    # --- what the page does with it ----------------------------------
+
+    def test_a_judgement_nobody_wrote_is_unavailable_not_clean(self):
+        obs = self._obs()
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = obs.read_vote_verdict(Path(tmp) / "nothing.json")
+            self.assertFalse(verdict["available"])
+            self.assertEqual(verdict["error"], "never written")
+            self.assertIn("不可用", obs.verdict_line(verdict))
+
+    def test_a_judgement_that_stopped_arriving_is_stale(self):
+        """The watchdog runs every 300s; three missed passes is a stopped
+        judge, and a stopped judge must not read as an all-clear."""
+        obs = self._obs()
+        now = 1_800_000_000.0
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "snap.json"
+            self._write(path, written=now - 60, members={"m": {"status": "ok"}})
+            fresh = obs.read_vote_verdict(path, now)
+            self.assertTrue(fresh["available"])
+            self.assertFalse(fresh["stale"])
+            self._write(path, written=now - 5090, members={"m": {"status": "ok"}})
+            old = obs.read_vote_verdict(path, now)
+            self.assertTrue(old["stale"])
+            self.assertGreater(old["age_s"], obs.VOTE_VERDICT_STALE_S)
+
+    def test_a_corrupt_judgement_is_unavailable_not_a_guess(self):
+        obs = self._obs()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "snap.json"
+            path.write_text("{not json", encoding="utf-8")
+            verdict = obs.read_vote_verdict(path)
+            self.assertFalse(verdict["available"])
+            self.assertIn("JSONDecodeError", verdict["error"])
+
+    def test_a_decision_member_with_no_judgement_is_a_gap_not_a_dash(self):
+        obs = self._obs()
+        cell = obs._verdict_cell(None, "decision")
+        self.assertEqual(cell["verdict"], "无判")
+        self.assertTrue(cell["verdict_bad"])
+        self.assertEqual(obs._verdict_cell(None, "proposal")["verdict"], "—")
+
+    def test_a_proposer_is_not_badged_unknown_for_not_voting(self):
+        """An LLM casts no vote by design. A permanent "未知" on every proposer
+        would put a meaningless badge on the page and train the reader to
+        ignore the column; a *decision* member that could not be measured is
+        the opposite, and keeps its label."""
+        obs = self._obs()
+        cell = obs._verdict_cell({"status": "unknown"}, "proposal")
+        self.assertEqual(cell["verdict"], "—")
+        self.assertFalse(cell["verdict_bad"])
+        judged = obs._verdict_cell({"status": "unknown"}, "decision")
+        self.assertEqual(judged["verdict"], "未知")
+
+    def test_a_wedge_and_a_silence_are_both_alarms(self):
+        obs = self._obs()
+        wedge = obs._verdict_cell({"status": "wedge"}, "decision")
+        self.assertEqual(wedge["verdict"], "落后")
+        self.assertTrue(wedge["verdict_bad"])
+        self.assertTrue(obs._verdict_cell({"status": "silent"}, "decision")["verdict_bad"])
+        self.assertFalse(obs._verdict_cell({"status": "ok"}, "decision")["verdict_bad"])
+
+    def test_the_audit_catches_a_row_whose_verdict_is_blank(self):
+        obs = self._obs()
+        view = {"people": [{"name": "win-laya-int8", "from": "win",
+                            "host": "192.168.31.100", "model": "laya-en",
+                            "role": "决策", "record": "票 3/0",
+                            "fresh": "35.8 小时", "verdict": ""}],
+                "messages": []}
+        self.assertTrue(any("verdict is blank" in p
+                            for p in obs.audit_view(view)))
+        view["people"][0]["verdict"] = "—"
+        self.assertTrue(any("decision member has no verdict" in p
+                            for p in obs.audit_view(view)))
+
+    def test_a_short_feed_cannot_answer_under_the_same_column_name(self):
+        """The drift this design exists to prevent, as a fixture.
+
+        Same member, same moment, two window lengths. The short window -- what
+        the page could see if it judged for itself -- has too few samples and
+        says ``unknown``, which renders as no alarm. The published judgement,
+        fitted over the whole feed, says ``wedge``. One column name must not
+        hold both answers, so the page keeps the one the watchdog published.
+        """
+        obs, wd = self._obs(), self._wd()
+        now = 1_800_000_000.0
+        frozen = int(now - 1800)
+        full = [(now - 5400 + i * 300, (now - 5400 + i * 300) - frozen)
+                for i in range(18)]
+        self.assertEqual(wd.member_slope(full, now)["status"], wd.WEDGED)
+        self.assertEqual(wd.member_slope(full[-3:], now)["status"], wd.UNKNOWN)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "snap.json"
+            self._write(path, written=now - 30,
+                        members={"win-laya-int8": wd.member_slope(full, now)})
+            verdict = obs.read_vote_verdict(path, now)
+            cell = obs._verdict_cell(verdict["members"]["win-laya-int8"], "decision")
+            self.assertEqual(cell["verdict"], "落后")
+            self.assertTrue(cell["verdict_bad"])

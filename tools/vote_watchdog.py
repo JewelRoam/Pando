@@ -82,6 +82,9 @@ DEFAULT_MIN_SPAN_S = 600.0
 #: falling further behind. See the module docstring for the measured margin.
 DEFAULT_SLOPE = 0.20
 
+#: Where the judgement is published for readers that must not re-derive it.
+DEFAULT_SNAPSHOT = "~/.pandosi/vote-watchdog.json"
+
 OK = "ok"
 WEDGED = "wedge"
 SILENT = "silent"
@@ -295,6 +298,44 @@ def track_first_seen(state_file: Path | None, verdicts: dict, now: float) -> dic
     return verdicts
 
 
+
+def write_snapshot(snapshot_file: Path | None, verdicts: dict, now: float,
+                   decision: list[str], window_s: float) -> None:
+    """Publish the whole judgement so that nobody has to re-derive it.
+
+    The verdict has exactly one owner: this module. A reader that refit the
+    same numbers over a shorter feed would be answering a different question
+    under the same name, and the two answers would drift -- in practice toward
+    the reassuring one, because less history means fewer samples and a tool
+    that runs out of samples says "unknown", which reads like "no alarm". So
+    the page *reads* this file instead of judging.
+
+    Written on every pass, including the passes where every member is fine:
+    "nothing is wrong" is itself a finding, and a file that only appears when
+    something breaks cannot be told apart from a watchdog that stopped running.
+
+    The first-seen memory kept by ``track_first_seen`` is deliberately a
+    *different* file. That one forgets a member the moment it recovers, because
+    a second wedge must page again; this one has to go on saying ``ok``.
+    """
+    if snapshot_file is None:
+        return
+    payload = {
+        "written": now,
+        "written_at": time.strftime("%F %T", time.localtime(now)),
+        "window_s": window_s,
+        "decision": sorted(d for d in decision if d),
+        "members": verdicts,
+    }
+    try:
+        path = snapshot_file.expanduser()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=1,
+                                   sort_keys=True), encoding="utf-8")
+    except OSError as exc:
+        print(f"vote-watchdog: snapshot not written: {exc}", flush=True)
+
+
 def _fmt_lag(seconds: float) -> str:
     return f"{seconds / 3600.0:.1f}h"
 
@@ -318,6 +359,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--state-file", default="",
                         help="remember which alarms were already reported, so "
                              "a caller can page once instead of every poll")
+    parser.add_argument("--snapshot-file", default=DEFAULT_SNAPSHOT,
+                        help="publish the verdicts here for readers that must "
+                             "not re-derive them (default: %(default)s); pass "
+                             "an empty string to publish nothing")
     parser.add_argument("--page-new-only", action="store_true",
                         help="exit 2 only for an alarm that is new since the "
                              "state file was last written")
@@ -341,6 +386,8 @@ def main(argv: list[str] | None = None) -> int:
                       slope_max=args.slope)
     state_file = Path(args.state_file) if args.state_file else None
     track_first_seen(state_file, verdicts, now)
+    write_snapshot(Path(args.snapshot_file) if args.snapshot_file else None,
+                   verdicts, now, args.decision, args.window_seconds)
 
     unnamed_silent = [m for m, v in verdicts.items()
                       if v["status"] == UNKNOWN and m not in args.decision]
