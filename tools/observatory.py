@@ -662,8 +662,34 @@ def _dash(value) -> str:
     return text if text else "—"
 
 
+def _code_cell(head: str, majority: str) -> dict:
+    """Show one member's commit next to the one most of the fleet runs.
+
+    Two different honest answers, and they are not the same finding: a member
+    that names a commit other than the fleet's is **old** (it can still tell us
+    what it runs); a member that names nothing predates the field entirely, so
+    we know only that it is **unknown**. Neither is silently rendered as fine.
+    """
+    head = str(head or "").strip()
+    if not head:
+        return {"code": "未知", "code_stale": False, "code_unknown": True}
+    return {"code": head[:7], "code_stale": bool(majority and head != majority),
+            "code_unknown": False}
+
+
+def _majority_head(rows: list[dict]) -> str:
+    """The commit most members report, or "" when nobody reports one."""
+    heads = [str((row.get("capability") or {}).get("code_head") or "").strip()
+             for row in rows]
+    heads = [head for head in heads if head]
+    if not heads:
+        return ""
+    return max(set(heads), key=lambda head: (heads.count(head), head))
+
+
 def present_people(rows: list[dict]) -> list[dict]:
     """One display string per column. The page does not assemble these."""
+    majority = _majority_head(rows)
     presented = []
     for row in rows:
         roots = [str(item) for item in (row.get("roots") or []) if item]
@@ -695,6 +721,7 @@ def present_people(rows: list[dict]) -> list[dict]:
             "record": record,
             "detail": str(activity.get("error") or activity.get("goal") or ""),
             "mark": str(row.get("pubkey") or ""),
+            **_code_cell((row.get("capability") or {}).get("code_head"), majority),
         })
     return presented
 
@@ -888,6 +915,9 @@ def participant_from_node(node_id: str, info: dict, root: str) -> dict:
             "arch": cap.get("arch"),
             "cpu_count": cap.get("cpu_count"),
             "ram_gb": cap.get("ram_gb"),
+            # Which commit this member is running. Empty means it is old
+            # enough to predate the field -- which is itself the finding.
+            "code_head": cap.get("code_head") or "",
         },
         "pubkey_fingerprint": _short(pubkey, 16),
         "has_pubkey": bool(pubkey),
@@ -1457,13 +1487,14 @@ const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function peopleTable(rows){
   if (!rows.length) return '<div class="empty">没有人。</div>';
-  return `<table><thead><tr><th>名字</th><th>角色</th><th>来自</th><th>主机</th><th>模型</th><th>记录</th></tr></thead><tbody>`
+  return `<table><thead><tr><th>名字</th><th>角色</th><th>来自</th><th>主机</th><th>模型</th><th>代码</th><th>记录</th></tr></thead><tbody>`
     + rows.map(p => `<tr>
       <td${p.mark ? ` title="${esc(p.mark)}"` : ''}>${esc(p.name)}</td>
       <td>${esc(p.role)}</td>
       <td>${esc(p.from)}</td>
       <td>${esc(p.host)}</td>
       <td>${esc(p.model)}</td>
+      <td class="mono">${esc(p.code)}${p.code_stale ? ' <span class="bad">旧</span>' : ''}</td>
       <td>${esc(p.record)}${p.detail ? `<div class="sub">${esc(p.detail)}</div>` : ''}</td>
     </tr>`).join('') + '</tbody></table>';
 }

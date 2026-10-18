@@ -32,6 +32,7 @@ from pando.rootd import (Coordinator, INITIAL_STEM_TIMEOUT,
                             Root, load_accuracy_registry)
 from pando.stemd import Stem
 from pando.onboard import build_plan
+from pando import graft
 from pando.grants import (audit_status, grant_status, require_grant,
                             save_grant)
 from pando.service import build_service_plan, detect_platform
@@ -5209,3 +5210,131 @@ class TestCodeSync(unittest.TestCase):
             ).stdout.split()[0]
             self.assertNotEqual(second_head, first_head)
             self.assertEqual(stamp.read_text(encoding="utf-8").strip(), second_head)
+
+
+class TestCodeIdentity(unittest.TestCase):
+    """A member that cannot say which commit it runs is a member nobody can audit.
+
+    The 2026-10-18 finding was that the Windows node sat four commits behind and
+    the only way to learn that was to ask it. These tests pin the two facts that
+    make the check possible from any peer: every registration carries the head,
+    and that head is the code the process actually loaded.
+    """
+
+    def _env(self) -> dict:
+        env = os.environ.copy()
+        for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+            env.pop(key, None)
+        env.update({
+            "GIT_AUTHOR_NAME": "code-id-test",
+            "GIT_AUTHOR_EMAIL": "code-id@example.com",
+            "GIT_COMMITTER_NAME": "code-id-test",
+            "GIT_COMMITTER_EMAIL": "code-id@example.com",
+        })
+        return env
+
+    def _repo(self, path: Path, text: str = "one\n") -> tuple[dict, str]:
+        env = self._env()
+        subprocess.run(["git", "init", "-q", "-b", "main", str(path)],
+                       check=True, env=env, capture_output=True, text=True)
+        (path / "README").write_text(text)
+        subprocess.run(["git", "-C", str(path), "add", "README"],
+                       check=True, env=env, capture_output=True, text=True)
+        subprocess.run(["git", "-C", str(path), "commit", "-qm", "one"],
+                       check=True, env=env, capture_output=True, text=True)
+        head = subprocess.run(["git", "-C", str(path), "rev-parse", "HEAD"],
+                              check=True, env=env, capture_output=True,
+                              text=True).stdout.strip()
+        return env, head
+
+    def test_a_checkout_can_name_its_own_commit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _env, head = self._repo(root / "one")
+            self.assertEqual(graft.code_head(root / "one"), head)
+
+    def test_something_that_is_not_a_checkout_says_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(graft.code_head(Path(tmp)), "")
+
+    def test_a_hijacked_git_dir_does_not_answer_for_us(self):
+        # The pre-push gate exports GIT_DIR. A probe that honoured it would
+        # report this checkout's commit while claiming to describe another.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env, mine = self._repo(root / "mine")
+            # Different bytes on purpose: two identical trees would share a
+            # commit sha and the test would pass without proving anything.
+            _other_env, other = self._repo(root / "other", "other\n")
+            self.assertNotEqual(mine, other)
+            previous = os.environ.get("GIT_DIR")
+            os.environ["GIT_DIR"] = str(root / "other" / ".git")
+            try:
+                self.assertEqual(graft.code_head(root / "mine"), mine)
+            finally:
+                if previous is None:
+                    os.environ.pop("GIT_DIR", None)
+                else:
+                    os.environ["GIT_DIR"] = previous
+
+    def test_capability_carries_the_head_it_is_running(self):
+        cap = graft.capability()
+        self.assertIn("code_head", cap)
+        self.assertEqual(cap["code_head"], graft.code_head())
+
+    def test_a_live_process_reports_what_it_loaded_not_what_arrived_since(self):
+        # Memoized on purpose: a stem that was fast-forwarded underneath itself
+        # still runs the old bytes until it restarts, and must say so.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = root / "repo"
+            env, first = self._repo(repo)
+            saved_root, saved_head = graft.ROOT, graft._CODE_HEAD
+            graft.ROOT, graft._CODE_HEAD = repo, None
+            try:
+                self.assertEqual(graft.running_commit(), first)
+                (repo / "README").write_text("two\n")
+                subprocess.run(["git", "-C", str(repo), "add", "README"],
+                               check=True, env=env, capture_output=True, text=True)
+                subprocess.run(["git", "-C", str(repo), "commit", "-qm", "two"],
+                               check=True, env=env, capture_output=True, text=True)
+                second = subprocess.run(
+                    ["git", "-C", str(repo), "rev-parse", "HEAD"], check=True,
+                    env=env, capture_output=True, text=True).stdout.strip()
+                self.assertNotEqual(first, second)
+                self.assertEqual(graft.code_head(repo), second)   # disk moved
+                self.assertEqual(graft.running_commit(), first)   # process did not
+            finally:
+                graft.ROOT, graft._CODE_HEAD = saved_root, saved_head
+
+    def _load_observatory(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "observatory_under_test",
+            Path(__file__).resolve().parents[1] / "tools" / "observatory.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_the_page_marks_who_is_running_old_code(self):
+        obs = self._load_observatory()
+
+        def row(name: str, head: str) -> dict:
+            return {"name": name, "roots": ["mac"], "lineage": "laya-en",
+                    "host": "127.0.0.1", "capability": {"code_head": head},
+                    "activity": None, "seen": None, "stats": {}, "role": "decision",
+                    "chat": None, "pubkey": ""}
+
+        rows = [row("mac-laya-int8", "a" * 40), row("pi5-laya", "a" * 40),
+                row("win-laya-int8", "b" * 40), row("win-gemma-12b", "")]
+        shown = {item["name"]: item for item in obs.present_people(rows)}
+        # The fleet's commit is what most members report.
+        self.assertEqual(shown["mac-laya-int8"]["code"], "a" * 7)
+        self.assertFalse(shown["mac-laya-int8"]["code_stale"])
+        # A member naming another commit is behind, and says so on the page.
+        self.assertEqual(shown["win-laya-int8"]["code"], "b" * 7)
+        self.assertTrue(shown["win-laya-int8"]["code_stale"])
+        # A member that cannot name one predates the field: unknown, not fine.
+        self.assertEqual(shown["win-gemma-12b"]["code"], "未知")
+        self.assertTrue(shown["win-gemma-12b"]["code_unknown"])
+

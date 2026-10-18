@@ -5,6 +5,9 @@ from __future__ import annotations
 import os
 import platform
 import subprocess
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def total_ram_gb() -> float:
@@ -37,6 +40,51 @@ def total_ram_gb() -> float:
     return 0.0
 
 
+def code_head(root: Path | None = None) -> str:
+    """The commit a checkout is on, so a peer can see who is running old code.
+
+    A member that cannot say which code it runs is a member nobody can audit:
+    on 2026-10-18 the only way to learn that the Windows node was four commits
+    behind was to ask it. Probed from the repo this module lives in unless a
+    root is given.
+
+    Never a startup blocker: no git, no checkout, or an unparsable answer all
+    yield "". GIT_DIR / GIT_WORK_TREE are stripped first, because a git hook
+    (the pre-push gate runs this same tree) exports both and would otherwise
+    make an unrelated repository answer for us.
+    """
+    env = dict(os.environ)
+    for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+        env.pop(key, None)
+    try:
+        done = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(root or ROOT), env=env,
+            capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if done.returncode != 0:
+        return ""
+    return done.stdout.strip()
+
+
+_CODE_HEAD: str | None = None
+
+
+def running_commit() -> str:
+    """The commit this process is running, probed once and then remembered.
+
+    Deliberately memoized: the honest answer is the code that was loaded when
+    the process started, not whatever the checkout has been fast-forwarded to
+    since. A stem that updated underneath itself still runs the old bytes
+    until it restarts, and has to say so.
+    """
+    global _CODE_HEAD
+    if _CODE_HEAD is None:
+        _CODE_HEAD = code_head()
+    return _CODE_HEAD
+
+
 def capability() -> dict:
     return {
         "arch": platform.machine(),
@@ -44,6 +92,9 @@ def capability() -> dict:
         "python": platform.python_version(),
         "cpu_count": os.cpu_count() or 0,
         "ram_gb": round(total_ram_gb(), 2),
+        # Top-level fact, not decoration: roots show it per member so an
+        # out-of-date node is visible from any peer without asking it.
+        "code_head": running_commit(),
     }
 
 
