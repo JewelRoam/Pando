@@ -1,0 +1,90 @@
+{
+  "experiment": "equal-budget-004",
+  "title": "Bloodline arm: one NON-Qwen LLM alone vs the same 4-member committee",
+  "date": "2026-10-19",
+  "author": "mac-codex",
+  "origin": "equal-budget-003 closed the BUDGET axis and said so in as many words: 'A and A' are both Qwen3. So the correct sentence is \"a Qwen3-8B beat this committee\", not \"a big model beat this committee\". A different-bloodline big model at equal weight is still unrun.' This run is that arm. The committee is adopted verbatim from 002; nothing else moves.",
+  "preregistered_before_any_harvest": true,
+  "this_is_the_bloodline_arm_not_a_new_experiment": {
+    "what_moves": "arm A only: Qwen3-8B (4.682 GiB, Q4_K_M) -> Yi-1.5-9B-Q4_K_M, a different lineage, reached over LAN",
+    "what_is_held_frozen": "arm B is adopted verbatim from assets/votes/equal-budget-002.raw.json via --reuse-arm-b; the tool refuses the donor unless suite, row count and member URLs match one for one",
+    "why_holding_it_matters": "re-harvesting the held arm would re-roll it (a timeout, a sampler decision on the second pass), and a between-runs delta would then be read as a between-arms delta"
+  },
+  "host": {
+    "arm_a_machine": "Windows 11, AMD64, 16 cpu, 31.43 GiB (win root 192.168.31.100:8790)",
+    "arm_a_accelerator": "RTX 3070 (ngl 99)",
+    "arm_b_machine": "Apple arm64, 10 cpu, 16 GiB (this mac)",
+    "note": "arm A is the first arm in this series scored ACROSS A LAN BOUNDARY; see declared_limits.latency_is_not_comparable"
+  },
+  "suites": [
+    {
+      "path": "assets/heldout4_test.jsonl",
+      "family": "big6",
+      "rows": 240,
+      "sha256": "fad4bdf844b55d208ddf35e737be0e6f4821417bc919d5647edb3e40531db7ff"
+    },
+    {
+      "path": "assets/heldout5_test.jsonl",
+      "family": "big7",
+      "rows": 120,
+      "sha256": "2b9613c7504febfa6df63295bc775b68798350182c3cbe70df535cabfb247048"
+    }
+  ],
+  "rows_total": 360,
+  "suites_sha256_match_002_and_003": true,
+  "arm_a": {
+    "role": "one NON-Qwen LLM, alone, on the committee budget",
+    "node_id": "win-yi-9b",
+    "checkpoint": "yi-1.5-9b-q4km",
+    "lineage": "01.AI Yi-1.5 - not Qwen, not Gemma",
+    "url": "http://192.168.31.100:54244",
+    "url_is_transient": true,
+    "url_source": "win root /nodes, read immediately before this run; stem ports rotate every restart and must never be cached",
+    "stemd_backend": "openai (OpenAIChoiceBackend, prompt variant b)",
+    "model_file_declared_by_win_supervisor": "D:\\pando-models\\yi-1.5-9b-q4km (tools/win_node_supervisor.ps1)",
+    "weight_bytes": null,
+    "weight_gb": null,
+    "weight_unverified_reason": "win exposes no gguf file size over /nodes, the stem /health, or llama-server /props (all four probed 2026-10-19 07:0x; only checkpoint aliases come back). The mac therefore CANNOT claim this arm is at equal weight. Closing it needs one command on win: Get-Item D:\\pando-models\\*.gguf | Select-Object Name,Length",
+    "no_new_model_loaded": "win-yi-9b was already resident as a civilization member; this run started zero new model servers. Compare 003, which had to unload and reload the mac's 8B for ~15 minutes."
+  },
+  "arm_b": {
+    "role": "the same committee, its votes taken from 002 rather than re-asked",
+    "source": "assets/votes/equal-budget-002.raw.json",
+    "source_sha256": "c56f658b040253acdac89bf5b098e317aa2be52e559c2534fcec5cc0049baa81",
+    "members": [
+      "http://127.0.0.1:8767",
+      "http://127.0.0.1:8770",
+      "http://127.0.0.1:8769",
+      "http://127.0.0.1:8766"
+    ],
+    "member_checkpoints": {
+      "http://127.0.0.1:8767": "mac-llm-4b (Qwen3-4B)",
+      "http://127.0.0.1:8770": "phi-3.5-mini-q4km",
+      "http://127.0.0.1:8769": "mac-laya-int8",
+      "http://127.0.0.1:8766": "mac-text (text-nb-v1)"
+    },
+    "total_weight_gib": 5.112,
+    "note": "8767 and 8770 are NOT listening right now. That is deliberate and harmless: --reuse-arm-b re-reads the stored votes, it does not re-ask the members. The tool refuses the donor if the member URL list differs by even one entry."
+  },
+  "decision_rule_fixed_before_the_run": {
+    "let d": "(rows where arm A is right and arm B wrong) - (rows where arm B is right and arm A wrong), on rows both answered",
+    "d >= 0 means": "this foreign-bloodline model is NOT better than the committee on these rows",
+    "d < 0 and |d| > 1.96*SE": "the committee is ahead of THIS foreign model beyond noise on these rows",
+    "otherwise": "inconclusive at this n; no claim either way",
+    "unchanged_from_002_and_003": true
+  },
+  "declared_limits": {
+    "budget_axis_not_closed_by_this_run": "the pre-registered control was 'a non-Qwen big model at equal weight'. Weight is unverified for arm A, so this run closes the BLOODLINE axis (a different lineage was actually measured on the identical rows) but leaves the equal-weight claim open. Do not merge the two sentences.",
+    "arm_a_vote_is_choice_only": "win runs pando.stemd --backend openai (OpenAIChoiceBackend). Its docstring: 'There is no calibrated probability in that response. Votes are marked neutral.' So arm A answers with a choice and p=0.5/neutral=true on every row. Only choice accuracy is comparable to arm B; a confidence-weighted comparison is impossible for this arm and the tool's accuracy_calibrated column is the one that matters.",
+    "latency_is_not_comparable": "arm A's milliseconds include LAN transit plus a GPU box; arm B's are in-process on the same mac as the harness. The latency numbers are recorded for the record only and are NOT a verdict input for this run.",
+    "interference_declared_up_front": "arm A's harness drives the same llama-server that win's own proposer (win-gpu-proposer) uses, 360 sequential requests. It may delay win's proposer for the duration. Done in a single pass, not repeatedly, and not while a win-side experiment is running.",
+    "problems_are_internal": "heldout4/heldout5 were produced by this project's own pipeline. Author and examinee are the same group. No result here is externally anchored."
+  },
+  "reflection_template": [
+    "sample size and standard error",
+    "which control is still missing",
+    "whether the evidence is externally anchored",
+    "ops cost including human approvals",
+    "one falsifiable alternative explanation"
+  ]
+}

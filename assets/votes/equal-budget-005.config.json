@@ -1,0 +1,68 @@
+{
+  "experiment": "equal-budget-005",
+  "title": "Bracket for the bloodline arm: the same committee vs a non-Qwen model ABOVE its budget (Gemma-4-12B-Q4_K_M)",
+  "date": "2026-10-19",
+  "author": "mac-codex",
+  "origin": "004 ran the bloodline arm the todo asked for and the committee WON (0.9259 vs 0.8757, delta=+18, 1SE=3.39). That result is confounded: Yi-1.5-9B differs from the committee in lineage AND is plausibly a weaker model overall, and its weight bytes are unverified. A single point cannot separate 'different bloodline' from 'weaker model'. This run adds the second point on the other side of the capacity axis so the axis is bracketed rather than asserted - the same move 003 made for the budget axis.",
+  "preregistered_before_any_harvest": true,
+  "this_is_a_bracket_not_a_new_experiment": {
+    "what_moves": "arm A only: Yi-1.5-9B-Q4_K_M (unverified weight) -> Gemma-4-12B-Q4_K_M, still non-Qwen, on a GPU, but LARGER than the committee's 5.112 GiB",
+    "what_is_held_frozen": "arm B is adopted verbatim from assets/votes/equal-budget-002.raw.json via --reuse-arm-b; the tool refuses the donor unless suite, row count and member URLs match one for one",
+    "why_bracketing_beats_asserting": "004 alone licenses at most 'a non-Qwen 9B did not beat this committee'. Only with a bigger non-Qwen arm can the sentence 'the committee beats non-Qwen models' be tested at all, and only against two points can it be said which way the capacity axis runs."
+  },
+  "suites": [
+    {
+      "path": "assets/heldout4_test.jsonl",
+      "family": "big6",
+      "rows": 240,
+      "sha256": "fad4bdf844b55d208ddf35e737be0e6f4821417bc919d5647edb3e40531db7ff"
+    },
+    {
+      "path": "assets/heldout5_test.jsonl",
+      "family": "big7",
+      "rows": 120,
+      "sha256": "2b9613c7504febfa6df63295bc775b68798350182c3cbe70df535cabfb247048"
+    }
+  ],
+  "rows_total": 360,
+  "arm_a": {
+    "role": "one NON-Qwen LLM, alone, ABOVE the committee's budget",
+    "node_id": "win-gemma-12b",
+    "checkpoint": "gemma-4-12b-q4km",
+    "lineage": "Google Gemma-4 - neither Qwen nor Yi",
+    "url": "http://192.168.31.100:54241",
+    "url_is_transient": true,
+    "url_source": "win root /nodes, read immediately before this run",
+    "model_file_declared_by_win_supervisor": "D:\\pando-models\\gemma-4-12b-it-Q4_K_M.gguf (tools/win_node_supervisor.ps1)",
+    "weight_bytes": null,
+    "weight_gb": null,
+    "weight_direction_is_not_in_doubt": "unlike 004, the sign here is safe without file sizes: a 12B model at Q4_K_M cannot weigh less than a 5.112 GiB committee of 4B + 3.5B + laya + text-nb. This arm is ABOVE budget by construction, so any committee win here is a win against a larger adversary, not a matched one.",
+    "no_new_model_loaded": "win-gemma-12b was already resident as a civilization member; zero new model servers."
+  },
+  "arm_b": {
+    "role": "the same committee, its votes taken from 002 rather than re-asked",
+    "source": "assets/votes/equal-budget-002.raw.json",
+    "source_sha256": "c56f658b040253acdac89bf5b098e317aa2be52e559c2534fcec5cc0049baa81",
+    "members": [
+      "http://127.0.0.1:8767",
+      "http://127.0.0.1:8770",
+      "http://127.0.0.1:8769",
+      "http://127.0.0.1:8766"
+    ],
+    "total_weight_gib": 5.112
+  },
+  "decision_rule_fixed_before_the_run": {
+    "let d": "(rows where arm A is right and arm B wrong) - (rows where arm B is right and arm A wrong), on rows both answered",
+    "d >= 0 means": "this non-Qwen model ABOVE the committee's budget is not better than the committee on these rows",
+    "d < 0 and |d| > 1.96*SE": "the larger non-Qwen model is ahead beyond noise on these rows",
+    "otherwise": "inconclusive at this n; no claim either way",
+    "unchanged_from_002_003_004": true
+  },
+  "declared_limits": {
+    "still_not_externally_anchored": "same two internally generated suites. Author and examinee are the same group.",
+    "arm_a_vote_is_choice_only": "win's stems run --backend openai (OpenAIChoiceBackend): choice only, p=0.5, neutral=true by design. Only choice accuracy is comparable.",
+    "latency_is_not_comparable": "arm A crosses a LAN and runs on a 3070; arm B is in-process on this mac.",
+    "confound_this_arm_cannot_remove": "lineage, host, quantisation and serving path all differ between arm A and arm B simultaneously. This bracket bounds the capacity axis; it does not isolate lineage.",
+    "interference_declared_up_front": "arm A's harness drives the same llama-server win's own proposer uses, 360 sequential requests, one pass."
+  }
+}
