@@ -1254,11 +1254,15 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                     }, sort_keys=True) + "\n")
                 bundle = latest_sealed(args.out_root) if pulls else None
                 for proposal_id, destination in addressed:
+                    # A pull host is recorded whether or not the offer landed:
+                    # ``offer_replication`` returns the reason it did not
+                    # (``no-bundle`` when nothing is sealed yet). Dropping that
+                    # row made a failed copy read exactly like one that was
+                    # never attempted -- which is how win sat at zero received
+                    # seeds for 35 rounds without leaving a trace.
                     if destination in pulls:
                         record = offer_replication(
                             proposal_id, destination, bundle=bundle, outbox=outbox)
-                        if record.get("skipped") != "offered":
-                            continue
                     else:
                         record = {
                             "proposal_id": proposal_id,

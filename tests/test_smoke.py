@@ -4365,8 +4365,11 @@ class TestExecution(unittest.TestCase):
             proposal_id="mac-proposer-r1", author="mac-proposer"))
         self.assertEqual(rc, 0)
 
-    def _replicate_round(self, pull):
+    def _replicate_round(self, pull, sealed=True):
         """One ``run_once`` round for a win-addressed copy under ``pull``.
+
+        ``sealed=False`` leaves the out root empty, so the round has a pull
+        host and nothing to hand it -- the case that used to vanish.
 
         Returns the ``seed.replicate`` ledger rows and whether the bundle
         actually landed in the outbox, so both halves of the fix can be
@@ -4380,7 +4383,8 @@ class TestExecution(unittest.TestCase):
             ident_path = root / "identity.json"
             ident_path.write_text(json.dumps(identity.to_json()),
                                   encoding="utf-8")
-            self._sealed_bundle(root)
+            if sealed:
+                self._sealed_bundle(root)
             args = self._execute_args(root, ident_path)
             args.hosts = {"win": "http://win.example:8790"}
             args.pull = pull
@@ -4418,6 +4422,20 @@ class TestExecution(unittest.TestCase):
         self.assertEqual(len(skipped), 1)
         self.assertEqual(skipped[0]["skipped"], "no-transport")
         self.assertFalse(staged_control)
+
+    def test_a_pull_host_with_nothing_sealed_is_recorded_not_dropped(self):
+        """A failed offer must leave a row; the silence is what hid win's 0.
+
+        ``offer_replication`` returns ``no-bundle`` when nothing sealed is on
+        hand, and the caller used to ``continue`` past it, so the round wrote
+        no row at all. "The copy did not happen" then read exactly like "the
+        copy was never attempted" -- and only the second is harmless.
+        """
+        rows, staged = self._replicate_round({"win"}, sealed=False)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["skipped"], "no-bundle")
+        self.assertEqual(rows[0]["destination"], "win")
+        self.assertFalse(staged)
 
     def test_a_failed_export_is_not_treated_as_handled(self):
         import tempfile
