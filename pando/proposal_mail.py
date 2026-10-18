@@ -68,6 +68,70 @@ def _request(url: str, path: str, token: str | None, method: str,
         return {"error": f"unreachable: {exc}"}
 
 
+
+def mailbox_chain(primary: str, fallbacks=None) -> list[str]:
+    """Ordered, deduplicated list of mailboxes to try, first to last."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for url in [primary] + list(fallbacks or []):
+        url = (url or "").strip()
+        if url and url not in seen:
+            seen.add(url)
+            out.append(url)
+    return out
+
+
+def delivery_failed(result) -> bool:
+    """Return True only for failures that may succeed on another mailbox.
+
+    ``_request`` reports transport problems as data, not exceptions. A dead
+    host and an HTTP 5xx mean nobody heard the message; a 4xx means the
+    mailbox heard it and refused it, so retrying another mailbox cannot help.
+    """
+    if not isinstance(result, dict):
+        return True
+    err = str(result.get("error") or "")
+    if not err:
+        return False
+    return err.startswith("unreachable:") or err.startswith("HTTP 5")
+
+
+def fetch_proposals_any(urls, token: str | None = None,
+                        pinned: dict[str, str] | None = None,
+                        status: str = "all", timeout: float = 15,
+                        max_items: int | None = None):
+    """Read the first non-empty proposal feed in *urls*.
+
+    Returns ``(proposals, source_url, last_error)``. An empty feed is not a
+    successful answer while another mailbox remains: replication can lag, and
+    a quiet primary must not hide a populated fallback.
+    """
+    if isinstance(urls, str):
+        chain = mailbox_chain(urls)
+    else:
+        urls = list(urls or [])
+        chain = mailbox_chain(urls[0] if urls else "", urls[1:])
+    last_error = None
+    answered = False
+    for url in chain:
+        listing = _request(url, f"/tasks?status={status}", token, "GET",
+                           timeout=timeout)
+        if isinstance(listing, dict) and listing.get("error"):
+            last_error = str(listing.get("error"))
+            continue
+        answered = True
+        last_error = None
+        rows = listing.get("tasks") if isinstance(listing, dict) else None
+        rows = rows if isinstance(rows, list) else []
+        proposals = fetch_proposals(url, token, pinned=pinned, status=status,
+                                    timeout=timeout, max_items=max_items,
+                                    rows=rows)
+        if proposals:
+            return proposals, url, None
+    return [], None, None if answered else last_error
+
+
+
 def publish_proposal(proposal: Proposal, identity, url: str,
                      token: str | None = None, timeout: float = 15) -> dict:
     """Sign *proposal* with *identity* and leave it on the mailbox.

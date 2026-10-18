@@ -2882,6 +2882,109 @@ class TestReactions(unittest.TestCase):
                          ["neck-a", "neck-c"])
 
 
+    def test_reaction_delivery_uses_the_fallback_mailbox(self):
+        """A dead primary must not turn a signed vote into a lost vote."""
+        from unittest import mock
+        from pando import reactd
+
+        calls = []
+
+        def fake_publish(record, node_id, url, token, timeout=15):
+            calls.append(url)
+            if url == "http://primary":
+                return {"error": "unreachable: primary"}
+            return {"task": {"id": "t1"}, "claimed": True}
+
+        with mock.patch.object(reactd, "publish_reaction", fake_publish):
+            sent = reactd.publish_reaction_any(
+                {"payload": {"target_id": "p1"}}, "mac-text",
+                ["http://primary", "http://fallback"], None, 5)
+
+        self.assertEqual(calls, ["http://primary", "http://fallback"])
+        self.assertEqual(sent["mailbox"], "http://fallback")
+        self.assertTrue(sent["claimed"])
+
+    def test_reading_proposals_falls_through_an_unreachable_primary(self):
+        """An empty or dead primary must not hide a populated fallback."""
+        from unittest import mock
+        from pando import proposal_mail
+
+        seen = []
+
+        def fake_fetch(url, token=None, pinned=None, status="all",
+                       timeout=15, max_items=None, rows=None):
+            seen.append(url)
+            return ["proposal-from-fallback"] if url == "http://fallback" else []
+
+        with mock.patch.object(proposal_mail, "fetch_proposals", fake_fetch), \
+                mock.patch.object(proposal_mail, "_request",
+                                  side_effect=[{"error": "unreachable: primary"},
+                                               {"tasks": [{"id": "t1"}]}]):
+            found, source, error = proposal_mail.fetch_proposals_any(
+                ["http://primary", "http://fallback"], None)
+
+        self.assertEqual(seen, ["http://fallback"])
+        self.assertEqual(found, ["proposal-from-fallback"])
+        self.assertEqual(source, "http://fallback")
+        self.assertIsNone(error)
+
+    def test_an_empty_fallback_is_healthy_even_if_primary_is_down(self):
+        """An answered empty feed is idle, not a failed poll."""
+        from unittest import mock
+        from pando import proposal_mail
+
+        with mock.patch.object(proposal_mail, "fetch_proposals",
+                               return_value=[]), \
+                mock.patch.object(proposal_mail, "_request",
+                                  side_effect=[{"error": "unreachable: primary"},
+                                               {"tasks": []}]):
+            found, source, error = proposal_mail.fetch_proposals_any(
+                ["http://primary", "http://fallback"], None)
+
+        self.assertEqual(found, [])
+        self.assertIsNone(source)
+        self.assertIsNone(error)
+
+    def test_a_lost_reaction_is_retried_instead_of_marked_done(self):
+        """A failed post leaves the proposal retryable, not silently adopted."""
+        from types import SimpleNamespace
+        from unittest import mock
+        from pathlib import Path as _P
+        from pando import reactd
+        from pando.identity import load_or_create
+
+        proposal = SimpleNamespace(proposal_id="p1", author="other",
+                                   goal="goal", action="action")
+        stems = [{"node_id": "mac-text", "url": "http://stem",
+                  "checkpoint": "text-nb-v1"}]
+        asks, posts = [], []
+
+        def fake_ask(stem, item, timeout):
+            asks.append(item.proposal_id)
+            return {"stance": "赞同", "probability": None}
+
+        def fake_publish(record, node_id, url, token, timeout=15):
+            posts.append(url)
+            if len(posts) == 1:
+                return {"error": "unreachable: mailbox"}
+            return {"task": {"id": "r1"}, "claimed": True}
+
+        with tempfile.TemporaryDirectory() as td, \
+                mock.patch.object(reactd, "ask_stem", fake_ask), \
+                mock.patch.object(reactd, "publish_reaction", fake_publish):
+            identity = load_or_create(_P(td) / "identity.json")
+            ledger = _P(td) / "ledger.jsonl"
+            first = reactd.react_once([proposal], stems, identity,
+                                      ["http://primary"], None, ledger, 5)
+            second = reactd.react_once([proposal], stems, identity,
+                                       ["http://primary"], None, ledger, 5)
+
+        self.assertEqual(first["did"], "error")
+        self.assertEqual(second["did"], "reacted")
+        self.assertEqual(asks, ["p1", "p1"])
+        self.assertEqual(posts, ["http://primary", "http://primary"])
+
+
 class TestObservatoryFeed(unittest.TestCase):
     def test_an_address_is_stored_once(self):
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))

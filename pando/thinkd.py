@@ -68,7 +68,8 @@ from .genesis import ACTION_SPACE, Proposal
 from .identity import load_or_create
 from .policy import KNOBS, validate as validate_policy
 from .net import open_url
-from .proposal_mail import fetch_proposals, publish_proposal
+from .proposal_mail import (delivery_failed, fetch_proposals,
+                            mailbox_chain, publish_proposal)
 
 # Actions we hand the model, in a stable order so prompts are reproducible.
 ACTION_MENU = "\n".join(f"{name}: {desc}" for name, desc in ACTION_SPACE.items())
@@ -429,25 +430,6 @@ def proposal_from_obj(obj: dict, author: str, node_id: str,
     ), ""
 
 
-def mailbox_chain(primary: str, fallbacks=None) -> list[str]:
-    """Ordered, deduplicated list of mailboxes to try, first to last.
-
-    The same sentence the model failover rests on applies to the mailbox, and
-    nobody had applied it there: *"handing the thinker a single URL would make
-    its uptime a property of the operator's memory schedule rather than of the
-    citizen."* One mailbox on one host is one process away from every device
-    in the colony being unable to be heard - which is exactly the failure that
-    was measured (thinking moved off the Mac; being-heard did not).
-    """
-    seen: set[str] = set()
-    out: list[str] = []
-    for url in [primary] + list(fallbacks or []):
-        url = (url or "").strip()
-        if url and url not in seen:
-            seen.add(url)
-            out.append(url)
-    return out
-
 
 class Spool:
     """Signed proposals that could not be delivered, kept until they can be.
@@ -524,25 +506,6 @@ class Spool:
         self._write([r for r in self._read()
                      if r.get("proposal_id") not in gone])
 
-
-def delivery_failed(result) -> bool:
-    """Was the proposal *undelivered* (retryable) or *refused* (final)?
-
-    Get this wrong and the spool is worse than useless. ``proposal_mail._request``
-    reports transport problems as data, not exceptions - a dead host comes back
-    as ``{"error": "unreachable: ..."}`` and a broken mailbox as ``{"error":
-    "HTTP 5xx"}``. Both mean "nobody heard it", so both must be spooled. A 4xx
-    is the mailbox doing its job; spooling that would replay the same rejection
-    until the disk filled. (This distinction was caught by an end-to-end run
-    against a dead port, not by reading the code: the first version spooled only
-    on exceptions and would therefore have never spooled the real case.)
-    """
-    if not isinstance(result, dict):
-        return True
-    err = str(result.get("error") or "")
-    if not err:
-        return False
-    return err.startswith("unreachable:") or err.startswith("HTTP 5")
 
 
 def replicate_streak(rows: list[dict], window: int = 6, need: int = 4) -> bool:

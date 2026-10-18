@@ -30,7 +30,8 @@ from .common import DECIDING_ROLE, DecisionRequest
 from .genesis import REACTION_STANCES, sign_reaction
 from .identity import load_or_create
 from .net import local_addresses, open_url
-from .proposal_mail import fetch_proposals, publish_reaction
+from .proposal_mail import (delivery_failed, fetch_proposals_any,
+                            mailbox_chain, publish_reaction)
 
 
 def select_local_stems(nodes: dict, addresses: set[str]) -> list[dict]:
@@ -87,6 +88,77 @@ def append_ledger(path: Path, row: dict) -> None:
         handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
 
 
+def load_delivered(path: Path) -> dict[str, set[str]]:
+    """Which (proposal, member) reactions the mailbox has already accepted.
+
+    A proposal is only ``done`` after every local decision model's reaction
+    was accepted. Remembering successful posts separately means a partial
+    mailbox failure can be retried without re-asking models that already got
+    through. The old done-row format is read too, so upgrades keep their
+    existing history.
+    """
+    delivered: dict[str, set[str]] = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return delivered
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(row, dict):
+            continue
+        target = str(row.get("target_id") or "")
+        if not target:
+            continue
+        if row.get("delivered"):
+            node = str(row.get("node_id") or "")
+            if node:
+                delivered.setdefault(target, set()).add(node)
+        if row.get("done"):
+            for vote in row.get("votes") or []:
+                if isinstance(vote, dict) and vote.get("node_id"):
+                    delivered.setdefault(target, set()).add(str(vote["node_id"]))
+    return delivered
+
+
+def _mailboxes(urls) -> list[str]:
+    if isinstance(urls, str):
+        return mailbox_chain(urls)
+    urls = list(urls or [])
+    return mailbox_chain(urls[0] if urls else "", urls[1:])
+
+
+def publish_reaction_any(record: dict, node_id: str, urls,
+                         token: str | None, timeout: float) -> dict:
+    """Publish a reaction to the first mailbox that hears it.
+
+    A dead mailbox and a 5xx go to the next URL; a 4xx is a final refusal
+    and is returned without asking another host.
+    """
+    last = {"error": "unreachable: no mailbox configured"}
+    for url in _mailboxes(urls):
+        result = publish_reaction(record, node_id, url, token, timeout)
+        if not delivery_failed(result):
+            if isinstance(result, dict):
+                result.setdefault("mailbox", url)
+            return result
+        last = result
+    return last
+
+
+def _accepted(result) -> bool:
+    if not isinstance(result, dict) or result.get("error"):
+        return False
+    return (result.get("task") is not None
+            or result.get("claimed") is not None
+            or result.get("claim_warning") is not None)
+
+
 def _read_token(path: str | None) -> str | None:
     if not path:
         return None
@@ -136,12 +208,15 @@ def ask_stem(stem: dict, proposal, timeout: float) -> dict:
             "probability": None if vote.get("neutral") else probability}
 
 
-def react_once(proposals, stems: list[dict], identity, mailbox: str,
-               token: str | None, ledger: Path, timeout: float) -> dict:
+def react_once(proposals, stems: list[dict], identity, mailbox,
+               token: str | None, ledger: Path, timeout: float,
+               mailbox_fallbacks=None) -> dict:
     """Answer one not-yet-answered proposal.
 
     On the first run, every proposal but the newest is marked skipped, so a
-    restart does not walk history through the models.
+    restart does not walk history through the models. A reaction is only
+    counted as done after a mailbox accepted it; a failed post leaves the
+    proposal retryable instead of silently treating a lost vote as a vote.
     """
     seen = load_seen(ledger)
     ordered = [item for item in proposals if getattr(item, "proposal_id", "")]
@@ -158,10 +233,11 @@ def react_once(proposals, stems: list[dict], identity, mailbox: str,
     if not stems:
         return {"did": "idle", "reason": "no local stems"}
     proposal = pending[0]
+    delivered = load_delivered(ledger).get(proposal.proposal_id, set())
     votes = []
     errors = []
     for stem in stems:
-        if stem["node_id"] == proposal.author:
+        if stem["node_id"] == proposal.author or stem["node_id"] in delivered:
             continue
         try:
             vote = ask_stem(stem, proposal, timeout)
@@ -172,16 +248,33 @@ def react_once(proposals, stems: list[dict], identity, mailbox: str,
         record = sign_reaction(
             proposal.proposal_id, stem["node_id"], stem["checkpoint"],
             vote["stance"], identity, probability=vote["probability"])
-        posted = publish_reaction(record, stem["node_id"], mailbox, token,
-                                  timeout=timeout)
+        posted = publish_reaction_any(record, stem["node_id"], mailbox, token,
+                                      timeout)
+        if not _accepted(posted):
+            detail = posted.get("error") if isinstance(posted, dict) else posted
+            errors.append(f"{stem['node_id']}: publish: {detail}")
+            continue
+        append_ledger(ledger, {
+            "target_id": proposal.proposal_id,
+            "node_id": stem["node_id"],
+            "delivered": True,
+            "stance": vote["stance"],
+            "mailbox": posted.get("mailbox"),
+            "at": time.time(),
+        })
+        delivered.add(stem["node_id"])
         votes.append({"node_id": stem["node_id"], "stance": vote["stance"],
                       "claimed": posted.get("claimed")})
-    if errors and not votes:
-        return {"did": "error", "target": proposal.proposal_id, "errors": errors}
+    expected = {stem["node_id"] for stem in stems
+                if stem["node_id"] != proposal.author}
+    complete = expected <= delivered
     append_ledger(ledger, {
-        "target_id": proposal.proposal_id, "done": True, "at": time.time(),
+        "target_id": proposal.proposal_id, "done": complete, "at": time.time(),
         "votes": votes, "errors": errors,
     })
+    if errors or not complete:
+        return {"did": "error", "target": proposal.proposal_id,
+                "votes": votes, "errors": errors, "complete": complete}
     return {"did": "reacted", "target": proposal.proposal_id,
             "votes": votes, "errors": errors}
 
@@ -191,6 +284,8 @@ def main() -> int:
     parser.add_argument("--root", default="http://127.0.0.1:8765")
     parser.add_argument("--pairing-token-file", default="~/.pandosi/pairing.token")
     parser.add_argument("--mailbox", default="http://127.0.0.1:8776")
+    parser.add_argument("--mailbox-fallback", action="append", default=[],
+                        help="mailbox to try after the primary (repeatable)")
     parser.add_argument("--token-file", default="~/.pandosi/mailbox.token")
     parser.add_argument("--ledger", default="~/.pandosi/reaction-ledger.jsonl")
     parser.add_argument("--interval", type=float, default=40)
@@ -203,13 +298,17 @@ def main() -> int:
     token = _read_token(args.token_file)
     ledger = Path(args.ledger).expanduser()
     addresses = local_addresses()
+    mailboxes = mailbox_chain(args.mailbox, args.mailbox_fallback)
     while True:
         try:
             nodes = fetch_nodes(args.root, pairing)
             stems = select_local_stems(nodes, addresses)
-            proposals = fetch_proposals(args.mailbox, token, status="all",
-                                        max_items=30, timeout=args.timeout)
-            report = react_once(proposals, stems, identity, args.mailbox,
+            proposals, _source, read_error = fetch_proposals_any(
+                mailboxes, token, status="all", max_items=30,
+                timeout=args.timeout)
+            if read_error and not proposals:
+                raise RuntimeError(read_error)
+            report = react_once(proposals, stems, identity, mailboxes,
                                 token, ledger, args.timeout)
             print(time.strftime("%H:%M:%S"),
                   json.dumps(report, ensure_ascii=False), flush=True)
