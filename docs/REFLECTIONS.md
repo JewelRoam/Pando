@@ -335,13 +335,16 @@ The Mac's full answer lives in mailbox task t-20261017-001001-f790. Load-bearing
   pass than the code. A change that is refused carries no `skipped` key on purpose: it is retried
   and refused again next round, so a rule that can never apply stays visible in the ledger instead
   of looking handled.
-- Honest boundary: 4 of the 8 declared actions now have actuators. `culture.refine` is staged-only
+- Honest boundary: 5 of the 8 declared actions now have actuators. `culture.refine` is staged-only
   (`b3ff290`): it validates a `{"playbook": {...}}` payload, signs an attestation and writes the
   candidate under `~/.pandosi/culture-outbox/<proposal-id>/` with `applied: false`. It never spawns
   a process, never rewrites the live playbook and never touches the rules - applying a candidate
-  still goes through `pando/gate.py` and a human. `recruit.invite`, `reproduce.spawn`,
-  `resource.rebalance` and `meta.propose` are still `no-actuator` - adopted and held, not executed
-  and not silent.
+  still goes through `pando/gate.py` and a human. `recruit.invite` is staged-only too
+  (`pando/invite.py`): it mints a fresh bearer pairing token, signs the invitation and writes it
+  0600 under `~/.pandosi/invites/<proposal-id>/` with `applied: false`. Nothing installs the token
+  into a running root, and staging is idempotent because re-minting on a retry would invalidate an
+  invitation already copied elsewhere. `reproduce.spawn`, `resource.rebalance` and `meta.propose`
+  are still `no-actuator` - adopted and held, not executed and not silent.
 - Falsifier: sign a `policy.set` that lowers `min_adopt` to 1 with the ordinary two adopters, and
   check the ledger records a refusal rather than writing `min_adopt=1`. That is the whole safety
   claim, and it is one command to test.

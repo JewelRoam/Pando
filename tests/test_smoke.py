@@ -3304,7 +3304,8 @@ class TestExecution(unittest.TestCase):
             out_root=str(Path(tmp) / "out"),
             policy_path=str(Path(tmp) / "policy.json"),
             hosts=None, pull=[], outbox=str(Path(tmp) / "outbox"),
-            culture_outbox=str(Path(tmp) / "culture-outbox"))
+            culture_outbox=str(Path(tmp) / "culture-outbox"),
+            invite_outbox=str(Path(tmp) / "invite-outbox"))
 
     def test_a_raising_export_is_recorded_rather_than_ending_the_loop(self):
         """One broken actuator must not take the executor down with it.
@@ -3712,6 +3713,155 @@ class TestExecution(unittest.TestCase):
             self.assertEqual(rows[0]["action"], "culture.refine")
             self.assertFalse((Path(args.culture_outbox) / "p-theirs-c").exists())
 
+    def test_a_recruit_invite_is_staged_signed_and_inert(self):
+        """recruit.invite mints a credential, and nothing else.
+
+        The artifact is a bearer token in a 0600 file under the issuer's own
+        outbox. No root is written and no member is registered, so a staged
+        invitation cannot be mistaken for an applied admission.
+        """
+        import tempfile
+        from pando.execute import run_once
+        from pando.identity import Identity
+        from pando.invite import verify as verify_invite
+
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = Identity.generate()
+            ident_path = Path(tmp) / "identity.json"
+            ident_path.write_text(json.dumps(identity.to_json()),
+                                  encoding="utf-8")
+            (Path(tmp) / "phrase").write_text("pw\n", encoding="utf-8")
+            proposal = self._proposal(action="recruit.invite", pid="p-inv")
+            proposal.pubkey = identity.public_key
+            votes = [self._vote("mac-text", "赞同", "p-inv"),
+                     self._vote("mac-laya-int8", "赞同", "p-inv")]
+            args = self._execute_args(tmp, ident_path)
+
+            self.assertEqual(run_once([proposal], votes, args), 0)
+            rows = [json.loads(line) for line in
+                    Path(args.ledger).read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(rows), 1)
+            row = rows[0]
+            self.assertTrue(row["executed"])
+            self.assertEqual(row["action"], "recruit.invite")
+            self.assertNotIn("skipped", row)
+
+            root = Path(row["directory"])
+            manifest = json.loads(
+                (root / "manifest.json").read_text(encoding="utf-8"))
+            self.assertFalse(manifest["applied"])
+            self.assertEqual(manifest["status"], "staged-not-applied")
+            self.assertEqual(manifest["invite_hash"], row["invite_hash"])
+            body = json.loads(
+                (root / "invite.json").read_text(encoding="utf-8"))
+            self.assertEqual(body["proposal_id"], "p-inv")
+            self.assertEqual(body["author"], "mac-proposer")
+            self.assertTrue(body["token"])
+            # The credential is 0600 and the signed payload verifies.
+            self.assertEqual((root / "invite.json").stat().st_mode & 0o777,
+                             0o600)
+            self.assertTrue(verify_invite(root))
+            # Nothing live changed: no policy store, no member table.
+            self.assertFalse(Path(args.policy_path).exists())
+
+    def test_a_recruit_invite_is_staged_once_and_not_reminted(self):
+        """A retry returns the same token; a second mint would break a copy."""
+        import tempfile
+        from pando.execute import run_once
+        from pando.identity import Identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = Identity.generate()
+            ident_path = Path(tmp) / "identity.json"
+            ident_path.write_text(json.dumps(identity.to_json()),
+                                  encoding="utf-8")
+            (Path(tmp) / "phrase").write_text("pw\n", encoding="utf-8")
+            proposal = self._proposal(action="recruit.invite", pid="p-inv-once")
+            proposal.pubkey = identity.public_key
+            votes = [self._vote("mac-text", "赞同", "p-inv-once"),
+                     self._vote("mac-laya-int8", "赞同", "p-inv-once")]
+            args = self._execute_args(tmp, ident_path)
+
+            run_once([proposal], votes, args)
+            root = Path(args.invite_outbox) / "p-inv-once"
+            first = json.loads(
+                (root / "invite.json").read_text(encoding="utf-8"))
+            # Even if the ledger is lost, a retry must not mint a new token.
+            Path(args.ledger).unlink()
+            run_once([proposal], votes, args)
+            second = json.loads(
+                (root / "invite.json").read_text(encoding="utf-8"))
+            self.assertEqual(second["token"], first["token"])
+
+    def test_a_recruit_invite_with_bad_params_is_recorded_and_not_staged(self):
+        """A refused intent keeps its reason and no ``skipped`` marker."""
+        import tempfile
+        from pando.execute import run_once
+        from pando.identity import Identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = Identity.generate()
+            ident_path = Path(tmp) / "identity.json"
+            ident_path.write_text(json.dumps(identity.to_json()),
+                                  encoding="utf-8")
+            (Path(tmp) / "phrase").write_text("pw\n", encoding="utf-8")
+            proposal = self._proposal(action="recruit.invite", pid="p-badinv")
+            proposal.pubkey = identity.public_key
+            proposal.params = {"expires_in_hours": 0}
+            votes = [self._vote("mac-text", "赞同", "p-badinv"),
+                     self._vote("mac-laya-int8", "赞同", "p-badinv")]
+            args = self._execute_args(tmp, ident_path)
+
+            run_once([proposal], votes, args)
+            rows = [json.loads(line) for line in
+                    Path(args.ledger).read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(rows), 1)
+            self.assertFalse(rows[0]["executed"])
+            self.assertNotIn("skipped", rows[0])
+            self.assertIn("InviteError", rows[0]["failed"])
+            self.assertFalse((Path(args.invite_outbox) / "p-badinv").exists())
+
+    def test_a_foreign_recruit_invite_is_recorded_and_not_staged_here(self):
+        """Another host's invitation is named, never minted with our key."""
+        import tempfile
+        from pando.execute import run_once
+        from pando.identity import Identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = Identity.generate()
+            ident_path = Path(tmp) / "identity.json"
+            ident_path.write_text(json.dumps(identity.to_json()),
+                                  encoding="utf-8")
+            (Path(tmp) / "phrase").write_text("pw\n", encoding="utf-8")
+            proposal = self._proposal(action="recruit.invite", pid="p-theirs-i")
+            proposal.pubkey = "someone-elses-key"
+            votes = [self._vote("mac-text", "赞同", "p-theirs-i"),
+                     self._vote("mac-laya-int8", "赞同", "p-theirs-i")]
+            args = self._execute_args(tmp, ident_path)
+
+            run_once([proposal], votes, args)
+            rows = [json.loads(line) for line in
+                    Path(args.ledger).read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["skipped"], "other-host")
+            self.assertEqual(rows[0]["action"], "recruit.invite")
+            self.assertFalse((Path(args.invite_outbox) / "p-theirs-i").exists())
+
+    def test_invite_validate_is_pure_and_refuses_unknown_params(self):
+        from pando.invite import validate
+
+        self.assertEqual(validate({}), ({}, ""))
+        self.assertEqual(validate(None), ({}, ""))
+        self.assertEqual(validate([]), ({}, ""))
+        self.assertEqual(validate({"candidate": "pi6", "expires_in_hours": 24}),
+                         ({"candidate": "pi6", "expires_in_hours": 24}, ""))
+        for raw in ({"bogus": 1}, {"candidate": ""}, {"candidate": 5},
+                    {"expires_in_hours": 0}, {"expires_in_hours": True},
+                    {"expires_in_hours": 1.5}, "nope"):
+            bad, why = validate(raw)
+            self.assertIsNone(bad, raw)
+            self.assertTrue(why, raw)
+
     def test_culture_validate_is_pure_and_refuses_a_patchy_candidate(self):
         """The typed intent is a whole playbook, not a patch or a stray field."""
         from pando.culture import validate
@@ -3732,10 +3882,10 @@ class TestExecution(unittest.TestCase):
     def test_the_threshold_the_executor_uses_comes_from_the_policy_file(self):
         """The same votes, two stores, two outcomes. This is the closed loop.
 
-        ``recruit.invite`` stands in for any action with no actuator: if the
-        gate adopts it, the round records ``no-actuator``; if it does not, the
-        round records nothing. So the ledger itself says which threshold was
-        in force.
+        ``resource.rebalance`` stands in for any action with no actuator: if
+        the gate adopts it, the round records ``no-actuator``; if it does not,
+        the round records nothing. So the ledger itself says which threshold
+        was in force.
         """
         import tempfile
         from pando.execute import run_once
@@ -3747,10 +3897,10 @@ class TestExecution(unittest.TestCase):
             ident_path.write_text(json.dumps(identity.to_json()),
                                   encoding="utf-8")
             (Path(tmp) / "phrase").write_text("pw\n", encoding="utf-8")
-            proposal = self._proposal(action="recruit.invite", pid="p-invite")
+            proposal = self._proposal(action="resource.rebalance", pid="p-rebalance")
             proposal.pubkey = identity.public_key
-            votes = [self._vote("mac-text", "赞同", "p-invite"),
-                     self._vote("mac-laya-int8", "赞同", "p-invite")]
+            votes = [self._vote("mac-text", "赞同", "p-rebalance"),
+                     self._vote("mac-laya-int8", "赞同", "p-rebalance")]
             args = self._execute_args(tmp, ident_path)
 
             # Default store: two adopts are enough, so the round reports the
