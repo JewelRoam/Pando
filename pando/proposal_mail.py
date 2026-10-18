@@ -98,6 +98,55 @@ def _request(url: str, path: str, token: str | None, method: str,
         return {"error": f"unreachable: {exc}"}
 
 
+#: How many task ids one body-fetch call may name. The mailbox caps the same
+#: list at ``MAX_BODIES``; the smaller of the two bounds wins, so this stays
+#: under it and a chunk never silently truncates.
+BODY_FETCH_CHUNK = 500
+
+
+def fetch_bodies(url: str, token: str | None, ids, timeout: float = 15,
+                 chunk: int = BODY_FETCH_CHUNK) -> dict[str, dict]:
+    """The full task records for ``ids``, in as few requests as the mailbox allows.
+
+    A listing carries ids and titles but not bodies, so reading N rows used to
+    cost N round trips: one execute pass read 2412 rows and paid for every one
+    of them, ten seconds of serial HTTP per ten-minute round. Batching is what
+    turns that into five requests.
+
+    A mailbox that predates the route answers 404, and meeting an older peer
+    mid-upgrade is ordinary rather than exceptional, so the fallback is the
+    per-id GET the caller would have made anyway. Missing ids are simply
+    absent from the result; the caller drops them exactly as it dropped a
+    failed GET before.
+    """
+    wanted, seen = [], set()
+    for task_id in ids or ():
+        key = str(task_id or "")
+        if key and key not in seen:
+            seen.add(key)
+            wanted.append(key)
+    out: dict[str, dict] = {}
+    if not wanted:
+        return out
+    step = max(1, int(chunk))
+    for start in range(0, len(wanted), step):
+        batch = wanted[start:start + step]
+        got = _request(url, "/tasks/bodies", token, "POST",
+                       {"ids": batch}, timeout=timeout)
+        tasks = got.get("tasks") if isinstance(got, dict) else None
+        if isinstance(tasks, dict):
+            for key, task in tasks.items():
+                if isinstance(task, dict):
+                    out[str(key)] = task
+            continue
+        for task_id in batch:
+            full = _request(url, f"/task/{task_id}", token, "GET",
+                            timeout=timeout)
+            task = full.get("task") if isinstance(full, dict) else None
+            if isinstance(task, dict):
+                out[task_id] = task
+    return out
+
 
 def mailbox_chain(primary: str, fallbacks=None) -> list[str]:
     """Ordered, deduplicated list of mailboxes to try, first to last."""
@@ -262,7 +311,7 @@ def fetch_proposals(url: str, token: str | None = None,
     else:
         tasks = rows
     skip = {str(s) for s in (skip_ids or ())}
-    records = []
+    wanted = []
     for task in tasks:
         if not isinstance(task, dict):
             continue
@@ -274,9 +323,15 @@ def fetch_proposals(url: str, token: str | None = None,
             # Already answered or skipped: reading its body again every poll
             # buys nothing and costs one round trip per row.
             continue
-        full = _request(url, f"/task/{task.get('id')}", token, "GET",
-                        timeout=timeout)
-        body = (full.get("task") or {}).get("body")
+        wanted.append(task)
+    # One batched read for the whole selection. This used to be a signed GET
+    # per row, so a caller that handed in a full listing paid thousands of
+    # round trips for a handful of open proposals.
+    bodies = fetch_bodies(url, token, [row.get("id") for row in wanted],
+                          timeout=timeout)
+    records = []
+    for task in wanted:
+        body = (bodies.get(str(task.get("id"))) or {}).get("body")
         if not isinstance(body, str):
             continue
         try:

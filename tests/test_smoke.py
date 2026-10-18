@@ -3170,16 +3170,25 @@ class TestReactions(unittest.TestCase):
                     Proposal(proposal_id=pid, author="ann", goal="goal",
                              action="do.a"), ident))
 
+            batches = []
+
             def fake_request(url, path, token, method, payload=None,
                              timeout=15):
                 paths.append(path)
+                if path == "/tasks/bodies":
+                    batches.extend(payload["ids"])
+                    return {"tasks": {i: {"id": i, "body": body_for(ids[i])}
+                                      for i in payload["ids"]}}
                 return {"task": {"body": body_for(ids[path.rsplit("/", 1)[-1]])}}
 
             with mock.patch.object(proposal_mail, "_request", fake_request):
                 found = proposal_mail.fetch_proposals(
                     "http://mailbox", None, rows=rows, skip_ids={"p2"})
 
-        self.assertEqual(paths, ["/task/t1"])
+        # The invariant is which bodies were asked for, not the transport that
+        # asked: p2 is skipped, so only t1 is named, and it is named once.
+        self.assertEqual(paths, ["/tasks/bodies"])
+        self.assertEqual(batches, ["t1"])
         self.assertEqual([p.proposal_id for p in found], ["p1"])
 
     def test_a_bounded_poll_reads_the_newest_rows_only(self):
@@ -3202,21 +3211,27 @@ class TestReactions(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             ident = load_or_create(_P(td) / "identity.json")
 
+            def body_for(pid):
+                return json.dumps(sign_proposal(
+                    Proposal(proposal_id=pid, author="ann", goal="goal",
+                             action="do.a"), ident))
+
             def fake_request(url, path, token, method, payload=None,
                              timeout=15):
+                if path == "/tasks/bodies":
+                    paths.extend(payload["ids"])
+                    return {"tasks": {i: {"id": i, "body": body_for(ids[i])}
+                                      for i in payload["ids"]}}
                 if path.startswith("/tasks"):
                     return {"tasks": rows}
-                paths.append(path)
-                return {"task": {"body": json.dumps(sign_proposal(
-                    Proposal(proposal_id=ids[path.rsplit("/", 1)[-1]],
-                             author="ann", goal="goal", action="do.a"),
-                    ident))}}
+                raise AssertionError(f"unbatched body read: {path}")
 
             with mock.patch.object(proposal_mail, "_request", fake_request):
                 found, _source, _error = proposal_mail.fetch_proposals_any(
                     ["http://mailbox"], None, max_items=2, timeout=5)
 
-        self.assertEqual(paths, ["/task/t3", "/task/t4"])
+        # Two rows, two bodies, one request -- and only the newest two.
+        self.assertEqual(paths, ["t3", "t4"])
         self.assertEqual([p.proposal_id for p in found], ["p3", "p4"])
 
     def test_the_sweep_reads_titles_and_retires_the_backlog(self):
@@ -3287,6 +3302,222 @@ class TestReactions(unittest.TestCase):
         self.assertEqual(proposal_id_from_title(""), "")
         self.assertGreater(proposal_age_seconds("p-r1-1000000000", 1000000060),
                            59)
+
+
+class TestBatchedBodyFetch(unittest.TestCase):
+    """Reading N bodies must not cost N round trips.
+
+    A listing carries ids and titles but no bodies, so the executor read a
+    round's rows one ``/task/<id>`` at a time. On 2026-10-19 that was 2412
+    rows -- 1605 reactions and 807 proposals -- and about ten seconds of
+    serial HTTP on every ten-minute pass, for a handful of open proposals.
+    Batching is the difference between a poll that scales with the round and
+    one that scales with the whole backlog.
+    """
+
+    def test_a_long_selection_costs_one_request_per_chunk(self):
+        from unittest import mock
+        from pando import proposal_mail
+
+        seen = []
+        ids = [f"t{i}" for i in range(1200)]
+
+        def fake_request(url, path, token, method, payload=None, timeout=15):
+            self.assertEqual(path, "/tasks/bodies")
+            seen.append(list(payload["ids"]))
+            return {"tasks": {i: {"id": i, "body": i} for i in payload["ids"]}}
+
+        with mock.patch.object(proposal_mail, "_request", fake_request):
+            got = proposal_mail.fetch_bodies("http://m", None, ids)
+
+        self.assertEqual(sorted(got), sorted(ids))
+        self.assertEqual([len(chunk) for chunk in seen], [500, 500, 200])
+
+    def test_a_mailbox_without_the_route_falls_back_to_one_get_per_id(self):
+        """An older peer mid-upgrade answers 404; that must not be fatal."""
+        from unittest import mock
+        from pando import proposal_mail
+
+        paths = []
+
+        def fake_request(url, path, token, method, payload=None, timeout=15):
+            paths.append(path)
+            if path == "/tasks/bodies":
+                return {"error": "HTTP 404", "detail": "not found"}
+            return {"task": {"id": path.rsplit("/", 1)[-1], "body": "x"}}
+
+        with mock.patch.object(proposal_mail, "_request", fake_request):
+            got = proposal_mail.fetch_bodies("http://m", None, ["a", "b"])
+
+        self.assertEqual(paths, ["/tasks/bodies", "/task/a", "/task/b"])
+        self.assertEqual(sorted(got), ["a", "b"])
+
+    def test_a_missing_body_is_dropped_and_a_repeat_is_named_once(self):
+        from unittest import mock
+        from pando import proposal_mail
+
+        seen = []
+
+        def fake_request(url, path, token, method, payload=None, timeout=15):
+            seen.append(list(payload["ids"]))
+            return {"tasks": {"a": {"id": "a", "body": "A"}}}
+
+        with mock.patch.object(proposal_mail, "_request", fake_request):
+            got = proposal_mail.fetch_bodies("http://m", None,
+                                             ["a", "a", "b", "", None])
+
+        self.assertEqual(seen, [["a", "b"]])
+        self.assertEqual(list(got), ["a"])
+
+    def test_the_executor_reads_a_round_of_reactions_in_four_requests(self):
+        """1605 reaction rows, four chunked requests -- not 1605.
+        """
+        from unittest import mock
+        from pando import execute, genesis, proposal_mail
+
+        rows = [{"id": f"r{i}", "title": f"[reaction] p{i} 赞同 by node"}
+                for i in range(1605)]
+        calls = []
+
+        def fake_request(url, path, token, method, payload=None, timeout=15):
+            calls.append(path)
+            if path == "/tasks/bodies":
+                return {"tasks": {i: {"id": i, "body": "{}"}
+                                  for i in payload["ids"]}}
+            raise AssertionError(f"per-row body read: {path}")
+
+        with mock.patch.object(proposal_mail, "_request", fake_request), \
+                mock.patch.object(genesis, "verify_reaction",
+                                  lambda record: {"stance": "赞同"}):
+            found = execute._load_reactions("http://m", None, 80, rows=rows)
+
+        # 1605 ids at 500 a chunk: four requests where there were 1605.
+        self.assertEqual(calls, ["/tasks/bodies"] * 4)
+        self.assertEqual(len(found), 1605)
+
+    def test_the_executor_still_reads_reactions_from_an_older_mailbox(self):
+        """The batch route is an optimisation, not a new requirement."""
+        from unittest import mock
+        from pando import execute, genesis, proposal_mail
+
+        rows = [{"id": "r1", "title": "[reaction] p1 赞同 by node"},
+                {"id": "r2", "title": "[reaction] p2 反对 by node"}]
+        paths = []
+
+        def fake_request(url, path, token, method, payload=None, timeout=15):
+            paths.append(path)
+            if path == "/tasks/bodies":
+                return {"error": "HTTP 404", "detail": "not found"}
+            return {"task": {"id": path.rsplit("/", 1)[-1], "body": "{}"}}
+
+        with mock.patch.object(proposal_mail, "_request", fake_request), \
+                mock.patch.object(genesis, "verify_reaction",
+                                  lambda record: {"stance": "赞同"}):
+            found = execute._load_reactions("http://m", None, 80, rows=rows)
+
+        self.assertEqual(paths, ["/tasks/bodies", "/task/r1", "/task/r2"])
+        self.assertEqual(len(found), 2)
+
+    def test_the_mailbox_serves_bodies_in_bulk(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "agent_mailbox_under_test_bodies",
+            Path(__file__).resolve().parents[1] / "tools" / "agent_mailbox.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            box = module.Mailbox(Path(tmp))
+            created = [box.create("ann", f"[chat] c{i}", f"body-{i}")
+                       for i in range(3)]
+            ids = [t["id"] for t in created]
+            server = module.ThreadingHTTPServer(
+                ("127.0.0.1", 0), module.build_handler(box, "tok"))
+            port = server.server_address[1]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{port}/tasks/bodies",
+                    data=json.dumps({"ids": ids + ["nope"]}).encode(),
+                    headers={"Content-Type": "application/json",
+                             "Authorization": "Bearer tok"},
+                    method="POST")
+                with urllib.request.urlopen(request, timeout=3) as resp:
+                    got = json.loads(resp.read())["tasks"]
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=3)
+
+        self.assertEqual(sorted(got), sorted(ids))
+        self.assertEqual(got[ids[0]]["body"], "body-0")
+        self.assertEqual(got[ids[0]]["title"], "[chat] c0")
+        self.assertEqual(got[ids[2]]["body"], "body-2")
+
+    def test_the_bulk_route_caps_how_many_it_returns(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "agent_mailbox_under_test_cap",
+            Path(__file__).resolve().parents[1] / "tools" / "agent_mailbox.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            box = module.Mailbox(Path(tmp))
+            ids = [box.create("ann", f"[chat] c{i}", f"body-{i}")["id"]
+                   for i in range(4)]
+            module.MAX_BODIES = 2  # the route reads the module global per call
+            server = module.ThreadingHTTPServer(
+                ("127.0.0.1", 0), module.build_handler(box, "tok"))
+            port = server.server_address[1]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{port}/tasks/bodies",
+                    data=json.dumps({"ids": ids}).encode(),
+                    headers={"Content-Type": "application/json",
+                             "Authorization": "Bearer tok"},
+                    method="POST")
+                with urllib.request.urlopen(request, timeout=3) as resp:
+                    got = json.loads(resp.read())["tasks"]
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=3)
+
+        self.assertEqual(len(got), 2)
+
+    def test_the_route_still_needs_the_token(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "agent_mailbox_under_test_auth",
+            Path(__file__).resolve().parents[1] / "tools" / "agent_mailbox.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            box = module.Mailbox(Path(tmp))
+            box.create("ann", "[chat] c0", "body-0")
+            server = module.ThreadingHTTPServer(
+                ("127.0.0.1", 0), module.build_handler(box, "tok"))
+            port = server.server_address[1]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{port}/tasks/bodies",
+                    data=json.dumps({"ids": []}).encode(),
+                    headers={"Content-Type": "application/json"},
+                    method="POST")
+                with self.assertRaises(urllib.error.HTTPError) as caught:
+                    urllib.request.urlopen(request, timeout=3)
+                self.assertEqual(caught.exception.code, 403)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=3)
 
 
 class TestChatMailboxPartition(unittest.TestCase):

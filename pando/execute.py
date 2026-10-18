@@ -946,7 +946,7 @@ def dry_run(proposals: list[Proposal], reactions: list[dict], **policy) -> dict:
 
 def _load_reactions(url: str, token: str | None, limit: int,
                     rows: list | None = None) -> list[dict]:
-    from .proposal_mail import _request
+    from .proposal_mail import _request, fetch_bodies
     from .genesis import verify_reaction
     if rows is None:
         listing = _request(url, "/tasks?status=all", token, "GET")
@@ -954,12 +954,15 @@ def _load_reactions(url: str, token: str | None, limit: int,
         tasks = tasks[-limit:]
     else:
         tasks = rows
+    wanted = [task.get("id") for task in tasks
+              if isinstance(task, dict)
+              and is_reaction_task(str(task.get("title") or ""))]
+    # One batched read instead of one GET per reaction row. A round can carry
+    # 1600 of them, and serial HTTP was the whole cost of the pass.
+    bodies = fetch_bodies(url, token, wanted)
     found = []
-    for task in tasks:
-        if not isinstance(task, dict) or not is_reaction_task(str(task.get("title") or "")):
-            continue
-        full = _request(url, f"/task/{task.get('id')}", token, "GET")
-        body = (full.get("task") or {}).get("body")
+    for task_id in wanted:
+        body = (bodies.get(str(task_id)) or {}).get("body")
         if not isinstance(body, str):
             continue
         try:

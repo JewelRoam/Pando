@@ -53,6 +53,9 @@ OPEN, CLAIMED, DONE, FAILED, BLOCKED = "open", "claimed", "done", \
     "failed", "blocked"
 FINAL = {DONE, FAILED, BLOCKED}
 STATUSES = {OPEN, CLAIMED, DONE, FAILED, BLOCKED}
+#: How many task records one ``/tasks/bodies`` call may return. A caller that
+#: names more gets the first ``MAX_BODIES`` back and asks again for the rest.
+MAX_BODIES = 2000
 # Finished states share a rank so "done" is not newer than "blocked".
 _RANK = {OPEN: 0, CLAIMED: 1, DONE: 2, FAILED: 2, BLOCKED: 2}
 _ID_OK = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
@@ -270,6 +273,20 @@ def build_handler(mailbox: Mailbox, token: str):
                 return
             path = self.path.split("?", 1)[0]
             payload = self._body()
+            if path == "/tasks/bodies":
+                # A listing carries ids and titles but no bodies. Reading a
+                # round's worth of rows one ``/task/<id>`` at a time is a round
+                # trip per row -- thousands of them on every executor pass.
+                # This route is the same data, in the chunks the caller names.
+                ids = payload.get("ids") if isinstance(payload, dict) else None
+                ids = ids if isinstance(ids, list) else []
+                found = {}
+                for task_id in ids[:MAX_BODIES]:
+                    task = mailbox.load(str(task_id))
+                    if task is not None:
+                        found[str(task_id)] = task
+                self._send(200, {"tasks": found})
+                return
             if path == "/task":
                 task = mailbox.create(str(payload.get("from", "?")),
                                       str(payload.get("title", "")),
