@@ -6119,6 +6119,55 @@ class TestCodeIdentity(unittest.TestCase):
         self.assertEqual(shown["win-gemma-12b"]["code"], "未知")
         self.assertTrue(shown["win-gemma-12b"]["code_unknown"])
 
+    def test_the_page_shows_how_old_each_member_s_latest_vote_is(self):
+        """A reactor that is running can still be answering yesterday.
+
+        2026-10-19: win-laya-int8 appended a reaction every two minutes while
+        every target it named was 35 hours old. Its process was alive and its
+        vote was worthless, and nothing on the page said so. The *newest*
+        target a member answered is the only record that separates "voting"
+        from "voting on yesterday", so it gets a column of its own, with the
+        unit written into every value the way the other columns do it.
+        """
+        obs = self._load_observatory()
+        now = 1_800_000_000.0
+
+        def member(name: str, role: str) -> dict:
+            return {"node_id": name, "roots": ["mac"], "lineage": "laya-en",
+                    "host": "127.0.0.1", "capability": {}, "stats": {},
+                    "role": role}
+
+        def vote(node: str, age_s: float) -> dict:
+            stamp = int(now - age_s)
+            return {"node_id": node, "target_id": "mac-proposer-r1-%d" % stamp,
+                    "checkpoint": "laya-en", "stance": "赞同"}
+
+        rows = obs.build_people(
+            [member("mac-laya-int8", "decision"),
+             member("win-laya-int8", "decision"),
+             member("pi5-laya", "decision"),
+             member("mac-llm-8b-local", "proposal")],
+            [], [],
+            [vote("mac-laya-int8", 1800.0),        # 0.5 h: answering today
+             vote("win-laya-int8", 35.4 * 3600.0),  # behind, like the real node
+             vote("win-laya-int8", 40.0 * 3600.0)],  # older: newest must win
+            now=now)
+        shown = {row["name"]: row for row in obs.present_people(rows)}
+        self.assertEqual(shown["mac-laya-int8"]["fresh"], "0.5 小时")
+        self.assertFalse(shown["mac-laya-int8"]["fresh_stale"])
+        # A member answering yesterday is behind, and says so on the page.
+        self.assertEqual(shown["win-laya-int8"]["fresh"], "35.4 小时")
+        self.assertTrue(shown["win-laya-int8"]["fresh_stale"])
+        # A decision member with no vote at all is a finding, not a blank.
+        self.assertEqual(shown["pi5-laya"]["fresh"], "无票")
+        self.assertTrue(shown["pi5-laya"]["fresh_stale"])
+        # A proposer is not expected to vote, so it stays unnamed, not bad.
+        self.assertEqual(shown["mac-llm-8b-local"]["fresh"], "—")
+        self.assertFalse(shown["mac-llm-8b-local"]["fresh_stale"])
+        # Every value carries its unit, so the column can be audited.
+        self.assertEqual(obs.audit_view({"people": obs.present_people(rows),
+                                         "messages": []}), [])
+
 
 
 class TestPi5UnitTemplates(unittest.TestCase):

@@ -51,6 +51,7 @@ from pando.chat import normalize_chat  # noqa: E402
 from pando.genesis import Proposal, verify_reaction  # noqa: E402
 from pando.identity import load_or_create, verify as verify_signature  # noqa: E402
 from pando.net import open_url  # noqa: E402 - repo root must be importable
+from pando.proposal_mail import proposal_age_seconds  # noqa: E402
 from pando.proposal_mail import publish_proposal  # noqa: E402
 
 PANDO_DIR = Path(os.environ.get("PANDOSI_HOME", "~/.pandosi")).expanduser()
@@ -428,8 +429,46 @@ def is_annotation(fields: dict | None) -> bool:
                 and str(fields.get("node_id") or "").strip())
 
 
+#: How old a member's newest answered proposal may be before the page stops
+#: calling it current. The fleet stamps proposals every few minutes, so a live
+#: voter that has answered nothing in six hours is not having a quiet spell;
+#: it is working through a backlog. Kept deliberately loose -- this column
+#: exists to catch a node answering *yesterday*, not to nag about a slow
+#: minute, and a false alarm here would teach a reader to ignore the column.
+VOTE_STALE_S = 6 * 3600.0
+
+
+def newest_vote_age(reactions: list[dict],
+                    now: float | None = None) -> dict[str, float]:
+    """Per member, the age in seconds of the newest proposal it answered.
+
+    A reaction names the proposal it answers, and every proposal id ends in
+    the epoch its proposer stamped it with. *Newest* is what separates a
+    voting member from a member that is merely still running: on 2026-10-19
+    ``win-laya-int8`` appended a reaction every two minutes while every
+    target it named was 35 hours old. Its process was up, its ledger grew,
+    and its vote was worthless -- and every column on the page looked fine.
+
+    A member that answered nothing is absent from the map. An id with no
+    stamp cannot be aged at all, so it is skipped rather than counted fresh.
+    """
+    moment = time.time() if now is None else now
+    found: dict[str, float] = {}
+    for reaction in reactions or []:
+        if not isinstance(reaction, dict):
+            continue
+        node = str(reaction.get("node_id") or "").strip()
+        age = proposal_age_seconds(reaction.get("target_id"), moment)
+        if not node or age is None:
+            continue
+        if node not in found or age < found[node]:
+            found[node] = age
+    return found
+
+
 def build_people(participants: list[dict], ledgers: list[dict],
-                 messages: list[dict]) -> list[dict]:
+                 messages: list[dict], reactions: list[dict] | None = None,
+                 now: float | None = None) -> list[dict]:
     """One row per name we actually saw. No role is assigned here.
 
     A root member, a ledger host, and a mailbox author share a row only when
@@ -446,7 +485,7 @@ def build_people(participants: list[dict], ledgers: list[dict],
         row = {
             "name": name, "roots": [], "lineage": "", "host": "",
             "capability": {}, "stats": {}, "pubkey": "", "chat": None,
-            "role": "", "activity": None, "seen": None,
+            "role": "", "activity": None, "seen": None, "vote_age_s": None,
         }
         rows.append(row)
         if name:
@@ -500,6 +539,13 @@ def build_people(participants: list[dict], ledgers: list[dict],
     for author, slot in counts.items():
         row = add(author)
         row["seen"] = slot
+    # A vote from a name with no row of its own is not shown: this panel is a
+    # roll of members, and inventing a member out of one stance would make an
+    # unregistered reactor look admitted.
+    for name, age in newest_vote_age(reactions or [], now).items():
+        row = index.get(name)
+        if row is not None:
+            row["vote_age_s"] = age
     return rows
 
 
@@ -677,6 +723,24 @@ def _code_cell(head: str, majority: str) -> dict:
             "code_unknown": False}
 
 
+def _fresh_cell(vote_age_s, role: str) -> dict:
+    """How stale a member's newest vote is, in one field with its unit.
+
+    Three honest answers, kept apart on purpose. A number means the member
+    answered something that recently. A decision member with no answer at all
+    gets ``无票``: it was admitted to vote and never has, which is its own
+    finding, not a blank. Anyone who is not here to vote -- a proposer, an
+    LLM -- gets a dash, because a proposer has no vote to be late with.
+    """
+    if isinstance(vote_age_s, (int, float)) and not isinstance(vote_age_s, bool):
+        age = max(0.0, float(vote_age_s))
+        return {"fresh": f"{age / 3600.0:.1f} 小时",
+                "fresh_stale": age > VOTE_STALE_S}
+    if str(role or "") == "decision":
+        return {"fresh": "无票", "fresh_stale": True}
+    return {"fresh": "—", "fresh_stale": False}
+
+
 def _majority_head(rows: list[dict]) -> str:
     """The commit most members report, or "" when nobody reports one."""
     heads = [str((row.get("capability") or {}).get("code_head") or "").strip()
@@ -722,6 +786,7 @@ def present_people(rows: list[dict]) -> list[dict]:
             "detail": str(activity.get("error") or activity.get("goal") or ""),
             "mark": str(row.get("pubkey") or ""),
             **_code_cell((row.get("capability") or {}).get("code_head"), majority),
+            **_fresh_cell(row.get("vote_age_s"), row.get("role")),
         })
     return presented
 
@@ -886,6 +951,9 @@ def audit_view(view: dict) -> list[str]:
                     or re.search(r"(^| )r\d+", record))
         if record != "—" and not has_unit:
             problems.append(f"record has no unit: {row.get('name')} {record}")
+        fresh = row.get("fresh") or ""
+        if fresh not in ("—", "无票") and "小时" not in fresh:
+            problems.append(f"fresh has no unit: {row.get('name')} {fresh}")
     for message in view.get("messages") or []:
         address = message.get("to") or ""
         if address.startswith("@@") or (address.startswith("@") and address[1:].startswith("@")):
@@ -1220,7 +1288,8 @@ def collect_state(cfg: dict) -> dict:
     state["proposers"] = sorted(
         by_author.values(), key=lambda r: str(r["last_at"] or ""), reverse=True)
     state["people"] = build_people(
-        state["participants"], state["thinkd"], state["chat"])
+        state["participants"], state["thinkd"], state["chat"],
+        state["reactions"])
 
     # --- optional extra service probes (addresses stay in hosts.json) ---
     for row in (cfg.get("extra_services") or cfg.get("services") or []):
@@ -1487,7 +1556,7 @@ const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function peopleTable(rows){
   if (!rows.length) return '<div class="empty">没有人。</div>';
-  return `<table><thead><tr><th>名字</th><th>角色</th><th>来自</th><th>主机</th><th>模型</th><th>代码</th><th>记录</th></tr></thead><tbody>`
+  return `<table><thead><tr><th>名字</th><th>角色</th><th>来自</th><th>主机</th><th>模型</th><th>代码</th><th>表态龄</th><th>记录</th></tr></thead><tbody>`
     + rows.map(p => `<tr>
       <td${p.mark ? ` title="${esc(p.mark)}"` : ''}>${esc(p.name)}</td>
       <td>${esc(p.role)}</td>
@@ -1495,6 +1564,7 @@ function peopleTable(rows){
       <td>${esc(p.host)}</td>
       <td>${esc(p.model)}</td>
       <td class="mono">${esc(p.code)}${p.code_stale ? ' <span class="bad">旧</span>' : ''}</td>
+      <td>${esc(p.fresh)}${p.fresh_stale ? ' <span class="bad">旧</span>' : ''}</td>
       <td>${esc(p.record)}${p.detail ? `<div class="sub">${esc(p.detail)}</div>` : ''}</td>
     </tr>`).join('') + '</tbody></table>';
 }
