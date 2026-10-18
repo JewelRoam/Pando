@@ -5,6 +5,7 @@
   ],
   "island_root_url": "http://127.0.0.1:8765",
   "_comment_roots": "one dashboard can read several independent island roots; each root keeps its own pairing token file",
+  "_comment_seed": "seed: \"pull\" marks a root whose host runs tools/seed_pull.py and fetches sealed bundles from this host's seed-outbox. Without it a seed.replicate naming that host is recorded as no-transport and the bundle is never offered - the gap that left win with 0 received seeds while pi5, which is marked, received 13. Drop the key for a peer that does not run seed_pull.",
   "roots": [
     {
       "name": "mac",
@@ -14,7 +15,8 @@
     {
       "name": "win",
       "url": "http://win-lan.example:8790",
-      "token_file": "~/.pandosi/win-pairing.token"
+      "token_file": "~/.pandosi/win-pairing.token",
+      "seed": "pull"
     }
   ],
   "sender": "mac-codex",

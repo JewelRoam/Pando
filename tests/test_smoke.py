@@ -4338,6 +4338,87 @@ class TestExecution(unittest.TestCase):
         self.assertNotIn("skipped", rows[0])
         self.assertIn(rows[0]["action"], ACTUATORS)
 
+    def _sealed_bundle(self, root):
+        """A real sealed bundle, so ``latest_sealed`` has something to offer."""
+        import importlib.util
+        tool = Path(__file__).resolve().parents[1] / "tools" / "seed.py"
+        spec = importlib.util.spec_from_file_location(
+            "pandosi_seed_exec_test", tool)
+        seed = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(seed)
+        from pando.identity import Identity
+        home = root / "seed-home"
+        (home / "mailbox" / "tasks").mkdir(parents=True)
+        (home / "mailbox" / "tasks" / "note.json").write_text(
+            json.dumps({"task": "hello"}))
+        ident = root / "seed-identity.json"
+        ident.write_text(json.dumps(Identity.generate().to_json()))
+        phrase = root / "seed-pass.txt"
+        phrase.write_text("correct horse battery staple\n")
+        # latest_sealed() looks for bundle *directories* under out_root, the
+        # way production writes executions/<proposal_id>/. Exporting into
+        # out_root itself would leave it nothing to find.
+        rc = seed.cmd_export(argparse.Namespace(
+            out=str(root / "out" / "mac-proposer-r1"), home=str(home),
+            identity=str(ident), rollout_dir=str(root / "rollouts"),
+            force=True, passphrase_file=str(phrase),
+            proposal_id="mac-proposer-r1", author="mac-proposer"))
+        self.assertEqual(rc, 0)
+
+    def _replicate_round(self, pull):
+        """One ``run_once`` round for a win-addressed copy under ``pull``.
+
+        Returns the ``seed.replicate`` ledger rows and whether the bundle
+        actually landed in the outbox, so both halves of the fix can be
+        asserted without reaching into the executor's internals.
+        """
+        from pando.execute import run_once
+        from pando.identity import Identity
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            identity = Identity.generate()
+            ident_path = root / "identity.json"
+            ident_path.write_text(json.dumps(identity.to_json()),
+                                  encoding="utf-8")
+            self._sealed_bundle(root)
+            args = self._execute_args(root, ident_path)
+            args.hosts = {"win": "http://win.example:8790"}
+            args.pull = pull
+            proposal = self._proposal(action="seed.replicate", pid="p-copy")
+            proposal.pubkey = identity.public_key
+            proposal.destination = "win"
+            votes = [self._vote("mac-text", "赞同", "p-copy"),
+                     self._vote("mac-laya-int8", "赞同", "p-copy")]
+            run_once([proposal], votes, args)
+            rows = [json.loads(line) for line in
+                    Path(args.ledger).read_text(encoding="utf-8").splitlines()]
+            staged = (Path(args.outbox) / "p-copy" / "manifest.json").is_file()
+            return [row for row in rows
+                    if row.get("action") == "seed.replicate"], staged
+
+    def test_a_named_host_that_pulls_is_offered_instead_of_skipped(self):
+        """``seed: pull`` in hosts.json is what turns a copy into an offer.
+
+        A named host with a root URL but no ``seed: pull`` was recorded as
+        ``no-transport`` every round: the bundle was never staged, so the
+        peer's ``seed_pull`` had nothing to fetch. win sat there for 35 rounds
+        while pi5, which is marked, received 13. Both halves are asserted
+        against the same proposal, because an ``offered`` row with nothing in
+        the outbox would read as sent when nothing was.
+        """
+        offered, staged = self._replicate_round({"win"})
+        self.assertEqual(len(offered), 1)
+        self.assertEqual(offered[0]["skipped"], "offered")
+        self.assertEqual(offered[0]["destination"], "win")
+        self.assertTrue(staged)
+
+        # The control: the same host without the key keeps the old verdict,
+        # and nothing is staged for it.
+        skipped, staged_control = self._replicate_round(set())
+        self.assertEqual(len(skipped), 1)
+        self.assertEqual(skipped[0]["skipped"], "no-transport")
+        self.assertFalse(staged_control)
+
     def test_a_failed_export_is_not_treated_as_handled(self):
         import tempfile
         from pando.execute import done_ids, left_ids
