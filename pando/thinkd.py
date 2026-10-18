@@ -66,6 +66,7 @@ from pathlib import Path
 from .culture import validate as validate_culture
 from .genesis import ACTION_SPACE, Proposal
 from .identity import load_or_create
+from .playbook import parse_playbook
 from .policy import KNOBS, validate as validate_policy
 from .net import open_url
 from .proposal_mail import (delivery_failed, fetch_proposals,
@@ -100,12 +101,42 @@ SYSTEM_PROMPT = f"""你是 PandoSI 殖民地的一名提案者。这个群体是
    更容易通过，至少需要 3 个决策模型赞同；不要靠 goal 的措辞绕过。
    选了 culture.refine 时，params 必须是单独的 JSON 字段，形如
    {{"playbook": {{<一份完整 playbook>}}}}：给的是完整的候选 playbook，不是补丁，
-   不是一段文字。它必须是和本机运行中的 playbook 同构的结构（meta/gating/
-   questions/actions/lineages/combiner），否则会被执行器拒绝；params.playbook
-   里出现的未知字段一样会被拒绝。这个动作只是把候选签名后放进评审 outbox，
-   不会当场改写规则，所以不要指望它在同一轮生效。
+   不是一段文字。它必须和本机运行中的 playbook 同构（meta/gating/questions/
+   actions/lineages/combiner），顶层出现未知字段会被执行器拒绝。
+   形状写不对时你的回答会被退回一次，退回时会把一份能通过校验的骨架直接给你。
+   这个动作只是把候选签名后放进评审 outbox，不会当场改写规则，
+   所以不要指望它在同一轮生效。
    其他 action 不要写 params。
 """
+
+
+def culture_skeleton() -> dict:
+    """A minimal playbook, in the exact shape the executor will accept.
+
+    Measured (pi5 r541, 2026-10-18): the proposer had learned to *choose*
+    ``culture.refine`` and was refused every time with "params must be
+    {"playbook": {<complete playbook>}}". The system prompt had asked it to
+    infer a schema from one adjective ("同构 meta/gating/questions/actions/
+    lineages/combiner"), which no 1.7B model can do from a blank page.
+
+    This is the same handover the destination repair already does for
+    ``seed.replicate``: show the concrete object instead of describing it. It
+    is validated by ``parse_playbook`` on the way out, so the example cannot
+    quietly drift from what ``pando.culture.validate`` will demand - a
+    skeleton that no longer parses would be worse than none, because the model
+    would copy it faithfully and still be refused.
+    """
+    skeleton = {
+        "meta": {"name": "candidate", "version": 1},
+        "gating": {"auto_min_agreement": 0.6, "auto_min_probability": 0.6,
+                   "escalate_above_disagreement": 0.5, "quorum_floor": 2},
+        "questions": [{"id": "intent", "type": "choice",
+                       "instructions": "Classify the message.",
+                       "criteria": ["refund", "greeting"]}],
+        "actions": [{"when": "intent == refund", "do": "log_only"}],
+    }
+    parse_playbook(skeleton, source_path="<thinkd culture skeleton>")
+    return skeleton
 
 
 @dataclass
@@ -129,6 +160,11 @@ class Round:
     # had changed its mind.
     call_retried: bool = False
     novelty_forced: bool = False
+    # The round chose culture.refine without any idea what a playbook looks
+    # like, so it was shown one and asked again. Kept apart from ``retried``
+    # for the same reason as ``call_retried``: handing over a schema is not the
+    # model changing its mind, and a rate that mixes them measures nothing.
+    params_repaired: bool = False
     # Did this round land on the same action as the one before it? Recorded even
     # when the goal was reworded, because "same verb, new sentence" is still the
     # organism walking into the same wall - and measuring that rate is the only
@@ -163,6 +199,7 @@ class Round:
             "retried": self.retried,
             "call_retried": self.call_retried,
             "novelty_forced": self.novelty_forced,
+            "params_repaired": self.params_repaired,
             "repeated": self.repeated,
             "served_by": self.served_by,
         }
@@ -763,6 +800,38 @@ class Thinker:
             return None
         return proposal2
 
+    def _ask_for_playbook(self, user: str, round_no: int, round_, why: str):
+        """One more call, with the skeleton the model was never shown.
+
+        Returns ``(proposal, raw_text)`` or ``None``. Any valid action is
+        accepted on the retry, not just culture.refine: demanding that the
+        model stay on the action it just failed at is how the destination
+        repair once walked a round back onto the action it had just left.
+        """
+        try:
+            skeleton = culture_skeleton()
+        except (TypeError, ValueError):  # pragma: no cover - parser drift
+            return None
+        retry_user = (
+            user + "\n\n【上一轮你的回答被拒绝】" + why
+            + "。下面这份 playbook 是执行器现场校验过的最小骨架，"
+              "params.playbook 必须长成这个结构（顶层键只能是 "
+              "meta/gating/questions/actions/lineages/combiner，"
+              "可以改里面的值、增删 questions/actions 条目）：\n"
+            + json.dumps(skeleton, ensure_ascii=False)
+            + "\n或者换一个动作。只输出一行 JSON。")
+        try:
+            text2, usage2 = self.proposer.complete(SYSTEM_PROMPT, retry_user)
+        except Exception:  # noqa: BLE001 - a failed retry holds the round
+            return None
+        round_.prompt_tokens += int(usage2.get("prompt_tokens") or 0)
+        round_.completion_tokens += int(usage2.get("completion_tokens") or 0)
+        proposal2, _why2 = proposal_from_obj(
+            extract_json(text2) or {}, self.node_id, self.node_id, round_no)
+        if proposal2 is None:
+            return None
+        return proposal2, text2
+
     def _user_prompt(self, round_no: int, group: list[dict]) -> str:
         own = self.ledger.tail(self.history_window)
         lines = [f"这是你的第 {round_no} 轮思考。", "", "【你自己的历史】"]
@@ -856,6 +925,17 @@ class Thinker:
             return round_
         proposal, why = proposal_from_obj(obj, self.node_id, self.node_id,
                                           round_no)
+
+        # The action is learnable from the menu; the shape of a playbook is
+        # not. Show it rather than holding the round (and rather than
+        # loosening the validator, which is the only thing standing between a
+        # small model's prose and a signed culture artifact).
+        if proposal is None and why.startswith("culture.refine params invalid"):
+            repaired = self._ask_for_playbook(user, round_no, round_, why)
+            if repaired is not None:
+                proposal, text = repaired
+                why = ""
+                round_.params_repaired = True
 
         # Measured: a 4B model repeats the previous round almost verbatim.
         # Asking for novelty in the prompt is a request, not a constraint, so

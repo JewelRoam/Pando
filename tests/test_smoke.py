@@ -1956,6 +1956,73 @@ class TestResidentThinker(unittest.TestCase):
             self.assertIsNone(bad, raw)
             self.assertIn("culture.refine params invalid", why)
 
+    def test_the_culture_skeleton_is_a_playbook_the_executor_accepts(self):
+        """The example handed to the proposer must be the shape that runs.
+
+        ``pando.culture.validate`` and ``pando.playbook.parse_playbook`` are
+        the two doors the candidate has to walk through. A skeleton that
+        drifted from them would be worse than no skeleton: the model would
+        copy it faithfully and still be refused, and the round would look like
+        another failed attempt to think rather than a broken prompt.
+        """
+        from pando.culture import validate as validate_culture
+        from pando.thinkd import culture_skeleton
+
+        skeleton = culture_skeleton()
+        checked, why = validate_culture({"playbook": skeleton})
+        self.assertEqual(why, "")
+        self.assertEqual(checked, skeleton)
+        # Round-trippable as JSON too: the wire format is what gets signed.
+        self.assertEqual(json.loads(json.dumps(skeleton)), skeleton)
+
+    def test_a_culture_refine_without_the_shape_is_repaired_once(self):
+        """Measured (pi5 r541, 2026-10-18): the model picked the action and had
+        no way to guess the object, so every attempt was held. The repair is
+        the same one seed.replicate already gets - show it, ask again - not a
+        looser validator, because the validator is what stops prose from being
+        signed as a culture artifact.
+        """
+        from pando.thinkd import culture_skeleton
+
+        with tempfile.TemporaryDirectory() as tmp:
+            skeleton = culture_skeleton()
+            thinker, proposer, _sent = self._thinker(
+                [{"action": "culture.refine", "goal": "raise the floor",
+                  "params": {"set": {"min_adopt": 3}}},
+                 {"action": "culture.refine", "goal": "raise the floor",
+                  "expected_effect": "a lower adoption bar",
+                  "params": {"playbook": skeleton}}],
+                Path(tmp) / "think.jsonl")
+            round_ = thinker.think(1)
+
+            self.assertTrue(round_.params_repaired)
+            self.assertTrue(round_.published)
+            self.assertEqual(round_.proposal.action, "culture.refine")
+            self.assertEqual(round_.proposal.params, {"playbook": skeleton})
+            self.assertEqual(proposer.calls, 2)
+            # The retry must actually carry the shape, or it is a plea again.
+            self.assertIn('"meta"', proposer.users[1])
+            self.assertIn("gating", proposer.users[1])
+
+    def test_a_round_that_never_picks_up_the_shape_is_held_not_signed(self):
+        """The repair is one call, not a loop. If the model still cannot do it,
+        the round is held and recorded - and nothing signed reaches the wire."""
+        with tempfile.TemporaryDirectory() as tmp:
+            thinker, proposer, sent = self._thinker(
+                [{"action": "culture.refine", "goal": "raise the floor",
+                  "params": {"playbook": {"meta": {"name": "x"}}}},
+                 {"action": "culture.refine", "goal": "still guessing",
+                  "params": {"playbook": {"meta": {"name": "x"}}}}],
+                Path(tmp) / "think.jsonl")
+            round_ = thinker.think(1)
+
+            self.assertFalse(round_.params_repaired)
+            self.assertFalse(round_.published)
+            self.assertIsNone(round_.proposal)
+            self.assertIn("culture.refine params invalid", round_.error)
+            self.assertEqual(proposer.calls, 2)
+            self.assertEqual(sent, [])
+
     def test_thinkd_keeps_thinking_through_model_and_mailbox_failures(self):
         """A dead model, dead mailbox, or bad JSON is a recorded round, not an end."""
         with tempfile.TemporaryDirectory() as tmp:
