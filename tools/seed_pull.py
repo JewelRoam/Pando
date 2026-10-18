@@ -68,7 +68,9 @@ def pull_once(base: str, token: str, inbox: Path, ledger: Path | None = None) ->
                 refused.append(proposal_id)
                 continue
             kept = seed.receive_bundle(src, inbox, ledger=ledger)
-        if not kept.get("copied") and kept.get("reason") != "already-received":
+        if kept.get("reason") == "already-received":
+            continue
+        if not kept.get("copied"):
             refused.append(proposal_id)
             continue
         ack = json.dumps({"by": "pull"}).encode("utf-8")
@@ -89,17 +91,18 @@ def main(argv: list[str] | None = None) -> int:
     token = Path(args.token_file).expanduser().read_text(encoding="utf-8").strip()
     ledger = Path(args.ledger).expanduser() if args.ledger else None
 
-    def run() -> int:
+    def run(announce: bool) -> int:
         result = pull_once(args.base, token, Path(args.inbox), ledger)
-        print(json.dumps(result, ensure_ascii=False, sort_keys=True), flush=True)
+        if announce or result["copied"] or result["refused"]:
+            print(json.dumps(result, ensure_ascii=False, sort_keys=True), flush=True)
         return 0
 
     if args.once:
-        return run()
+        return run(True)
     import time
     while True:
         try:
-            run()
+            run(False)
         except Exception as exc:  # noqa: BLE001 - a pull failure must not kill the loop
             print(json.dumps({"error": str(exc)[:200]}, ensure_ascii=False), flush=True)
         time.sleep(60)

@@ -3538,9 +3538,13 @@ class TestSeedReceive(unittest.TestCase):
             try:
                 result = pull_mod.pull_once(
                     f"http://127.0.0.1:{port}", token, root / "inbox")
+                again = pull_mod.pull_once(
+                    f"http://127.0.0.1:{port}", token, root / "inbox")
             finally:
                 server.shutdown()
             self.assertEqual(result["copied"], ["repl-1"])
+            self.assertEqual(again["copied"], [])
+            self.assertEqual(again["refused"], [])
             self.assertFalse(result["unwrapped"])
             self.assertFalse(result["started_model"])
             stored = json.loads((root / "inbox" / "mac-proposer-r9" / "identity" /
