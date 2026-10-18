@@ -118,28 +118,164 @@ def _titled(title: str, prefix: str) -> tuple[str, str] | None:
     return parts[1], parts[2]
 
 
-def rows_for_execution(tasks: list, limit: int) -> list:
-    """Recent rows, plus every seed.export and seed.replicate, and the reactions that name them.
+#: How deep the executor looks for its own un-acted work, per actuator. Every
+#: actuator runs at most once per round, so this is only a bound on the cost
+#: of a round, never a statement about which proposals are allowed to run.
+DEFAULT_PER_ACTION = 40
 
-    The recent window is the last ``limit`` rows. An adopted seed.export
-    does not stop being adopted because newer mail pushed it out of that
-    window, so those proposals, and the reactions whose titles name them,
-    are kept as well. Order stays the listing order.
+
+def _author_of(title: str, prefix: str = "[proposal]") -> str:
+    """The author token of a ``[proposal]`` title, or ``""``.
+
+    ``publish_proposal`` writes ``"[proposal] <id> <action> by <author>"`` and
+    an author is a single token, so the fifth token is the whole name. It is
+    read without fetching the body, which is what lets retention tell this
+    host's drafts from a peer's before paying for a GET.
+    """
+    parts = str(title).split()
+    if len(parts) < 5 or parts[0] != prefix or parts[3] != "by":
+        return ""
+    return parts[4]
+
+
+def rows_for_execution(tasks: list, limit: int,
+                       per_action: int = DEFAULT_PER_ACTION,
+                       settled: frozenset | set = frozenset(),
+                       authors: set | None = None) -> list:
+    """The rows one round may act on, in listing order.
+
+    Three layers:
+
+    1. the last ``limit`` rows -- the live window the dry run and the ledger
+       describe;
+    2. every ``seed.export`` and ``seed.replicate``. Those two are the only
+       actions with a second host on the other end, so the send/receive
+       bookkeeping has to see a peer's offer as well as this host's: an
+       addressed replication pushed out of the window would be offered twice;
+    3. with ``authors`` set, the oldest ``per_action`` proposals of each
+       actuator action that this host signs under and that no ledger row has
+       settled yet (``settled``).
+
+    Layer 3 is the one that is easy to leave out and hard to notice missing.
+    Without it an adopted ``culture.refine`` / ``recruit.invite`` /
+    ``reproduce.spawn`` / ``resource.rebalance`` / ``meta.propose`` /
+    ``policy.set`` older than ``limit`` rows is invisible, so the only actions
+    that ever reach an actuator are the two seeds. Oldest-first on purpose: a
+    backlog is drained from the front, and newest-first would strand every
+    proposal behind a window that keeps sliding away from it. It keys on the
+    author name in the title rather than the pubkey because the body has not
+    been fetched yet; ``next_*`` re-checks the pubkey, so a name collision
+    buys a wasted fetch, never a wrong execution.
+
+    Reactions naming any kept proposal ride along. A proposal judged on half
+    its votes reads as "not adopted", which is indistinguishable in the ledger
+    from a real refusal.
     """
     rows = [row for row in tasks if isinstance(row, dict)]
     window = rows[-limit:] if limit > 0 else []
     keep = {row.get("id") for row in window}
+    names = {str(name) for name in (authors or ()) if name}
     seed_ids = set()
+    act_ids = set()
+    taken: Counter = Counter()
     for row in rows:
         parsed = _titled(str(row.get("title") or ""), "[proposal]")
-        if parsed and parsed[1] in ("seed.export", "seed.replicate"):
-            seed_ids.add(parsed[0])
+        if parsed is None:
+            continue
+        proposal_id, action = parsed
+        if action in ("seed.export", "seed.replicate"):
+            seed_ids.add(proposal_id)
             keep.add(row.get("id"))
+            continue
+        if not names or per_action <= 0 or action not in ACTUATORS:
+            continue
+        if taken[action] >= per_action or proposal_id in settled:
+            continue
+        if _author_of(str(row.get("title") or "")) not in names:
+            continue
+        taken[action] += 1
+        act_ids.add(proposal_id)
+        keep.add(row.get("id"))
     for row in rows:
         parsed = _titled(str(row.get("title") or ""), "[reaction]")
-        if parsed and parsed[0] in seed_ids:
+        if parsed and (parsed[0] in seed_ids or parsed[0] in act_ids):
             keep.add(row.get("id"))
     return [row for row in rows if row.get("id") in keep]
+
+
+def _hosts_table(path: str = "~/.pandosi/hosts.json") -> dict:
+    """This host's ``hosts.json``, or ``{}`` when it is missing or corrupt.
+
+    The executor already reads the same file for its mailbox and pull
+    destinations; reading the author name from it too keeps one source of
+    truth for "who is this host".
+    """
+    try:
+        return json.loads(
+            Path(path).expanduser().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def local_authors(table: dict | None, extra=()) -> set[str]:
+    """The author names this host may drain in layer 3 of the row selection.
+
+    ``hosts.json`` already carries this host's ``proposer_id``. ``extra`` is
+    for a second local name (a host can sign under more than one). An empty
+    result disables layer 3 instead of guessing: a wrong name here fails
+    silently -- the host would drain nothing beyond the seed pair -- while an
+    empty set is merely the behaviour that preceded this function.
+    """
+    names = {str(name) for name in (extra or ()) if name}
+    if isinstance(table, dict) and table.get("proposer_id"):
+        names.add(str(table["proposer_id"]))
+    return names
+
+
+#: How many rounds one proposal may raise before the executor stops retrying
+#: it. Retrying is the right default -- a locked file, a model that is still
+#: loading, a passphrase that has not been typed yet are all transient -- but a
+#: proposal whose params can never satisfy the actuator's contract raises the
+#: same error for ever. Every actuator takes the *oldest* unsettled proposal, so
+#: without a budget one such proposal blocks that action's whole backlog while
+#: the ledger grows a row every round.
+MAX_ATTEMPTS = 3
+
+
+def failure_counts(ledger: Path) -> Counter:
+    """Rounds in which each proposal raised, keyed by proposal id."""
+    found: Counter = Counter()
+    try:
+        lines = ledger.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return found
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if row.get("failed") and not row.get("executed") and row.get("proposal_id"):
+            found[str(row["proposal_id"])] += 1
+    return found
+
+
+def settle_after_failure(record: dict, failures: Counter) -> dict:
+    """Turn a repeatedly-failing record into a settled refusal, in place.
+
+    The row keeps its ``failed`` reason and gains ``skipped`` plus ``attempts``.
+    ``skipped`` is what ``left_ids`` reads, so the proposal stops being picked
+    while the reason it was dropped stays in the ledger. Same three states as
+    everywhere else here: ``executed`` true means done, ``skipped`` means
+    settled, neither means retry.
+    """
+    if record.get("executed") or record.get("skipped"):
+        return record
+    pid = str(record.get("proposal_id") or "")
+    attempts = failures.get(pid, 0) + 1
+    if pid and attempts >= MAX_ATTEMPTS:
+        record["skipped"] = "gave-up"
+        record["attempts"] = attempts
+    return record
 
 def tally(proposal: Proposal, reactions: list[dict]) -> dict[str, list[str]]:
     """One vote per decision model. The author does not count."""
@@ -809,6 +945,15 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
     identity = Identity.from_json(json.loads(
         Path(args.identity).expanduser().read_text(encoding="utf-8")))
     signer = identity.public_key
+    failures = failure_counts(ledger)
+
+    def record_row(record: dict) -> None:
+        """One ledger append, with the retry budget applied first."""
+        settle_after_failure(record, failures)
+        ledger.parent.mkdir(parents=True, exist_ok=True)
+        with ledger.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, sort_keys=True) + "\n")
+
     knobs = load_policy(getattr(args, "policy_path", DEFAULT_POLICY_PATH))
     chosen = next_seed_export(proposals, reactions, done_ids(ledger), signer,
                               knobs)
@@ -825,7 +970,6 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
         except Exception as exc:  # noqa: BLE001 - one action must not end the loop
             sealed = None
             failure = f"{type(exc).__name__}: {exc}"
-        ledger.parent.mkdir(parents=True, exist_ok=True)
         record = {
             "proposal_id": chosen.proposal_id,
             "action": "seed.export",
@@ -833,12 +977,11 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
             "sealed": bool(sealed),
         }
         if not sealed:
-            # No ``skipped``: a failed seal is retried next round, so the
-            # adopted proposal is not dropped. The reason still travels, or
-            # a broken actuator is indistinguishable from an idle one.
+            # No ``skipped`` yet, so the seal is retried -- until
+            # ``MAX_ATTEMPTS``. The reason still travels, or a broken
+            # actuator would be indistinguishable from an idle one.
             record["failed"] = failure or "export wrote no manifest"
-        with ledger.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, sort_keys=True) + "\n")
+        record_row(record)
     # A rule change is applied after the export and before the replicate
     # bookkeeping, so this round's own ledger row is already in ``done_ids``
     # when the later passes look for unactuated work.
@@ -863,9 +1006,7 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
         else:
             record["executed"] = True
             record["applied"] = outcome["applied"]
-        ledger.parent.mkdir(parents=True, exist_ok=True)
-        with ledger.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, sort_keys=True) + "\n")
+        record_row(record)
     # A culture change is staged after the export and rule change. Staging is
     # one-way and inert: it writes a signed, validated candidate into the
     # outbox for later review and never loads it, so it cannot rewrite the
@@ -891,9 +1032,7 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
             record["executed"] = True
             record["playbook_hash"] = staged["playbook_hash"]
             record["directory"] = staged["directory"]
-        ledger.parent.mkdir(parents=True, exist_ok=True)
-        with ledger.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, sort_keys=True) + "\n")
+        record_row(record)
     # An invitation is minted last and is inert: the token is written 0600 into
     # a local outbox with ``applied: false``. Nothing installs it into a root,
     # so adopting a recruit can never admit a member in the same breath.
@@ -919,9 +1058,7 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
             record["invite_hash"] = staged["invite_hash"]
             record["expires_at"] = staged["expires_at"]
             record["directory"] = staged["directory"]
-        ledger.parent.mkdir(parents=True, exist_ok=True)
-        with ledger.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, sort_keys=True) + "\n")
+        record_row(record)
     # A reproduction is drafted last and is inert by construction: the plan
     # names what would be copied and where, and lists every reason the parent
     # still refuses. Nothing is copied, no process starts, and this module
@@ -947,9 +1084,7 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
             record["plan_hash"] = staged["plan_hash"]
             record["refusals"] = staged["refusals"]
             record["directory"] = staged["directory"]
-        ledger.parent.mkdir(parents=True, exist_ok=True)
-        with ledger.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, sort_keys=True) + "\n")
+        record_row(record)
     # A member move is drafted next, and it is inert: the plan names the
     # member and the target host and lists every precondition. No member is
     # stopped, none is started, no state directory is touched.
@@ -975,9 +1110,7 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
             record["plan_hash"] = staged["plan_hash"]
             record["refusals"] = staged["refusals"]
             record["directory"] = staged["directory"]
-        ledger.parent.mkdir(parents=True, exist_ok=True)
-        with ledger.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, sort_keys=True) + "\n")
+        record_row(record)
     # A proposal for a *new operator* is drafted last of all. It is the one
     # artifact in this file that must never become code: the spec carries a
     # label and prose, and the implementation is what the gate supplies.
@@ -1003,9 +1136,7 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
             record["spec_hash"] = staged["spec_hash"]
             record["refusals"] = staged["refusals"]
             record["directory"] = staged["directory"]
-        ledger.parent.mkdir(parents=True, exist_ok=True)
-        with ledger.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, sort_keys=True) + "\n")
+        record_row(record)
     # An export must not crowd out a replicate. Both are recorded.
     if True:
         seen = done_ids(ledger) | left_ids(ledger)
@@ -1158,6 +1289,10 @@ def main() -> int:
     parser.add_argument("--mailbox", default="http://127.0.0.1:8776")
     parser.add_argument("--token-file", default="~/.pandosi/mailbox.token")
     parser.add_argument("--limit", type=int, default=40)
+    parser.add_argument("--author", action="append", default=[],
+                        help="an author name this host signs under; repeatable. "
+                             "Added to hosts.json proposer_id. Only these "
+                             "authors are drained past the row window.")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--once", action="store_true",
                         help="one round: at most one adopted seed.export and "
@@ -1186,16 +1321,19 @@ def main() -> int:
     token = Path(args.token_file).expanduser().read_text(encoding="utf-8").strip()
     from .proposal_mail import _request
     listing = _request(args.mailbox, "/tasks?status=all", token, "GET")
-    rows = rows_for_execution(listing.get("tasks") or [], args.limit)
+    table = _hosts_table()
+    ledger = Path(args.ledger).expanduser()
+    rows = rows_for_execution(
+        listing.get("tasks") or [], args.limit,
+        authors=local_authors(table, args.author),
+        settled=done_ids(ledger) | left_ids(ledger))
     proposals = fetch_proposals(args.mailbox, token, status="all", rows=rows)
     reactions = _load_reactions(args.mailbox, token, args.limit, rows=rows)
     if args.once:
-        path = Path("~/.pandosi/hosts.json").expanduser()
-        try:
-            table = json.loads(path.read_text(encoding="utf-8"))
+        if table:
             args.hosts = known_hosts(table)
             args.pull = pull_destinations(table)
-        except (OSError, json.JSONDecodeError):
+        else:
             args.hosts = None
             args.pull = set()
         return run_once(proposals, reactions, args)

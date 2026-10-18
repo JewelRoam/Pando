@@ -3218,6 +3218,78 @@ class TestExecution(unittest.TestCase):
             [row["id"] for row in rows],
             ["t-old", "t-vote", "t-copy", "t-copy-vote", "t-new"])
 
+    def test_layer_three_drains_this_hosts_backlog_oldest_first(self):
+        from pando.execute import rows_for_execution
+        rows_in = [{"id": f"t-c{i}",
+                    "title": f"[proposal] p-c{i} culture.refine by mac-proposer"}
+                   for i in range(5)]
+        rows_in.append({"id": "t-x", "title":
+                        "[proposal] p-x culture.refine by win-gpu-proposer"})
+        rows_in += [{"id": f"t-n{i}",
+                     "title": f"[proposal] p-n{i} culture.refine by mac-proposer"}
+                    for i in range(3)]
+        recent = {"id": "t-new", "title": "[chat] hello"}
+        rows = rows_for_execution(rows_in + [recent], 1,
+                                  per_action=4, authors={"mac-proposer"})
+        self.assertEqual([row["id"] for row in rows],
+                         ["t-c0", "t-c1", "t-c2", "t-c3", "t-new"])
+
+    def test_layer_three_leaves_settled_and_foreign_work_alone(self):
+        from pando.execute import rows_for_execution
+        a = {"id": "t-a", "title": "[proposal] p-a recruit.invite by mac-proposer"}
+        b = {"id": "t-b", "title": "[proposal] p-b recruit.invite by mac-proposer"}
+        rows = rows_for_execution([a, b], 0, authors={"mac-proposer"},
+                                  settled={"p-a"})
+        self.assertEqual([row["id"] for row in rows], ["t-b"])
+
+    def test_layer_three_carries_the_votes_that_judge_it(self):
+        from pando.execute import rows_for_execution
+        proposal = {"id": "t-p",
+                    "title": "[proposal] p-1 meta.propose by mac-proposer"}
+        vote = {"id": "t-v", "title": "[reaction] p-1 \u8d5e\u540c by mac-text"}
+        rows = rows_for_execution([proposal, vote, {"id": "t-z",
+                                                    "title": "[chat] hi"}],
+                                  0, authors={"mac-proposer"})
+        self.assertEqual([row["id"] for row in rows], ["t-p", "t-v"])
+
+    def test_the_local_author_names_come_from_hosts_json(self):
+        from pando.execute import local_authors
+        self.assertEqual(local_authors({"proposer_id": "mac-proposer"}),
+                         {"mac-proposer"})
+        self.assertEqual(
+            local_authors({"proposer_id": "mac-proposer"}, ["mac-llm-8b-local"]),
+            {"mac-proposer", "mac-llm-8b-local"})
+        self.assertEqual(local_authors({}), set())
+        self.assertEqual(local_authors(None), set())
+
+    def test_a_proposal_that_keeps_raising_is_settled_after_a_budget(self):
+        import tempfile
+        from pando.execute import failure_counts, settle_after_failure
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Path(tmp) / "l.jsonl"
+            ledger.write_text(
+                '{"proposal_id": "p1", "action": "policy.set", "executed": false,'
+                ' "failed": "PolicyError: x"}\n'
+                '{"proposal_id": "p1", "action": "policy.set", "executed": false,'
+                ' "failed": "PolicyError: x"}\n'
+                '{"proposal_id": "p2", "action": "policy.set", "executed": true}\n',
+                encoding="utf-8")
+            failures = failure_counts(ledger)
+            self.assertEqual(failures["p1"], 2)
+            self.assertIsNone(failures.get("p2"))
+            stuck = {"proposal_id": "p1", "action": "policy.set",
+                     "executed": False, "failed": "PolicyError: x"}
+            settle_after_failure(stuck, failures)
+            self.assertEqual(stuck["skipped"], "gave-up")
+            self.assertEqual(stuck["attempts"], 3)
+            fresh = {"proposal_id": "p3", "action": "policy.set",
+                     "executed": False, "failed": "OSError: busy"}
+            settle_after_failure(fresh, failures)
+            self.assertNotIn("skipped", fresh)
+            done = {"proposal_id": "p1", "executed": True}
+            settle_after_failure(done, failures)
+            self.assertNotIn("skipped", done)
+
     def test_the_author_does_not_vote_and_one_adopt_does_not_pass(self):
         from pando.execute import judge
         proposal = self._proposal()
