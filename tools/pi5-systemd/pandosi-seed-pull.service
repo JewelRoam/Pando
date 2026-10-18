@@ -1,0 +1,12 @@
+[Unit]
+Description=PandoSI pull sealed seeds from the mac outbox
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/home/admin/pando/bin/python /home/admin/pandosi-src/tools/seed_pull.py --from http://192.168.31.41:8478 --token-file /home/admin/.pando/mailbox.token --inbox /home/admin/.pandosi/inbox --ledger /home/admin/.pandosi/receive-ledger.jsonl
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=default.target

@@ -5338,3 +5338,73 @@ class TestCodeIdentity(unittest.TestCase):
         self.assertEqual(shown["win-gemma-12b"]["code"], "未知")
         self.assertTrue(shown["win-gemma-12b"]["code_unknown"])
 
+
+
+class TestPi5UnitTemplates(unittest.TestCase):
+    """The pi5 roster must live in the repo, not only on the SD card.
+
+    2026-10-19: the live pi5 ran four user units that had no template here --
+    chat, seed intake, and the ten-minute code fast-forward among them. A node
+    rebuilt from this repo would have looked healthy and been unable to talk,
+    to receive a seed, or to update itself: exactly the parts that let it keep
+    running when no cloud agent is watching. A missing template stays invisible
+    until the rebuild, so the roster is checked here instead.
+    """
+
+    #: Units a rebuilt pi5 must end up with. Adding a resident role to the node
+    #: without adding its template here is the bug this list exists to catch.
+    ROSTER = (
+        "pandosi-llama.service",
+        "pandosi-root.service",
+        "pandosi-stem-text.service",
+        "pandosi-stem-laya.service",
+        "pandosi-stem-llm.service",
+        "pandosi-react.service",
+        "pandosi-think.service",
+        "pandosi-think-watchdog.service",
+        "pandosi-chat.service",
+        "pandosi-seed-pull.service",
+        "pandosi-code-sync.service",
+    )
+
+    def _units(self) -> dict:
+        root = Path(__file__).resolve().parents[1] / "tools" / "pi5-systemd"
+        return {path.name: path.read_text(encoding="utf-8")
+                for path in sorted(root.iterdir())
+                if path.suffix in (".service", ".timer")}
+
+    def test_the_roster_is_complete_and_every_template_is_a_unit(self):
+        units = self._units()
+        for name in self.ROSTER:
+            self.assertIn(name, units, f"no template for {name}")
+        for name, text in units.items():
+            self.assertIn("[Unit]", text, name)
+            if name.endswith(".service"):
+                self.assertIn("[Service]", text, name)
+                self.assertIn("ExecStart=", text, name)
+            else:
+                self.assertIn("[Timer]", text, name)
+                self.assertIn("OnUnitActiveSec=", text, name)
+
+    def test_a_timer_cannot_run_a_job_that_is_not_a_template(self):
+        units = self._units()
+        timers = [name for name in units if name.endswith(".timer")]
+        self.assertTrue(timers, "no timers at all")
+        missing = []
+        for name in timers:
+            for unit in re.findall(r"^Unit=(\S+)$", units[name], re.M):
+                if unit not in units:
+                    missing.append(f"{name} -> {unit}")
+        self.assertEqual(missing, [])
+
+    def test_the_fast_forward_only_restarts_units_the_guard_allows(self):
+        """A ten-minute job that may restart a model would OOM a 4 GB pi5."""
+        from tools import code_sync
+
+        units = self._units()
+        restarted = set(re.findall(
+            r"--restart\s+(\S+)", units["pandosi-code-sync.service"]))
+        self.assertTrue(restarted, "the fast-forward restarts nothing")
+        self.assertEqual(restarted - set(code_sync.SAFE_UNITS), set())
+        # And what it does restart must be a unit this repo can rebuild.
+        self.assertEqual(restarted - set(units), set())
