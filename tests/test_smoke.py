@@ -1798,6 +1798,131 @@ class TestSmoke(unittest.TestCase):
                 seed.unwrap_identity(tpath.read_bytes(), "correct horse "
                                                          "battery staple")
 
+    def test_the_drill_can_be_pointed_at_the_bundle_that_actually_traveled(self):
+        """A bundle exported here and a bundle that crossed the wire are not
+        the same evidence.
+
+        ``seed_drill.py`` used to be able to drill only something it built
+        itself; ``--seed-src`` pointed it at an existing bundle, but a sealed
+        one was simply skipped, so the artifact that really leaves the machine
+        was the one artifact never drilled. The measured failure this guards
+        (2026-10-19): pi5's inbox held 17 received bundles and not one had ever
+        been opened, so "the seed that travels revives the member" was an
+        assertion with a passing test suite behind it and nothing else.
+
+        The drill must now open the given artifact, run all three negative
+        controls against *that* artifact, and name it (digest + proposal id)
+        so the report can be audited later. Without the passphrase it must
+        still fail, and say why.
+        """
+        import importlib.util
+        root_dir = Path(__file__).resolve().parents[1]
+        spec = importlib.util.spec_from_file_location(
+            "pandosi_seed", root_dir / "tools" / "seed.py")
+        seed = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(seed)
+        from pando.identity import Identity
+
+        drill = root_dir / "tools" / "seed_drill.py"
+        spec_drill = importlib.util.spec_from_file_location(
+            "pandosi_seed_drill", drill)
+        seed_drill_module = importlib.util.module_from_spec(spec_drill)
+        spec_drill.loader.exec_module(seed_drill_module)
+
+        def run_drill(bundle, pass_file=None, report=None):
+            args = [sys.executable, str(drill), "--seed-src", str(bundle)]
+            if pass_file is not None:
+                args += ["--seed-src-passphrase-file", str(pass_file)]
+            if report is not None:
+                args += ["--json", str(report)]
+            return subprocess.run(args, capture_output=True, text=True,
+                                  timeout=180, env={**os.environ,
+                                                    "PYTHONPATH": str(root_dir)})
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            home = tmp / "home"
+            (home / "mailbox" / "tasks").mkdir(parents=True)
+            identity_path = tmp / "pando" / "identity.json"
+            live = Identity.generate()
+            identity_path.parent.mkdir(parents=True, exist_ok=True)
+            identity_path.write_text(json.dumps(live.to_json(), indent=2))
+            pass_file = tmp / "pass.txt"
+            pass_file.write_text("the passphrase that travels separately\n")
+
+            # What actually leaves the box: a sealed, identity-only bundle.
+            traveled = tmp / "traveled" / "mac-proposer-r7-1792361638"
+            self.assertEqual(seed.cmd_export(argparse.Namespace(
+                out=str(traveled), home=str(home), identity=str(identity_path),
+                rollout_dir=str(tmp / "rollouts"), force=True,
+                passphrase_file=str(pass_file),
+                proposal_id="mac-proposer-r7-1792361638",
+                author="mac-proposer")), 0)
+            manifest = json.loads((traveled / "manifest.json").read_text())
+            self.assertEqual(manifest["totals"]["files"], 1,
+                             "the traveled offer is identity-only by design")
+
+            # 1. without the passphrase the drill refuses to bless it.
+            blind = run_drill(traveled, report=tmp / "blind.json")
+            self.assertEqual(blind.returncode, 1, blind.stdout + blind.stderr)
+            blind_report = json.loads((tmp / "blind.json").read_text())
+            self.assertIn("--seed-src-passphrase-file",
+                          blind_report["modes"]["plaintext"].get("hint", ""))
+
+            # 2. with it, the artifact itself carries the identity.
+            report_path = tmp / "traveled.json"
+            done = run_drill(traveled, pass_file, report=report_path)
+            self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+            report = json.loads(report_path.read_text())
+            sealed = report["modes"]["sealed"]
+
+            self.assertTrue(report["ok"])
+            self.assertEqual(report["modes"]["plaintext"].get("skipped"),
+                             "traveled bundle is sealed; see the sealed slot")
+            self.assertEqual(sealed["bundle_path"], str(traveled))
+            self.assertEqual(sealed["bundle_proposal_id"],
+                             "mac-proposer-r7-1792361638")
+            self.assertEqual(sealed["bundle_author"], "mac-proposer")
+            self.assertEqual(sealed["bundle_fingerprint"],
+                             live.node_fingerprint)
+            self.assertTrue(sealed["bundle_accepted"])
+            self.assertEqual(len(sealed["bundle_digest"]), 64)
+
+            # the two membership questions, answered against the traveled key
+            self.assertTrue(sealed["identity_carried"])
+            self.assertEqual(sealed["fingerprint_rehydrated"],
+                             live.node_fingerprint)
+            self.assertTrue(sealed["same_key_accepted"])
+            self.assertEqual(sealed["same_key_status"], 200)
+            self.assertTrue(sealed["new_key_refused"])
+            self.assertEqual(sealed["new_key_status"], 403)
+
+            # the three negative controls, on the traveled bytes
+            self.assertTrue(sealed["no_passphrase_refused"])
+            self.assertTrue(sealed["tampered"])
+            self.assertTrue(sealed["tampered_refused"])
+            self.assertTrue(sealed["wrong_passphrase_refused"])
+
+            # 3. the digest names a *different* artifact than the local drill
+            #    would have built - proof the report is about this bundle.
+            other = run_drill(traveled, pass_file, report=tmp / "again.json")
+            self.assertEqual(other.returncode, 0)
+            again = json.loads((tmp / "again.json").read_text())
+            self.assertEqual(again["modes"]["sealed"]["bundle_digest"],
+                             sealed["bundle_digest"],
+                             "the same artifact must digest the same")
+            tampered = tmp / "tampered-copy"
+            seed_broken = seed_drill_module.tamper_ciphertext(traveled,
+                                                              tampered)
+            self.assertTrue(seed_broken)
+            third = run_drill(tampered, pass_file, report=tmp / "third.json")
+            self.assertEqual(third.returncode, 1)
+            third_report = json.loads((tmp / "third.json").read_text())
+            self.assertNotEqual(
+                third_report["modes"]["sealed"]["bundle_digest"],
+                sealed["bundle_digest"],
+                "a mutated copy must not digest the same")
+
 
 class TestResidentThinker(unittest.TestCase):
     """pando.thinkd - the proposer that has to keep running when nobody asks.

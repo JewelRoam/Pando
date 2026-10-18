@@ -54,6 +54,66 @@ field order; the checker now refuses to report a pass on an empty scan.
   member cycle **twice** (plaintext and sealed) and, in the sealed run, three
   negative controls: no passphrase, a flipped ciphertext byte, and a wrong
   passphrase.
+  - `--seed-src <dir>` points the drill at a bundle that already exists
+    instead of exporting one here. Alone, the given bundle must be plaintext;
+    a sealed one is reported as skipped rather than silently passed.
+  - `--seed-src-passphrase-file <p>` opens a **sealed** `--seed-src`, and then
+    the sealed run *and all three negative controls* are performed against
+    that artifact. This is the difference between "the export path works" and
+    "the thing that actually crossed the wire still revives the member" - and
+    the difference between drilling a key on the machine that made it and
+    drilling the one that landed on the other box.
+  - The report names the artifact: `bundle_path`, a whole-tree
+    `bundle_digest`, the `bundle_proposal_id` / `bundle_author` /
+    `bundle_fingerprint` out of the manifest. A drill that cannot say what it
+    drilled is an anecdote.
+
+## Drilling the artifact that actually traveled (2026-10-19)
+
+Everything above drills a bundle the Mac just built. Until 2026-10-19 that was
+the *only* thing ever drilled: pi5's inbox held **17 received bundles** and not
+one had been opened, so "the seed that travels revives the member" had a
+passing test suite behind it and no measurement.
+
+```
+python3 tools/seed_drill.py \
+  --seed-src <pulled bundle> \
+  --seed-src-passphrase-file ~/.pandosi/seed.passphrase
+```
+
+Against `mac-proposer-r582-1792361638`, pulled off pi5's inbox
+(`bundle_digest b38565a5af8c6d1f252370007a5fbb367ad0bb3be681e4f130e7031ce992f398`):
+
+```
+[plaintext]
+  skipped: --seed-src is sealed, so there is no plaintext run
+[sealed]
+  bundle          : 1 files, 529 bytes
+  restore time    : 0.043s
+  identity carried: True (bd326f4f2da58311)
+  same key        : HTTP 200 -> accepted
+  new key         : HTTP 403 -> refused
+  verdict         : PASS
+  no passphrase   : rc=1 -> refused
+  tampered bytes  : rc=1 -> refused
+  wrong passphrase: rc=1 -> refused
+verdict: PASS (plaintext=True, sealed=True)
+```
+
+What this does and does not prove:
+
+- **Proves**: the key in a bundle that went Mac -> pi5 still re-registers under
+  its own name, and a freshly generated key with the same name is still
+  refused, and the three negative controls hold on *those* bytes.
+- **Does not prove**: anything about the member's history. The offer that
+  travels is **identity-only** (`totals.files == 1`), unlike the 7589-file
+  bundle the local drill builds. The key survives the trip; the ledger,
+  mailbox history and bindings do not travel with it. A member revived from a
+  traveled offer re-registers and starts over, it does not resume.
+- **Does not prove**: that it works on a box that is not this one. The drill
+  still runs on the Mac, against a copy of the bundle. Running it *on* the
+  receiving host is the next step, and it needs the passphrase there, which is
+  exactly the human step the seal is for.
 
 ## Drill result (measured, not asserted)
 

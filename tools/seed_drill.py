@@ -22,13 +22,21 @@ controls, because a lock nobody tries to pick is decoration:
   4. the right passphrase, wrong bytes (a flipped ciphertext) is refused
   5. the wrong passphrase is refused
 
+The same drill can be pointed at a bundle that already exists - the one that
+actually crossed the wire - with ``--seed-src``. Give it a passphrase and the
+sealed run plus all three negative controls are performed against *that*
+artifact instead of one exported here, which is the difference between "the
+export path works" and "the thing that traveled still revives the member".
+
     python3 tools/seed_drill.py [--keep] [--json <path>]
+    python3 tools/seed_drill.py --seed-src <dir> --seed-src-passphrase-file <p>
 """
 
 from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import importlib.util
 import json
 import os
@@ -107,6 +115,29 @@ def tamper_ciphertext(bundle: Path, out: Path) -> bool:
     return True
 
 
+def tree_digest(bundle: Path) -> str:
+    """One digest over the whole tree, so a report names the exact artifact."""
+    h = hashlib.sha256()
+    for path in sorted(p for p in bundle.rglob("*") if p.is_file()):
+        h.update(str(path.relative_to(bundle)).encode("utf-8"))
+        h.update(b"\0")
+        h.update(hashlib.sha256(path.read_bytes()).digest())
+    return h.hexdigest()
+
+
+def note_provenance(seed, bundle: Path, report: dict) -> None:
+    """Record which artifact was drilled. A drill that cannot say what it
+    drilled is an anecdote, not evidence."""
+    judged = seed.judge_bundle(bundle)
+    report["bundle_path"] = str(bundle)
+    report["bundle_digest"] = tree_digest(bundle)
+    report["bundle_accepted"] = judged.get("accepted")
+    report["bundle_reason"] = judged.get("reason")
+    report["bundle_proposal_id"] = judged.get("proposal_id")
+    report["bundle_author"] = judged.get("author")
+    report["bundle_fingerprint"] = judged.get("fingerprint")
+
+
 def run_member_cycle(seed, bundle: Path, work: Path, report: dict,
                      passphrase_file=None) -> None:
     """Rehydrate one bundle into `work` and ask the two membership questions."""
@@ -181,44 +212,89 @@ def main() -> int:
     parser.add_argument("--json", default=None,
                         help="write the drill report as JSON to this path")
     parser.add_argument("--seed-src", default=None,
-                        help="use an existing bundle instead of exporting "
-                             "(skips the export half; the wrapped run is then "
-                             "whatever that bundle already is)")
+                        help="drill an existing bundle - the one that actually "
+                             "traveled - instead of exporting one here")
+    parser.add_argument("--seed-src-passphrase-file", default=None,
+                        help="passphrase for --seed-src. With it the bundle "
+                             "must be sealed and the sealed run plus all three "
+                             "negative controls are done against that artifact")
     args = parser.parse_args()
 
     sys.path.insert(0, str(REPO))
     seed = _load_seed_module()
 
+    if args.seed_src_passphrase_file and not args.seed_src:
+        parser.error("--seed-src-passphrase-file only makes sense with "
+                     "--seed-src")
+
     work = Path(tempfile.mkdtemp(prefix="pandosi-drill."))
     report: dict = {"ok": False, "workdir": str(work), "modes": {}}
 
+    traveled = Path(args.seed_src).expanduser() if args.seed_src else None
+    traveled_pass = (Path(args.seed_src_passphrase_file).expanduser()
+                     if args.seed_src_passphrase_file else None)
+    if traveled is not None:
+        report["traveled"] = {"path": str(traveled)}
+
     # ---- mode 1: plaintext bundle, the original drill ----------------------
-    plain_dir = work / "plain"
-    if not args.seed_src:
-        rc = export_bundle(seed, plain_dir, None)
-        if rc != 0:
-            print("plaintext export failed", file=sys.stderr)
-            return rc
+    plain = report["modes"].setdefault("plaintext", {})
+    plain_attempted = True
+    if traveled is not None and traveled_pass is not None:
+        # A sealed bundle is not a plaintext one; asking the plaintext question
+        # of it would only produce a misleading FAIL.
+        plain["skipped"] = "traveled bundle is sealed; see the sealed slot"
+        plain_attempted = False
+        print("[plaintext]\n  skipped: --seed-src is sealed, so there is no "
+              "plaintext run; the sealed slot below drills it")
     else:
-        plain_dir = Path(args.seed_src).expanduser()
-    run_member_cycle(seed, plain_dir, work / "member-plain",
-                     report["modes"].setdefault("plaintext", {}))
-    print_cycle("plaintext", report["modes"]["plaintext"])
+        plain_dir = traveled if traveled is not None else work / "plain"
+        if traveled is None:
+            rc = export_bundle(seed, plain_dir, None)
+            if rc != 0:
+                print("plaintext export failed", file=sys.stderr)
+                return rc
+        else:
+            note_provenance(seed, plain_dir, plain)
+        run_member_cycle(seed, plain_dir, work / "member-plain", plain)
+        if traveled is not None and not plain.get("ok"):
+            # A sealed bundle dropped into the plaintext slot fails for a
+            # reason that has nothing to do with the artifact being bad.
+            on_disk = (plain_dir / "identity" / "identity.json")
+            sealed_on_disk = False
+            if on_disk.is_file():
+                try:
+                    sealed_on_disk = (json.loads(on_disk.read_text())
+                                      .get("kind") == "encrypted-identity")
+                except (OSError, ValueError):
+                    sealed_on_disk = False
+            if sealed_on_disk:
+                plain["hint"] = ("this bundle is sealed; re-run with "
+                                 "--seed-src-passphrase-file to drill it")
+                print("  hint            : the bundle is sealed; re-run with "
+                      "--seed-src-passphrase-file to drill it")
+        print_cycle("plaintext", plain)
 
     # ---- mode 2: sealed bundle, plus the negative controls ------------------
     sealed = report["modes"].setdefault("sealed", {})
-    if args.seed_src:
-        sealed["skipped"] = "no export, cannot know the passphrase"
-        print("[sealed]\n  skipped: --seed-src was given, so the drill cannot "
-              "know the passphrase")
+    sealed_attempted = True
+    if traveled is not None and traveled_pass is None:
+        sealed["skipped"] = "no passphrase for the traveled bundle"
+        sealed_attempted = False
+        print("[sealed]\n  skipped: --seed-src was given without "
+              "--seed-src-passphrase-file, so the drill cannot open it")
     else:
-        enc_dir = work / "sealed"
-        pass_file = work / "passphrase.txt"
-        pass_file.write_text(PASSPHRASE + "\n")
-        rc = export_bundle(seed, enc_dir, pass_file)
-        if rc != 0:
-            print("sealed export failed", file=sys.stderr)
-            return rc
+        if traveled is not None:
+            enc_dir = traveled
+            pass_file = traveled_pass
+            note_provenance(seed, enc_dir, sealed)
+        else:
+            enc_dir = work / "sealed"
+            pass_file = work / "passphrase.txt"
+            pass_file.write_text(PASSPHRASE + "\n")
+            rc = export_bundle(seed, enc_dir, pass_file)
+            if rc != 0:
+                print("sealed export failed", file=sys.stderr)
+                return rc
 
         # 3. no passphrase -> the whole run is refused before anything lands.
         sealed["no_passphrase_rc"] = rehydrate(seed, enc_dir,
@@ -254,10 +330,11 @@ def main() -> int:
         print(f"  wrong passphrase: rc={sealed['wrong_passphrase_rc']} "
               f"-> {'refused' if sealed['wrong_passphrase_refused'] else 'ACCEPTED (bad!)'}")
 
-    plain_ok = bool(report["modes"]["plaintext"].get("ok"))
-    if args.seed_src:
-        sealed_ok = True  # not attempted
-    else:
+    # A skipped slot is not a failure: the drill asked a question it could not
+    # ask of this artifact, and said so out loud.
+    plain_ok = bool(plain.get("ok")) if plain_attempted else True
+    sealed_ok = True
+    if sealed_attempted:
         sealed_ok = bool(sealed.get("ok")
                          and sealed.get("no_passphrase_refused")
                          and sealed.get("tampered_refused")
