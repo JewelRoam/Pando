@@ -29,15 +29,28 @@ tested actuator for that exact action exists.
   proposal may carry labels only, ``sandbox_confirmed`` is always false, and
   nothing here calls ``pando.reproduce.reproduce``. A plan cannot be an
   approval.
-- ``resource.rebalance``, ``meta.propose`` — no actuator. An adopted proposal
-  with one of these actions is recorded as ``no-actuator``: a hold on the
-  world, not a success and not a silence.
+- ``resource.rebalance`` — draft a signed *move* plan into a local outbox:
+  which member, onto which host, and every precondition that is still unmet.
+  Labels only (``node_id``, ``target_host``); a ``path`` or ``command`` is
+  refused, so a proposal cannot name the state directory or the stop/start
+  order. Nothing stops a member, starts one, or copies a byte.
+- ``meta.propose`` — draft a signed *operator spec* into a local outbox: the
+  name of a new proposal operator and the prose asking for it. This is the one
+  action whose payload is code in the end, so the artifact carries labels only
+  and ``code``/``source``/``module``/``path``/``command`` are refused rather
+  than ignored. Nothing imports a module or defines a class.
+
+That closes the action space: all eight declared actions now have an actuator,
+and six of the eight stop at a signed draft in a local outbox. The two that
+touch the world on their own are ``seed.export`` (writes a sealed bundle under
+this host's own ``executions/``) and ``policy.set`` (moves one bounded knob).
+Neither is reachable from a proposal alone.
 
 Nothing here starts itself, and nothing here opens a socket. A dry run reads
 the mailbox and prints counts. A ``--once`` round seals at most one seed,
 applies at most one rule change, stages at most one culture candidate, mints at
-most one invitation, and drafts at most one reproduction plan, each recorded in
-an append-only ledger.
+most one invitation, and drafts at most one plan for each of reproduction,
+member move, and a new operator — each recorded in an append-only ledger.
 """
 from __future__ import annotations
 
@@ -53,6 +66,12 @@ from .genesis import ACTION_SPACE, Proposal
 from .invite import DEFAULT_OUTBOX as DEFAULT_INVITE_OUTBOX
 from .invite import InviteError
 from .invite import stage as stage_invite
+from .operators import DEFAULT_OUTBOX as DEFAULT_OPERATOR_OUTBOX
+from .operators import OperatorError
+from .operators import stage as stage_operator
+from .rebalance import DEFAULT_OUTBOX as DEFAULT_REBALANCE_OUTBOX
+from .rebalance import RebalanceError
+from .rebalance import stage as stage_rebalance
 from .spawn import DEFAULT_OUTBOX as DEFAULT_SPAWN_OUTBOX
 from .spawn import SpawnError
 from .spawn import stage as stage_spawn
@@ -78,6 +97,8 @@ ACTUATORS: tuple[str, ...] = (
     "culture.refine",
     "recruit.invite",
     "reproduce.spawn",
+    "resource.rebalance",
+    "meta.propose",
 )
 
 
@@ -331,6 +352,68 @@ def foreign_reproduce_spawns(proposals: list[Proposal], reactions: list[dict],
     found = []
     for proposal in proposals:
         if proposal.proposal_id in done or proposal.action != "reproduce.spawn":
+            continue
+        if proposal.pubkey == signer:
+            continue
+        if adopted(proposal, reactions, knobs):
+            found.append(proposal.proposal_id)
+    return found
+
+
+def next_rebalance(proposals: list[Proposal], reactions: list[dict],
+                   done: set[str], signer: str | None = None,
+                   knobs: dict | None = None) -> Proposal | None:
+    """Oldest adopted ``resource.rebalance`` this host authored, not yet drafted.
+
+    Only the signer's own proposal is drafted: the plan is written into the
+    authoring host's outbox, and a foreign move is named, never re-hosted here.
+    """
+    for proposal in proposals:
+        if proposal.proposal_id in done or proposal.action != "resource.rebalance":
+            continue
+        if signer is not None and proposal.pubkey != signer:
+            continue
+        if adopted(proposal, reactions, knobs):
+            return proposal
+    return None
+
+
+def foreign_rebalances(proposals: list[Proposal], reactions: list[dict],
+                       done: set[str], signer: str,
+                       knobs: dict | None = None) -> list[str]:
+    """Adopted ``resource.rebalance`` ids another host authored."""
+    found = []
+    for proposal in proposals:
+        if proposal.proposal_id in done or proposal.action != "resource.rebalance":
+            continue
+        if proposal.pubkey == signer:
+            continue
+        if adopted(proposal, reactions, knobs):
+            found.append(proposal.proposal_id)
+    return found
+
+
+def next_meta_propose(proposals: list[Proposal], reactions: list[dict],
+                      done: set[str], signer: str | None = None,
+                      knobs: dict | None = None) -> Proposal | None:
+    """Oldest adopted ``meta.propose`` this host authored, not yet drafted."""
+    for proposal in proposals:
+        if proposal.proposal_id in done or proposal.action != "meta.propose":
+            continue
+        if signer is not None and proposal.pubkey != signer:
+            continue
+        if adopted(proposal, reactions, knobs):
+            return proposal
+    return None
+
+
+def foreign_meta_proposes(proposals: list[Proposal], reactions: list[dict],
+                          done: set[str], signer: str,
+                          knobs: dict | None = None) -> list[str]:
+    """Adopted ``meta.propose`` ids another host authored."""
+    found = []
+    for proposal in proposals:
+        if proposal.proposal_id in done or proposal.action != "meta.propose":
             continue
         if proposal.pubkey == signer:
             continue
@@ -865,6 +948,62 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
         ledger.parent.mkdir(parents=True, exist_ok=True)
         with ledger.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, sort_keys=True) + "\n")
+    # A member move is drafted next, and it is inert: the plan names the
+    # member and the target host and lists every precondition. No member is
+    # stopped, none is started, no state directory is touched.
+    move = next_rebalance(proposals, reactions, done_ids(ledger), signer, knobs)
+    if move is not None:
+        record = {"proposal_id": move.proposal_id,
+                  "action": "resource.rebalance"}
+        try:
+            staged = stage_rebalance(
+                move, identity=identity,
+                outbox=getattr(args, "rebalance_outbox",
+                               DEFAULT_REBALANCE_OUTBOX))
+        except RebalanceError as exc:
+            # No ``skipped``: a refused draft is retried next round and refused
+            # again, so a move that can never be staged stays visible.
+            record["executed"] = False
+            record["failed"] = f"RebalanceError: {exc}"
+        except Exception as exc:  # noqa: BLE001 - one action must not end the loop
+            record["executed"] = False
+            record["failed"] = f"{type(exc).__name__}: {exc}"
+        else:
+            record["executed"] = True
+            record["plan_hash"] = staged["plan_hash"]
+            record["refusals"] = staged["refusals"]
+            record["directory"] = staged["directory"]
+        ledger.parent.mkdir(parents=True, exist_ok=True)
+        with ledger.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, sort_keys=True) + "\n")
+    # A proposal for a *new operator* is drafted last of all. It is the one
+    # artifact in this file that must never become code: the spec carries a
+    # label and prose, and the implementation is what the gate supplies.
+    meta = next_meta_propose(proposals, reactions, done_ids(ledger), signer,
+                             knobs)
+    if meta is not None:
+        record = {"proposal_id": meta.proposal_id, "action": "meta.propose"}
+        try:
+            staged = stage_operator(
+                meta, identity=identity,
+                outbox=getattr(args, "operator_outbox",
+                               DEFAULT_OPERATOR_OUTBOX))
+        except OperatorError as exc:
+            # No ``skipped``: a refused draft is retried next round and refused
+            # again, so a spec that can never be staged stays visible.
+            record["executed"] = False
+            record["failed"] = f"OperatorError: {exc}"
+        except Exception as exc:  # noqa: BLE001 - one action must not end the loop
+            record["executed"] = False
+            record["failed"] = f"{type(exc).__name__}: {exc}"
+        else:
+            record["executed"] = True
+            record["spec_hash"] = staged["spec_hash"]
+            record["refusals"] = staged["refusals"]
+            record["directory"] = staged["directory"]
+        ledger.parent.mkdir(parents=True, exist_ok=True)
+        with ledger.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, sort_keys=True) + "\n")
     # An export must not crowd out a replicate. Both are recorded.
     if True:
         seen = done_ids(ledger) | left_ids(ledger)
@@ -885,13 +1024,18 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                                                   signer, knobs)
         foreign_spawns = foreign_reproduce_spawns(proposals, reactions, seen,
                                                   signer, knobs)
+        foreign_moves = foreign_rebalances(proposals, reactions, seen, signer,
+                                           knobs)
+        foreign_meta = foreign_meta_proposes(proposals, reactions, seen, signer,
+                                             knobs)
         unacted = local_unacted(proposals, reactions, seen, signer, knobs)
         pulls = getattr(args, "pull", None) or set()
         outbox = getattr(args, "outbox", "~/.pandosi/outbox")
         acks = received_acks(ledger, outbox)
         if (foreign or replicates or addressed or unacted or foreign_repl
                 or foreign_policy or foreign_culture or foreign_invites
-                or foreign_spawns or acks):
+                or foreign_spawns or foreign_moves or foreign_meta
+                or acks):
             ledger.parent.mkdir(parents=True, exist_ok=True)
             with ledger.open("a", encoding="utf-8") as handle:
                 for proposal_id in foreign:
@@ -961,6 +1105,20 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                         "executed": False,
                         "skipped": "other-host",
                     }, sort_keys=True) + "\n")
+                for proposal_id in foreign_moves:
+                    handle.write(json.dumps({
+                        "proposal_id": proposal_id,
+                        "action": "resource.rebalance",
+                        "executed": False,
+                        "skipped": "other-host",
+                    }, sort_keys=True) + "\n")
+                for proposal_id in foreign_meta:
+                    handle.write(json.dumps({
+                        "proposal_id": proposal_id,
+                        "action": "meta.propose",
+                        "executed": False,
+                        "skipped": "other-host",
+                    }, sort_keys=True) + "\n")
                 for proposal_id, action in unacted:
                     handle.write(json.dumps({
                         "proposal_id": proposal_id,
@@ -976,6 +1134,8 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                    "foreign_culture_refines": foreign_culture,
                    "foreign_recruit_invites": foreign_invites,
                    "foreign_reproduce_spawns": foreign_spawns,
+                   "foreign_rebalances": foreign_moves,
+                   "foreign_meta_proposes": foreign_meta,
                    "no_actuator": [item[0] for item in unacted]}
         print(json.dumps(payload, ensure_ascii=False), flush=True)
         write_status(ledger.with_name("execute-status.json"), payload)
@@ -1012,6 +1172,10 @@ def main() -> int:
                         help="where staged recruit.invite tokens are written")
     parser.add_argument("--spawn-outbox", default=DEFAULT_SPAWN_OUTBOX,
                         help="where drafted reproduce.spawn plans are written")
+    parser.add_argument("--rebalance-outbox", default=DEFAULT_REBALANCE_OUTBOX,
+                        help="where drafted resource.rebalance plans are written")
+    parser.add_argument("--operator-outbox", default=DEFAULT_OPERATOR_OUTBOX,
+                        help="where drafted meta.propose specs are written")
     args = parser.parse_args()
     args.policy_path = args.policy
     if args.dry_run == args.once:

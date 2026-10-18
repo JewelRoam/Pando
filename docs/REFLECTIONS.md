@@ -335,7 +335,9 @@ The Mac's full answer lives in mailbox task t-20261017-001001-f790. Load-bearing
   pass than the code. A change that is refused carries no `skipped` key on purpose: it is retried
   and refused again next round, so a rule that can never apply stays visible in the ledger instead
   of looking handled.
-- Honest boundary: 6 of the 8 declared actions now have actuators. `culture.refine` is staged-only
+- Honest boundary: all 8 declared actions now have actuators, and the count is the point: the
+  action space is closed on purpose, so "we act on everything we can propose" is a claim the code
+  can keep. `culture.refine` is staged-only
   (`b3ff290`): it validates a `{"playbook": {...}}` payload, signs an attestation and writes the
   candidate under `~/.pandosi/culture-outbox/<proposal-id>/` with `applied: false`. It never spawns
   a process, never rewrites the live playbook and never touches the rules - applying a candidate
@@ -354,8 +356,23 @@ The Mac's full answer lives in mailbox task t-20261017-001001-f790. Load-bearing
   starts, no grant is written, and the grant state is read rather than requested so a staging round
   cannot append to the audit trail. Unlike `recruit.invite`, a plan holds no secret, so re-staging
   rewrites it instead of freezing it: the artifact cannot keep reporting a refusal that has since
-  been answered. `resource.rebalance` and `meta.propose` are still `no-actuator` - adopted and
-  held, not executed and not silent.
+  been answered. `resource.rebalance` (`pando/rebalance.py`) is staged-only in the same shape: an
+  adopted proposal may carry labels only (`node_id`, `target_host`), and a `path`, `command`, `url`
+  or any other key is refused rather than ignored, so no model can name a state directory or a
+  stop/start order in an artifact a human might later run. The signed plan lands under
+  `~/.pandosi/rebalance-outbox/<proposal-id>/` with `approved: false`, `moved: false` and a refusal
+  list naming the five preconditions the move still lacks - the first being that the old copy must
+  be stopped first, or two members end up sharing one identity. Nothing stops a member, starts one
+  or copies a byte, and the grant state is read (`include_audit=False`) rather than requested, so a
+  staging round cannot append to the audit trail. `meta.propose` (`pando/operators.py`) is the last
+  and the narrowest: it drafts a signed *operator spec* - a name and prose asking for the operator -
+  into `~/.pandosi/operator-outbox/<proposal-id>/` with `approved: false`, `installed: false` and
+  its own refusal list. This is the one action whose payload would be code in the end, so
+  `code`/`source`/`module`/`path`/`command` are refused rather than ignored, and today's
+  `genesis.py` hard-codes its operator set, so a spec cannot become code even if a human misread it
+  as approval - Tier 2 needs a loader that does not exist yet. So the eight split cleanly: six stop
+  at a signed draft in a local outbox, and the only two that touch the world on their own are
+  `seed.export` (seals this host's own seed) and `policy.set` (moves one bounded knob).
 - Falsifier: sign a `policy.set` that lowers `min_adopt` to 1 with the ordinary two adopters, and
   check the ledger records a refusal rather than writing `min_adopt=1`. That is the whole safety
   claim, and it is one command to test.

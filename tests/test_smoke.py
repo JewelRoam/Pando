@@ -3306,7 +3306,9 @@ class TestExecution(unittest.TestCase):
             hosts=None, pull=[], outbox=str(Path(tmp) / "outbox"),
             culture_outbox=str(Path(tmp) / "culture-outbox"),
             invite_outbox=str(Path(tmp) / "invite-outbox"),
-            spawn_outbox=str(Path(tmp) / "spawn-outbox"))
+            spawn_outbox=str(Path(tmp) / "spawn-outbox"),
+            rebalance_outbox=str(Path(tmp) / "rebalance-outbox"),
+            operator_outbox=str(Path(tmp) / "operator-outbox"))
 
     def test_a_raising_export_is_recorded_rather_than_ending_the_loop(self):
         """One broken actuator must not take the executor down with it.
@@ -3394,8 +3396,10 @@ class TestExecution(unittest.TestCase):
             if action not in ACTUATORS:
                 self.assertIn(action, set(unacted.values()))
         # An actuator for an action the action space does not declare is dead
-        # code that can never run.
-        self.assertTrue(set(ACTUATORS) <= set(ACTION_SPACE))
+        # code that can never run, and a declared action with no actuator is a
+        # hold the group cannot ever clear. The two sets are now equal: every
+        # declared action stops at a signed draft at worst.
+        self.assertEqual(set(ACTUATORS), set(ACTION_SPACE))
 
     def test_a_params_block_is_signed_and_absent_params_keeps_the_old_payload(self):
         """``params`` rides inside the signature, and only when it is non-empty.
@@ -3950,6 +3954,233 @@ class TestExecution(unittest.TestCase):
             self.assertEqual(rows[0]["action"], "reproduce.spawn")
             self.assertFalse((Path(args.spawn_outbox) / "p-theirs-s").exists())
 
+    def test_a_resource_rebalance_drafts_a_signed_plan_and_moves_nothing(self):
+        """The plan is signed, inert, and never an approval to move a member."""
+        import tempfile
+        from pando.execute import run_once
+        from pando.identity import Identity
+        from pando.rebalance import verify as verify_move
+
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = Identity.generate()
+            ident_path = Path(tmp) / "identity.json"
+            ident_path.write_text(json.dumps(identity.to_json()),
+                                  encoding="utf-8")
+            (Path(tmp) / "phrase").write_text("pw\n", encoding="utf-8")
+            proposal = self._proposal(action="resource.rebalance", pid="p-move")
+            proposal.pubkey = identity.public_key
+            proposal.params = {"node_id": "mac-llm-8b-local",
+                               "target_host": "win"}
+            votes = [self._vote("mac-text", "赞同", "p-move"),
+                     self._vote("mac-laya-int8", "赞同", "p-move")]
+            args = self._execute_args(tmp, ident_path)
+
+            run_once([proposal], votes, args)
+            rows = [json.loads(line) for line in
+                    Path(args.ledger).read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(rows), 1)
+            self.assertTrue(rows[0]["executed"])
+            self.assertEqual(rows[0]["action"], "resource.rebalance")
+            root = Path(args.rebalance_outbox) / "p-move"
+            self.assertEqual(root.stat().st_mode & 0o777, 0o700)
+            plan = json.loads((root / "plan.json").read_text(encoding="utf-8"))
+            self.assertIs(plan["approved"], False)
+            self.assertIs(plan["moved"], False)
+            self.assertEqual(plan["requested"],
+                             {"node_id": "mac-llm-8b-local",
+                              "target_host": "win"})
+            self.assertTrue(plan["refusals"])
+            self.assertTrue(plan["requires"])
+            self.assertIn("service_autostart", plan["grants"])
+            self.assertEqual((root / "plan.json").stat().st_mode & 0o777,
+                             0o600)
+            self.assertTrue(verify_move(root))
+            self.assertFalse(Path(args.policy_path).exists())
+
+    def test_a_resource_rebalance_naming_a_path_is_refused(self):
+        """A proposal cannot choose the state directory or an argv."""
+        import tempfile
+        from pando.execute import run_once
+        from pando.identity import Identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = Identity.generate()
+            ident_path = Path(tmp) / "identity.json"
+            ident_path.write_text(json.dumps(identity.to_json()),
+                                  encoding="utf-8")
+            (Path(tmp) / "phrase").write_text("pw\n", encoding="utf-8")
+            proposal = self._proposal(action="resource.rebalance", pid="p-badmove")
+            proposal.pubkey = identity.public_key
+            proposal.params = {"node_id": "mac-text", "path": "/"}
+            votes = [self._vote("mac-text", "赞同", "p-badmove"),
+                     self._vote("mac-laya-int8", "赞同", "p-badmove")]
+            args = self._execute_args(tmp, ident_path)
+
+            run_once([proposal], votes, args)
+            rows = [json.loads(line) for line in
+                    Path(args.ledger).read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(rows), 1)
+            self.assertFalse(rows[0]["executed"])
+            self.assertNotIn("skipped", rows[0])
+            self.assertIn("RebalanceError", rows[0]["failed"])
+            self.assertFalse((Path(args.rebalance_outbox) / "p-badmove").exists())
+
+    def test_a_foreign_resource_rebalance_is_recorded_and_not_drafted_here(self):
+        """Another host's move is named, never drafted with our key."""
+        import tempfile
+        from pando.execute import run_once
+        from pando.identity import Identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = Identity.generate()
+            ident_path = Path(tmp) / "identity.json"
+            ident_path.write_text(json.dumps(identity.to_json()),
+                                  encoding="utf-8")
+            (Path(tmp) / "phrase").write_text("pw\n", encoding="utf-8")
+            proposal = self._proposal(action="resource.rebalance",
+                                      pid="p-theirs-m")
+            proposal.pubkey = "someone-elses-key"
+            votes = [self._vote("mac-text", "赞同", "p-theirs-m"),
+                     self._vote("mac-laya-int8", "赞同", "p-theirs-m")]
+            args = self._execute_args(tmp, ident_path)
+
+            run_once([proposal], votes, args)
+            rows = [json.loads(line) for line in
+                    Path(args.ledger).read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["skipped"], "other-host")
+            self.assertEqual(rows[0]["action"], "resource.rebalance")
+            self.assertFalse((Path(args.rebalance_outbox) / "p-theirs-m").exists())
+
+    def test_rebalance_validate_is_pure_and_refuses_unknown_params(self):
+        from pando.rebalance import validate
+
+        self.assertEqual(validate({}), ({}, ""))
+        self.assertEqual(validate(None), ({}, ""))
+        self.assertEqual(validate([]), ({}, ""))
+        self.assertEqual(validate({"node_id": "pi6", "target_host": "win"}),
+                         ({"node_id": "pi6", "target_host": "win"}, ""))
+        for raw in ({"path": "/tmp"}, {"command": "rm -rf /"},
+                    {"node_id": ""}, {"target_host": 5}, "nope", 7):
+            checked, why = validate(raw)
+            self.assertIsNone(checked, raw)
+            self.assertTrue(why, raw)
+
+    def test_a_meta_propose_drafts_a_signed_spec_and_installs_nothing(self):
+        """The spec is signed, inert, and carries no executable surface."""
+        import tempfile
+        from pando.execute import run_once
+        from pando.identity import Identity
+        from pando.operators import verify as verify_spec
+
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = Identity.generate()
+            ident_path = Path(tmp) / "identity.json"
+            ident_path.write_text(json.dumps(identity.to_json()),
+                                  encoding="utf-8")
+            (Path(tmp) / "phrase").write_text("pw\n", encoding="utf-8")
+            proposal = self._proposal(action="meta.propose", pid="p-meta")
+            proposal.pubkey = identity.public_key
+            proposal.params = {"operator": "novelty-sampler",
+                               "rationale": "propose against the least-seen "
+                                            "action instead of the newest"}
+            votes = [self._vote("mac-text", "赞同", "p-meta"),
+                     self._vote("mac-laya-int8", "赞同", "p-meta")]
+            args = self._execute_args(tmp, ident_path)
+
+            run_once([proposal], votes, args)
+            rows = [json.loads(line) for line in
+                    Path(args.ledger).read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(rows), 1)
+            self.assertTrue(rows[0]["executed"])
+            self.assertEqual(rows[0]["action"], "meta.propose")
+            root = Path(args.operator_outbox) / "p-meta"
+            self.assertEqual(root.stat().st_mode & 0o777, 0o700)
+            spec = json.loads((root / "spec.json").read_text(encoding="utf-8"))
+            self.assertIs(spec["approved"], False)
+            self.assertIs(spec["installed"], False)
+            self.assertEqual(spec["requested"],
+                             {"operator": "novelty-sampler"})
+            self.assertIn("novelty-sampler", spec["rationale"] + "novelty-sampler")
+            self.assertTrue(spec["refusals"])
+            self.assertTrue(spec["requires"])
+            self.assertEqual((root / "spec.json").stat().st_mode & 0o777,
+                             0o600)
+            self.assertTrue(verify_spec(root))
+            self.assertFalse(Path(args.policy_path).exists())
+
+    def test_a_meta_propose_carrying_code_is_refused(self):
+        """The one action whose payload is code in the end carries none."""
+        import tempfile
+        from pando.execute import run_once
+        from pando.identity import Identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = Identity.generate()
+            ident_path = Path(tmp) / "identity.json"
+            ident_path.write_text(json.dumps(identity.to_json()),
+                                  encoding="utf-8")
+            (Path(tmp) / "phrase").write_text("pw\n", encoding="utf-8")
+            proposal = self._proposal(action="meta.propose", pid="p-badmeta")
+            proposal.pubkey = identity.public_key
+            proposal.params = {"operator": "sneaky",
+                               "source": "import os; os.system('id')"}
+            votes = [self._vote("mac-text", "赞同", "p-badmeta"),
+                     self._vote("mac-laya-int8", "赞同", "p-badmeta")]
+            args = self._execute_args(tmp, ident_path)
+
+            run_once([proposal], votes, args)
+            rows = [json.loads(line) for line in
+                    Path(args.ledger).read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(rows), 1)
+            self.assertFalse(rows[0]["executed"])
+            self.assertNotIn("skipped", rows[0])
+            self.assertIn("OperatorError", rows[0]["failed"])
+            self.assertFalse((Path(args.operator_outbox) / "p-badmeta").exists())
+
+    def test_a_foreign_meta_propose_is_recorded_and_not_drafted_here(self):
+        """Another host's operator request is named, never drafted here."""
+        import tempfile
+        from pando.execute import run_once
+        from pando.identity import Identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = Identity.generate()
+            ident_path = Path(tmp) / "identity.json"
+            ident_path.write_text(json.dumps(identity.to_json()),
+                                  encoding="utf-8")
+            (Path(tmp) / "phrase").write_text("pw\n", encoding="utf-8")
+            proposal = self._proposal(action="meta.propose", pid="p-theirs-o")
+            proposal.pubkey = "someone-elses-key"
+            votes = [self._vote("mac-text", "赞同", "p-theirs-o"),
+                     self._vote("mac-laya-int8", "赞同", "p-theirs-o")]
+            args = self._execute_args(tmp, ident_path)
+
+            run_once([proposal], votes, args)
+            rows = [json.loads(line) for line in
+                    Path(args.ledger).read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["skipped"], "other-host")
+            self.assertEqual(rows[0]["action"], "meta.propose")
+            self.assertFalse((Path(args.operator_outbox) / "p-theirs-o").exists())
+
+    def test_operator_validate_is_pure_and_refuses_code_params(self):
+        from pando.operators import validate
+
+        self.assertEqual(validate({}), ({}, ""))
+        self.assertEqual(validate(None), ({}, ""))
+        self.assertEqual(validate([]), ({}, ""))
+        self.assertEqual(validate({"operator": "novelty",
+                                   "rationale": "why not"}),
+                         ({"operator": "novelty", "rationale": "why not"}, ""))
+        for raw in ({"code": "x=1"}, {"source": "import os"},
+                    {"module": "os"}, {"path": "/tmp/x.py"},
+                    {"command": "python x.py"}, {"operator": ""},
+                    {"operator": 5}, {"rationale": 5}, "nope", 7):
+            checked, why = validate(raw)
+            self.assertIsNone(checked, raw)
+            self.assertTrue(why, raw)
+
     def test_spawn_validate_is_pure_and_refuses_unknown_params(self):
         from pando.spawn import validate
 
@@ -4000,10 +4231,10 @@ class TestExecution(unittest.TestCase):
     def test_the_threshold_the_executor_uses_comes_from_the_policy_file(self):
         """The same votes, two stores, two outcomes. This is the closed loop.
 
-        ``resource.rebalance`` stands in for any action with no actuator: if
-        the gate adopts it, the round records ``no-actuator``; if it does not,
-        the round records nothing. So the ledger itself says which threshold
-        was in force.
+        ``resource.rebalance`` stands in for any adopted action: if the gate
+        adopts it, the round drafts a signed, inert move plan and records it;
+        if it does not, the round records nothing. So the ledger itself says
+        which threshold was in force.
         """
         import tempfile
         from pando.execute import run_once
@@ -4021,12 +4252,15 @@ class TestExecution(unittest.TestCase):
                      self._vote("mac-laya-int8", "赞同", "p-rebalance")]
             args = self._execute_args(tmp, ident_path)
 
-            # Default store: two adopts are enough, so the round reports the
-            # adopted-but-unactuated proposal instead of staying silent.
+            # Default store: two adopts are enough, so the round acts on the
+            # proposal: resource.rebalance drafts a signed, inert move plan.
             run_once([proposal], votes, args)
             rows = [json.loads(line) for line in
                     Path(args.ledger).read_text(encoding="utf-8").splitlines()]
-            self.assertEqual([row["skipped"] for row in rows], ["no-actuator"])
+            self.assertEqual([row["action"] for row in rows],
+                             ["resource.rebalance"])
+            self.assertTrue(rows[0]["executed"])
+            self.assertIn("plan_hash", rows[0])
 
             # Raise the bar in the store; the same two votes no longer adopt.
             Path(args.policy_path).write_text(
@@ -4198,6 +4432,9 @@ class TestExecution(unittest.TestCase):
             foreign_replications([theirs, copy], away_votes, set(), "local-key"),
             ["away"])
         from pando.execute import local_unacted
+        # ``local_unacted`` is the safety net for an adopted, locally signed
+        # action that has no actuator. Every declared action now has one, so a
+        # signed ``resource.rebalance`` is acted on, not listed as unactuated.
         other = self._proposal(pid="move", action="resource.rebalance")
         other.pubkey = "local-key"
         more = votes + [
@@ -4205,8 +4442,7 @@ class TestExecution(unittest.TestCase):
             self._vote("mac-llm", "赞同", "move"),
         ]
         self.assertEqual(
-            local_unacted([other, copy], more, set(), "local-key"),
-            [("move", "resource.rebalance")])
+            local_unacted([other, copy], more, set(), "local-key"), [])
 
 
 class TestChat(unittest.TestCase):
