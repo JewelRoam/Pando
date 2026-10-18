@@ -78,18 +78,28 @@ $chatArgs = @('-m', 'pando.chatd',
   '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
   '--ledger', 'D:\pando-models\chat-ledger.jsonl',
   '--interval', '20')
+# Asks only the decision models registered on THIS root for 赞同/搁置/反对,
+# so every proposal collects one reaction per local role. It never calls a
+# member that lives on another device.
+$reactArgs = @('-m', 'pando.reactd',
+  '--root', 'http://127.0.0.1:8790',
+  '--pairing-token-file', $token,
+  '--mailbox', 'http://192.168.31.41:8776',
+  '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
+  '--ledger', 'D:\pando-models\reaction-ledger.jsonl',
+  '--interval', '40')
 $executorArgs = @("$repo\tools\execute_loop.py", '300')
 
 $names = @('llama-3070', 'stem-gemma', 'stem-laya', 'worker', 'win-mailbox',
   'llama-yi-cpu', 'stem-yi', 'think-proposer', 'think-yi', 'observatory', 'chat',
-  'executor-loop')
+  'react', 'executor-loop')
 $exes = @($llamaExe, $python, $python, $python, $python, $llamaExe, $python,
-  $python, $python, $python, $python, $python)
+  $python, $python, $python, $python, $python, $python, $python)
 $argsList = @($llamaArgs, $gemmaArgs, $layaArgs, $workerArgs, $mailboxArgs,
   $yiLlamaArgs, $yiStemArgs, $thinkArgs, $yiThinkArgs, $observatoryArgs, $chatArgs,
-  $executorArgs)
+  $reactArgs, $executorArgs)
 $cwds = @('D:\pando-models\llama-cuda', $repo, $repo, $repo, $repo,
-  'D:\pando-models\llama-cuda', $repo, $repo, $repo, $repo, $repo, $repo)
+  'D:\pando-models\llama-cuda', $repo, $repo, $repo, $repo, $repo, $repo, $repo)
 
 $procs = @{}
 while ($true) {

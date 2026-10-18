@@ -2710,6 +2710,52 @@ class TestReactions(unittest.TestCase):
         self.assertEqual([row["node_id"] for row in chosen], ["mac-text"])
 
 
+    def test_each_local_role_answers_and_the_author_sits_out(self):
+        """Every device fields one vote per local role; the author stays out.
+
+        A proposal is answered by each decision model registered on this
+        machine, except the one that wrote it. Reading the reaction list
+        after a pass is therefore "who spoke", not "who was online".
+        """
+        from types import SimpleNamespace
+        from unittest import mock
+        from pathlib import Path as _P
+        from pando import reactd
+        from pando.identity import load_or_create
+
+        stems = [
+            {"node_id": "neck-a", "url": "http://a", "checkpoint": "c-a"},
+            {"node_id": "neck-b", "url": "http://b", "checkpoint": "c-b"},
+            {"node_id": "neck-c", "url": "http://c", "checkpoint": "c-c"},
+        ]
+        proposals = [SimpleNamespace(proposal_id="p1", author="neck-b",
+                                     goal="goal", action="action")]
+        asked, posted = [], []
+
+        def fake_ask(stem, proposal, timeout):
+            asked.append(stem["node_id"])
+            return {"stance": "赞同", "probability": None}
+
+        def fake_publish(record, node_id, mailbox, token, timeout=15):
+            posted.append((record["payload"]["target_id"], node_id))
+            return {"claimed": True}
+
+        with tempfile.TemporaryDirectory() as td, \
+                mock.patch.object(reactd, "ask_stem", fake_ask), \
+                mock.patch.object(reactd, "publish_reaction", fake_publish):
+            identity = load_or_create(_P(td) / "identity.json")
+            report = reactd.react_once(proposals, stems, identity,
+                                       "http://mailbox", None,
+                                       _P(td) / "ledger.jsonl", 5)
+
+        self.assertEqual(asked, ["neck-a", "neck-c"])
+        self.assertEqual(sorted(posted),
+                         [("p1", "neck-a"), ("p1", "neck-c")])
+        self.assertEqual(report["did"], "reacted")
+        self.assertEqual(sorted(v["node_id"] for v in report["votes"]),
+                         ["neck-a", "neck-c"])
+
+
 class TestObservatoryFeed(unittest.TestCase):
     def test_an_address_is_stored_once(self):
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))

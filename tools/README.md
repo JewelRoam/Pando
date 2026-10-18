@@ -14,7 +14,7 @@ are not all the same kind of thing. Read this index before adding another.
 | `observatory.py` | one-command dashboard: aggregates every island root, and shows a decision model's stance under the proposal it answered. stdlib only. |
 | `pando.reactd` | asks only this machine's decision models for 赞同/搁置/反对 and publishes a signed reaction. Not a tool script: `python -m pando.reactd`. |
 | `think_stats.py`, `think_watchdog.py` | proposer-ledger statistics; stall watchdog for a frozen thinker. |
-| `win_node_supervisor.ps1`, `win_stack_restart.ps1` | keep the nine resident win services alive; restart everything. |
+| `win_node_supervisor.ps1`, `win_stack_restart.ps1` | keep the thirteen resident win services alive; restart everything. |
 | `win_worker.py` | the local model answers `[chat]`/tasks on the win node's behalf. |
 | `win_yi_probe.ps1`, `ctx_guard_probe.py` | one-shot hardware probes (Yi CPU load; llama-server VRAM/context guard). |
 | `pi5_llm_member.sh`, `pi5-systemd/`, `mac-launchd/` | per-host service units for the pi5 and the Mac. |
