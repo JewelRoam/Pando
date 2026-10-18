@@ -123,6 +123,30 @@ def _titled(title: str, prefix: str) -> tuple[str, str] | None:
 #: of a round, never a statement about which proposals are allowed to run.
 DEFAULT_PER_ACTION = 40
 
+#: Where a host keeps its executor state. The Mac has used ``~/.pandosi`` since
+#: the first round; a node brought up under the shorter ``~/.pando`` should pass
+#: ``--state-dir`` once rather than spell out ten paths -- spelling them out per
+#: unit is how one host ends up with its ledger in one tree and its outboxes in
+#: another, and how a seal writes a rollout home nobody reads.
+DEFAULT_STATE_DIR = "~/.pandosi"
+
+#: Path arguments that live inside the state dir, as argument name -> (leaf,
+#: what the leaf is for). ``--identity`` is deliberately absent: both hosts
+#: keep the identity in ``~/.pando``, which predates this flag and must not be
+#: silently relocated by it.
+STATE_PATHS: dict[str, tuple[str, str]] = {
+    "token_file": ("mailbox.token", "the mailbox token this host reads"),
+    "passphrase_file": ("seed.passphrase", "the passphrase that seals a seed"),
+    "out_root": ("executions", "where a sealed seed is written"),
+    "ledger": ("execute-ledger.jsonl", "what this host has already acted on"),
+    "policy": ("policy.json", "the bounded self-modification store"),
+    "culture_outbox": ("culture-outbox", "staged culture.refine candidates"),
+    "invite_outbox": ("invites", "staged recruit.invite tokens"),
+    "spawn_outbox": ("reproduce-outbox", "drafted reproduce.spawn plans"),
+    "rebalance_outbox": ("rebalance-outbox", "drafted resource.rebalance plans"),
+    "operator_outbox": ("operator-outbox", "drafted meta.propose specs"),
+}
+
 
 def _author_of(title: str, prefix: str = "[proposal]") -> str:
     """The author token of a ``[proposal]`` title, or ``""``.
@@ -997,7 +1021,9 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                         "executed": False,
                         "deferred": "no-passphrase"})
     elif chosen is not None:
-        home = Path("~/.pandosi/seed-home-empty").expanduser()
+        home = Path(getattr(args, "seed_home",
+                                   DEFAULT_STATE_DIR + "/seed-home-empty")
+                   ).expanduser()
         home.mkdir(parents=True, exist_ok=True)
         try:
             sealed = export_seed(
@@ -1325,11 +1351,21 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
         return 0 if sealed else 1
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """The executor's flags, with state paths left blank for ``resolve_state``.
+
+    A blank default is not "no ledger": it means "wherever ``--state-dir``
+    points". Keeping the leaf names here and the root in one place is what lets
+    a non-Mac host relocate its whole state with a single flag.
+    """
     parser = argparse.ArgumentParser(
         description="judge proposals; does not execute them")
     parser.add_argument("--mailbox", default="http://127.0.0.1:8776")
-    parser.add_argument("--token-file", default="~/.pandosi/mailbox.token")
+    parser.add_argument("--hosts", default="~/.pandosi/hosts.json",
+                        help="this host's table: proposer_id, mailboxes, roots")
+    parser.add_argument("--state-dir", default=DEFAULT_STATE_DIR,
+                        help="the directory every blank path below is relative "
+                             f"to (default: {DEFAULT_STATE_DIR})")
     parser.add_argument("--limit", type=int, default=40)
     parser.add_argument("--author", action="append", default=[],
                         help="an author name this host signs under; repeatable. "
@@ -1339,31 +1375,40 @@ def main() -> int:
     parser.add_argument("--once", action="store_true",
                         help="one round: at most one adopted seed.export and "
                              "at most one adopted policy.set")
-    parser.add_argument("--passphrase-file", default="~/.pandosi/seed.passphrase")
     parser.add_argument("--identity", default="~/.pando/identity.json")
-    parser.add_argument("--out-root", default="~/.pandosi/executions")
-    parser.add_argument("--ledger", default="~/.pandosi/execute-ledger.jsonl")
-    parser.add_argument("--policy", default=DEFAULT_POLICY_PATH,
-                        help="the bounded self-modification store")
-    parser.add_argument("--culture-outbox", default=DEFAULT_CULTURE_OUTBOX,
-                        help="where staged culture.refine candidates are written")
-    parser.add_argument("--invite-outbox", default=DEFAULT_INVITE_OUTBOX,
-                        help="where staged recruit.invite tokens are written")
-    parser.add_argument("--spawn-outbox", default=DEFAULT_SPAWN_OUTBOX,
-                        help="where drafted reproduce.spawn plans are written")
-    parser.add_argument("--rebalance-outbox", default=DEFAULT_REBALANCE_OUTBOX,
-                        help="where drafted resource.rebalance plans are written")
-    parser.add_argument("--operator-outbox", default=DEFAULT_OPERATOR_OUTBOX,
-                        help="where drafted meta.propose specs are written")
-    args = parser.parse_args()
+    for name, (leaf, purpose) in STATE_PATHS.items():
+        parser.add_argument("--" + name.replace("_", "-"), dest=name, default="",
+                            help=f"{purpose} (default: <state-dir>/{leaf})")
+    return parser
+
+
+def resolve_state(args: argparse.Namespace) -> argparse.Namespace:
+    """Fill every blank state path from ``--state-dir``. An explicit one wins.
+
+    Called on the parsed namespace rather than inside ``main`` so the rule can
+    be tested without a mailbox: a host that quietly resolves its ledger to a
+    different tree than its outboxes is indistinguishable from an idle one.
+    """
+    base = Path(str(getattr(args, "state_dir", "") or DEFAULT_STATE_DIR)
+                ).expanduser()
+    for name, (leaf, _) in STATE_PATHS.items():
+        if not getattr(args, name, ""):
+            setattr(args, name, str(base / leaf))
+    args.state_dir = str(base)
+    args.seed_home = str(base / "seed-home-empty")
     args.policy_path = args.policy
+    return args
+
+
+def main() -> int:
+    args = resolve_state(build_parser().parse_args())
     if args.dry_run == args.once:
         print("pass exactly one of --dry-run or --once", flush=True)
         return 2
     token = Path(args.token_file).expanduser().read_text(encoding="utf-8").strip()
     from .proposal_mail import _request
     listing = _request(args.mailbox, "/tasks?status=all", token, "GET")
-    table = _hosts_table()
+    table = _hosts_table(args.hosts)
     ledger = Path(args.ledger).expanduser()
     rows = rows_for_execution(
         listing.get("tasks") or [], args.limit,

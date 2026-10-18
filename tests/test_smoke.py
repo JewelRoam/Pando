@@ -5493,6 +5493,7 @@ class TestPi5UnitTemplates(unittest.TestCase):
         "pandosi-chat.service",
         "pandosi-seed-pull.service",
         "pandosi-code-sync.service",
+        "pandosi-execute.service",
     )
 
     def _units(self) -> dict:
@@ -5536,3 +5537,123 @@ class TestPi5UnitTemplates(unittest.TestCase):
         self.assertEqual(restarted - set(code_sync.SAFE_UNITS), set())
         # And what it does restart must be a unit this repo can rebuild.
         self.assertEqual(restarted - set(units), set())
+
+
+class TestExecuteStateResolution(unittest.TestCase):
+    """A host that spells out ten paths can end up with its ledger in one tree
+    and its outboxes in another -- and that reads, from the outside, exactly
+    like a host with nothing to do. ``--state-dir`` is the one knob instead.
+    """
+
+    def _resolve(self, argv):
+        from pando.execute import build_parser, resolve_state
+        return resolve_state(build_parser().parse_args(argv))
+
+    def test_blank_paths_fill_from_the_state_dir(self):
+        from pando.execute import STATE_PATHS
+        args = self._resolve(["--state-dir", "/tmp/pi5-state"])
+        for name, (leaf, _) in STATE_PATHS.items():
+            self.assertEqual(getattr(args, name), f"/tmp/pi5-state/{leaf}", name)
+        self.assertEqual(args.seed_home, "/tmp/pi5-state/seed-home-empty")
+        self.assertEqual(args.policy_path, args.policy)
+
+    def test_the_default_is_still_the_mac_tree(self):
+        args = self._resolve([])
+        home = Path("~/.pandosi").expanduser()
+        self.assertEqual(args.ledger, str(home / "execute-ledger.jsonl"))
+        self.assertEqual(args.out_root, str(home / "executions"))
+
+    def test_an_explicit_path_beats_the_state_dir(self):
+        args = self._resolve(["--state-dir", "/tmp/pi5-state",
+                              "--ledger", "/tmp/elsewhere/ledger.jsonl"])
+        self.assertEqual(args.ledger, "/tmp/elsewhere/ledger.jsonl")
+        self.assertEqual(args.policy, "/tmp/pi5-state/policy.json")
+
+    def test_identity_is_not_relocated_by_the_state_dir(self):
+        """Both hosts predate this flag with ~/.pando/identity.json.
+
+        Relocating it would make a host seal a seed under a name its own
+        signature does not match -- a failure that looks like a bad key.
+        """
+        from pando.execute import STATE_PATHS
+        self.assertNotIn("identity", STATE_PATHS)
+        args = self._resolve(["--state-dir", "/tmp/pi5-state"])
+        self.assertEqual(args.identity, "~/.pando/identity.json")
+
+
+class TestExecuteLoop(unittest.TestCase):
+    """The loop is the pi5 node's only clock, and it is not a timer unit.
+
+    The roster's rule is that no host gains a new scheduled task, so the
+    executor interval is a resident process instead. That makes an import
+    error here a silent stop, not a failed job.
+    """
+
+    def _load(self):
+        import importlib.util
+        path = Path(__file__).resolve().parents[1] / "tools" / "execute_loop.py"
+        spec = importlib.util.spec_from_file_location(
+            "execute_loop_under_test", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_the_mac_directory_is_tried_before_the_pi_short_name(self):
+        loop = self._load()
+        self.assertEqual(loop.HOST_FILES[0], "~/.pandosi/hosts.json")
+        self.assertIn("~/.pando/hosts.json", loop.HOST_FILES)
+
+    def test_an_explicit_hosts_file_is_used_as_given(self):
+        loop = self._load()
+        with tempfile.TemporaryDirectory() as tmp:
+            made = Path(tmp) / "hosts.json"
+            made.write_text("{}", encoding="utf-8")
+            self.assertEqual(loop.host_file(str(made)), made)
+
+    def test_the_mailbox_comes_from_the_hosts_table(self):
+        loop = self._load()
+        self.assertEqual(
+            loop.mailbox_url({"mailboxes": ["http://pi5-box:8776", "http://x"]}),
+            "http://pi5-box:8776")
+        self.assertEqual(loop.mailbox_url({}), "http://127.0.0.1:8776")
+        self.assertEqual(loop.mailbox_url({"mailboxes": []}),
+                         "http://127.0.0.1:8776")
+        self.assertEqual(loop.read_hosts(None), {})
+
+    def test_a_round_carries_the_table_it_was_resolved_from(self):
+        """A loop reading one table and a round reading another drains nobody."""
+        loop = self._load()
+        args = loop.build_parser().parse_args([
+            "300", "--hosts", "/home/admin/.pando/hosts.json",
+            "--state-dir", "/home/admin/.pando",
+            "--token-file", "/home/admin/.pando/mailbox.token"])
+        command = loop.round_command(
+            args, "http://192.168.31.41:8776",
+            Path("/home/admin/.pando/hosts.json"))
+        self.assertEqual(command[1:4], ["-m", "pando.execute", "--once"])
+        self.assertEqual(
+            command[command.index("--hosts") + 1], "/home/admin/.pando/hosts.json")
+        self.assertEqual(
+            command[command.index("--state-dir") + 1], "/home/admin/.pando")
+        self.assertEqual(
+            command[command.index("--mailbox") + 1], "http://192.168.31.41:8776")
+        self.assertEqual(command[command.index("--limit") + 1], "40")
+
+    def test_the_round_omits_a_state_dir_it_was_not_given(self):
+        """The Mac's launchd spells its paths out; a blank must stay blank."""
+        loop = self._load()
+        args = loop.build_parser().parse_args([])
+        command = loop.round_command(args, "http://127.0.0.1:8776",
+                                     Path("/x/hosts.json"))
+        self.assertNotIn("--state-dir", command)
+        self.assertEqual(args.interval, 300.0)
+
+    def test_the_loop_sleeps_with_a_module_it_actually_imported(self):
+        """A NameError in the sleep call stops the only clock this node has.
+
+        The sleep sits outside the round's try/except on purpose -- a round
+        that fails must not spin -- so a missing import is not caught there.
+        """
+        loop = self._load()
+        self.assertTrue(hasattr(loop, "time"),
+                        "tools/execute_loop.py must import time")

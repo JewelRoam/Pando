@@ -18,18 +18,26 @@ from pathlib import Path
 
 # Client processes only. A model server is not on this list, on purpose.
 #
-# ``pandosi-react`` belongs here: on pi5 the installed package resolves to the
-# checkout, so a fast-forward replaces its code on disk. If the voter is not
-# restarted, the running process keeps the old module in memory and silently
-# votes with superseded logic -- the exact drift that left it without
-# ``--mailbox-fallback`` for four hours after ``a5a7ff5`` landed. ``rootd`` is
-# deliberately absent: it registers members at startup only and restarting it
-# would drop the live registry for every local stem.
+# ``pandosi-react`` belongs here: pi5 installs this checkout into its venv, and
+# a fast-forward rewrites that copy on disk. If the consumer is not restarted
+# the running process keeps the old module in memory and silently works with
+# superseded logic -- the exact drift that left the voter without
+# ``--mailbox-fallback`` for four hours after ``a5a7ff5`` landed.
+#
+# ``pandosi-execute`` belongs here for the same reason and with more at stake:
+# a voter that reloads stale code casts a stale vote, but an executor that
+# reloads stale code *acts* stale -- it would keep sealing seeds and staging
+# drafts through actuators whose contracts this repo has since changed. A
+# restart is how the loop's next round picks up the new module.
+#
+# ``rootd`` is deliberately absent: it registers members at startup only and
+# restarting it would drop the live registry for every local stem.
 SAFE_UNITS = frozenset({
     "pandosi-think.service",
     "pandosi-chat.service",
     "pandosi-react.service",
     "pandosi-seed-pull.service",
+    "pandosi-execute.service",
 })
 
 
