@@ -93,7 +93,7 @@ Paired, on the 351 rows both arms answered:
 ```
 A′ right / B wrong = 22
 B right / A′ wrong = 15
-d = B − A′ = −7     1SE = 3.041     d/SE = −2.30
+d = B − A′ = −7     1SE = 6.083     d/SE = −1.15
 ```
 
 Per suite: `big6` A′ 0.9250 vs B 0.9202; `big7` A′ 0.9833 vs B 0.9381.
@@ -101,8 +101,8 @@ Per suite: `big6` A′ 0.9250 vs B 0.9202; `big7` A′ 0.9833 vs B 0.9381.
 ## The bracket, read straight
 
 ```
-002:  committee at  93.8% of arm A's weight   d = −6,  z = −2.00   one-big at least as good
-003:  committee at 109.2% of arm A′'s weight  d = −7,  z = −2.30   one-big at least as good
+002:  committee at  93.8% of arm A's weight   d = −6,  z = −1.00   one-big at least as good
+003:  committee at 109.2% of arm A′'s weight  d = −7,  z = −1.15   one-big at least as good
 ```
 
 The committee was handicapped in one run and favoured in the other, and the
@@ -113,8 +113,11 @@ what the bracket buys, and it is the whole reason this arm was owed.
 Under the decision rule fixed before the run, `d <= 0` means: *a single
 `Qwen3-8B-Q4_K_M` is at least as good while carrying **less** memory than the
 4-member committee, so the many-small-at-equal-budget claim is refuted on this
-family, not merely unsupported.* `|z| = 2.30 > 1.96`, so the rule fires rather
-than returning "inconclusive".
+family, not merely unsupported.* The rule keys on the **sign of `d`**, not on
+significance: `|z| = 1.15` is inside the noise, so this is not a significant
+refutation — it is the pre-registered rule firing on direction alone. (The
+earlier text here quoted `|z| = 2.30 > 1.96`; that `z` came from a paired SE
+twice too large, corrected 2026-10-19 — see 勘误 below.)
 
 This is a **negative result for the project's own thesis**, and it is reported
 that way on purpose. A swarm whose weakest member answers 0.3583 while the best
@@ -146,11 +149,16 @@ this model family — under a bracket that tilts the budget both ways.
 ## 反思与质疑
 
 - **样本量 / 标准误.** n = 360 rows, both arms answer 351, so the paired
-  statistic rests on 351 pairs. `d = −7` with `1SE = 3.04` is `z = −2.30` —
-  barely past the 1.96 line. A three-row swing either way would erase it. This
-  is one suite, one prompt variant, one seed-free `temp 0` decode; treat
-  `|z| = 2.30` as suggestive-strong, not as a settled effect size. Two runs
-  separating the same direction (z = −2.00, −2.30) is the honest strength.
+  statistic rests on 351 pairs. `d = −7` with `1SE = 6.08` is `z = −1.15` —
+  **inside** the 1.96 line, not past it. The numbered copy of this document
+  said `1SE = 3.04, z = −2.30`, which double-counted the evidence: the paired
+  SE is `sqrt(b+c) = sqrt(22+15)`, and the old `sqrt(n)/2` is the SE of a
+  difference of two *independent* proportions. So the honest strength is: two
+  runs lean the same way (z = −1.00, −1.15) and **neither clears the noise
+  floor**; the verdict survives only because the pre-registered rule reads the
+  sign of `d`. One suite, one prompt variant, one seed-free `temp 0` decode.
+  McNemar exact two-sided p = 0.324 (003), 0.405 (002). Treat `d = −7` as a
+  directional hint, not a settled effect size.
 - **缺哪个对照.** The bracket closes the *budget* axis and leaves the
   *bloodline* axis open: arm A and arm A′ are the same family. The control that
   would still falsify "many small models are competitive" most cheaply is a
@@ -192,3 +200,23 @@ Unless the "equal-memory-budget, many small models vs one big model" control
 holds **and** the missing different-bloodline arm is run, no result from this
 project may be described as evidence for group intelligence. This run is a
 control that came back against the thesis. Recording it is the point.
+
+## 勘误 · 2026-10-19 · 配对标准误
+
+本文件里的 `1SE = 3.041, d/SE = −2.30`、以及两处 `|z| = 2.30 > 1.96` 出自一个
+错误的配对标准误公式：工具当时用 `sqrt(n)/2`（n = 两臂共同作答行数），而配对差
+只在不一致行上有信息，正确值是 `sqrt(b+c) = sqrt(22+15) = 6.083`。
+
+提交 `278dc1e` 换成 `pando/common.py:mcnemar_test()`（唯一实现，含精确 McNemar
+p），四份报告从缓存原始票就地重生成。本文件更正后：
+
+```
+A′ right / B wrong = 22
+B right / A′ wrong = 15
+d = B − A′ = −7     1SE = 6.083     d/SE = −1.15     McNemar exact p = 0.324
+```
+
+**判决没变**，因为预注册规则读的是 `d` 的符号：`d = −7 < 0` → "one-big is at
+least as good"。**强度变了**：`|z| = 1.15` 在 1.96 之内，"bracket 两臂同向"
+这句话现在说的是**方向**同向，不是**显著**同向。002 同理，从 −2.00 更正为
+−1.00。任何"两次 z 都超过 2"的说法都必须撤掉。

@@ -66,7 +66,7 @@ arm A  acc=0.9417  p50=285ms p95=382ms        (360/360 rows)
   member :8769  laya-en     acc=0.8389  neutral=False  p95=47ms    360/360
   member :8766  text-nb-v1  acc=0.3583  neutral=False  p95=1ms     360/360
 arm B  acc=0.9259  coverage=0.975
-paired: A right/B wrong=21  B right/A wrong=15  on 351 rows  (d=-6, 1SE=3.00)
+paired: A right/B wrong=21  B right/A wrong=15  on 351 rows  (d=-6, 1SE=6.00)
 verdict (rule as pre-registered): one-big is at least as good — claim NOT supported
 ```
 
@@ -76,13 +76,15 @@ the rows B answered); on `big7` the big model is clearly ahead (0.9833 vs
 
 ## The rule fired, and this is the answer the project was missing
 
-`d = −6`, `SE = 3.00`, `z = −2.00`. The many-small-at-equal-budget claim **is
-not supported**, and the sign is not neutral: the single 8B is ahead by about
-two standard errors while carrying 6.6% more weight. The honest reading is
-"the committee did not beat the big model", with the direction against it — not
-"the committee is proven worse", because `|z| = 2.0` on 360 internally-labelled
-rows is a marginal result that would not survive correction for anything else
-we measured in the same session.
+`d = −6`, `SE = 6.00`, `z = −1.00`. The many-small-at-equal-budget claim **is
+not supported**, but the sign is weak: the single 8B is ahead by about one
+standard error, while carrying 6.6% more weight. The honest reading is "the
+committee did not beat the big model, and the point estimate leans against it"
+— nothing stronger, because `|z| = 1.0` on 360 internally-labelled rows is
+inside the noise. This run cannot separate "the big model is better" from "the
+two arms are level", and none of the four variants tried on the same harvest
+reaches the Bonferroni line. (`z` was printed as −2.00 before the 2026-10-19
+paired-SE correction — see the 勘误 section at the end.)
 
 ## Exploratory (post hoc) — the deficit has a name
 
@@ -92,10 +94,14 @@ re-harvested; the same per-row votes were recombined.
 
 | member set | weights | acc | coverage | B right/A wrong | A right/B wrong | d | z |
 |---|---|---|---|---|---|---|---|
-| B4 pre-registered (4B+Phi+laya+text) | 5.112 GiB | 0.9259 | 0.975 | 15 | 21 | −6 | −2.00 |
-| B3 drop-text (4B+Phi+laya) | 5.112 GiB | 0.9565 | 0.958 | 15 | 13 | +2 | +0.76 |
-| B2 two-LLM (4B+Phi) | **4.555 GiB** | **0.9675** | 0.939 | 15 | 10 | **+5** | **+2.00** |
-| B3 drop-Phi (4B+laya+text) | 2.884 GiB | 0.8611 | 1.000 | 14 | 43 | −29 | −7.68 |
+| B4 pre-registered (4B+Phi+laya+text) | 5.112 GiB | 0.9259 | 0.975 | 15 | 21 | −6 | −1.00 |
+| B3 drop-text (4B+Phi+laya) | 5.112 GiB | 0.9565 | 0.958 | 15 | 13 | +2 | +0.38 |
+| B2 two-LLM (4B+Phi) | **4.555 GiB** | **0.9675** | 0.939 | 15 | 10 | **+5** | **+1.00** |
+| B3 drop-Phi (4B+laya+text) | 2.884 GiB | 0.8611 | 1.000 | 14 | 43 | −29 | −3.84 |
+
+(`z` column corrected 2026-10-19: the paired SE is `sqrt(b+c)`, not `sqrt(n)/2`.
+Every `|z|` in this table was counted against twice the real noise; the sign of
+`d` and the ordering of the variants are unchanged.)
 
 Two things fall out of this, and the second is the one that matters:
 
@@ -164,8 +170,8 @@ far, and removing it flips the sign of this experiment.
 ## 反思与质疑
 
 - **样本量/标准误**：360 行上单臂 accuracy 的 1 SE ≈ 1.25pp，配对
-  discordance 的 1 SE = 3.00 行。主结果是 `d=−6`（z=−2.00），探索里最好的
-  变体是 `d=+5`（z=+2.00）——**两个都在 1.96 的边缘上**。在同一个 harvest
+  discordance 的 1 SE = 6.00 行。主结果是 `d=−6`（z=−1.00），探索里最好的
+  变体是 `d=+5`（z=+1.00）——**两个都远在 1.96 之内**。在同一个 harvest
   上试了 4 个成员组合，Bonferroni 后需要 `|z|>2.5`，所以探索表里**没有
   任何一个变体达到可宣称的门槛**。这一节的存在就是为了防止下一轮把
   `+5` 当成结论引用。
@@ -255,3 +261,66 @@ SE = 0.0253，所以 z-vs-chance = **+11.35**。意思是：它几乎全错，�
   证伪方法：给它一组**它自己体系内**的对照题，若那些题上它显著高于 0.3583，
   则"模型差"被否证、"harness 失配"成立。本 run 没做这件事，所以
   "text-nb 很弱"这句话现在是**证据不足**，不是**已确立**。
+
+## 勘误 · 2026-10-19 · 配对标准误（这个文件的 z 值曾经是假的）
+
+**错在哪。** `tools/equal_budget_check.py` 与 `tools/vote_ablation.py` 都把配
+对差的标准误写成 `sqrt(n)/2`（n = 两臂共同作答的行数）。那是**两个独立比例
+之差**的 SE；配对差 `d = b − c` 只在不一致行上有信息，`var(b−c) = b+c`，所以
+正确的 SE 是 `sqrt(b+c)`。旧式子在 n≫b+c 时把 SE 放大到约 2 倍，于是每个 z
+都被乘了 2，把"在噪声里"印成了"超出噪声"。
+
+**修在哪。** 提交 `278dc1e` 把唯一定义放进 `pando/common.py:mcnemar_test(b, c)`
+（返回 delta/se/z 与**精确**两侧 McNemar p，不依赖 scipy），两个工具改为调用它，
+并在报告里多写一个 `mcnemar_exact_p`。四份报告从缓存原始票**原地重生成**，
+`git diff` 证明只有 `paired` 块变化，accuracy/coverage/per_member/decisions/
+per_suite 逐字节不动。
+
+**本文件里变了什么。**
+
+| 位置 | 旧 | 新 |
+|---|---|---|
+| 结果块 | `1SE = 3.00`，`z = −2.00` | `1SE = 6.00`，`z = −1.00` |
+| 探索表 B4 | `z = −2.00` | `z = −1.00` |
+| 探索表 B3 drop-text | `+0.76` | `+0.38` |
+| 探索表 B2 two-LLM | `+2.00` | `+1.00` |
+| 探索表 B3 drop-Phi | `−7.68` | `−3.84` |
+
+**没变什么。** 预注册判决看的是 `d` 的**符号**，不是显著性，所以判决串一个字
+没改：`d = −6 < 0` → "one-big is at least as good"。accuracy、coverage、
+per-member 表、per-suite 数字全部逐字节相同。变化只在**强度**这一维：主结果与
+探索里最好的变体原本被写成"卡在 1.96 边缘"，现在**两者都远在噪声之内**
+（`|z| = 1.00`）。drop-Phi 仍然显著更差（z = −3.84，精确 p ≈ 1.5e-4）。
+
+**同一节里还有一个未修的疑点（未改动，仅记录）。** 下面 swap 实验表的 z 列的
+分母是 `sqrt(base(1-base)/n)`（单臂二项 SE），不是配对 SE。两个被比较的量来
+自**同一批行**，所以严格说也该用 McNemar 式的不一致计数；但这一处与上面的
+`/2` bug **不是同一个错**，而且误差方向没测过（不一致行数可能多于或少于
+`n·p(1-p)`，z 可能被放大也可能被低估）。在单独核对过之前，`−3.41 / −2.97 /
+−1.98` 这几个数只能当**未定**。
+
+**为什么既有测试没抓到。** 112 个测试测的是**管道**（票能不能对上、覆盖率怎么
+算、判决字符串怎么印），没有一个测试问过"这个 SE 的公式在这个设计下对不对"。
+公式错得很安静：它不报错、不崩、在**独立**比较上还是对的，只有配对设计下才失真。
+本文件里的 2.00 与 +0.76 是从同一个错式子算出来的，所以它们之间"看起来一致"
+这件事本身也不是证据。
+
+### 反思与质疑
+
+- **样本量/标准误**：不只样本量的问题——原来那个 SE **本身就是错的**。更正后
+  b+c = 36，SE = 6.00，`|z| = 1.00`，精确 p = 0.405。这个 run 在统计上分不开
+  "大模型更好"与"两臂并列"。
+- **缺哪个对照**：仍然缺（a）8B-Q4 括弧臂（003 已补，见那个文件）、
+  （b）不同血统的第二台大模型、（c）同血统小模型的对照。最关键的那条（等内存
+  预算下多台小模型 vs 一台大模型）已经跑了，结论是**不支持**——而且现在比更正
+  前更弱，不是更强。
+- **证据是否外部锚定**：完全没有，360 行标签全出自本项目自己的生成管线。
+- **运维代价（含人类审批次数）**：更正本身 0 审批、0 新进程，但**代价是"已发表
+  的数字被撤回"**：任何已经引用过 `z = −2.00 / −2.30` 的下游文本都得跟着改，
+  而下游文本散落在文档、群聊记录、以及 LLM 成员自己的记忆里——**最后这一类改
+  不动**，这是这次真正长期的那笔账。
+- **一条可证伪的替代解释**：也许 002 与 003 的 `d` 符号相反是**两次 harvest 的
+  环境差异**（002 的 arm A 是常驻 8B-Q6，003 的 arm A′ 是临时起的 8B-Q4，两者
+  都在不同时刻与不同负载下跑）造成的，而不是臂本身的性质。证伪方法：同一次
+  harvest 里同时量产两臂、交错取样。本 run 没做，所以"方向随预算反转"里的
+  "随预算"这半句现在只有 1SE 级别的证据跟着。
