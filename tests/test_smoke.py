@@ -2838,11 +2838,16 @@ class TestExecution(unittest.TestCase):
         from pando.execute import rows_for_execution
         old = {"id": "t-old", "title": "[proposal] p-old seed.export by mac-proposer"}
         vote = {"id": "t-vote", "title": "[reaction] p-old 赞同 by mac-text"}
+        copy = {"id": "t-copy", "title": "[proposal] p-copy seed.replicate by mac-proposer"}
+        copy_vote = {"id": "t-copy-vote", "title": "[reaction] p-copy 赞同 by mac-text"}
         other = {"id": "t-other", "title": "[proposal] p-other recruit.invite by mac-proposer"}
         other_vote = {"id": "t-other-vote", "title": "[reaction] p-other 赞同 by mac-text"}
         recent = {"id": "t-new", "title": "[chat] hello"}
-        rows = rows_for_execution([old, vote, other, other_vote, recent], 1)
-        self.assertEqual([row["id"] for row in rows], ["t-old", "t-vote", "t-new"])
+        rows = rows_for_execution(
+            [old, vote, copy, copy_vote, other, other_vote, recent], 1)
+        self.assertEqual(
+            [row["id"] for row in rows],
+            ["t-old", "t-vote", "t-copy", "t-copy-vote", "t-new"])
 
     def test_the_author_does_not_vote_and_one_adopt_does_not_pass(self):
         from pando.execute import judge

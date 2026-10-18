@@ -45,7 +45,7 @@ def _titled(title: str, prefix: str) -> tuple[str, str] | None:
 
 
 def rows_for_execution(tasks: list, limit: int) -> list:
-    """Recent rows, plus every seed.export and the reactions that name it.
+    """Recent rows, plus every seed.export and seed.replicate, and the reactions that name them.
 
     The recent window is the last ``limit`` rows. An adopted seed.export
     does not stop being adopted because newer mail pushed it out of that
@@ -58,7 +58,7 @@ def rows_for_execution(tasks: list, limit: int) -> list:
     seed_ids = set()
     for row in rows:
         parsed = _titled(str(row.get("title") or ""), "[proposal]")
-        if parsed and parsed[1] == "seed.export":
+        if parsed and parsed[1] in ("seed.export", "seed.replicate"):
             seed_ids.add(parsed[0])
             keep.add(row.get("id"))
     for row in rows:
@@ -488,7 +488,24 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
     signer = Identity.from_json(json.loads(
         Path(args.identity).expanduser().read_text(encoding="utf-8"))).public_key
     chosen = next_seed_export(proposals, reactions, done_ids(ledger), signer)
-    if chosen is None:
+    sealed = None
+    if chosen is not None:
+        home = Path("~/.pandosi/seed-home-empty").expanduser()
+        home.mkdir(parents=True, exist_ok=True)
+        sealed = export_seed(
+            chosen, home=home, identity=args.identity,
+            rollout_dir=home / "rollouts", out_root=args.out_root,
+            passphrase_file=phrase)
+        ledger.parent.mkdir(parents=True, exist_ok=True)
+        with ledger.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps({
+                "proposal_id": chosen.proposal_id,
+                "action": "seed.export",
+                "executed": bool(sealed),
+                "sealed": bool(sealed),
+            }, sort_keys=True) + "\n")
+    # An export must not crowd out a replicate. Both are recorded.
+    if True:
         seen = done_ids(ledger) | left_ids(ledger)
         foreign = foreign_adopted_seeds(proposals, reactions, seen, signer)
         replicates = local_replications(proposals, reactions, seen, signer)
@@ -555,26 +572,15 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                    "no_actuator": [item[0] for item in unacted]}
         print(json.dumps(payload, ensure_ascii=False), flush=True)
         write_status(ledger.with_name("execute-status.json"), payload)
-        return 0
-    home = Path("~/.pandosi/seed-home-empty").expanduser()
-    home.mkdir(parents=True, exist_ok=True)
-    ok = export_seed(
-        chosen, home=home, identity=args.identity,
-        rollout_dir=home / "rollouts", out_root=args.out_root,
-        passphrase_file=phrase)
-    ledger.parent.mkdir(parents=True, exist_ok=True)
-    with ledger.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps({
-            "proposal_id": chosen.proposal_id,
-            "action": "seed.export",
-            "executed": bool(ok),
-            "sealed": bool(ok),
-        }, sort_keys=True) + "\n")
-    payload = {"did": "executed", "proposal_id": chosen.proposal_id,
-               "executed": bool(ok)}
-    print(json.dumps(payload, sort_keys=True), flush=True)
-    write_status(ledger.with_name("execute-status.json"), payload)
-    return 0 if ok else 1
+        if sealed is None:
+            return 0
+        offered = [item[0] for item in addressed
+                   if item[1] in (getattr(args, "pull", None) or set())]
+        done = {"did": "executed", "proposal_id": chosen.proposal_id,
+                "executed": bool(sealed), "offered": offered}
+        print(json.dumps(done, sort_keys=True), flush=True)
+        write_status(ledger.with_name("execute-status.json"), done)
+        return 0 if sealed else 1
 
 
 def main() -> int:
