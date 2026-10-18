@@ -2701,13 +2701,69 @@ class TestReactions(unittest.TestCase):
 
         nodes = {
             "mac-text": {"host": "127.0.0.1", "url": "http://127.0.0.1:8766",
-                         "checkpoint": "text-nb-v1"},
+                         "checkpoint": "text-nb-v1", "role": "decision"},
             "pandosi-pi5-laya": {"host": "192.168.31.22",
                                  "url": "http://192.168.31.22:9",
-                                 "checkpoint": "laya-en"},
+                                 "checkpoint": "laya-en", "role": "decision"},
         }
         chosen = select_local_stems(nodes, {"127.0.0.1", "localhost"})
         self.assertEqual([row["node_id"] for row in chosen], ["mac-text"])
+
+    def test_only_a_decision_model_is_asked_to_react(self):
+        """An LLM writes proposals; it is never asked to vote on one.
+
+        The two jobs live on one device but not in one member, so the
+        reactor has to read ``role`` and leave the proposer alone.
+        """
+        from pando.reactd import select_local_stems
+
+        nodes = {
+            "mac-text": {"host": "127.0.0.1", "url": "http://127.0.0.1:8766",
+                         "checkpoint": "text-nb-v1", "role": "decision"},
+            "mac-llm-8b-local": {"host": "127.0.0.1",
+                                 "url": "http://127.0.0.1:8767",
+                                 "checkpoint": "mac-llm-8b-q6",
+                                 "role": "proposal"},
+        }
+        chosen = select_local_stems(nodes, {"127.0.0.1", "localhost"})
+        self.assertEqual([row["node_id"] for row in chosen], ["mac-text"])
+
+    def test_a_stem_that_names_no_role_keeps_its_old_job(self):
+        """A root that predates the field still answers.
+
+        Absence is read off what the member can do, so nothing that used to
+        vote silently stops voting just because the field is new.
+        """
+        from pando.reactd import select_local_stems
+
+        nodes = {
+            "mac-text": {"host": "127.0.0.1", "url": "http://127.0.0.1:8766",
+                         "checkpoint": "text-nb-v1"},
+        }
+        chosen = select_local_stems(nodes, {"127.0.0.1", "localhost"})
+        self.assertEqual([row["node_id"] for row in chosen], ["mac-text"])
+
+    def test_the_registry_records_which_job_a_member_holds(self):
+        """The role is a field on the member, not something a reader infers.
+
+        A member that names its role keeps it; one that names none is read
+        off what it can do, so the record is always explicit.
+        """
+        from pando.rootd import Coordinator
+
+        coordinator = Coordinator(quorum_k=1)
+        self.assertTrue(coordinator.register(
+            "mac-text", "http://127.0.0.1:8766", "text-nb-v1"))
+        self.assertTrue(coordinator.register(
+            "mac-llm", "http://127.0.0.1:8767", "mac-llm-8b-q6",
+            chat={"model": "qwen-test"}))
+        self.assertTrue(coordinator.register(
+            "named", "http://127.0.0.1:8768", "c",
+            chat={"model": "qwen-test"}, role="decision"))
+        nodes = coordinator.live_nodes()
+        self.assertEqual(nodes["mac-text"]["role"], "decision")
+        self.assertEqual(nodes["mac-llm"]["role"], "proposal")
+        self.assertEqual(nodes["named"]["role"], "decision")
 
 
     def test_each_local_role_answers_and_the_author_sits_out(self):

@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+# What a member is for. A device usually holds both kinds: a decision model
+# that answers proposals, and an LLM that writes them. They are not the same
+# job, so one member never does both: the LLM does not also hold a vote, and
+# a decision model does not write proposals.
+DECIDING_ROLE = "decision"
+PROPOSING_ROLE = "proposal"
+ROLES = (DECIDING_ROLE, PROPOSING_ROLE)
+
 import json
 import hashlib
 import uuid

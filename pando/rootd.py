@@ -28,8 +28,8 @@ class _PandoHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-from .common import (DecisionRequest, DecisionResult, Vote, aggregate,
-                     collapse_lineages)
+from .common import (DECIDING_ROLE, DecisionRequest, DecisionResult,
+                     PROPOSING_ROLE, Vote, aggregate, collapse_lineages)
 from .spore import build_manifest, generate_signing_key
 from .rollout import RolloutRecorder
 from .calibrate import Calibrator
@@ -306,7 +306,8 @@ class Coordinator:
     def register(self, node_id: str, url: str, checkpoint: str,
                  cap: dict | None = None,
                  artifact_sha256: str | None = None,
-                 chat: dict | None = None) -> bool:
+                 chat: dict | None = None,
+                 role: str | None = None) -> bool:
         """Add or refresh a node. Returns False for a retired node."""
         with self._lock:
             if node_id in self.blocked:
@@ -339,6 +340,12 @@ class Coordinator:
             kept = normalize_chat(chat)
             if kept:
                 record["chat"] = kept
+            # What this member is for travels in its own field, so a reader
+            # never has to infer it from the backend again. A stem that
+            # names nothing is read off what it can do: one that holds a
+            # conversation proposes, everything else decides.
+            record["role"] = str(
+                role or (PROPOSING_ROLE if kept else DECIDING_ROLE))
             self.nodes[node_id] = record
         return True
 
@@ -1102,7 +1109,8 @@ def build_handler(coordinator: Coordinator, root=None):
                                             data["checkpoint"],
                                             data.get("capability"),
                                             data.get("artifact_sha256"),
-                                            data.get("chat")):
+                                            data.get("chat"),
+                                            data.get("role")):
                     self._send(403, {
                         "error": f"node {data['node_id']!r} was retired by "
                                  "this swarm",

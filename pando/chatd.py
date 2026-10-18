@@ -20,6 +20,7 @@ import urllib.request
 from pathlib import Path
 
 from .chat import message_text, next_reply, normalize_chat
+from .common import PROPOSING_ROLE
 from .net import local_addresses, open_url
 
 
@@ -72,6 +73,11 @@ def local_chat_members(nodes: dict, addresses: set[str],
                        health_of=None) -> tuple[list[dict], set[str]]:
     """Local speakers, plus every node id that carries ``chat.model``.
 
+    Only a proposer speaks: a decision model answers proposals and is not
+    put in the conversation. ``role`` says which is which; a member with no
+    role but a chat descriptor is read as a proposer, so a root that
+    predates the field keeps working.
+
     ``health_of(url) -> dict`` is only called for a local stem whose node
     record does not yet have the field.
     """
@@ -83,6 +89,9 @@ def local_chat_members(nodes: dict, addresses: set[str],
         chat = normalize_chat(info.get("chat"))
         host = str(info.get("host") or "")
         url = str(info.get("url") or "").rstrip("/")
+        role = str(info.get("role") or (PROPOSING_ROLE if chat else ""))
+        if role and role != PROPOSING_ROLE:
+            continue
         local = bool(url) and host in addresses
         if chat is None and local and health_of is not None:
             try:

@@ -4,6 +4,11 @@ A proposal is a message. A reaction is the short answer a decision model
 puts under it: agree, hold, or decline. It sits on that proposal the way a
 chat reaction sits on a message, and it is not another item in the feed.
 
+Only decision models answer. An LLM writes proposals and does not hold a
+vote, so asking one to react would put a model in a job it was never given.
+Whether a member decides travels in its own ``role`` field; anything that
+does not say ``decision`` is left out.
+
 The reactor only calls stems registered on this machine. A root that still
 lists another device's members is not a reason to ask them. Each end reacts
 for itself.
@@ -21,7 +26,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from .common import DecisionRequest
+from .common import DECIDING_ROLE, DecisionRequest
 from .genesis import REACTION_STANCES, sign_reaction
 from .identity import load_or_create
 from .net import local_addresses, open_url
@@ -29,7 +34,11 @@ from .proposal_mail import fetch_proposals, publish_reaction
 
 
 def select_local_stems(nodes: dict, addresses: set[str]) -> list[dict]:
-    """Stems whose host is this machine. Remote members are left alone."""
+    """Decision models on this machine. Everything else is left alone.
+
+    A member with no ``role`` is treated as a decision model, so a root
+    that predates the field keeps answering the way it did before.
+    """
     chosen = []
     for node_id, info in (nodes or {}).items():
         if not isinstance(info, dict):
@@ -37,6 +46,9 @@ def select_local_stems(nodes: dict, addresses: set[str]) -> list[dict]:
         host = str(info.get("host") or "")
         url = str(info.get("url") or "")
         if host not in addresses or not url:
+            continue
+        role = str(info.get("role") or DECIDING_ROLE)
+        if role != DECIDING_ROLE:
             continue
         chosen.append({
             "node_id": str(node_id),

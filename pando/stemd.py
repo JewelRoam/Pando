@@ -29,7 +29,7 @@ from contextlib import nullcontext
 
 from .backend import (MockBackend, OnnxLayaBackend,
                      OpenAIChoiceBackend, TorchLayaBackend)
-from .common import DecisionRequest
+from .common import DECIDING_ROLE, DecisionRequest, PROPOSING_ROLE, ROLES
 from .graft import assign_role, capability
 from .resources import asset_path
 
@@ -195,9 +195,23 @@ class Stem:
         return host_ms_per_decision(self.usage)
 
 
+def stem_role(backend) -> str:
+    """Whether this member votes or proposes.
+
+    A backend that can hold a conversation is the one that writes proposals;
+    it does not also hold a vote. Everything else is here to answer. The
+    answer travels in the registration, so a reader never has to work it out
+    from the backend again.
+    """
+    return (PROPOSING_ROLE
+            if callable(getattr(backend, "chat_descriptor", None))
+            else DECIDING_ROLE)
+
+
 def heartbeat_loop(stem: Stem, root_url: str,
                    pairing_token: str | None = None,
-                   interval: float = 5.0) -> None:
+                   interval: float = 5.0,
+                   role: str | None = None) -> None:
     """Register with root and heartbeat until the process exits."""
     node_identity = None
     try:
@@ -208,6 +222,7 @@ def heartbeat_loop(stem: Stem, root_url: str,
     cap = capability()
     registration = {"node_id": stem.node_id, "url": stem.url(),
                     "checkpoint": stem.backend.checkpoint,
+                    "role": role or stem_role(stem.backend),
                     "capability": cap}
     describe = getattr(stem.backend, "chat_descriptor", None)
     if callable(describe):
@@ -262,6 +277,9 @@ def main() -> None:
     parser.add_argument("--node-id", required=True)
     parser.add_argument("--checkpoint", default=None,
                         help="lineage/checkpoint identity; defaults by backend")
+    parser.add_argument("--role", choices=ROLES, default=None,
+                        help="what this member is for; defaults by backend "
+                             "(an LLM proposes, a decision model votes)")
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--host", default="127.0.0.1",
                         help="interface to bind; use 0.0.0.0 for LAN")
@@ -379,8 +397,10 @@ def main() -> None:
     if args.root:
         threading.Thread(target=heartbeat_loop,
                          args=(stem, args.root, args.pairing_token),
+                         kwargs={"role": args.role},
                          daemon=True).start()
-        print(f"registering with root at {args.root}")
+        print(f"registering with root at {args.root} "
+              f"(role={args.role or stem_role(backend)})")
     try:
         while True:
             time.sleep(3600)
