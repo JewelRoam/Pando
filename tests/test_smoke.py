@@ -4423,6 +4423,13 @@ class TestCodeSync(unittest.TestCase):
             refused = sync.restart_units(["pandosi-llama.service"])
             self.assertEqual(refused["reason"], "refused")
             self.assertEqual(refused["restarted"], [])
+            # The voter is a client: a fast-forward must be able to restart it,
+            # or pi5 keeps running the previous module from memory.
+            self.assertIn("pandosi-react.service", sync.SAFE_UNITS)
+            self.assertNotIn("pandosi-llama.service", sync.SAFE_UNITS)
+            self.assertNotIn("pandosi-stem-laya.service", sync.SAFE_UNITS)
+            # rootd holds the live member registry; it is not auto-restarted.
+            self.assertNotIn("pandosi-root.service", sync.SAFE_UNITS)
             peer = sync.sync_repo(root / "missing", peer=str(bare))
             self.assertEqual(peer["reason"], "no-git")
 
