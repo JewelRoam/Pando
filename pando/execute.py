@@ -1,17 +1,27 @@
-"""Decide whether a proposal may be executed. Do not touch the world.
+"""Decide whether a proposal may be executed, and carry out the few it owns.
 
-The colony can already propose and vote. It cannot yet do the thing it voted
-for, and wiring that straight through would run almost every proposal: the
-decision models currently answer 赞同 far more often than they refuse.
+The colony can already propose and vote. Handing every adopted proposal
+straight to an actuator would run almost every one of them: the decision
+models currently answer 赞同 far more often than they refuse. So an action
+runs only when three things are true — the action is in the action space,
+enough other decision models adopted it under the policy in force, and a
+tested actuator for that exact action exists.
 
-So this module only judges. An action runs only when three things are true:
-the action is in the action space, enough other decision models adopted it,
-and a tested actuator for that exact action was passed in. The default
-actuator set is empty. A judgment of "adopted, not executed" is a hold on
-the world, recorded as such, not a success.
+``ACTUATORS`` is that boundary, and it is short on purpose. As of today:
 
-Nothing here starts itself. A dry run reads the mailbox and prints counts.
-It does not write an outcome, restart a process, or copy a seed.
+- ``seed.export`` — seal this host's identity into a bundle. Wired.
+- ``seed.replicate`` — stage that bundle for a host that pulls it. Wired up
+  to a transport that does not exist; naming a host is not permission to send.
+- ``policy.set`` — move a knob in ``pando/policy.py``. Wired, bounded, and the
+  only actuator that changes what the gate does next round.
+- ``recruit.invite``, ``reproduce.spawn``, ``culture.refine``,
+  ``resource.rebalance``, ``meta.propose`` — no actuator. An adopted proposal
+  with one of these actions is recorded as ``no-actuator``: a hold on the
+  world, not a success and not a silence.
+
+Nothing here starts itself, and nothing here opens a socket. A dry run reads
+the mailbox and prints counts. A ``--once`` round seals at most one seed and
+applies at most one rule change, each recorded in an append-only ledger.
 """
 from __future__ import annotations
 
@@ -21,6 +31,10 @@ from collections import Counter
 from pathlib import Path
 
 from .genesis import ACTION_SPACE, Proposal
+from .policy import DEFAULT_PATH as DEFAULT_POLICY_PATH
+from .policy import PolicyError
+from .policy import apply as apply_policy
+from .policy import load as load_policy
 from .proposal_mail import fetch_proposals, is_reaction_task
 
 ADOPT = "赞同"
@@ -32,7 +46,7 @@ STANCES = (ADOPT, HOLD, DECLINE)
 #: ``ACTION_SPACE`` is a declared intent: adopted, never executed. Kept as
 #: one list so the boundary is readable from outside and cannot drift
 #: between the judge, the executor and the ledger.
-ACTUATORS: tuple[str, ...] = ("seed.export", "seed.replicate")
+ACTUATORS: tuple[str, ...] = ("seed.export", "seed.replicate", "policy.set")
 
 
 
@@ -140,6 +154,40 @@ def judge(proposal: Proposal, reactions: list[dict], *,
 
 
 
+def adopted(proposal: Proposal, reactions: list[dict],
+            knobs: dict | None = None) -> bool:
+    """Does the gate adopt this proposal, under the current policy?
+
+    ``knobs`` is what ``pando/policy.py`` loaded. The knob names are the
+    keyword arguments of ``judge`` on purpose, so the store is passed straight
+    through. It is read here and not inside ``judge`` so that the judge stays a
+    pure function of its arguments and the tests can fix a policy without
+    touching the disk.
+    """
+    return bool(judge(proposal, reactions, actuators={},
+                      **dict(knobs or {}))["adopted"])
+
+
+def next_policy_set(proposals: list[Proposal], reactions: list[dict],
+                    done: set[str], signer: str | None = None,
+                    knobs: dict | None = None) -> Proposal | None:
+    """Oldest adopted ``policy.set`` this host authored and not yet applied.
+
+    One per round, like the seed export, and for the same two reasons: a round
+    should not rewrite every knob at once, and a rule change applied halfway
+    through a round would leave the ledger describing a rule that never held.
+    A change applied here is in force from the next round.
+    """
+    for proposal in proposals:
+        if proposal.proposal_id in done or proposal.action != "policy.set":
+            continue
+        if signer is not None and proposal.pubkey != signer:
+            continue
+        if adopted(proposal, reactions, knobs):
+            return proposal
+    return None
+
+
 def export_seed(proposal: Proposal, *, home, identity, rollout_dir, out_root,
                  passphrase_file=None) -> bool:
     """Write one seed bundle for this proposal, under ``out_root``.
@@ -221,7 +269,8 @@ def left_ids(ledger: Path) -> set[str]:
 
 
 def next_seed_export(proposals: list[Proposal], reactions: list[dict],
-                     done: set[str], signer: str | None = None) -> Proposal | None:
+                     done: set[str], signer: str | None = None,
+                     knobs: dict | None = None) -> Proposal | None:
     """Oldest adopted seed.export this host is allowed to seal.
 
     The bundle is this machine's identity. A proposal signed by another
@@ -233,8 +282,7 @@ def next_seed_export(proposals: list[Proposal], reactions: list[dict],
             continue
         if signer is not None and proposal.pubkey != signer:
             continue
-        result = judge(proposal, reactions, actuators={})
-        if result["adopted"]:
+        if adopted(proposal, reactions, knobs):
             return proposal
     return None
 
@@ -247,7 +295,8 @@ def write_status(path: Path, payload: dict) -> None:
 
 
 def foreign_adopted_seeds(proposals: list[Proposal], reactions: list[dict],
-                          done: set[str], signer: str) -> list[str]:
+                          done: set[str], signer: str,
+                          knobs: dict | None = None) -> list[str]:
     """Adopted seed.export ids this host must not seal."""
     found = []
     for proposal in proposals:
@@ -255,13 +304,34 @@ def foreign_adopted_seeds(proposals: list[Proposal], reactions: list[dict],
             continue
         if proposal.pubkey == signer:
             continue
-        if judge(proposal, reactions, actuators={})["adopted"]:
+        if adopted(proposal, reactions, knobs):
+            found.append(proposal.proposal_id)
+    return found
+
+
+def foreign_policy_sets(proposals: list[Proposal], reactions: list[dict],
+                        done: set[str], signer: str,
+                        knobs: dict | None = None) -> list[str]:
+    """Adopted policy.set ids another host authored. It applies them itself.
+
+    Recorded rather than dropped: now that ``policy.set`` has an actuator, a
+    foreign rule change that is neither applied here nor named here would leave
+    the ledger silent about work the group adopted.
+    """
+    found = []
+    for proposal in proposals:
+        if proposal.proposal_id in done or proposal.action != "policy.set":
+            continue
+        if proposal.pubkey == signer:
+            continue
+        if adopted(proposal, reactions, knobs):
             found.append(proposal.proposal_id)
     return found
 
 
 def foreign_replications(proposals: list[Proposal], reactions: list[dict],
-                         done: set[str], signer: str) -> list[str]:
+                         done: set[str], signer: str,
+                         knobs: dict | None = None) -> list[str]:
     """Adopted seed.replicate ids signed by someone else. Not ours to send."""
     found = []
     for proposal in proposals:
@@ -269,13 +339,14 @@ def foreign_replications(proposals: list[Proposal], reactions: list[dict],
             continue
         if not proposal.pubkey or proposal.pubkey == signer:
             continue
-        if judge(proposal, reactions, actuators={})["adopted"]:
+        if adopted(proposal, reactions, knobs):
             found.append(proposal.proposal_id)
     return found
 
 
 def local_replications(proposals: list[Proposal], reactions: list[dict],
-                       done: set[str], signer: str) -> list[str]:
+                       done: set[str], signer: str,
+                       knobs: dict | None = None) -> list[str]:
     """Adopted seed.replicate ids signed here that name no destination."""
     found = []
     for proposal in proposals:
@@ -283,7 +354,7 @@ def local_replications(proposals: list[Proposal], reactions: list[dict],
             continue
         if proposal.pubkey != signer or proposal.destination:
             continue
-        if judge(proposal, reactions, actuators={})["adopted"]:
+        if adopted(proposal, reactions, knobs):
             found.append(proposal.proposal_id)
     return found
 
@@ -408,7 +479,8 @@ def received_acks(ledger: Path, outbox) -> list[dict]:
 
 
 def addressed_replications(proposals: list[Proposal], reactions: list[dict],
-                           done: set[str], signer: str) -> list[tuple[str, str]]:
+                           done: set[str], signer: str,
+                           knobs: dict | None = None) -> list[tuple[str, str]]:
     """Adopted seed.replicate ids signed here that name a host.
 
     Naming a host is not permission to send. There is still no transport.
@@ -419,13 +491,14 @@ def addressed_replications(proposals: list[Proposal], reactions: list[dict],
             continue
         if proposal.pubkey != signer or not proposal.destination:
             continue
-        if judge(proposal, reactions, actuators={})["adopted"]:
+        if adopted(proposal, reactions, knobs):
             found.append((proposal.proposal_id, proposal.destination))
     return found
 
 
 def local_unacted(proposals: list[Proposal], reactions: list[dict],
-                  done: set[str], signer: str) -> list[tuple[str, str]]:
+                  done: set[str], signer: str,
+                  knobs: dict | None = None) -> list[tuple[str, str]]:
     """Adopted proposals this host signed that have no actuator.
 
     Anything in ``ACTUATORS`` is left out: those are recorded by their own
@@ -438,7 +511,7 @@ def local_unacted(proposals: list[Proposal], reactions: list[dict],
             continue
         if proposal.action in ACTUATORS:
             continue
-        if judge(proposal, reactions, actuators={})["adopted"]:
+        if adopted(proposal, reactions, knobs):
             found.append((proposal.proposal_id, proposal.action))
     return found
 
@@ -480,11 +553,15 @@ def _load_reactions(url: str, token: str | None, limit: int,
 
 
 def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
-    """Export one sealed seed, or do nothing if none is waiting.
+    """Carry out at most one seed.export and at most one policy.set.
 
     The home directory is empty on purpose: the bundle must not copy the
-    mailbox token or task files. Only a seed.export signed by this host is sealed. A seed.replicate
-    with no destination is recorded and not sent.
+    mailbox token or task files. Only a seed.export signed by this host is
+    sealed. A seed.replicate with no destination is recorded and not sent.
+
+    The policy store is read once at the top, so every judgment in a round uses
+    the same rules. A rule change applied here is in force from the next round,
+    which keeps the ledger from describing a rule that never held.
     """
     phrase = Path(args.passphrase_file).expanduser()
     if not phrase.is_file():
@@ -494,7 +571,9 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
     from .identity import Identity
     signer = Identity.from_json(json.loads(
         Path(args.identity).expanduser().read_text(encoding="utf-8"))).public_key
-    chosen = next_seed_export(proposals, reactions, done_ids(ledger), signer)
+    knobs = load_policy(getattr(args, "policy_path", DEFAULT_POLICY_PATH))
+    chosen = next_seed_export(proposals, reactions, done_ids(ledger), signer,
+                              knobs)
     sealed = None
     if chosen is not None:
         home = Path("~/.pandosi/seed-home-empty").expanduser()
@@ -522,19 +601,53 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
             record["failed"] = failure or "export wrote no manifest"
         with ledger.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, sort_keys=True) + "\n")
+    # A rule change is applied after the export and before the replicate
+    # bookkeeping, so this round's own ledger row is already in ``done_ids``
+    # when the later passes look for unactuated work.
+    change = next_policy_set(proposals, reactions, done_ids(ledger), signer,
+                             knobs)
+    if change is not None:
+        adopters = len(tally(change, reactions)[ADOPT])
+        record = {"proposal_id": change.proposal_id, "action": "policy.set"}
+        try:
+            outcome = apply_policy(
+                change, getattr(args, "policy_path", DEFAULT_POLICY_PATH),
+                adopters=adopters)
+        except PolicyError as exc:
+            # No ``skipped``: a refused change is retried next round and
+            # refused again, and the reason travels, so a change that can never
+            # be applied stays visible instead of looking handled.
+            record["executed"] = False
+            record["failed"] = f"PolicyError: {exc}"
+        except Exception as exc:  # noqa: BLE001 - one action must not end the loop
+            record["executed"] = False
+            record["failed"] = f"{type(exc).__name__}: {exc}"
+        else:
+            record["executed"] = True
+            record["applied"] = outcome["applied"]
+        ledger.parent.mkdir(parents=True, exist_ok=True)
+        with ledger.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, sort_keys=True) + "\n")
     # An export must not crowd out a replicate. Both are recorded.
     if True:
         seen = done_ids(ledger) | left_ids(ledger)
-        foreign = foreign_adopted_seeds(proposals, reactions, seen, signer)
-        replicates = local_replications(proposals, reactions, seen, signer)
-        addressed = addressed_replications(proposals, reactions, seen, signer)
+        foreign = foreign_adopted_seeds(proposals, reactions, seen, signer,
+                                        knobs)
+        replicates = local_replications(proposals, reactions, seen, signer,
+                                        knobs)
+        addressed = addressed_replications(proposals, reactions, seen, signer,
+                                           knobs)
         hosts = getattr(args, "hosts", None)
-        foreign_repl = foreign_replications(proposals, reactions, seen, signer)
-        unacted = local_unacted(proposals, reactions, seen, signer)
+        foreign_repl = foreign_replications(proposals, reactions, seen, signer,
+                                            knobs)
+        foreign_policy = foreign_policy_sets(proposals, reactions, seen, signer,
+                                             knobs)
+        unacted = local_unacted(proposals, reactions, seen, signer, knobs)
         pulls = getattr(args, "pull", None) or set()
         outbox = getattr(args, "outbox", "~/.pandosi/outbox")
         acks = received_acks(ledger, outbox)
-        if foreign or replicates or addressed or unacted or foreign_repl or acks:
+        if (foreign or replicates or addressed or unacted or foreign_repl
+                or foreign_policy or acks):
             ledger.parent.mkdir(parents=True, exist_ok=True)
             with ledger.open("a", encoding="utf-8") as handle:
                 for proposal_id in foreign:
@@ -576,6 +689,13 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                         "executed": False,
                         "skipped": "other-host",
                     }, sort_keys=True) + "\n")
+                for proposal_id in foreign_policy:
+                    handle.write(json.dumps({
+                        "proposal_id": proposal_id,
+                        "action": "policy.set",
+                        "executed": False,
+                        "skipped": "other-host",
+                    }, sort_keys=True) + "\n")
                 for proposal_id, action in unacted:
                     handle.write(json.dumps({
                         "proposal_id": proposal_id,
@@ -587,6 +707,7 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                    "replication_without_destination": replicates,
                    "replication_not_sent": [item[0] for item in addressed],
                    "foreign_replications": foreign_repl,
+                   "foreign_policy_sets": foreign_policy,
                    "no_actuator": [item[0] for item in unacted]}
         print(json.dumps(payload, ensure_ascii=False), flush=True)
         write_status(ledger.with_name("execute-status.json"), payload)
@@ -609,12 +730,16 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=40)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--once", action="store_true",
-                        help="export one adopted seed that is not already done")
+                        help="one round: at most one adopted seed.export and "
+                             "at most one adopted policy.set")
     parser.add_argument("--passphrase-file", default="~/.pandosi/seed.passphrase")
     parser.add_argument("--identity", default="~/.pando/identity.json")
     parser.add_argument("--out-root", default="~/.pandosi/executions")
     parser.add_argument("--ledger", default="~/.pandosi/execute-ledger.jsonl")
+    parser.add_argument("--policy", default=DEFAULT_POLICY_PATH,
+                        help="the bounded self-modification store")
     args = parser.parse_args()
+    args.policy_path = args.policy
     if args.dry_run == args.once:
         print("pass exactly one of --dry-run or --once", flush=True)
         return 2

@@ -313,3 +313,31 @@ The Mac's full answer lives in mailbox task t-20261017-001001-f790. Load-bearing
 - The 6 packages previously written on the Mac under directories named pi5/win-gpu carry the
   Mac's fingerprint (`bd326f...`): proof that directory naming cannot testify to identity -
   only signatures can.
+
+## 2026-10-18 - policy.set: the first actuator that moves the gate itself
+
+- The execution layer is now three actions deep, not one: `seed.export` (seals 43 times in the
+  live ledger), `seed.replicate` (stages a bundle; the transport it names still does not exist,
+  so `no-transport` is the honest outcome), and `policy.set` (moves a knob in
+  `~/.pandosi/policy.json`, applied once per round).
+- `policy.set` is the only verb that changes what the gate does next round, so its store is the
+  most conservative thing in the repo. The knob set is closed (`min_adopt`, `veto`); a proposal
+  whose params disagree with the reader fails whole rather than being silently ignored.
+  Out-of-range is *refused, never clamped*, because a clamp would store a value the author never
+  signed. Values come only from the signed `params` block - the free-text `goal` written by a
+  1.7B model cannot move a threshold.
+- The one new rule: **weakening the gate costs more than tightening it.** Lowering `min_adopt`,
+  or `veto` true -> false, needs 3 adopters instead of the ordinary bar. A system that can vote
+  away its own veto with a bare majority is not a safety system. `weakens()` raises on an unknown
+  knob, so adding a knob forces that decision to be made rather than defaulted.
+- A missing or corrupt store falls back to the *strict* defaults (`min_adopt=2`, `veto=true`),
+  which is the shipping behaviour - so a file we cannot read can never make the gate easier to
+  pass than the code. A change that is refused carries no `skipped` key on purpose: it is retried
+  and refused again next round, so a rule that can never apply stays visible in the ledger instead
+  of looking handled.
+- Honest boundary: 3 of the 8 declared actions now have actuators. `recruit.invite`,
+  `reproduce.spawn`, `culture.refine`, `resource.rebalance` and `meta.propose` are still
+  `no-actuator` - adopted and held, not executed and not silent.
+- Falsifier: sign a `policy.set` that lowers `min_adopt` to 1 with the ordinary two adopters, and
+  check the ledger records a refusal rather than writing `min_adopt=1`. That is the whole safety
+  claim, and it is one command to test.

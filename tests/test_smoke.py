@@ -3062,6 +3062,7 @@ class TestExecution(unittest.TestCase):
             ledger=str(Path(tmp) / "execute-ledger.jsonl"),
             identity=str(identity_path),
             out_root=str(Path(tmp) / "out"),
+            policy_path=str(Path(tmp) / "policy.json"),
             hosts=None, pull=[], outbox=str(Path(tmp) / "outbox"))
 
     def test_a_raising_export_is_recorded_rather_than_ending_the_loop(self):
@@ -3149,6 +3150,229 @@ class TestExecution(unittest.TestCase):
         for action in ACTION_SPACE:
             if action not in ACTUATORS:
                 self.assertIn(action, set(unacted.values()))
+        # An actuator for an action the action space does not declare is dead
+        # code that can never run.
+        self.assertTrue(set(ACTUATORS) <= set(ACTION_SPACE))
+
+    def test_a_params_block_is_signed_and_absent_params_keeps_the_old_payload(self):
+        """``params`` rides inside the signature, and only when it is non-empty.
+
+        Adding a signed field is how an action gets machine-readable arguments.
+        It has to leave every already-signed proposal verifiable, which is why
+        an empty block is omitted rather than written as ``{}``.
+        """
+        from pando.genesis import Proposal, sign_proposal, verify_proposal
+        from pando.identity import Identity
+
+        identity = Identity.generate()
+        want = {"set": {"min_adopt": 3}}
+        signed = Proposal("p-params", "mac-proposer", "goal", "policy.set",
+                          "effect", 0.1, [], params=want)
+        record = sign_proposal(signed, identity)
+        self.assertEqual(record["payload"]["params"], want)
+        self.assertEqual(verify_proposal(record).params, want)
+
+        old = Proposal("p-old", "mac-proposer", "goal", "seed.export",
+                       "effect", 0.1, [])
+        self.assertNotIn("params", old.payload())
+
+    def test_an_unknown_knob_is_refused_rather_than_ignored(self):
+        from pando.policy import PolicyError, defaults, set_knobs
+        with self.assertRaises(PolicyError) as caught:
+            set_knobs(defaults(), {"set": {"min_adopts": 3}})
+        self.assertIn("unknown knob", str(caught.exception))
+        # All or nothing: one impossible knob must not let the other through.
+        with self.assertRaises(PolicyError):
+            set_knobs(defaults(), {"set": {"min_adopt": 4, "nope": 1}})
+        with self.assertRaises(PolicyError):
+            set_knobs(defaults(), {"min_adopt": 4})
+        with self.assertRaises(PolicyError):
+            set_knobs(defaults(), {"set": {}})
+
+    def test_an_out_of_range_value_is_refused_rather_than_clamped(self):
+        """A silent clamp would store a value the author never signed."""
+        from pando.policy import PolicyError, defaults, set_knobs
+        for bad in (0, 9, 2.0, True, "3", None):
+            with self.assertRaises(PolicyError):
+                set_knobs(defaults(), {"set": {"min_adopt": bad}}, adopters=99)
+        with self.assertRaises(PolicyError):
+            set_knobs(defaults(), {"set": {"veto": 1}}, adopters=99)
+
+    def test_weakening_the_gate_needs_more_adopters_than_tightening_it(self):
+        from pando.policy import PolicyError, defaults, set_knobs
+        # Tightening: the ordinary bar.
+        new, applied = set_knobs(defaults(), {"set": {"min_adopt": 3}},
+                                 adopters=2)
+        self.assertEqual(applied["min_adopt"], {"from": 2, "to": 3})
+        self.assertEqual(new["min_adopt"], 3)
+        # Weakening: refused at the ordinary bar, allowed above it.
+        strict = {"min_adopt": 3, "veto": True}
+        with self.assertRaises(PolicyError) as caught:
+            set_knobs(strict, {"set": {"min_adopt": 2}}, adopters=2)
+        self.assertIn("easier to pass", str(caught.exception))
+        loosened, _ = set_knobs(strict, {"set": {"min_adopt": 2}}, adopters=3)
+        self.assertEqual(loosened["min_adopt"], 2)
+        with self.assertRaises(PolicyError):
+            set_knobs(defaults(), {"set": {"veto": False}}, adopters=2)
+        no_veto, _ = set_knobs(defaults(), {"set": {"veto": False}}, adopters=3)
+        self.assertFalse(no_veto["veto"])
+
+    def test_every_knob_declares_how_it_can_weaken_the_gate(self):
+        from pando.policy import KNOBS, weakens
+        for name, knob in KNOBS.items():
+            if knob.kind is bool:
+                self.assertTrue(weakens(name, True, False))
+                self.assertFalse(weakens(name, False, True))
+            else:
+                self.assertTrue(weakens(name, knob.high, knob.low))
+                self.assertFalse(weakens(name, knob.low, knob.high))
+
+    def test_the_policy_store_round_trips_and_falls_back_on_a_corrupt_file(self):
+        import tempfile
+        import types
+        from pando.policy import apply, defaults, load
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Path(tmp) / "nested" / "policy.json"
+            self.assertEqual(load(store), defaults())
+            out = apply(types.SimpleNamespace(params={"set": {"min_adopt": 3}}),
+                        store, adopters=2)
+            self.assertEqual(out["applied"],
+                             {"min_adopt": {"from": 2, "to": 3}})
+            self.assertEqual(load(store)["min_adopt"], 3)
+            self.assertEqual(json.loads(store.read_text(encoding="utf-8")),
+                             {"min_adopt": 3, "veto": True})
+            store.write_text("{not json", encoding="utf-8")
+            self.assertEqual(load(store), defaults())
+            store.write_text(json.dumps({"min_adopt": 99}), encoding="utf-8")
+            self.assertEqual(load(store)["min_adopt"], 2)
+
+    def test_an_adopted_policy_set_is_applied_once_and_not_retried(self):
+        import tempfile
+        from pando.execute import run_once
+        from pando.identity import Identity
+        from pando.policy import load
+
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = Identity.generate()
+            ident_path = Path(tmp) / "identity.json"
+            ident_path.write_text(json.dumps(identity.to_json()),
+                                  encoding="utf-8")
+            (Path(tmp) / "phrase").write_text("pw\n", encoding="utf-8")
+            proposal = self._proposal(action="policy.set", pid="p-rule")
+            proposal.pubkey = identity.public_key
+            proposal.params = {"set": {"min_adopt": 3}}
+            votes = [self._vote("mac-text", "赞同", "p-rule"),
+                     self._vote("mac-laya-int8", "赞同", "p-rule")]
+            args = self._execute_args(tmp, ident_path)
+
+            self.assertEqual(run_once([proposal], votes, args), 0)
+            rows = [json.loads(line) for line in
+                    Path(args.ledger).read_text(encoding="utf-8").splitlines()]
+            applied = [row for row in rows if row.get("applied")]
+            self.assertEqual(len(applied), 1)
+            self.assertTrue(applied[0]["executed"])
+            self.assertEqual(applied[0]["applied"],
+                             {"min_adopt": {"from": 2, "to": 3}})
+            self.assertNotIn("skipped", applied[0])
+            self.assertEqual(load(args.policy_path)["min_adopt"], 3)
+
+            # Second round: the id is in done_ids, so nothing is rewritten.
+            run_once([proposal], votes, args)
+            again = Path(args.ledger).read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(again), len(rows))
+
+    def test_a_refused_rule_change_is_recorded_and_changes_nothing(self):
+        import tempfile
+        from pando.execute import run_once
+        from pando.identity import Identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = Identity.generate()
+            ident_path = Path(tmp) / "identity.json"
+            ident_path.write_text(json.dumps(identity.to_json()),
+                                  encoding="utf-8")
+            (Path(tmp) / "phrase").write_text("pw\n", encoding="utf-8")
+            proposal = self._proposal(action="policy.set", pid="p-bad")
+            proposal.pubkey = identity.public_key
+            proposal.params = {"set": {"min_adopt": 9}}
+            votes = [self._vote("mac-text", "赞同", "p-bad"),
+                     self._vote("mac-laya-int8", "赞同", "p-bad")]
+            args = self._execute_args(tmp, ident_path)
+
+            self.assertEqual(run_once([proposal], votes, args), 0)
+            rows = [json.loads(line) for line in
+                    Path(args.ledger).read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(rows), 1)
+            self.assertFalse(rows[0]["executed"])
+            self.assertIn("outside", rows[0]["failed"])
+            # No ``skipped``: it is retried, and refused again, visibly.
+            self.assertNotIn("skipped", rows[0])
+            self.assertFalse(Path(args.policy_path).exists())
+
+    def test_a_foreign_rule_change_is_recorded_and_not_applied_here(self):
+        import tempfile
+        from pando.execute import run_once
+        from pando.identity import Identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = Identity.generate()
+            ident_path = Path(tmp) / "identity.json"
+            ident_path.write_text(json.dumps(identity.to_json()),
+                                  encoding="utf-8")
+            (Path(tmp) / "phrase").write_text("pw\n", encoding="utf-8")
+            proposal = self._proposal(action="policy.set", pid="p-theirs")
+            proposal.pubkey = "someone-elses-key"
+            proposal.params = {"set": {"min_adopt": 3}}
+            votes = [self._vote("mac-text", "赞同", "p-theirs"),
+                     self._vote("mac-laya-int8", "赞同", "p-theirs")]
+            args = self._execute_args(tmp, ident_path)
+
+            run_once([proposal], votes, args)
+            rows = [json.loads(line) for line in
+                    Path(args.ledger).read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["skipped"], "other-host")
+            self.assertEqual(rows[0]["action"], "policy.set")
+            self.assertFalse(Path(args.policy_path).exists())
+
+    def test_the_threshold_the_executor_uses_comes_from_the_policy_file(self):
+        """The same votes, two stores, two outcomes. This is the closed loop.
+
+        ``recruit.invite`` stands in for any action with no actuator: if the
+        gate adopts it, the round records ``no-actuator``; if it does not, the
+        round records nothing. So the ledger itself says which threshold was
+        in force.
+        """
+        import tempfile
+        from pando.execute import run_once
+        from pando.identity import Identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = Identity.generate()
+            ident_path = Path(tmp) / "identity.json"
+            ident_path.write_text(json.dumps(identity.to_json()),
+                                  encoding="utf-8")
+            (Path(tmp) / "phrase").write_text("pw\n", encoding="utf-8")
+            proposal = self._proposal(action="recruit.invite", pid="p-invite")
+            proposal.pubkey = identity.public_key
+            votes = [self._vote("mac-text", "赞同", "p-invite"),
+                     self._vote("mac-laya-int8", "赞同", "p-invite")]
+            args = self._execute_args(tmp, ident_path)
+
+            # Default store: two adopts are enough, so the round reports the
+            # adopted-but-unactuated proposal instead of staying silent.
+            run_once([proposal], votes, args)
+            rows = [json.loads(line) for line in
+                    Path(args.ledger).read_text(encoding="utf-8").splitlines()]
+            self.assertEqual([row["skipped"] for row in rows], ["no-actuator"])
+
+            # Raise the bar in the store; the same two votes no longer adopt.
+            Path(args.policy_path).write_text(
+                json.dumps({"min_adopt": 3, "veto": True}), encoding="utf-8")
+            Path(args.ledger).write_text("", encoding="utf-8")
+            run_once([proposal], votes, args)
+            self.assertEqual(
+                Path(args.ledger).read_text(encoding="utf-8"), "")
 
     def test_seed_export_writes_a_bundle_only_after_two_votes(self):
         import tempfile

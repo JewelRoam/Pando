@@ -588,6 +588,7 @@ def read_execution_ledger(path: Path) -> dict[str, dict]:
             "executed": bool(row.get("executed")),
             "skipped": str(row.get("skipped") or ""),
             "failed": str(row.get("failed") or ""),
+            "applied": row.get("applied") or {},
             "destination": str(row.get("destination") or ""),
             "sealed": bool(row.get("sealed")),
         }
@@ -600,6 +601,13 @@ def execution_text(row: dict | None) -> str:
         return ""
     if row.get("sealed"):
         return "sealed"
+    applied = row.get("applied") or {}
+    if isinstance(applied, dict) and applied:
+        # A rule change is the interesting half of the row: "executed" alone
+        # says something happened, not what the gate now does.
+        return "applied " + ", ".join(
+            f"{name}={(applied[name] or {}).get('to')}"
+            for name in sorted(applied))
     if row.get("executed"):
         return "executed"
     skipped = str(row.get("skipped") or "")

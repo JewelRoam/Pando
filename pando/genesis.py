@@ -66,6 +66,10 @@ class Proposal:
     # Host name for seed.replicate. Empty stays out of the signed payload so
     # older signatures, which never had the key, still verify.
     destination: str = ""
+    # Machine-readable arguments for the action (``policy.set`` names its knobs
+    # here and nowhere else). Signed with everything else, and likewise left out
+    # of the payload while empty so proposals signed before it existed verify.
+    params: dict = field(default_factory=dict)
 
     def payload(self) -> dict:
         """The content a signature covers (everything but the proof)."""
@@ -80,6 +84,8 @@ class Proposal:
         }
         if self.destination:
             body["destination"] = self.destination
+        if self.params:
+            body["params"] = dict(self.params)
         return body
 
 
@@ -454,6 +460,7 @@ def verify_proposal(record, expected_pubkey: str | None = None) -> Proposal | No
             cites=list(payload.get("cites", [])),
             pubkey=pubkey,
             destination=str(payload.get("destination") or ""),
+            params=dict(payload.get("params") or {}),
         )
     except (KeyError, TypeError, ValueError):
         return None
