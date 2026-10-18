@@ -3545,3 +3545,120 @@ class TestSeedReceive(unittest.TestCase):
             self.assertNotIn(live.to_json()["secret_key"], json.dumps(stored))
             self.assertTrue((outbox / "repl-1.ack.json").is_file())
             self.assertFalse((root / "inbox" / "repl-plain").exists())
+
+
+class TestCodeSync(unittest.TestCase):
+    """A checkout may fast-forward. It may not clobber edits or restart a model."""
+
+    def _load(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "code_sync_under_test",
+            Path(__file__).resolve().parents[1] / "tools" / "code_sync.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def _env(self):
+        env = os.environ.copy()
+        env.pop("GIT_DIR", None)
+        env.pop("GIT_WORK_TREE", None)
+        env["GIT_AUTHOR_NAME"] = "sync-test"
+        env["GIT_AUTHOR_EMAIL"] = "sync@example.com"
+        env["GIT_COMMITTER_NAME"] = "sync-test"
+        env["GIT_COMMITTER_EMAIL"] = "sync@example.com"
+        return env
+
+    def _run(self, env, *args):
+        subprocess.run(list(args), check=True, env=env, capture_output=True, text=True)
+
+    def _world(self, root: Path):
+        env = self._env()
+        src = root / "src"
+        bare = root / "origin.git"
+        client = root / "client"
+        self._run(env, "git", "init", "-b", "main", str(src))
+        (src / "README").write_text("one\n")
+        self._run(env, "git", "-C", str(src), "add", "README")
+        self._run(env, "git", "-C", str(src), "commit", "-m", "one")
+        self._run(env, "git", "clone", "--bare", str(src), str(bare))
+        self._run(env, "git", "clone", str(bare), str(client))
+        return env, src, bare, client
+
+    def test_a_fast_forward_moves_and_a_dirty_tree_does_not(self):
+        sync = self._load()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env, src, bare, client = self._world(root)
+            before = subprocess.run(
+                ["git", "-C", str(client), "rev-parse", "HEAD"],
+                check=True, capture_output=True, text=True, env=env).stdout.strip()
+            (src / "README").write_text("two\n")
+            self._run(env, "git", "-C", str(src), "add", "README")
+            self._run(env, "git", "-C", str(src), "commit", "-m", "two")
+            self._run(env, "git", "-C", str(src), "push", str(bare), "main")
+            moved = sync.sync_repo(client)
+            self.assertTrue(moved["updated"])
+            self.assertEqual(moved["reason"], "fast-forward")
+            self.assertNotEqual(moved["after"], before)
+
+            (client / "README").write_text("local edit\n")
+            held = sync.sync_repo(client)
+            self.assertFalse(held["updated"])
+            self.assertEqual(held["reason"], "dirty")
+            head = subprocess.run(
+                ["git", "-C", str(client), "rev-parse", "HEAD"],
+                check=True, capture_output=True, text=True, env=env).stdout.strip()
+            self.assertEqual(head, moved["after"])
+            self.assertEqual((client / "README").read_text(), "local edit\n")
+
+    def test_a_fork_is_not_merged_and_a_model_unit_is_not_restarted(self):
+        sync = self._load()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env, src, bare, client = self._world(root)
+            (client / "README").write_text("client\n")
+            self._run(env, "git", "-C", str(client), "add", "README")
+            self._run(env, "git", "-C", str(client), "commit", "-m", "client")
+            client_head = subprocess.run(
+                ["git", "-C", str(client), "rev-parse", "HEAD"],
+                check=True, capture_output=True, text=True, env=env).stdout.strip()
+            (src / "README").write_text("origin\n")
+            self._run(env, "git", "-C", str(src), "add", "README")
+            self._run(env, "git", "-C", str(src), "commit", "-m", "origin")
+            self._run(env, "git", "-C", str(src), "push", str(bare), "main")
+            forked = sync.sync_repo(client)
+            self.assertFalse(forked["updated"])
+            self.assertEqual(forked["reason"], "not-fast-forward")
+            head = subprocess.run(
+                ["git", "-C", str(client), "rev-parse", "HEAD"],
+                check=True, capture_output=True, text=True, env=env).stdout.strip()
+            self.assertEqual(head, client_head)
+
+            refused = sync.restart_units(["pandosi-llama.service"])
+            self.assertEqual(refused["reason"], "refused")
+            self.assertEqual(refused["restarted"], [])
+            peer = sync.sync_repo(root / "missing", peer=str(bare))
+            self.assertEqual(peer["reason"], "no-git")
+
+    def test_a_peer_is_used_only_when_origin_cannot_be_fetched(self):
+        sync = self._load()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env, src, bare, client = self._world(root)
+            before = subprocess.run(
+                ["git", "-C", str(client), "rev-parse", "HEAD"],
+                check=True, capture_output=True, text=True, env=env).stdout.strip()
+            (src / "README").write_text("peer\n")
+            self._run(env, "git", "-C", str(src), "add", "README")
+            self._run(env, "git", "-C", str(src), "commit", "-m", "peer")
+            self._run(env, "git", "-C", str(src), "push", str(bare), "main")
+            self._run(env, "git", "-C", str(client), "remote", "set-url",
+                      "origin", str(root / "missing.git"))
+            missed = sync.sync_repo(client)
+            self.assertEqual(missed["reason"], "fetch-failed")
+            self.assertEqual(missed["after"], before)
+            fetched = sync.sync_repo(client, peer=str(bare))
+            self.assertTrue(fetched["updated"])
+            self.assertEqual(fetched["via"], "peer")
+            self.assertEqual((client / "README").read_text(), "peer\n")
