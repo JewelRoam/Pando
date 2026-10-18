@@ -36,10 +36,13 @@ def _extract(packed: bytes, dest: Path, seed) -> bool:
     """Unpack the offered tar. A tar that rotted on the way is not an exception.
 
     ``tarfile`` raises a truncated archive only while the members are being
-    walked, so the guard has to cover the loop and not just the open. One
+    walked, so the guard has to cover the loop and not just the open. A
     truncated offer used to raise ``ReadError`` out of ``pull_once`` and stop
-    the whole round: every offer behind it in sort order was never fetched,
-    which is how one bad artifact starves the landing point.
+    the whole round, so every offer behind it in sort order went unfetched.
+    That is a latent failure, not an observed one: measured 2026-10-19, all
+    53 offers on the mac shelf served 200 and judged clean, so nothing was
+    actually being starved there. The path still had to be closed -- one
+    rotted byte would have been enough, and the failure is silent.
     """
     dest.mkdir(parents=True, exist_ok=True)
     try:
@@ -91,9 +94,14 @@ def pull_once(base: str, token: str, inbox: Path, ledger: Path | None = None) ->
             # The bytes verify and the delivery is complete; the inbox simply
             # holds this bundle already. Counted, not acked -- nothing prunes
             # the sender's shelf, so a duplicate offer would sit there unacked
-            # anyway (measured on the mac shelf 2026-10-19: 51 offers carrying
-            # 16 distinct bundles, 16 acks). Skipping it silently made a round
-            # that dropped 35 deliveries print "copied: []" and nothing else.
+            # anyway. Skipping it silently made this invisible, and the mac
+            # shelf shows exactly why that matters: measured 2026-10-19 it
+            # advertised 53 offers carrying only 17 distinct bundles, and all
+            # 17 had landed (17 inbox dirs, 17 receive-ledger rows, 17 acks).
+            # The other 36 were the same bundle staged again -- one of them 20
+            # times -- not 36 lost deliveries. Without this counter the old
+            # round printed "copied: [], refused: []" and could not be told
+            # apart from a healthy, up-to-date landing point.
             duplicates.append(proposal_id)
             continue
         if not kept.get("copied"):

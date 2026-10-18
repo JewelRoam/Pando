@@ -6529,6 +6529,83 @@ class TestSeedReceive(unittest.TestCase):
                     seed.judge_bundle(inbox / proposal_id)["accepted"])
 
 
+    def test_re_staged_offers_of_one_bundle_are_duplicates_not_a_backlog(self):
+        """The shelf re-stages one bundle; that is not N deliveries.
+
+        Measured on the live mac shelf 2026-10-19: 53 offers carried only 17
+        distinct bundles, and all 17 had landed (17 inbox dirs, 17
+        receive-ledger rows, 17 acks). The other 36 were the *same* bundle
+        staged again -- one of them twenty times. A round that walks all 53
+        must report 17 copied and 36 duplicates, because the old silent
+        ``continue`` printed ``copied: []`` for both "everything already
+        here" and "nothing is getting through", and those need opposite
+        responses from whoever is reading the ledger.
+        """
+        import argparse
+        from pando.execute import offer_replication
+        from pando.identity import Identity
+        from tools import seed_outbox as outbox_mod
+        from tools import seed_pull as pull_mod
+
+        seed = self._seed()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            phrase = root / "phrase"
+            phrase.write_text("correct horse battery staple")
+            identity_path = root / "identity.json"
+            identity_path.write_text(
+                json.dumps(Identity.generate().to_json(), indent=2))
+            home = root / "home"
+            home.mkdir()
+
+            def export(proposal_id):
+                out = root / f"bundle-{proposal_id}"
+                rc = seed.cmd_export(argparse.Namespace(
+                    out=str(out), home=str(home),
+                    identity=str(identity_path),
+                    rollout_dir=str(root / "rollouts"), force=True,
+                    passphrase_file=str(phrase), proposal_id=proposal_id,
+                    author="mac-proposer"))
+                self.assertEqual(rc, 0)
+                return out
+
+            bundled = export("mac-proposer-once")
+            outbox = root / "outbox"
+            # One bundle, staged five times under five offer ids -- the shape
+            # the live shelf actually has.
+            for offer_id in ("repl-a", "repl-b", "repl-c", "repl-d", "repl-e"):
+                offered = offer_replication(offer_id, "pi5", bundle=bundled,
+                                            outbox=outbox)
+                self.assertEqual(offered["skipped"], "offered")
+
+            server = outbox_mod.ThreadingHTTPServer(
+                ("127.0.0.1", 0), outbox_mod.make_handler(outbox, "restage"))
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            try:
+                first = pull_mod.pull_once(
+                    f"http://127.0.0.1:{server.server_address[1]}",
+                    "restage", root / "inbox")
+                second = pull_mod.pull_once(
+                    f"http://127.0.0.1:{server.server_address[1]}",
+                    "restage", root / "inbox")
+            finally:
+                server.shutdown()
+
+            self.assertEqual(len(first["copied"]), 1)
+            self.assertEqual(first["refused"], [])
+            self.assertEqual(sorted(first["duplicate"]),
+                             ["repl-b", "repl-c", "repl-d", "repl-e"])
+            # Second round: nothing left to copy, and it says so with all five
+            # accounted for instead of printing an empty result.
+            self.assertEqual(second["copied"], [])
+            self.assertEqual(second["refused"], [])
+            self.assertEqual(sorted(second["duplicate"]),
+                             ["repl-a", "repl-b", "repl-c", "repl-d", "repl-e"])
+            # One bundle on disk, not five: the re-staging never multiplied it.
+            self.assertEqual([p.name for p in (root / "inbox").iterdir()],
+                             ["mac-proposer-once"])
+
+
 class TestWindowsSeedPull(unittest.TestCase):
     def test_windows_supervisor_starts_and_restarts_the_seed_pull_client(self):
         root = Path(__file__).resolve().parents[1]
