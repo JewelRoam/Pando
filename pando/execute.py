@@ -304,7 +304,11 @@ def known_hosts(data: dict | None) -> dict[str, str] | None:
 
 
 def replication_skip(destination: str, hosts: dict[str, str] | None) -> str:
-    """Why this named copy is not sent. This function does not open the URL."""
+    """Why this named copy is not sent. This function does not open the URL.
+
+    A bundle that is already on disk can be kept by ``tools/seed.py receive``.
+    That command is not a transport, and this function does not call it.
+    """
     if hosts is not None and destination not in hosts:
         return "unknown-host"
     return "no-transport"

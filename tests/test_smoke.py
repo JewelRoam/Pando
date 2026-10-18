@@ -3328,3 +3328,145 @@ class TestLocalCi(unittest.TestCase):
         text = hook.read_text(encoding="utf-8")
         self.assertIn("tools/local_ci.py", text)
         self.assertTrue(hook.stat().st_mode & 0o111)
+
+
+class TestSeedReceive(unittest.TestCase):
+    """A bundle already on disk may be kept. It may not be unwrapped or sent."""
+
+    def _seed(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "pandosi_seed_receive",
+            Path(__file__).resolve().parents[1] / "tools" / "seed.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def _export(self, seed, root, passphrase_file=None, proposal_id="mac-proposer-r1"):
+        from pando.identity import Identity
+        home = root / "home"
+        (home / "mailbox" / "tasks").mkdir(parents=True)
+        (home / "mailbox" / "tasks" / "note.json").write_text(
+            json.dumps({"task": "hello"}))
+        identity_path = root / "pando" / "identity.json"
+        identity_path.parent.mkdir(parents=True, exist_ok=True)
+        live = Identity.generate()
+        identity_path.write_text(json.dumps(live.to_json(), indent=2))
+        bundle = root / "bundle"
+        rc = seed.cmd_export(argparse.Namespace(
+            out=str(bundle), home=str(home), identity=str(identity_path),
+            rollout_dir=str(root / "rollouts"), force=True,
+            passphrase_file=(str(passphrase_file) if passphrase_file else None),
+            proposal_id=proposal_id, author="mac-proposer"))
+        self.assertEqual(rc, 0)
+        return bundle, live
+
+    def test_a_sealed_bundle_is_kept_encrypted_and_a_plaintext_key_is_not(self):
+        seed = self._seed()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            phrase = root / "pass.txt"
+            phrase.write_text("correct horse battery staple\n")
+            bundle, live = self._export(seed, root, phrase)
+            inbox = root / "inbox"
+            ledger = root / "receive.jsonl"
+            kept = seed.receive_bundle(bundle, inbox, ledger=ledger)
+            self.assertTrue(kept["copied"])
+            self.assertEqual(kept["reason"], "sealed")
+            self.assertFalse(kept["unwrapped"])
+            self.assertFalse(kept["started_model"])
+            stored = json.loads((inbox / "mac-proposer-r1" / "identity" /
+                                  "identity.json").read_text())
+            self.assertEqual(stored["kind"], "encrypted-identity")
+            self.assertNotIn("secret_key", stored)
+            self.assertNotIn(live.to_json()["secret_key"],
+                             json.dumps(stored))
+            row = json.loads(ledger.read_text().splitlines()[-1])
+            self.assertEqual(row["reason"], "sealed")
+            self.assertNotIn("secret_key", ledger.read_text())
+
+            again = seed.receive_bundle(bundle, inbox)
+            self.assertFalse(again["copied"])
+            self.assertEqual(again["reason"], "already-received")
+            replaced = seed.receive_bundle(bundle, inbox, force=True)
+            self.assertTrue(replaced["copied"])
+            self.assertFalse(replaced["unwrapped"])
+            stored = json.loads((inbox / "mac-proposer-r1" / "identity" /
+                                  "identity.json").read_text())
+            self.assertEqual(stored["kind"], "encrypted-identity")
+            self.assertNotIn("secret_key", stored)
+
+            plain = root / "plain"
+            self.assertEqual(seed.cmd_export(argparse.Namespace(
+                out=str(plain), home=str(root / "home"),
+                identity=str(root / "pando" / "identity.json"),
+                rollout_dir=str(root / "rollouts"), force=True,
+                passphrase_file=None, proposal_id="mac-proposer-plain",
+                author="mac-proposer")), 0)
+            refused = seed.receive_bundle(plain, root / "nope")
+            self.assertFalse(refused["accepted"])
+            self.assertEqual(refused["reason"], "plaintext-identity")
+            self.assertFalse((root / "nope").exists())
+
+    def test_signature_is_judged_before_anything_is_written(self):
+        seed = self._seed()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            phrase = root / "pass.txt"
+            phrase.write_text("correct horse battery staple\n")
+            bundle, _live = self._export(seed, root, phrase, "mac-proposer-r2")
+            inbox = root / "inbox"
+
+            unsigned = root / "unsigned"
+            shutil.copytree(bundle, unsigned)
+            manifest_path = unsigned / "manifest.json"
+            manifest = json.loads(manifest_path.read_text())
+            manifest.pop("signature", None)
+            manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+            refused = seed.receive_bundle(unsigned, inbox)
+            self.assertEqual(refused["reason"], "unsigned")
+            self.assertFalse(inbox.exists())
+
+            forged = root / "forged"
+            shutil.copytree(bundle, forged)
+            manifest_path = forged / "manifest.json"
+            manifest = json.loads(manifest_path.read_text())
+            manifest["signature"] = "A" * len(manifest["signature"])
+            manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+            refused = seed.receive_bundle(forged, inbox)
+            self.assertEqual(refused["reason"], "bad-signature")
+            self.assertFalse(inbox.exists())
+
+            flipped = root / "flipped"
+            shutil.copytree(bundle, flipped)
+            note = flipped / "mailbox" / "tasks" / "note.json"
+            note.write_text(note.read_text() + " ")
+            refused = seed.receive_bundle(flipped, inbox)
+            self.assertEqual(refused["reason"], "bad-digest")
+            self.assertFalse(inbox.exists())
+
+            leaked = root / "leaked-home"
+            shutil.copytree(root / "home", leaked)
+            (leaked / "mailbox" / "tasks" / "note.json").write_text(
+                json.dumps({"secret_key": "not-a-real-key"}))
+            leaked_bundle = root / "leaked"
+            self.assertEqual(seed.cmd_export(argparse.Namespace(
+                out=str(leaked_bundle), home=str(leaked),
+                identity=str(root / "pando" / "identity.json"),
+                rollout_dir=str(root / "rollouts"), force=True,
+                passphrase_file=str(phrase), proposal_id="mac-proposer-leak",
+                author="mac-proposer")), 0)
+            refused = seed.receive_bundle(leaked_bundle, inbox)
+            self.assertEqual(refused["reason"], "plaintext-secret")
+            self.assertFalse(inbox.exists())
+
+            repo = Path(__file__).resolve().parents[1]
+            refused = seed.receive_bundle(bundle, repo / "inbox-must-not-exist")
+            self.assertEqual(refused["reason"], "git-worktree")
+            self.assertFalse((repo / "inbox-must-not-exist").exists())
+
+    def test_the_executor_does_not_call_the_receiver(self):
+        text = (Path(__file__).resolve().parents[1] / "pando" /
+                "execute.py").read_text(encoding="utf-8")
+        self.assertNotIn("receive_bundle", text)
+        self.assertNotIn("cmd_receive", text)

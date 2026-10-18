@@ -19,6 +19,7 @@ of the same group.
                                      [--rollout-dir rollouts] \
                                      [--passphrase-file ~/.seed-pass]
     python3 tools/seed.py verify    --from <dir> [--passphrase-file ~/.seed-pass]
+    python3 tools/seed.py receive   --from <dir> [--inbox ~/.pandosi/inbox]
     python3 tools/seed.py rehydrate --from <dir> --home <dir> \
                                      --identity <path> [--rollout-dir <dir>] \
                                      [--passphrase-file ~/.seed-pass]
@@ -41,6 +42,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -447,6 +449,263 @@ def cmd_rehydrate(args) -> int:
     return 0
 
 
+_INBOX_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+
+
+def read_bundle(src: Path) -> tuple[dict, Path] | None:
+    """Manifest plus its directory. None when the bundle is not readable.
+
+    Unlike ``load_bundle`` this does not exit the process. A receiver that
+    refuses a bad directory must return a reason, not take the interpreter
+    down with it.
+    """
+    src = Path(src).expanduser()
+    path = src / MANIFEST
+    if path.is_symlink() or not path.is_file():
+        return None
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(manifest, dict):
+        return None
+    return manifest, src
+
+
+def _signature_reason(manifest: dict) -> str | None:
+    """None when the manifest signature checks out. Does not read file bytes."""
+    signature = manifest.get("signature")
+    source = manifest.get("source")
+    pubkey = source.get("pubkey") if isinstance(source, dict) else None
+    if not signature or not pubkey:
+        return "unsigned"
+    mod = _identity_module()
+    if mod is None:
+        return "unverifiable"
+    body = {key: value for key, value in manifest.items() if key != "signature"}
+    if not mod.verify(str(pubkey), body, str(signature)):
+        return "bad-signature"
+    return None
+
+
+def _rel_is_safe(rel: object) -> bool:
+    if not isinstance(rel, str) or not rel:
+        return False
+    path = Path(rel)
+    if path.is_absolute():
+        return False
+    return ".." not in path.parts
+
+
+def _digest_reason(src: Path, manifest: dict) -> str | None:
+    files = manifest.get("files")
+    if not isinstance(files, list) or not files:
+        return "bad-digest"
+    for entry in files:
+        if not isinstance(entry, dict) or not _rel_is_safe(entry.get("path")):
+            return "bad-path"
+        path = src / entry["path"]
+        if path.is_symlink() or not path.is_file():
+            return "bad-digest"
+        if sha256_file(path) != entry.get("sha256"):
+            return "bad-digest"
+    return None
+
+
+def _json_has_secret(value: object) -> bool:
+    if isinstance(value, dict):
+        if "secret_key" in value:
+            return True
+        return any(_json_has_secret(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_json_has_secret(item) for item in value)
+    return False
+
+
+def _key_reason(src: Path, manifest: dict) -> str | None:
+    """Why this bundle must not be kept. None when the key is sealed."""
+    protection = manifest.get("protection")
+    identity_flag = protection.get("identity") if isinstance(protection, dict) else None
+    if identity_flag == "plaintext":
+        return "plaintext-identity"
+    files = [entry for entry in manifest.get("files") or [] if isinstance(entry, dict)]
+    identities = [entry for entry in files if entry.get("kind") == "identity"]
+    if not identities:
+        return "no-identity"
+    for entry in identities:
+        if not entry.get("encrypted"):
+            return "plaintext-identity"
+        try:
+            payload = json.loads((src / entry["path"]).read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return "plaintext-identity"
+        if not isinstance(payload, dict) or payload.get("kind") != "encrypted-identity":
+            return "plaintext-identity"
+        if _json_has_secret(payload):
+            return "plaintext-secret"
+    for entry in files:
+        if entry.get("kind") == "identity":
+            continue
+        try:
+            payload = json.loads((src / entry["path"]).read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if _json_has_secret(payload):
+            return "plaintext-secret"
+    return None
+
+
+def judge_bundle(src: Path) -> dict:
+    """Decide whether a bundle already on disk may be kept.
+
+    The signature is checked before the private-key rule, and before any
+    copy. Nothing here decrypts, connects, or starts a process.
+    """
+    result = {"accepted": False, "copied": False, "started_model": False,
+              "unwrapped": False, "reason": "no-manifest"}
+    loaded = read_bundle(src)
+    if loaded is None:
+        return result
+    manifest, src = loaded
+    reason = _signature_reason(manifest)
+    if reason:
+        result["reason"] = reason
+        return result
+    reason = _digest_reason(src, manifest)
+    if reason:
+        result["reason"] = reason
+        return result
+    reason = _key_reason(src, manifest)
+    if reason:
+        result["reason"] = reason
+        return result
+    source = manifest.get("source") if isinstance(manifest.get("source"), dict) else {}
+    result.update({
+        "accepted": True,
+        "reason": "sealed",
+        "proposal_id": str(manifest.get("proposal_id") or ""),
+        "author": str(manifest.get("author") or ""),
+        "fingerprint": str(source.get("node_fingerprint") or ""),
+    })
+    return result
+
+
+def _inbox_name(manifest: dict) -> str | None:
+    source = manifest.get("source") if isinstance(manifest.get("source"), dict) else {}
+    raw = str(manifest.get("proposal_id") or source.get("node_fingerprint") or "")
+    if not _INBOX_NAME.fullmatch(raw):
+        return None
+    return raw
+
+
+def _copy_sealed(src: Path, manifest: dict, dest: Path) -> None:
+    """Copy the manifest and the files it names. Extra files stay behind.
+
+    The previous copy stays in place until the new bytes are complete.
+    """
+    staging = dest.parent / f".{dest.name}.partial"
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging.mkdir(parents=True)
+    backup = None
+    try:
+        for entry in manifest["files"]:
+            target = staging / entry["path"]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((src / entry["path"]).read_bytes())
+            mode = int(str(entry.get("mode") or "644"), 8) & 0o666
+            os.chmod(target, mode or 0o600)
+        manifest_path = staging / MANIFEST
+        manifest_path.write_bytes((src / MANIFEST).read_bytes())
+        os.chmod(manifest_path, 0o644)
+        if dest.exists():
+            backup = dest.parent / f".{dest.name}.old"
+            if backup.exists():
+                shutil.rmtree(backup)
+            dest.rename(backup)
+        staging.rename(dest)
+    except Exception:
+        shutil.rmtree(staging, ignore_errors=True)
+        if backup is not None and backup.exists() and not dest.exists():
+            backup.rename(dest)
+        raise
+    if backup is not None and backup.exists():
+        shutil.rmtree(backup, ignore_errors=True)
+
+
+def _append_receive_ledger(ledger, result: dict) -> None:
+    if not ledger:
+        return
+    path = Path(ledger).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    row = {key: result[key] for key in
+           ("accepted", "author", "copied", "fingerprint", "path",
+            "proposal_id", "reason") if key in result}
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def receive_bundle(src, inbox, *, force: bool = False, ledger=None) -> dict:
+    """Keep a sealed bundle under ``inbox``.
+
+    Refuses a missing signature, a bad signature, a digest mismatch, a
+    plaintext ``secret_key``, and a destination inside a git worktree.
+    The kept bytes stay encrypted. This is not a transport: it does not
+    open a socket, and ``pando.execute`` does not call it.
+    """
+    verdict = judge_bundle(src)
+    if not verdict["accepted"]:
+        return verdict
+    loaded = read_bundle(src)
+    if loaded is None:
+        verdict["accepted"] = False
+        verdict["reason"] = "no-manifest"
+        return verdict
+    manifest, src = loaded
+    inbox = Path(inbox).expanduser()
+    if _inside_git_worktree(inbox):
+        verdict["accepted"] = False
+        verdict["reason"] = "git-worktree"
+        return verdict
+    name = _inbox_name(manifest)
+    if name is None:
+        verdict["accepted"] = False
+        verdict["reason"] = "bad-name"
+        return verdict
+    dest = inbox / name
+    if dest.exists() and not force:
+        verdict["accepted"] = False
+        verdict["copied"] = False
+        verdict["reason"] = "already-received"
+        verdict["path"] = str(dest)
+        return verdict
+    inbox.mkdir(parents=True, exist_ok=True)
+    try:
+        _copy_sealed(src, manifest, dest)
+    except OSError:
+        shutil.rmtree(dest, ignore_errors=True)
+        verdict["accepted"] = False
+        verdict["reason"] = "copy-failed"
+        return verdict
+    kept = judge_bundle(dest)
+    if not kept["accepted"]:
+        shutil.rmtree(dest, ignore_errors=True)
+        verdict["accepted"] = False
+        verdict["reason"] = "copy-failed"
+        return verdict
+    kept["copied"] = True
+    kept["path"] = str(dest)
+    _append_receive_ledger(ledger, kept)
+    return kept
+
+
+def cmd_receive(args) -> int:
+    result = receive_bundle(args.from_, args.inbox, force=bool(args.force),
+                            ledger=args.ledger)
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True), flush=True)
+    return 0 if result.get("copied") else 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -470,6 +729,13 @@ def main() -> int:
     p.add_argument("--passphrase-file", default=None,
                    help="required when the bundle's identity is encrypted")
     p.set_defaults(func=cmd_verify)
+
+    p = sub.add_parser("receive", help="keep a sealed bundle already on disk")
+    p.add_argument("--from", dest="from_", required=True)
+    p.add_argument("--inbox", default=str(Path.home() / ".pandosi" / "inbox"))
+    p.add_argument("--force", action="store_true")
+    p.add_argument("--ledger", default=str(Path.home() / ".pandosi" / "receive-ledger.jsonl"))
+    p.set_defaults(func=cmd_receive)
 
     p = sub.add_parser("rehydrate", help="restore a bundle onto this machine")
     p.add_argument("--from", dest="from_", required=True)
