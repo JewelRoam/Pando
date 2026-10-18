@@ -67,6 +67,15 @@ field order; the checker now refuses to report a pass on an empty scan.
     `bundle_digest`, the `bundle_proposal_id` / `bundle_author` /
     `bundle_fingerprint` out of the manifest. A drill that cannot say what it
     drilled is an anecdote.
+  - The passphrase is read **once** and re-exposed inside the drill's own
+    temp dir (mode 0600), so a single-shot source like `/dev/stdin` or a FIFO
+    works. Measured on pi5 (2026-10-19): the sealed run reads the passphrase
+    twice - once for the flipped-ciphertext control, once for the honest run -
+    so with `/dev/stdin` the control ate it, refused for the wrong reason, and
+    the drill reported FAIL on a bundle that was intact. A passphrase that
+    simply does not open the bundle is now reported as exactly that
+    (`does not open ...; nothing was drilled`) and nothing is drilled.
+  - `--keep` prints the path of the passphrase copy it leaves behind.
 
 ## Drilling the artifact that actually traveled (2026-10-19)
 
@@ -110,10 +119,31 @@ What this does and does not prove:
   bundle the local drill builds. The key survives the trip; the ledger,
   mailbox history and bindings do not travel with it. A member revived from a
   traveled offer re-registers and starts over, it does not resume.
-- **Does not prove**: that it works on a box that is not this one. The drill
-  still runs on the Mac, against a copy of the bundle. Running it *on* the
-  receiving host is the next step, and it needs the passphrase there, which is
-  exactly the human step the seal is for.
+- **Does not prove**: that it works on a box that is not this one, when the
+  drill runs on the Mac against a copy. See below for the run that does.
+
+## Drilled on the receiving host, passphrase never written there (2026-10-19)
+
+```
+ssh pi5 'cd ~/pandosi-src && ~/pando/bin/python tools/seed_drill.py \
+  --seed-src ~/.pandosi/inbox/mac-proposer-r582-1792361638 \
+  --seed-src-passphrase-file /dev/stdin' < ~/.pandosi/seed.passphrase
+```
+
+The passphrase crosses the ssh channel on stdin and is read once into the
+drill's own temp dir; it is never written to pi5's disk. Result: the key
+rehydrated on pi5, re-registered under its own name (HTTP 200), a fresh key
+with that name was refused (HTTP 403), and all three negative controls held.
+
+**The first run of this command FAILED** - and that was the useful part. See
+the `/dev/stdin` note above: the flipped-ciphertext control consumed the
+single-shot passphrase, so the honest run saw EOF and the drill reported FAIL
+on an intact bundle. The fix is the "read once" rule; the drill now passes on
+pi5 for the same command.
+
+That near-miss is worth more than the PASS. A drill that fails on a good
+bundle trains its reader to ignore it, which is how a real failure gets waved
+through later.
 
 ## Drill result (measured, not asserted)
 

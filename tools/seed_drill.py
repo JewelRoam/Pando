@@ -125,6 +125,29 @@ def tree_digest(bundle: Path) -> str:
     return h.hexdigest()
 
 
+def pin_passphrase(src: Path, work: Path) -> Path:
+    """Read a passphrase once and re-expose it as one file inside ``work``.
+
+    ``--seed-src-passphrase-file`` can be ``/dev/stdin`` or a FIFO, and the
+    sealed run reads the passphrase more than once: once for the flipped
+    ciphertext control, once for the honest run. A single-shot source is empty
+    by the second read, which makes the *control* refuse for the wrong reason
+    and the honest run fail - a drill reporting FAIL for a bundle that is fine.
+    Reading once removes the whole class, and the copy sits at mode 0600 inside
+    the drill's own temp dir.
+    """
+    text = Path(src).expanduser().read_text(encoding="utf-8")
+    if text.endswith("\r\n"):
+        text = text[:-2]
+    elif text.endswith("\n") or text.endswith("\r"):
+        text = text[:-1]
+    pinned = work / "passphrase"
+    fd = os.open(pinned, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(text + "\n")
+    return pinned
+
+
 def note_provenance(seed, bundle: Path, report: dict) -> None:
     """Record which artifact was drilled. A drill that cannot say what it
     drilled is an anecdote, not evidence."""
@@ -285,8 +308,23 @@ def main() -> int:
     else:
         if traveled is not None:
             enc_dir = traveled
-            pass_file = traveled_pass
+            pass_file = pin_passphrase(traveled_pass, work)
             note_provenance(seed, enc_dir, sealed)
+            # If the passphrase is simply wrong, every negative control below
+            # "passes" for a reason that has nothing to do with the artifact,
+            # and the honest run fails. Say so instead of reporting a FAIL.
+            rc = seed.cmd_verify(argparse.Namespace(
+                from_=str(enc_dir), passphrase_file=str(pass_file)))
+            if rc != 0:
+                print(f"the passphrase in {traveled_pass} does not open "
+                      f"{enc_dir}; nothing was drilled", file=sys.stderr)
+                report["ok"] = False
+                if args.json:
+                    Path(args.json).write_text(
+                        json.dumps(report, indent=2) + "\n")
+                if not args.keep:
+                    shutil.rmtree(work, ignore_errors=True)
+                return rc
         else:
             enc_dir = work / "sealed"
             pass_file = work / "passphrase.txt"
@@ -348,6 +386,11 @@ def main() -> int:
 
     if not args.keep:
         shutil.rmtree(work, ignore_errors=True)
+    else:
+        print(f"kept {work}")
+        if traveled_pass is not None:
+            print(f"  ... including the passphrase copy at {work / 'passphrase'}"
+                  " - delete it when you are done")
     return 0 if report["ok"] else 1
 
 

@@ -1923,6 +1923,81 @@ class TestSmoke(unittest.TestCase):
                 sealed["bundle_digest"],
                 "a mutated copy must not digest the same")
 
+    @unittest.skipIf(os.name == "nt", "/dev/stdin is a POSIX device")
+    def test_a_single_shot_passphrase_is_read_once_and_a_wrong_one_says_so(self):
+        """The sealed run reads the passphrase more than once.
+
+        Measured on pi5 (2026-10-19) while drilling a bundle out of its own
+        inbox: ``--seed-src-passphrase-file /dev/stdin`` reported FAIL on a
+        bundle that was fine. The flipped-ciphertext control read stdin first,
+        got the passphrase expected, and by the time the honest run asked again
+        the source was at EOF - so the *control* refused for the wrong reason
+        and the run failed. A drill that reports FAIL for an intact bundle is
+        worse than no drill, because it trains the reader to ignore it.
+
+        So: the passphrase is read exactly once and re-exposed inside the
+        drill's own temp dir, and a passphrase that simply does not open the
+        bundle is reported as such instead of as a bundle failure.
+        """
+        import importlib.util
+        root_dir = Path(__file__).resolve().parents[1]
+        spec = importlib.util.spec_from_file_location(
+            "pandosi_seed", root_dir / "tools" / "seed.py")
+        seed = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(seed)
+        from pando.identity import Identity
+
+        drill = root_dir / "tools" / "seed_drill.py"
+        good = "a passphrase that only one reader gets\n"
+        env = {**os.environ, "PYTHONPATH": str(root_dir)}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            home = tmp / "home"
+            (home / "mailbox" / "tasks").mkdir(parents=True)
+            identity_path = tmp / "pando" / "identity.json"
+            live = Identity.generate()
+            identity_path.parent.mkdir(parents=True, exist_ok=True)
+            identity_path.write_text(json.dumps(live.to_json(), indent=2))
+            pass_file = tmp / "pass.txt"
+            pass_file.write_text(good)
+            traveled = tmp / "traveled" / "mac-proposer-r9-1792361638"
+            self.assertEqual(seed.cmd_export(argparse.Namespace(
+                out=str(traveled), home=str(home), identity=str(identity_path),
+                rollout_dir=str(tmp / "rollouts"), force=True,
+                passphrase_file=str(pass_file),
+                proposal_id="mac-proposer-r9-1792361638",
+                author="mac-proposer")), 0)
+
+            report_path = tmp / "stdin.json"
+            done = subprocess.run(
+                [sys.executable, str(drill),
+                 "--seed-src", str(traveled),
+                 "--seed-src-passphrase-file", "/dev/stdin",
+                 "--json", str(report_path)],
+                input=good, capture_output=True, text=True, timeout=180,
+                env=env)
+            self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+            sealed = json.loads(report_path.read_text())["modes"]["sealed"]
+            self.assertTrue(sealed["identity_carried"], done.stdout)
+            self.assertTrue(sealed["same_key_accepted"], done.stdout)
+            # ... and the controls still mean what they say.
+            self.assertTrue(sealed["tampered_refused"])
+            self.assertTrue(sealed["wrong_passphrase_refused"])
+
+            # A passphrase that does not open the bundle is not a bundle
+            # failure, and must not be dressed up as one.
+            wrong = tmp / "wrong.txt"
+            wrong.write_text("not the passphrase\n")
+            bad = subprocess.run(
+                [sys.executable, str(drill),
+                 "--seed-src", str(traveled),
+                 "--seed-src-passphrase-file", str(wrong)],
+                capture_output=True, text=True, timeout=180, env=env)
+            self.assertEqual(bad.returncode, 1)
+            self.assertIn("does not open", bad.stdout + bad.stderr)
+            self.assertIn("nothing was drilled", bad.stdout + bad.stderr)
+
 
 class TestResidentThinker(unittest.TestCase):
     """pando.thinkd - the proposer that has to keep running when nobody asks.
