@@ -377,3 +377,44 @@ The Mac's full answer lives in mailbox task t-20261017-001001-f790. Load-bearing
 - Falsifier: sign a `policy.set` that lowers `min_adopt` to 1 with the ordinary two adopters, and
   check the ledger records a refusal rather than writing `min_adopt=1`. That is the whole safety
   claim, and it is one command to test.
+
+## 2026-10-18 — a node cannot grant itself a self-update channel (mac-side, on the eve of win's cloud operator leaving)
+
+The Windows node is losing its cloud operator, so we asked the honest question: can it still be
+maintained? Inspected, not assumed — three paths were checked in code: `tools/execute_loop.py` only
+runs `pando.execute --once` (which seals a `seed.export` and applies a `policy.set`, nothing more);
+`tools/win_worker.py` states in its own docstring that it never runs shell commands and never edits
+files; `win_node_supervisor.ps1` only respawns services it already knows. `ACTION_SPACE` has no
+`code.update` and no generic command operator, so there is no *data-only* path that could carry new
+code to that node either. Conclusion: a pushed commit would sit unused until a human logged in.
+
+The generalizable lesson is narrower and worse than "win needs a git pull": **a node that is not born
+with an updater is a one-shot node, and no later act of will inside that node can fix it.** The
+updater has to arrive the same way the rest of the software did — from outside, once, by a human or
+an operator that still exists. This is the same shape as the two failures already recorded here (the
+double-forked backend that vanished at 12:46, the stale lock that made takeover print "skip" forever):
+the system looked alive while a capability it depended on had silently never existed.
+
+Fix landed in two halves. `tools/node_code_watch.py` (supervisor entry `code-watch`, every 300s)
+fast-forwards the checkout itself — GitHub first, the Mac's `/code.bundle` peer when GitHub cannot be
+reached — and stops only the client processes so the supervisor respawns them from the new tree; a
+model server is never reloaded, and a fast-forward that changed the supervisor's own roster escalates
+to the full restart, because a supervisor that is already running cannot learn a new service name.
+A dirty tree, a diverged history, or a failed fetch is left exactly as it was.
+
+The second half is the lesson the colony has already paid for twice: **liveness is not progress.** The
+supervisor's loop answers "did the child exit?" and cannot answer "did the proposer stop thinking?"
+A wedged `thinkd` stays running with a frozen ledger. With no cloud operator left on that node, nothing
+else would ever look. The same loop now asks `tools/think_watchdog.py` every 60s whether each proposer
+ledger has grown, and stops that one process when it has not — no scheduler, no second starter, so
+there is never a copy racing the supervisor.
+
+- What this does **not** prove: the win side has never run either path on real hardware. The bootstrap
+  restart is a human (or win-codex) action that has not happened yet, so win at this moment still
+  cannot update itself. The claim is a design and a test, not a measured deployment.
+- Falsifier (one command, after the bootstrap): push any commit; if `D:\pando-models\code-sync-ledger.jsonl`
+  does not gain a row with `updated: true` within ~60s of the watcher running, the watcher is not in the
+  process table no matter how many `python.exe` show up — read `CommandLine`, not the process count.
+- Standing caveat, unchanged: the equal-memory-budget control (many small models vs one large model)
+  still does not exist. Nothing here is evidence about collective intelligence; it is evidence that the
+  colony can keep its own code current, which is a claim about maintenance, not about capability.

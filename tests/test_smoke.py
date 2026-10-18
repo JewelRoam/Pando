@@ -4921,7 +4921,20 @@ class TestWindowsSeedPull(unittest.TestCase):
         self.assertIn("tools\\node_code_watch.py", supervisor)
         self.assertIn("'code-watch'", supervisor)
         self.assertIn("node_code_watch\\.py", restart)
+        # Liveness is not progress: the loop must also catch a proposer that is
+        # alive with a frozen ledger, or the node goes silent unnoticed once no
+        # cloud operator is left to look at it.
+        self.assertIn("think_watchdog.py", supervisor)
+        self.assertIn("$thinkWatch", supervisor)
+        self.assertIn("win_restart_think.ps1", supervisor)
+        self.assertIn("win-gpu-proposer", supervisor)
+        self.assertIn("win-cpu-proposer", supervisor)
+        think_restart = (root / "tools" / "win_restart_think.ps1").read_text(
+            encoding="utf-8")
+        self.assertIn("param(", think_restart)
+        self.assertIn("pando\\.thinkd", think_restart)
         self.assertNotIn("New-ScheduledTask", supervisor)
+        self.assertNotIn("New-ScheduledTask", think_restart)
 
         def item_count(name):
             match = re.search(

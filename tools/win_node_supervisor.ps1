@@ -123,6 +123,22 @@ $codeWatchArgs = @("$repo\tools\node_code_watch.py", '--repo', "$repo",
   '--ledger', 'D:\pando-models\code-sync-ledger.jsonl',
   '--interval', '300')
 
+# Liveness is not progress. The loop below answers "did the child exit?"; it
+# cannot answer "did the proposer stop thinking?". A wedged thinkd stays alive
+# with a frozen ledger, and with no cloud operator left on this node nothing
+# else would notice. Every 60s, ask tools/think_watchdog.py whether each ledger
+# has grown; a stall stops that one process and the loop respawns it. No
+# scheduler is involved -- this is the loop that is already running.
+$thinkWatch = @(
+  @{ ledger = 'D:\pando-models\win-gpu-think-ledger.jsonl'; stall = 900
+     cooldown = 'D:\pando-models\think-watchdog-gpu.cooldown'
+     match = 'win-gpu-proposer' },
+  @{ ledger = 'D:\pando-models\win-cpu-think-ledger.jsonl'; stall = 1200
+     cooldown = 'D:\pando-models\think-watchdog-cpu.cooldown'
+     match = 'win-cpu-proposer' }
+)
+$watchdog = "$repo\tools\think_watchdog.py"
+
 $names = @('llama-3070', 'stem-gemma', 'stem-laya', 'worker', 'win-mailbox',
   'llama-yi-cpu', 'stem-yi', 'think-proposer', 'think-yi', 'observatory', 'chat',
   'react', 'executor-loop', 'rootd', 'seed-pull', 'code-watch')
@@ -137,7 +153,9 @@ $cwds = @('D:\pando-models\llama-cuda', $repo, $repo, $repo, $repo,
   $repo, $repo, $repo)
 
 $procs = @{}
+$loops = 0
 while ($true) {
+  $loops++
   for ($i = 0; $i -lt $names.Count; $i++) {
     $n = $names[$i]
     $p = $procs[$n]
@@ -149,6 +167,16 @@ while ($true) {
         -RedirectStandardOutput "$logs\$n.out.log" `
         -RedirectStandardError "$logs\$n.err.log" `
         -WindowStyle Hidden -PassThru
+    }
+  }
+  # Give a freshly started proposer a full round to write its first line
+  # before the watchdog is allowed to judge it (5 min), then check every 60s.
+  if ($loops -ge 30 -and ($loops % 6) -eq 0) {
+    foreach ($w in $thinkWatch) {
+      $wdArgs = @($watchdog, '--ledger', $w.ledger,
+        '--stall-seconds', "$($w.stall)", '--cooldown-file', $w.cooldown,
+        '--restart-cmd', "powershell -NoProfile -ExecutionPolicy Bypass -File $repo\tools\win_restart_think.ps1 -Match $($w.match)")
+      & $python @wdArgs *>> "$logs\think-watchdog.log"
     }
   }
   Start-Sleep -Seconds 10
