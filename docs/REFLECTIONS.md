@@ -335,7 +335,7 @@ The Mac's full answer lives in mailbox task t-20261017-001001-f790. Load-bearing
   pass than the code. A change that is refused carries no `skipped` key on purpose: it is retried
   and refused again next round, so a rule that can never apply stays visible in the ledger instead
   of looking handled.
-- Honest boundary: 5 of the 8 declared actions now have actuators. `culture.refine` is staged-only
+- Honest boundary: 6 of the 8 declared actions now have actuators. `culture.refine` is staged-only
   (`b3ff290`): it validates a `{"playbook": {...}}` payload, signs an attestation and writes the
   candidate under `~/.pandosi/culture-outbox/<proposal-id>/` with `applied: false`. It never spawns
   a process, never rewrites the live playbook and never touches the rules - applying a candidate
@@ -343,8 +343,19 @@ The Mac's full answer lives in mailbox task t-20261017-001001-f790. Load-bearing
   (`pando/invite.py`): it mints a fresh bearer pairing token, signs the invitation and writes it
   0600 under `~/.pandosi/invites/<proposal-id>/` with `applied: false`. Nothing installs the token
   into a running root, and staging is idempotent because re-minting on a retry would invalidate an
-  invitation already copied elsewhere. `reproduce.spawn`, `resource.rebalance` and `meta.propose`
-  are still `no-actuator` - adopted and held, not executed and not silent.
+  invitation already copied elsewhere. `reproduce.spawn` is the widest staged-only action
+  (`pando/spawn.py`): an adopted proposal may carry labels only (`node_id`, `lineage`), and a
+  `command`, `cwd`, `payload` or any other key is refused rather than ignored, so no model can put
+  an argv into an artifact a human might later run. It writes a signed plan under
+  `~/.pandosi/reproduce-outbox/<proposal-id>/` with `approved: false`, `spawned: false` and a
+  refusal list naming the four things the parent still lacks (a reproduce grant, a confirmed
+  receiving sandbox, a servable payload artifact, a gate-supplied target argv and host). It calls
+  the planner only - `pando.reproduce.reproduce` is never reached, no byte moves, no process
+  starts, no grant is written, and the grant state is read rather than requested so a staging round
+  cannot append to the audit trail. Unlike `recruit.invite`, a plan holds no secret, so re-staging
+  rewrites it instead of freezing it: the artifact cannot keep reporting a refusal that has since
+  been answered. `resource.rebalance` and `meta.propose` are still `no-actuator` - adopted and
+  held, not executed and not silent.
 - Falsifier: sign a `policy.set` that lowers `min_adopt` to 1 with the ordinary two adopters, and
   check the ledger records a refusal rather than writing `min_adopt=1`. That is the whole safety
   claim, and it is one command to test.

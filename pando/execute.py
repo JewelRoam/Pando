@@ -23,15 +23,21 @@ tested actuator for that exact action exists.
   the token into a running root, and the manifest is ``applied: false``. A
   staged invitation is a credential, so the artifact is written 0600 and never
   published to the mailbox or the ledger.
-- ``reproduce.spawn``, ``resource.rebalance``,
-  ``meta.propose`` — no actuator. An adopted proposal with one of these actions
-  is recorded as ``no-actuator``: a hold on the world, not a success and not a
-  silence.
+- ``reproduce.spawn`` — stage a signed reproduction *plan* into a local
+  outbox: what would be copied, where, and every reason the parent still
+  refuses. Same review-queue boundary as culture.refine, and wider: the
+  proposal may carry labels only, ``sandbox_confirmed`` is always false, and
+  nothing here calls ``pando.reproduce.reproduce``. A plan cannot be an
+  approval.
+- ``resource.rebalance``, ``meta.propose`` — no actuator. An adopted proposal
+  with one of these actions is recorded as ``no-actuator``: a hold on the
+  world, not a success and not a silence.
 
 Nothing here starts itself, and nothing here opens a socket. A dry run reads
 the mailbox and prints counts. A ``--once`` round seals at most one seed,
-applies at most one rule change, stages at most one culture candidate, and
-mints at most one invitation, each recorded in an append-only ledger.
+applies at most one rule change, stages at most one culture candidate, mints at
+most one invitation, and drafts at most one reproduction plan, each recorded in
+an append-only ledger.
 """
 from __future__ import annotations
 
@@ -47,6 +53,9 @@ from .genesis import ACTION_SPACE, Proposal
 from .invite import DEFAULT_OUTBOX as DEFAULT_INVITE_OUTBOX
 from .invite import InviteError
 from .invite import stage as stage_invite
+from .spawn import DEFAULT_OUTBOX as DEFAULT_SPAWN_OUTBOX
+from .spawn import SpawnError
+from .spawn import stage as stage_spawn
 from .policy import DEFAULT_PATH as DEFAULT_POLICY_PATH
 from .policy import PolicyError
 from .policy import apply as apply_policy
@@ -68,6 +77,7 @@ ACTUATORS: tuple[str, ...] = (
     "policy.set",
     "culture.refine",
     "recruit.invite",
+    "reproduce.spawn",
 )
 
 
@@ -282,6 +292,45 @@ def foreign_recruit_invites(proposals: list[Proposal], reactions: list[dict],
     found = []
     for proposal in proposals:
         if proposal.proposal_id in done or proposal.action != "recruit.invite":
+            continue
+        if proposal.pubkey == signer:
+            continue
+        if adopted(proposal, reactions, knobs):
+            found.append(proposal.proposal_id)
+    return found
+
+
+def next_reproduce_spawn(proposals: list[Proposal], reactions: list[dict],
+                         done: set[str], signer: str | None = None,
+                         knobs: dict | None = None) -> Proposal | None:
+    """Oldest adopted ``reproduce.spawn`` this host authored and not yet drafted.
+
+    Only the signer's own proposal is drafted here. The plan is written into the
+    authoring host's outbox, so a foreign reproduction stays foreign: it is
+    named in the ledger and never written locally.
+    """
+    for proposal in proposals:
+        if proposal.proposal_id in done or proposal.action != "reproduce.spawn":
+            continue
+        if signer is not None and proposal.pubkey != signer:
+            continue
+        if adopted(proposal, reactions, knobs):
+            return proposal
+    return None
+
+
+def foreign_reproduce_spawns(proposals: list[Proposal], reactions: list[dict],
+                             done: set[str], signer: str,
+                             knobs: dict | None = None) -> list[str]:
+    """Adopted ``reproduce.spawn`` ids another host authored.
+
+    Recorded rather than dropped: a reproduction the group adopted is a real
+    outcome even though this host must not draft it. The authoring host owns
+    its own outbox.
+    """
+    found = []
+    for proposal in proposals:
+        if proposal.proposal_id in done or proposal.action != "reproduce.spawn":
             continue
         if proposal.pubkey == signer:
             continue
@@ -788,6 +837,34 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
         ledger.parent.mkdir(parents=True, exist_ok=True)
         with ledger.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, sort_keys=True) + "\n")
+    # A reproduction is drafted last and is inert by construction: the plan
+    # names what would be copied and where, and lists every reason the parent
+    # still refuses. Nothing is copied, no process starts, and this module
+    # never calls ``pando.reproduce.reproduce``.
+    spawn = next_reproduce_spawn(proposals, reactions, done_ids(ledger),
+                                 signer, knobs)
+    if spawn is not None:
+        record = {"proposal_id": spawn.proposal_id, "action": "reproduce.spawn"}
+        try:
+            staged = stage_spawn(
+                spawn, identity=identity,
+                outbox=getattr(args, "spawn_outbox", DEFAULT_SPAWN_OUTBOX))
+        except SpawnError as exc:
+            # No ``skipped``: a refused draft is retried next round and refused
+            # again, so a plan that can never be staged stays visible.
+            record["executed"] = False
+            record["failed"] = f"SpawnError: {exc}"
+        except Exception as exc:  # noqa: BLE001 - one action must not end the loop
+            record["executed"] = False
+            record["failed"] = f"{type(exc).__name__}: {exc}"
+        else:
+            record["executed"] = True
+            record["plan_hash"] = staged["plan_hash"]
+            record["refusals"] = staged["refusals"]
+            record["directory"] = staged["directory"]
+        ledger.parent.mkdir(parents=True, exist_ok=True)
+        with ledger.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, sort_keys=True) + "\n")
     # An export must not crowd out a replicate. Both are recorded.
     if True:
         seen = done_ids(ledger) | left_ids(ledger)
@@ -806,13 +883,15 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                                                   signer, knobs)
         foreign_invites = foreign_recruit_invites(proposals, reactions, seen,
                                                   signer, knobs)
+        foreign_spawns = foreign_reproduce_spawns(proposals, reactions, seen,
+                                                  signer, knobs)
         unacted = local_unacted(proposals, reactions, seen, signer, knobs)
         pulls = getattr(args, "pull", None) or set()
         outbox = getattr(args, "outbox", "~/.pandosi/outbox")
         acks = received_acks(ledger, outbox)
         if (foreign or replicates or addressed or unacted or foreign_repl
                 or foreign_policy or foreign_culture or foreign_invites
-                or acks):
+                or foreign_spawns or acks):
             ledger.parent.mkdir(parents=True, exist_ok=True)
             with ledger.open("a", encoding="utf-8") as handle:
                 for proposal_id in foreign:
@@ -875,6 +954,13 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                         "executed": False,
                         "skipped": "other-host",
                     }, sort_keys=True) + "\n")
+                for proposal_id in foreign_spawns:
+                    handle.write(json.dumps({
+                        "proposal_id": proposal_id,
+                        "action": "reproduce.spawn",
+                        "executed": False,
+                        "skipped": "other-host",
+                    }, sort_keys=True) + "\n")
                 for proposal_id, action in unacted:
                     handle.write(json.dumps({
                         "proposal_id": proposal_id,
@@ -889,6 +975,7 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                    "foreign_policy_sets": foreign_policy,
                    "foreign_culture_refines": foreign_culture,
                    "foreign_recruit_invites": foreign_invites,
+                   "foreign_reproduce_spawns": foreign_spawns,
                    "no_actuator": [item[0] for item in unacted]}
         print(json.dumps(payload, ensure_ascii=False), flush=True)
         write_status(ledger.with_name("execute-status.json"), payload)
@@ -923,6 +1010,8 @@ def main() -> int:
                         help="where staged culture.refine candidates are written")
     parser.add_argument("--invite-outbox", default=DEFAULT_INVITE_OUTBOX,
                         help="where staged recruit.invite tokens are written")
+    parser.add_argument("--spawn-outbox", default=DEFAULT_SPAWN_OUTBOX,
+                        help="where drafted reproduce.spawn plans are written")
     args = parser.parse_args()
     args.policy_path = args.policy
     if args.dry_run == args.once:
