@@ -6,7 +6,7 @@ Wants=pandosi-root.service
 [Service]
 Type=simple
 WorkingDirectory=/home/admin
-ExecStart=/home/admin/pando/bin/python -m pando.reactd --root http://127.0.0.1:8791 --pairing-token-file /home/admin/.pando/root-pairing.token --mailbox http://192.168.31.41:8776 --token-file /home/admin/.pando/mailbox.token --ledger /home/admin/.pando/reaction-ledger.jsonl --interval 40
+ExecStart=/home/admin/pando/bin/python -m pando.reactd --root http://127.0.0.1:8791 --pairing-token-file /home/admin/.pando/root-pairing.token --mailbox http://192.168.31.41:8776 --mailbox-fallback http://192.168.31.100:8778 --token-file /home/admin/.pando/mailbox.token --ledger /home/admin/.pando/reaction-ledger.jsonl --interval 40
 Environment=PYTHONUNBUFFERED=1
 Restart=always
 RestartSec=5

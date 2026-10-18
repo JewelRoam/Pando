@@ -5046,6 +5046,14 @@ class TestWindowsSeedPull(unittest.TestCase):
         self.assertIn("seed_pull\\.py", restart)
         # The code watcher is the only thing that updates the checkout once no
         # cloud operator is left to run git by hand.
+        # The same partition rule on the win side. Both of the win writers
+        # post to the Mac's mailbox; when it is unreachable they must fall back
+        # to the local replica, which replicates onward. A reaction posted
+        # nowhere is not a queued vote, it is a lost one.
+        react = supervisor.split("$reactArgs = @(")[1].split("\n#")[0]
+        self.assertIn("'--mailbox-fallback'", react)
+        think = supervisor.split("$thinkArgs = @(")[1].split("\n#")[0]
+        self.assertIn("'--mailbox-fallback'", think)
         self.assertIn("$codeWatchArgs", supervisor)
         self.assertIn("tools\\node_code_watch.py", supervisor)
         self.assertIn("'code-watch'", supervisor)
@@ -5514,6 +5522,26 @@ class TestPi5UnitTemplates(unittest.TestCase):
             else:
                 self.assertIn("[Timer]", text, name)
                 self.assertIn("OnUnitActiveSec=", text, name)
+
+    def test_a_writer_never_loses_a_message_to_a_mailbox_partition(self):
+        """Every pi5 unit that posts to the colony mailbox needs a fallback.
+
+        2026-10-19: the pi5 react unit was the last writer with no fallback.
+        Win's supervisor and the Mac's launchd both had one, and pi5's own
+        proposer had one -- so this was a single missed flag, found by reading
+        ``systemctl show pandosi-react.service`` on the live board, not by a
+        test. A reaction posted to the fallback replicates back to the primary
+        within one replication pass; that is what "queued" means here. A
+        reaction posted nowhere is gone, and pi5 hosts a decision model whose
+        vote counts toward quorum.
+        """
+        units = self._units()
+        writers = [name for name, text in units.items()
+                   if "pando.reactd" in text or "pando.thinkd" in text]
+        self.assertTrue(writers, "no pi5 writer units at all")
+        for name in writers:
+            self.assertIn("--mailbox-fallback", units[name],
+                          f"{name} can lose a message to a partition")
 
     def test_a_timer_cannot_run_a_job_that_is_not_a_template(self):
         units = self._units()
