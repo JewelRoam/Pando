@@ -8628,8 +8628,12 @@ class TestCodeSync(unittest.TestCase):
             real = subprocess.run
             subprocess.run = self._systemctl_stub(calls)
             try:
-                first = sync.install_units(source, target)
-                second = sync.install_units(source, target)
+                # ``platform`` is pinned because this asserts the *systemd*
+                # branch: the same call on a laptop has to reach launchd, and
+                # a test that quietly followed the host would stop covering
+                # the branch it was written for the day it ran on a Mac.
+                first = sync.install_units(source, target, platform="linux")
+                second = sync.install_units(source, target, platform="linux")
             finally:
                 subprocess.run = real
 
@@ -8660,7 +8664,7 @@ class TestCodeSync(unittest.TestCase):
             (source / "pandosi-code-sync.service").write_text("ExecStart=/newer\n")
             subprocess.run = self._systemctl_stub(calls, rc=1)
             try:
-                failed = sync.install_units(source, target)
+                failed = sync.install_units(source, target, platform="linux")
             finally:
                 subprocess.run = real
             self.assertEqual(failed["reason"], "reload-failed")
@@ -8696,6 +8700,7 @@ class TestCodeSync(unittest.TestCase):
                 out = io.StringIO()
                 with contextlib.redirect_stdout(out):
                     sync.main(["--repo", str(client),
+                               "--platform", "linux",
                                "--install-units",
                                str(client / "tools" / "pi5-systemd"),
                                "--install-units-target", str(target)])
@@ -8732,6 +8737,276 @@ class TestCodeSync(unittest.TestCase):
                     "ExecStart=/new\n")
             finally:
                 subprocess.run = real
+
+    def test_one_client_list_maps_onto_three_service_managers(self):
+        """The clients are named once, so a new host is a row and not a fork.
+
+        Until 2026-10-19 each host carried its own copy of the deployment:
+        pi5 in ``tools/pi5-systemd``, Windows inside
+        ``win_node_supervisor.ps1``, the Mac in ``~/Library/LaunchAgents``
+        where the repo could not see it at all. That is three places for the
+        same client list to drift, and it drifted: the Mac's live think agent
+        carried ``--mailbox-fallback`` addresses its checkout copy did not,
+        and the checkout copy of ``pandosi-code-sync.service`` carried
+        ``--self-*`` flags the loaded unit did not.
+        """
+        sync = self._load()
+        repo = Path(__file__).resolve().parents[1]
+
+        # SAFE_UNITS is not a second list, it is the Linux column of this one.
+        self.assertEqual(sync.SAFE_UNITS,
+                         frozenset(row["linux"] for row
+                                   in sync.CLIENT_UNITS.values()))
+        self.assertIn("think", sync.CLIENT_UNITS)
+
+        # Every client resolves on every platform, and a platform that does
+        # not run one says so with an empty handle rather than by vanishing.
+        for name, row in sync.CLIENT_UNITS.items():
+            self.assertTrue(row.get("linux"), name)
+            self.assertNotEqual(row.get("windows", None), None, name)
+            self.assertIn("darwin", row, name)
+
+        # The Windows pattern is the one in the PowerShell the node actually
+        # runs. Two copies of a regex is exactly the drift this test is for.
+        ps1 = (repo / "tools" / "win_restart_clients.ps1").read_text()
+        found = re.search(r"\$pattern = '([^']+)'", ps1)
+        self.assertIsNotNone(found)
+        self.assertEqual(sync.WINDOWS_CLIENT_PATTERN, found.group(1))
+
+        # A model is not a client on any of the three, and the refusal is
+        # spelled the same way from either dialect.
+        for model in ("pandosi-llama.service", "pandosi-root.service",
+                      "com.jewelroam.pandosi-llm8b", "llama-server.exe"):
+            for platform in ("linux", "darwin", "windows"):
+                handles, refused = sync.resolve_units([model], platform)
+                self.assertEqual(handles, [], (model, platform))
+                self.assertEqual(refused, [model], (model, platform))
+        for row in sync.CLIENT_UNITS.values():
+            for handle in row.values():
+                self.assertNotIn("llama", handle)
+                self.assertNotIn("rootd", handle)
+
+        # The dialects are interchangeable *on purpose*: pi5's unit file
+        # names must work when the same code runs on the Mac, and vice versa.
+        handles, refused = sync.resolve_units(
+            ["pandosi-think.service", "think", "pandosi-stem-laya.service"],
+            "darwin")
+        self.assertEqual(refused, [])
+        self.assertEqual(handles, ["launchd:com.jewelroam.pandosi-think",
+                                   "proc:pando.stemd"])
+        self.assertEqual(sync.resolve_units(["pandosi-stem-laya.service"],
+                                            "linux")[0],
+                         ["pandosi-stem-laya.service"])
+
+    def test_a_restart_is_the_hosts_own_verb_not_a_shell_string(self):
+        """Same request, three verbs: systemctl, launchctl, Stop-Process.
+
+        ``--client-cmd`` is a string a human wrote for one host, which is why
+        the Mac could not have one: it has no supervisor script and no
+        systemd. The names are the portable half.
+        """
+        sync = self._load()
+
+        darwin_calls = []
+
+        def darwin_runner(argv, **kwargs):
+            darwin_calls.append(list(argv))
+            if argv[0] == "pgrep":
+                return subprocess.CompletedProcess(argv, 0, "4242\n", "")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        got = sync.restart_units(["think", "stem-laya"], platform="darwin",
+                                 runner=darwin_runner)
+        self.assertEqual(got["reason"], "restarted")
+        self.assertEqual(got["driver"], "launchd")
+        self.assertIn("com.jewelroam.pandosi-think", got["restarted"])
+        self.assertEqual(got["killed"], [4242])
+        self.assertIn(["kill", "-TERM", "4242"], darwin_calls)
+        self.assertTrue(any(call[0] == "launchctl" and call[1] == "kickstart"
+                            for call in darwin_calls))
+
+        listing = json.dumps([
+            {"ProcessId": 5, "CommandLine": "python.exe -m pando.thinkd --x"},
+            {"ProcessId": 6, "CommandLine": "llama-server.exe --model m.gguf"},
+            {"ProcessId": 7, "CommandLine": "python.exe -m pando.rootd"},
+            {"ProcessId": 8, "CommandLine": "python.exe tools/other.py"},
+        ])
+        windows_calls = []
+
+        def windows_runner(argv, **kwargs):
+            windows_calls.append(list(argv))
+            if "ConvertTo-Json" in argv[-1]:
+                return subprocess.CompletedProcess(argv, 0, listing, "")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        got = sync.restart_units(["think"], platform="windows",
+                                 runner=windows_runner)
+        self.assertEqual(got["driver"], "windows")
+        # A model and a bystander are not matched; the clients are.
+        self.assertEqual(got["killed"], [5, 7])
+        stop = windows_calls[-1][-1]
+        self.assertIn("Stop-Process -Id 5,7", stop)
+
+        # And the guard is all-or-nothing before any driver runs.
+        linux_calls = []
+        refused = sync.restart_units(
+            ["think", "pandosi-llama.service"], platform="linux",
+            runner=lambda argv, **kw: linux_calls.append(argv))
+        self.assertEqual(refused["reason"], "refused")
+        self.assertEqual(linux_calls, [])
+
+    def test_a_mac_agent_is_written_only_when_it_changed(self):
+        """On macOS a reload is an outage, so it is not unconditional.
+
+        Linux can afford ``daemon-reload`` every round: it re-reads text and
+        touches nothing. ``bootout``/``bootstrap`` stops and starts the agent,
+        and one of the Mac's agents is the mailbox listener every other Mac
+        process talks to. So an unchanged plist is *checked* with
+        ``launchctl print`` and reloaded only when launchd does not have it --
+        which is the pi5 trap (a file written, never loaded) closed without
+        turning every five-minute round into a restart of everything.
+        """
+        sync = self._load()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "checkout" / "tools" / "mac-launchd"
+            target = root / "Library" / "LaunchAgents"
+            source.mkdir(parents=True)
+            target.mkdir(parents=True)
+            chat = ("<plist><dict><key>Label</key>"
+                    "<string>com.jewelroam.pandosi-chat</string>"
+                    "<key>RunAtLoad</key><true/></dict></plist>\n")
+            (source / "com.jewelroam.pandosi-chat.plist").write_text(chat)
+            (target / "com.jewelroam.pandosi-chat.plist").write_text("old\n")
+            # A model agent, a stray name, and a stale backup are not adopted.
+            (source / "com.jewelroam.pandosi-llm8b.plist").write_text(
+                "<plist><dict><key>Label</key><string>"
+                "com.jewelroam.pandosi-llm8b</string></dict></plist>\n")
+            (source / "notes.plist").write_text(chat)
+            (source / "com.pandosi.stem.laya.plist.bak").write_text("stale\n")
+            # A plist whose Label and filename disagree is refused, because
+            # the ledger would name a job launchd does not have.
+            (source / "com.pandosi.stem.llm8b.plist").write_text(
+                "<plist><dict><key>Label</key><string>wrong</string>"
+                "</dict></plist>\n")
+
+            calls = []
+
+            def runner(argv, **kwargs):
+                calls.append(list(argv))
+                if argv[0] == "plutil":
+                    return subprocess.CompletedProcess(argv, 0, "OK\n", "")
+                if argv[0] == "launchctl" and argv[1] == "print":
+                    return subprocess.CompletedProcess(argv, 1, "", "no job")
+                return subprocess.CompletedProcess(argv, 0, "", "")
+
+            first = sync.install_units(source, target, platform="darwin",
+                                       runner=runner)
+            self.assertEqual(first["changed"],
+                             ["com.jewelroam.pandosi-chat.plist"])
+            self.assertEqual(first["reason"], "installed")
+            self.assertEqual(first["booted"], ["com.jewelroam.pandosi-chat"])
+            self.assertEqual((target / "com.jewelroam.pandosi-chat.plist")
+                             .read_text(), chat)
+            self.assertEqual((target / "com.jewelroam.pandosi-chat.plist.bak")
+                             .read_text(), "old\n")
+            self.assertFalse(
+                (target / "com.jewelroam.pandosi-llm8b.plist").exists())
+            self.assertFalse((target / "notes.plist").exists())
+            self.assertFalse(
+                (target / "com.pandosi.stem.laya.plist.bak").exists())
+            self.assertFalse((target / "com.pandosi.stem.llm8b.plist").exists())
+            # The skip is a ledger fact, not a silence: one broken template
+            # must not stop the round, and it must not disappear either.
+            self.assertEqual([row["unit"] for row in first["skipped"]],
+                             ["com.pandosi.stem.llm8b.plist"])
+            self.assertEqual(first["skipped"][0]["reason"], "label-mismatch")
+
+            # Second round: the bytes match, launchd has the job, so nothing is
+            # stopped and started again.
+            calls.clear()
+
+            def loaded_runner(argv, **kwargs):
+                calls.append(list(argv))
+                return subprocess.CompletedProcess(argv, 0, "", "")
+
+            second = sync.install_units(source, target, platform="darwin",
+                                        runner=loaded_runner)
+            self.assertEqual(second["changed"], [])
+            self.assertEqual(second["booted"], [])
+            self.assertEqual(second["reason"], "same")
+            self.assertEqual([call for call in calls
+                              if "bootstrap" in call or "bootout" in call], [])
+
+            # ... but a plist on disk that launchd never loaded is bootstrapped
+            # without being rewritten. That is the half Linux does with an
+            # unconditional ``daemon-reload``.
+            self.assertEqual(
+                sync.install_units(source, target, platform="darwin",
+                                   runner=runner)["booted"],
+                ["com.jewelroam.pandosi-chat"])
+
+    def test_windows_keeps_its_roster_inside_the_checkout(self):
+        """There is no ``~/Library/LaunchAgents`` to write on Windows.
+
+        The Windows supervisor's roster *is* a file in the checkout, so the
+        fast-forward already carries it and ``node_code_watch`` escalates to a
+        node restart when its hash changes. Pretending to install units there
+        would be a function that reports success and did nothing, so it
+        reports the truth instead.
+        """
+        sync = self._load()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "checkout"
+            target = root / "deployed"
+            source.mkdir()
+            (source / "pandosi-think.service").write_text("x\n")
+            got = sync.install_units(source, target, platform="windows")
+            self.assertFalse(got["installed"])
+            self.assertEqual(got["changed"], [])
+            self.assertEqual(got["reason"], "roster-inside-checkout")
+            self.assertFalse(target.exists())
+
+    def test_an_update_without_a_command_uses_the_platform_layer(self):
+        """The Mac has no supervisor script to name, so the watcher may not
+        need one either. ``--on-update clients`` with no ``--client-cmd``
+        hands the client *names* down to ``restart_units``.
+        """
+        watch = self._load_watch()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env, src, bare, client = self._world(root)
+            ledger = root / "code-sync-ledger.jsonl"
+            self._advance_origin(env, src, bare)
+
+            seen = []
+            watch.restart_units = lambda units, platform="": seen.append(
+                (list(units), platform)) or {"restarted": ["think"],
+                                             "reason": "restarted",
+                                             "driver": "launchd"}
+            watch._spawn = lambda command: self.fail(
+                "no shell command should be spawned: %r" % command)
+
+            row = watch.watch_round(repo=client, on_update="clients",
+                                    ledger=ledger, platform="darwin")
+            self.assertTrue(row["updated"])
+            self.assertEqual(row["action"], "client-restart")
+            self.assertEqual(row["restart"]["driver"], "launchd")
+            self.assertEqual(len(seen), 1)
+            self.assertEqual(seen[0][1], "darwin")
+            self.assertIn("think", seen[0][0])
+            self.assertIn("stem-text", seen[0][0])
+            lines = [json.loads(line)
+                     for line in ledger.read_text().splitlines()]
+            self.assertEqual(lines[-1]["restart"]["reason"], "restarted")
+
+            # An update that changes nothing still records nothing twice.
+            (client / "README").write_text("local edit\n")
+            quiet = watch.watch_round(repo=client, on_update="clients",
+                                      ledger=ledger, platform="darwin")
+            self.assertFalse(quiet["updated"])
+            self.assertEqual(len(seen), 1)
 
 
 class TestCodeIdentity(unittest.TestCase):

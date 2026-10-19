@@ -1,72 +1,56 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!--
-  The Mac's resident proposer (pando.thinkd) as a launchd agent.
-
-  Why this file exists: on 2026-10-17 the Mac agent process died for 7h47m and
-  nothing took over. Every other device was a responder, none was an initiator.
-  A civilisation whose only proposer can vanish silently is not alive; it is
-  waiting to be restarted by a human. KeepAlive + RunAtLoad is the whole point.
-
-  Install (paths are user-specific; edit the three /Users/<you> roots):
-    cp tools/mac-launchd/com.jewelroam.pandosi-think.plist ~/Library/LaunchAgents/
-    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.jewelroam.pandosi-think.plist
-  Inspect:
-    launchctl list | grep pandosi-think
-    tail -f ~/.pandosi/logs/think.launchd.out
-
-  Backends: 8B primary (127.0.0.1:8087) with 4B fallback (127.0.0.1:8080), both
-  themselves under launchd KeepAlive (see bin/llm-8b.sh, bin/llm-4b.sh). The
-  fallback matters because a swapped-out 8B must not be recorded as "thought".
-  Secrets stay in ~/.pandosi/*.token and are referenced by path, never inlined.
--->
 <plist version="1.0">
 <dict>
-  <key>Label</key>
-  <string>com.jewelroam.pandosi-think</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/Users/zhengenrong/Downloads/PandoSI-island/.venv/bin/python</string>
-    <string>-m</string>
-    <string>pando.thinkd</string>
-    <string>--node-id</string>
-    <string>mac-proposer</string>
-    <string>--base-url</string>
-    <string>http://127.0.0.1:8087/v1</string>
-    <string>--model</string>
-    <string>qwen3-8b-q5km-instruct</string>
-    <string>--api-key-file</string>
-    <string>/Users/zhengenrong/.pandosi/llm-api-8b-q6.token</string>
-    <string>--fallback-base-url</string>
-    <string>http://127.0.0.1:8080/v1</string>
-    <string>--fallback-model</string>
-    <string>qwen3-4b-instruct-2507</string>
-    <string>--fallback-api-key-file</string>
-    <string>/Users/zhengenrong/.pandosi/llm-api.token</string>
-    <string>--mailbox</string>
-    <string>http://127.0.0.1:8776</string>
-    <string>--token-file</string>
-    <string>/Users/zhengenrong/.pandosi/mailbox.token</string>
-    <string>--ledger</string>
-    <string>/Users/zhengenrong/.pandosi/think-ledger.jsonl</string>
-    <string>--interval</string>
-    <string>150</string>
-    <string>--explore-every</string>
-    <string>5</string>
-    <string>--activity-every</string>
-    <string>4</string>
-  </array>
-  <key>WorkingDirectory</key>
-  <string>/Users/zhengenrong/Downloads/PandoSI-island</string>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <true/>
-  <key>ThrottleInterval</key>
-  <integer>15</integer>
-  <key>StandardOutPath</key>
-  <string>/Users/zhengenrong/.pandosi/logs/think.launchd.out</string>
-  <key>StandardErrorPath</key>
-  <string>/Users/zhengenrong/.pandosi/logs/think.launchd.err</string>
+	<key>KeepAlive</key>
+	<true/>
+	<key>Label</key>
+	<string>com.jewelroam.pandosi-think</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/zhengenrong/Downloads/PandoSI-island/.venv/bin/python</string>
+		<string>-m</string>
+		<string>pando.thinkd</string>
+		<string>--node-id</string>
+		<string>mac-proposer</string>
+		<string>--base-url</string>
+		<string>http://127.0.0.1:8087/v1</string>
+		<string>--model</string>
+		<string>qwen3-8b-q5km-instruct</string>
+		<string>--api-key-file</string>
+		<string>/Users/zhengenrong/.pandosi/llm-api-8b-q6.token</string>
+		<string>--fallback-base-url</string>
+		<string>http://127.0.0.1:8080/v1</string>
+		<string>--fallback-model</string>
+		<string>qwen3-4b-instruct-2507</string>
+		<string>--fallback-api-key-file</string>
+		<string>/Users/zhengenrong/.pandosi/llm-api.token</string>
+		<string>--mailbox</string>
+		<string>http://127.0.0.1:8776</string>
+		<string>--mailbox-fallback</string>
+		<string>http://192.168.31.100:8778</string>
+		<string>--mailbox-fallback</string>
+		<string>http://100.93.216.90:8778</string>
+		<string>--token-file</string>
+		<string>/Users/zhengenrong/.pandosi/mailbox.token</string>
+		<string>--ledger</string>
+		<string>/Users/zhengenrong/.pandosi/think-ledger.jsonl</string>
+		<string>--interval</string>
+		<string>150</string>
+		<string>--explore-every</string>
+		<string>5</string>
+		<string>--activity-every</string>
+		<string>4</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>/Users/zhengenrong/.pandosi/logs/think.launchd.err</string>
+	<key>StandardOutPath</key>
+	<string>/Users/zhengenrong/.pandosi/logs/think.launchd.out</string>
+	<key>ThrottleInterval</key>
+	<integer>15</integer>
+	<key>WorkingDirectory</key>
+	<string>/Users/zhengenrong/Downloads/PandoSI-island</string>
 </dict>
 </plist>

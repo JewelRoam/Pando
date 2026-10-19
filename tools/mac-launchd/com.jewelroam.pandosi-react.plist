@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>KeepAlive</key>
+	<true/>
+	<key>Label</key>
+	<string>com.jewelroam.pandosi-react</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/zhengenrong/Downloads/PandoSI-island/.venv/bin/python</string>
+		<string>-m</string>
+		<string>pando.reactd</string>
+		<string>--root</string>
+		<string>http://127.0.0.1:8765</string>
+		<string>--pairing-token-file</string>
+		<string>/Users/zhengenrong/.pandosi/pairing.token</string>
+		<string>--mailbox</string>
+		<string>http://127.0.0.1:8776</string>
+		<string>--token-file</string>
+		<string>/Users/zhengenrong/.pandosi/mailbox.token</string>
+		<string>--mailbox-fallback</string>
+		<string>http://192.168.31.100:8778</string>
+		<string>--mailbox-fallback</string>
+		<string>http://100.93.216.90:8778</string>
+		<string>--ledger</string>
+		<string>/Users/zhengenrong/.pandosi/reaction-ledger.jsonl</string>
+		<string>--interval</string>
+		<string>40</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>/Users/zhengenrong/.pandosi/logs/react.launchd.err</string>
+	<key>StandardOutPath</key>
+	<string>/Users/zhengenrong/.pandosi/logs/react.launchd.out</string>
+	<key>ThrottleInterval</key>
+	<integer>15</integer>
+	<key>WorkingDirectory</key>
+	<string>/Users/zhengenrong/Downloads/PandoSI-island</string>
+</dict>
+</plist>

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.jewelroam.pandosi-code-watch</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/zhengenrong/Downloads/PandoSI-island/.venv/bin/python</string>
+    <string>/Users/zhengenrong/Downloads/PandoSI-island/tools/node_code_watch.py</string>
+    <string>--repo</string>
+    <string>/Users/zhengenrong/Downloads/PandoSI-island</string>
+    <string>--peer</string>
+    <string>http://127.0.0.1:8478/code.bundle</string>
+    <string>--peer-token-file</string>
+    <string>/Users/zhengenrong/.pandosi/mailbox.token</string>
+    <string>--on-update</string>
+    <string>clients</string>
+    <string>--ledger</string>
+    <string>/Users/zhengenrong/.pandosi/code-sync-ledger.jsonl</string>
+    <string>--interval</string>
+    <string>300</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/zhengenrong/Downloads/PandoSI-island</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>/Users/zhengenrong/.pandosi/logs/code-watch.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/zhengenrong/.pandosi/logs/code-watch.log</string>
+</dict>
+</plist>

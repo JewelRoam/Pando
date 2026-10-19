@@ -11,9 +11,16 @@ did in a ledger a peer can read.
 What happens after a fast-forward is explicit, never implied:
 
   none     record the new HEAD and change nothing (default)
-  clients  stop the client processes so the logon supervisor respawns them;
-           a model server is never touched
+  clients  stop the client processes so whatever supervises them respawns
+           them; a model server is never touched
   node     run the full node restart script, models included
+
+``clients`` needs no per-platform command. With ``--client-cmd`` it runs that
+string, which is how this was first deployed on Windows; without it -- the
+default, and the only form the Mac can use -- it hands the *names* of the
+clients to ``code_sync.restart_units``, which picks ``systemctl``,
+``launchctl`` or the Windows process table from the running interpreter. One
+list of clients, three hosts, no third copy of the deployment to keep in sync.
 
 ``node`` is used automatically when the update changed the supervisor's own
 roster file: a supervisor that is already running cannot learn a new service
@@ -37,7 +44,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tools.code_sync import sync_repo  # noqa: E402
+from tools.code_sync import CLIENT_UNITS, restart_units, sync_repo  # noqa: E402
 
 
 def _sha256(path: Path) -> str:
@@ -77,7 +84,7 @@ def _spawn(command: str) -> dict:
 
 def watch_round(*, repo, remote="origin", peer="", peer_token="",
                 on_update="none", client_cmd="", node_cmd="",
-                supervisor="", ledger=None) -> dict:
+                supervisor="", ledger=None, platform="") -> dict:
     """One sync. Restart only if the fast-forward actually moved HEAD."""
     repo = Path(repo).expanduser()
     supervisor_path = Path(supervisor).expanduser() if supervisor else None
@@ -96,7 +103,16 @@ def watch_round(*, repo, remote="origin", peer="", peer_token="",
         else:
             use_node = roster_changed or on_update == "node"
             row["action"] = "node-restart" if use_node else "client-restart"
-            row["command"] = _spawn(node_cmd if use_node else client_cmd)
+            command = node_cmd if use_node else client_cmd
+            if command:
+                row["command"] = _spawn(command)
+            else:
+                # No shell string: the clients are named, and the platform
+                # underneath this process decides what "restart" means. This
+                # is the branch the Mac uses, and the branch pi5's systemd
+                # timer will use when it is switched off ``--restart``.
+                row["restart"] = restart_units(list(CLIENT_UNITS),
+                                               platform=platform)
     _append(ledger, row)
     return row
 
@@ -111,7 +127,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--on-update", default="none",
                         choices=("none", "clients", "node"))
     parser.add_argument("--client-cmd", default="",
-                        help="stop the clients; the supervisor respawns them")
+                        help="stop the clients with this command; omit it to "
+                             "use the built-in per-platform restart")
+    parser.add_argument("--platform", default="",
+                        help="service manager to use (default: this host's)")
     parser.add_argument("--node-cmd", default="",
                         help="full node restart, models included")
     parser.add_argument("--supervisor", default="",
@@ -131,7 +150,8 @@ def main(argv: list[str] | None = None) -> int:
         row = watch_round(repo=args.repo, remote=args.remote, peer=args.peer,
                           peer_token=token, on_update=args.on_update,
                           client_cmd=args.client_cmd, node_cmd=args.node_cmd,
-                          supervisor=args.supervisor, ledger=ledger)
+                          supervisor=args.supervisor, ledger=ledger,
+                          platform=args.platform)
         # An idle round is the normal case; only say something when it was not.
         if announce or row.get("updated") or row.get("reason") != "already":
             print(json.dumps(row, ensure_ascii=False, sort_keys=True), flush=True)

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.jewelroam.pandosi-execute</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/zhengenrong/Downloads/PandoSI-island/.venv/bin/python</string>
+    <string>-m</string>
+    <string>pando.execute</string>
+    <string>--once</string>
+    <string>--limit</string>
+    <string>80</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/zhengenrong/Downloads/PandoSI-island</string>
+  <key>RunAtLoad</key><true/>
+  <key>StartInterval</key><integer>600</integer>
+  <key>StandardOutPath</key><string>/Users/zhengenrong/.pandosi/logs/execute.launchd.out</string>
+  <key>StandardErrorPath</key><string>/Users/zhengenrong/.pandosi/logs/execute.launchd.err</string>
+</dict>
+</plist>
