@@ -1070,6 +1070,13 @@ def dry_run(proposals: list[Proposal], reactions: list[dict], **policy) -> dict:
     """Judge every proposal. No actuator, no write."""
     results = [judge(proposal, reactions, actuators={}, **policy)
                for proposal in proposals]
+    for result in results:
+        # ``judge`` cannot distinguish "this host has no implementation" from
+        # "the dry run deliberately supplied none". Saying the former here
+        # made an adopted action look like a missing actuator even when the
+        # real executor had one, which sent operators chasing a false fault.
+        if result["detail"] == "adopted, not executed: no actuator":
+            result["detail"] = "adopted, not executed: dry run (actuator not invoked)"
     return {"summary": summarize(results), "results": results}
 
 

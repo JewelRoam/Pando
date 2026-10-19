@@ -5365,6 +5365,20 @@ class TestExecution(unittest.TestCase):
         self.assertIsNone(result["success"])
         self.assertIn("no actuator", result["detail"])
 
+    def test_dry_run_does_not_misreport_an_available_actuator_as_missing(self):
+        from pando.execute import dry_run
+        report = dry_run([self._proposal()], [
+            self._vote("mac-text", "赞同"),
+            self._vote("mac-llm", "赞同"),
+        ])
+        result = report["results"][0]
+        self.assertTrue(result["adopted"])
+        self.assertFalse(result["executed"])
+        self.assertEqual(
+            result["detail"],
+            "adopted, not executed: dry run (actuator not invoked)")
+        self.assertEqual(report["summary"]["adopted_not_executed"], 1)
+
     def test_one_decline_holds_even_when_others_adopt(self):
         from pando.execute import judge
         result = judge(self._proposal(), [
