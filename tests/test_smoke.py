@@ -10117,6 +10117,130 @@ class TestCodeSync(unittest.TestCase):
             finally:
                 subprocess.run = real
 
+    def test_units_are_reloaded_before_the_restart_that_uses_them(self):
+        """The process must start the bytes that this round just installed.
+
+        2026-10-20: pi5 fast-forwarded to the commit adding ``--grant-url`` and
+        wrote the matching unit, but restarted the old unit first. The live
+        executor kept its pre-grant argv until another commit arrived. A
+        restart before ``daemon-reload`` looks successful in both ledgers yet
+        runs yesterday's configuration.
+        """
+        sync = self._load()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env, src, bare, client = self._world(root)
+            units = src / "tools" / "pi5-systemd"
+            units.mkdir(parents=True)
+            (units / "pandosi-execute.service").write_text(
+                "ExecStart=/new --grant-url http://example/operator-grant\n")
+            self._run(env, "git", "-C", str(src), "add", "-A")
+            self._run(env, "git", "-C", str(src), "commit", "-m", "units")
+            self._run(env, "git", "-C", str(src), "push", str(bare), "main")
+            self._run(env, "git", "-C", str(client), "pull", "--ff-only",
+                      str(bare), "main")
+            target = root / "deployed-units"
+            target.mkdir()
+            (target / "pandosi-execute.service").write_text(
+                "ExecStart=/old\n")
+
+            calls = []
+            real = subprocess.run
+            subprocess.run = self._systemctl_stub(calls)
+            try:
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    sync.main(["--repo", str(client),
+                               "--platform", "linux",
+                               "--install-units", str(units),
+                               "--install-units-target", str(target),
+                               "--restart", "pandosi-execute.service"])
+                result = json.loads(out.getvalue())
+            finally:
+                subprocess.run = real
+
+            self.assertEqual(result["units"]["changed"],
+                             ["pandosi-execute.service"])
+            self.assertTrue(result["units"]["reloaded"])
+            self.assertEqual(result["restarted"],
+                             ["pandosi-execute.service"])
+            self.assertEqual(calls, [
+                ["systemctl", "--user", "daemon-reload"],
+                ["systemctl", "--user", "restart",
+                 "pandosi-execute.service"],
+            ])
+            self.assertTrue(result["restart_state"]["written"])
+
+            # The stamp describes a restart that actually happened. Once it is
+            # written, the ten-minute timer re-reads the same units but does
+            # not churn every client on every round. A future head or unit-byte
+            # change alters the fingerprint and re-arms the restart.
+            calls.clear()
+            subprocess.run = self._systemctl_stub(calls)
+            try:
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    sync.main(["--repo", str(client),
+                               "--platform", "linux",
+                               "--install-units", str(units),
+                               "--install-units-target", str(target),
+                               "--restart", "pandosi-execute.service"])
+                steady = json.loads(out.getvalue())
+            finally:
+                subprocess.run = real
+            self.assertEqual(steady["restart"], "already-recorded")
+            self.assertEqual(steady["restarted"], [])
+            self.assertEqual(calls, [
+                ["systemctl", "--user", "daemon-reload"],
+            ])
+
+    def test_a_missing_restart_stamp_heals_the_already_stale_generation(self):
+        """The fix must arrive without a second human restart.
+
+        The pi5 failure crossed an updater version boundary: the old updater
+        restarted first and wrote the unit second. By the time the fixed
+        updater runs, the checkout and deployed unit already match, so there
+        is no fast-forward or unit diff left to trigger on. The absent stamp is
+        the remaining evidence that the installed configuration has not yet
+        been through a successful restart.
+        """
+        sync = self._load()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env, _src, _bare, client = self._world(root)
+            units = client / "tools" / "pi5-systemd"
+            target = root / "deployed-units"
+            units.mkdir(parents=True)
+            target.mkdir()
+            text = "ExecStart=/new --grant-url http://example/operator-grant\n"
+            (units / "pandosi-execute.service").write_text(text)
+            (target / "pandosi-execute.service").write_text(text)
+
+            calls = []
+            real = subprocess.run
+            subprocess.run = self._systemctl_stub(calls)
+            try:
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    sync.main(["--repo", str(client),
+                               "--platform", "linux",
+                               "--install-units", str(units),
+                               "--install-units-target", str(target),
+                               "--restart", "pandosi-execute.service"])
+                result = json.loads(out.getvalue())
+            finally:
+                subprocess.run = real
+
+            self.assertEqual(result["reason"], "already")
+            self.assertEqual(result["units"]["changed"], [])
+            self.assertEqual(result["restarted"],
+                             ["pandosi-execute.service"])
+            self.assertEqual(calls, [
+                ["systemctl", "--user", "daemon-reload"],
+                ["systemctl", "--user", "restart",
+                 "pandosi-execute.service"],
+            ])
+
     def test_one_client_list_maps_onto_three_service_managers(self):
         """The clients are named once, so a new host is a row and not a fork.
 

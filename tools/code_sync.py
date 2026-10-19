@@ -634,6 +634,92 @@ def restart_units(units: list[str], *, platform: str = "",
     return {"restarted": [], "reason": "unknown-platform", "platform": plat}
 
 
+RESTART_STAMP = ".pandosi-restart-state.json"
+
+
+def _restart_stamp_path(repo: Path, unit_target: str = "",
+                        explicit: str = "") -> Path:
+    """Where the live process generation is recorded.
+
+    The stamp belongs beside the adopted units when the host has them. A host
+    with no external unit directory (Windows) keeps it inside the checkout's
+    ``.git`` directory, which survives fast-forwards and is never published.
+    """
+    if explicit:
+        return Path(explicit).expanduser()
+    if unit_target:
+        return Path(unit_target).expanduser() / RESTART_STAMP
+    return repo / ".git" / RESTART_STAMP
+
+
+def restart_fingerprint(units: list[str], *, repo: Path, unit_target: str = "",
+                        platform: str = "") -> str:
+    """Identify the bytes a successful restart is expected to be running.
+
+    The checkout head catches a code change. For systemd and launchd the
+    deployed unit bytes are hashed too, because an update can change
+    ``ExecStart`` without changing any Python module. A missing unit is part of
+    the fingerprint instead of an error: the next successful restart should
+    heal it.
+
+    This is deliberately not a probe of the live process. ``systemctl`` can
+    report the reloaded definition while the process still carries yesterday's
+    argv -- the exact state observed on pi5. A stamp written only after a
+    successful restart states the weaker, useful fact: this configuration has
+    been through one restart.
+    """
+    plat = platform_id(platform)
+    handles, _ = resolve_units(units, plat)
+    target = Path(unit_target).expanduser() if unit_target else None
+    records = []
+    for handle in handles:
+        deployed = ""
+        if target is not None:
+            if plat == "linux":
+                path = target / handle
+            elif plat == "darwin" and handle.startswith("launchd:"):
+                path = target / (handle.split(":", 1)[1] + ".plist")
+            else:
+                path = None
+            if path is not None:
+                try:
+                    deployed = hashlib.sha256(path.read_bytes()).hexdigest()
+                except OSError:
+                    deployed = "missing"
+        records.append([handle, deployed])
+    payload = {
+        "head": _head(repo, _env()),
+        "platform": plat,
+        "units": records,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _record_restart(path: Path, fingerprint: str) -> dict:
+    """Persist a successful restart, atomically enough for a timer retry."""
+    document = json.dumps({"fingerprint": fingerprint}, sort_keys=True) + "\n"
+    temporary = path.with_name(path.name + ".tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary.write_text(document, encoding="utf-8")
+        temporary.replace(path)
+    except OSError as exc:
+        temporary.unlink(missing_ok=True)
+        return {"path": str(path), "written": False,
+                "reason": "write-failed", "error": str(exc)[:120]}
+    return {"path": str(path), "written": True, "reason": "written"}
+
+
+def _restart_already_recorded(path: Path, fingerprint: str) -> bool:
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(document, dict) \
+        and document.get("fingerprint") == fingerprint
+
+
 #: Only units this project ships are ever written. A name outside the prefix is
 #: not copied, so ``--install-units`` cannot be pointed at an arbitrary file.
 UNIT_PREFIX = "pandosi-"
@@ -1179,6 +1265,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="checkout directory of systemd unit templates")
     parser.add_argument("--install-units-target", default="",
                         help="where this node's units are deployed")
+    parser.add_argument("--restart-state", default="",
+                        help="restart generation stamp (default: beside the "
+                             "installed units, or in the checkout's .git)")
     parser.add_argument("--telemetry-url", default="",
                         help="mailbox endpoint for this node's signed push")
     parser.add_argument("--telemetry-token-file", default="",
@@ -1206,16 +1295,6 @@ def main(argv: list[str] | None = None) -> int:
                        peers=sources, peer_token=token)
     if result.get("updated") and args.install_python:
         result["installed"] = install_checkout(args.install_python, Path(args.repo))
-        if result["installed"] and args.restart:
-            done = restart_units(args.restart, platform=args.platform)
-            result["restarted"] = done["restarted"]
-            result["restart"] = done["reason"]
-            result["restart_driver"] = done.get("driver", "")
-    elif args.restart and result.get("updated"):
-        done = restart_units(args.restart, platform=args.platform)
-        result["restarted"] = done["restarted"]
-        result["restart"] = done["reason"]
-        result["restart_driver"] = done.get("driver", "")
     # Adopt our own successor, and our own units, from a checkout we just
     # confirmed is current. A fetch that failed leaves the checkout at an older
     # commit; adopting from *that* copy would roll the updater (and the units)
@@ -1238,6 +1317,41 @@ def main(argv: list[str] | None = None) -> int:
                                             platform=args.platform)
         else:
             result["units"] = {"changed": [], "reloaded": False, **unconfirmed}
+    # Restart *after* the unit files have been installed and reloaded. Doing
+    # this in the other order starts the old ExecStart and leaves the new one
+    # dormant until a later commit -- observed on pi5 on 2026-10-20, where the
+    # checkout and on-disk unit both named --grant-url while the live process
+    # did not. The persisted fingerprint is what heals that already-damaged
+    # state on the next round: the old updater wrote the units after restarting
+    # the clients, but never restarted them with those bytes. ``units.changed``
+    # covers a template adopted at an otherwise unchanged head.
+    unit_changed = bool((result.get("units") or {}).get("changed"))
+    units_ready = not (args.install_units and args.install_units_target) \
+        or bool((result.get("units") or {}).get("reloaded"))
+    install_failed = bool(args.install_python) and result.get("updated") \
+        and not result.get("installed")
+    if args.restart:
+        state_path = _restart_stamp_path(Path(args.repo),
+                                         args.install_units_target,
+                                         args.restart_state)
+        fingerprint = restart_fingerprint(
+            args.restart, repo=Path(args.repo),
+            unit_target=args.install_units_target, platform=args.platform)
+        unrecorded = not _restart_already_recorded(state_path, fingerprint)
+        result["restart_fingerprint"] = fingerprint
+        if install_failed:
+            result["restart"] = "install-failed"
+        elif not units_ready:
+            result["restart"] = "units-not-reloaded"
+        elif confirmed and (result.get("updated") or unit_changed or unrecorded):
+            done = restart_units(args.restart, platform=args.platform)
+            result["restarted"] = done["restarted"]
+            result["restart"] = done["reason"]
+            result["restart_driver"] = done.get("driver", "")
+            if done.get("reason") == "restarted":
+                result["restart_state"] = _record_restart(state_path, fingerprint)
+        else:
+            result["restart"] = "already-recorded"
     if args.telemetry_url:
         required = {
             "--telemetry-token-file": args.telemetry_token_file,
