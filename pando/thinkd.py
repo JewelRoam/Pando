@@ -69,7 +69,9 @@ from .identity import load_or_create
 from .playbook import parse_playbook
 from .policy import KNOBS, validate as validate_policy
 from .net import open_url
-from .operators import validate as validate_operator
+from .operators import (DEFAULT_INSTALLED, OperatorError,
+                        installed as installed_operators,
+                        merge_action_space, validate as validate_operator)
 from .proposal_mail import (delivery_failed, fetch_proposals,
                             mailbox_chain, publish_proposal)
 
@@ -117,6 +119,36 @@ SYSTEM_PROMPT = f"""你是 PandoSI 殖民地的一名提案者。这个群体是
    退回时会把一份能通过校验的例子直接给你。
    其他 action 不要写 params。
 """
+
+
+def extra_action_block(space: dict[str, str]) -> str:
+    """The prompt section naming verbs this host installed and nobody wrote.
+
+    Empty when nothing is installed, and the prompt is then byte-identical to
+    the built-in one -- an install that changed every host's prompt would be a
+    silent rule change on hosts that never reviewed it.
+    """
+    extra = [name for name in space if name not in ACTION_SPACE]
+    if not extra:
+        return ""
+    lines = "\n".join(f"{name}: {space[name]}" for name in extra)
+    return ("\n本机额外安装的动作（action 同样可以取其中之一）：\n" + lines + "\n")
+
+
+def effective_action_space(directory: str | Path = DEFAULT_INSTALLED
+                           ) -> dict[str, str]:
+    """Built-ins plus this host's installed verbs, fail-open to the built-ins.
+
+    Fail-open is right here and fail-closed is right in the executor: a
+    proposer that stopped proposing because one record is unreadable would turn
+    a bad file into a stopped colony, while an executor that quietly ran the
+    smaller set would be the failure the record exists to prevent. Both read the
+    same directory; only the executor is allowed to refuse.
+    """
+    try:
+        return merge_action_space(ACTION_SPACE, installed_operators(directory))
+    except OperatorError:
+        return dict(ACTION_SPACE)
 
 
 def culture_skeleton() -> dict:
@@ -496,12 +528,21 @@ def destination_of(action: str, value) -> tuple[str, str]:
 
 
 def proposal_from_obj(obj: dict, author: str, node_id: str,
-                      round_no: int) -> tuple[Proposal | None, str]:
-    """Validate one model answer against ACTION_SPACE. Returns (proposal, why-not)."""
+                      round_no: int,
+                      action_space: dict | None = None,
+                      ) -> tuple[Proposal | None, str]:
+    """Validate one model answer against the space it was offered.
+
+    ``action_space`` defaults to the built-ins, so a caller that has not read
+    the installed set cannot accidentally widen what a proposal may name. An
+    installed verb carries no params here on purpose: its params come from the
+    record a reviewer wrote, never from the model.
+    """
+    space = dict(ACTION_SPACE if action_space is None else action_space)
     if not isinstance(obj, dict):
         return None, "model answer was not a JSON object"
     action = str(obj.get("action") or "").strip()
-    if action not in ACTION_SPACE:
+    if action not in space:
         return None, f"action {action!r} is not in the action space"
     goal = str(obj.get("goal") or "").strip()
     if not goal:
@@ -708,6 +749,12 @@ class Thinker:
         self.node_id = node_id
         self.spool = spool
         self.proposer = proposer
+        # What this host may propose: the built-ins plus the verbs a reviewer
+        # installed here. With nothing installed both the prompt and the space
+        # are the built-in ones, so the colony's shared menu is unchanged.
+        self.action_space = effective_action_space()
+        self.system_prompt = SYSTEM_PROMPT + extra_action_block(
+            self.action_space)
         self.identity = identity
         self.ledger = ledger
         self.mailbox_url = mailbox_url
@@ -878,13 +925,14 @@ class Thinker:
             + f"destination 必须是 JSON 里的一个字段，值只能是：{names}。"
             + "只把名字写进 goal 不算。或者换一个动作。只输出一行 JSON。")
         try:
-            text2, usage2 = self.proposer.complete(SYSTEM_PROMPT, retry_user)
+            text2, usage2 = self.proposer.complete(self.system_prompt, retry_user)
         except Exception:  # noqa: BLE001 - a failed retry holds the round
             return None
         round_.prompt_tokens += int(usage2.get("prompt_tokens") or 0)
         round_.completion_tokens += int(usage2.get("completion_tokens") or 0)
         proposal2, _why2 = proposal_from_obj(
-            extract_json(text2) or {}, self.node_id, self.node_id, round_no)
+            extract_json(text2) or {}, self.node_id, self.node_id, round_no,
+            self.action_space)
         if proposal2 is None or self._destination_problem(proposal2):
             return None
         return proposal2
@@ -910,13 +958,14 @@ class Thinker:
             + json.dumps(skeleton, ensure_ascii=False)
             + "\n或者换一个动作。只输出一行 JSON。")
         try:
-            text2, usage2 = self.proposer.complete(SYSTEM_PROMPT, retry_user)
+            text2, usage2 = self.proposer.complete(self.system_prompt, retry_user)
         except Exception:  # noqa: BLE001 - a failed retry holds the round
             return None
         round_.prompt_tokens += int(usage2.get("prompt_tokens") or 0)
         round_.completion_tokens += int(usage2.get("completion_tokens") or 0)
         proposal2, _why2 = proposal_from_obj(
-            extract_json(text2) or {}, self.node_id, self.node_id, round_no)
+            extract_json(text2) or {}, self.node_id, self.node_id, round_no,
+            self.action_space)
         if proposal2 is None:
             return None
         return proposal2, text2
@@ -950,13 +999,14 @@ class Thinker:
               "如果你要做的不是有界规则改动，就换一个动作。"
               "只输出一行 JSON。")
         try:
-            text2, usage2 = self.proposer.complete(SYSTEM_PROMPT, retry_user)
+            text2, usage2 = self.proposer.complete(self.system_prompt, retry_user)
         except Exception:  # noqa: BLE001 - a failed retry holds the round
             return None
         round_.prompt_tokens += int(usage2.get("prompt_tokens") or 0)
         round_.completion_tokens += int(usage2.get("completion_tokens") or 0)
         proposal2, _why2 = proposal_from_obj(
-            extract_json(text2) or {}, self.node_id, self.node_id, round_no)
+            extract_json(text2) or {}, self.node_id, self.node_id, round_no,
+            self.action_space)
         if proposal2 is None:
             return None
         return proposal2, text2
@@ -990,13 +1040,14 @@ class Thinker:
               "提案只带名字和理由，也不会当场装上任何东西。"
               "如果你要做的不是申请一个新操作，就换一个动作。只输出一行 JSON。")
         try:
-            text2, usage2 = self.proposer.complete(SYSTEM_PROMPT, retry_user)
+            text2, usage2 = self.proposer.complete(self.system_prompt, retry_user)
         except Exception:  # noqa: BLE001 - a failed retry holds the round
             return None
         round_.prompt_tokens += int(usage2.get("prompt_tokens") or 0)
         round_.completion_tokens += int(usage2.get("completion_tokens") or 0)
         proposal2, _why2 = proposal_from_obj(
-            extract_json(text2) or {}, self.node_id, self.node_id, round_no)
+            extract_json(text2) or {}, self.node_id, self.node_id, round_no,
+            self.action_space)
         if proposal2 is None:
             return None
         return proposal2, text2
@@ -1066,7 +1117,7 @@ class Thinker:
         text = usage = None
         for attempt in (1, 2):
             try:
-                text, usage = self.proposer.complete(SYSTEM_PROMPT, user)
+                text, usage = self.proposer.complete(self.system_prompt, user)
                 break
             except (urllib.error.URLError, urllib.error.HTTPError, OSError,
                     ValueError, TimeoutError) as exc:
@@ -1093,7 +1144,7 @@ class Thinker:
             round_.detail = "held: unparseable answer"
             return round_
         proposal, why = proposal_from_obj(obj, self.node_id, self.node_id,
-                                          round_no)
+                                          round_no, self.action_space)
 
         # The action is learnable from the menu; the shape of a playbook is
         # not. Show it rather than holding the round (and rather than
@@ -1143,7 +1194,7 @@ class Thinker:
             # rewords the goal. A reworded goal is not a new step, so the first
             # repair is a constraint, not a plea.
             recent = {str(r.get("action") or "") for r in self.ledger.tail(4)}
-            untried = [name for name in ACTION_SPACE if name not in recent]
+            untried = [name for name in self.action_space if name not in recent]
             if untried:
                 demand = "换一个动作。必须从这些里选：" + "、".join(untried) + "。"
             else:
@@ -1153,12 +1204,13 @@ class Thinker:
                 f"{last_action}。{demand}只改 goal 的措辞不算数。")
             text2 = ""
             try:
-                text2, usage2 = self.proposer.complete(SYSTEM_PROMPT, retry_user)
+                text2, usage2 = self.proposer.complete(self.system_prompt, retry_user)
             except Exception:  # noqa: BLE001 - a failed retry keeps the first answer
                 text2 = ""
             if text2:
                 proposal2, _why = proposal_from_obj(
-                    extract_json(text2) or {}, self.node_id, self.node_id, round_no)
+                    extract_json(text2) or {}, self.node_id, self.node_id,
+                    round_no, self.action_space)
                 if proposal2 is not None and proposal2.action != last_action:
                     proposal = proposal2
                     text = text2

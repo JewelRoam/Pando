@@ -6261,6 +6261,94 @@ class TestExecution(unittest.TestCase):
             self.assertEqual(rows[0]["installed_at"], 1000)
             self.assertEqual(rows[0]["status"], "installed")
 
+    def test_an_installed_verb_reaches_the_proposer_not_just_the_gate(self):
+        """Install is half the loop: the proposer has to be able to name it.
+
+        Written after reading the live tree (2026-10-19): ``merge_action_space``
+        had no caller outside the tests. The gate resolved an installed verb, but
+        ``pando/thinkd.py`` handed the model the hard-coded ``ACTION_SPACE`` and
+        refused every answer outside it, so an installed verb could never appear
+        in a proposal -- and ``next_installed`` only stages proposals that name
+        one. An install nobody can propose is the empty shell this action exists
+        to stop, one level up.
+        """
+        import tempfile
+        from pando.genesis import ACTION_SPACE
+        from pando.identity import Identity
+        from pando.invite import validate as invite_validate
+        from pando.operators import install
+        from pando.thinkd import (SYSTEM_PROMPT, effective_action_space,
+                                  extra_action_block, proposal_from_obj)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            installs = Path(tmp) / "operators"
+            # Nothing installed: built-in space, byte-identical prompt.
+            self.assertEqual(effective_action_space(installs), ACTION_SPACE)
+            self.assertEqual(extra_action_block(ACTION_SPACE), "")
+
+            root = self._staged_operator_spec(tmp)
+            install(root, identity=Identity.generate(),
+                    action_space=ACTION_SPACE,
+                    implementation={"binds_to": "recruit.invite",
+                                    "params": {"candidate": "node-a",
+                                               "expires_in_hours": 72}},
+                    reviewer="mac-codex", validate_params=invite_validate,
+                    installed_dir=installs, ledger=Path(tmp) / "ledger.jsonl")
+
+            space = effective_action_space(installs)
+            self.assertIn("novelty-sampler", space)
+            self.assertEqual(len(space), len(ACTION_SPACE) + 1)
+            for name, description in ACTION_SPACE.items():
+                self.assertEqual(space[name], description)
+
+            prompt = SYSTEM_PROMPT + extra_action_block(space)
+            self.assertTrue(prompt.startswith(SYSTEM_PROMPT))
+            self.assertIn("novelty-sampler", prompt)
+
+            answer = {"action": "novelty-sampler", "goal": "sample a novelty",
+                      "expected_effect": "widen the menu", "cost": 0.1,
+                      "cites": ["r1"]}
+            proposal, why = proposal_from_obj(answer, "mac-proposer",
+                                              "mac-proposer", 1,
+                                              action_space=space)
+            self.assertEqual(why, "")
+            self.assertEqual(proposal.action, "novelty-sampler")
+            # Params come from the record a reviewer wrote, never from the
+            # model, so the proposal carries none of its own.
+            self.assertEqual(proposal.params, {})
+
+            # A caller that does not pass the space cannot widen it by accident.
+            held, why = proposal_from_obj(answer, "mac-proposer",
+                                          "mac-proposer", 1)
+            self.assertIsNone(held)
+            self.assertIn("not in the action space", why)
+
+            # A model-supplied params block is refused even for a verb that is
+            # installed: the binding is not the model's to choose.
+            with_params = dict(answer, params={"candidate": "attacker"})
+            self.assertIsNone(
+                proposal_from_obj(with_params, "mac-proposer", "mac-proposer",
+                                  1, action_space=space)[0])
+
+    def test_a_broken_installed_record_leaves_the_proposer_proposing(self):
+        """Fail-open in the proposer, fail-closed in the executor.
+
+        A proposer that stopped proposing because one record is unreadable
+        would turn a bad file into a stopped colony; an executor that quietly
+        ran the smaller set would be the failure the record exists to prevent.
+        Only the executor is allowed to refuse.
+        """
+        import tempfile
+        from pando.genesis import ACTION_SPACE
+        from pando.thinkd import effective_action_space
+
+        with tempfile.TemporaryDirectory() as tmp:
+            installs = Path(tmp) / "operators"
+            installs.mkdir(parents=True)
+            (installs / "broken.json").write_text('{"operator": "x"}',
+                                                  encoding="utf-8")
+            self.assertEqual(effective_action_space(installs), ACTION_SPACE)
+
     def test_install_refuses_a_draft_that_was_tampered_with(self):
         """A hand-edited spec cannot borrow the signature of the reviewed one.
 
