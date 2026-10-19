@@ -1032,6 +1032,120 @@ def refresh_self(source: Path, target: Path) -> dict:
             "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]}
 
 
+TELEMETRY_TIMEOUT_S = 20.0
+
+
+def _read_telemetry_token(path: str) -> str:
+    token = Path(path).expanduser().read_text(encoding="utf-8").strip()
+    if not token:
+        raise ValueError(f"token file is empty: {path}")
+    return token
+
+
+def _telemetry_round(path: str) -> int:
+    """Largest valid ``round`` in the ledger, not the file's mtime.
+
+    Thinkd writes JSON lines and may be midway through an append when this job
+    runs. A malformed final line is therefore expected; earlier valid rows
+    still describe real progress. No valid row is different: reporting zero
+    would turn "the ledger cannot be read" into a fabricated stall.
+    """
+    largest: int | None = None
+    with Path(path).expanduser().open(encoding="utf-8") as stream:
+        for line in stream:
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            value = row.get("round") if isinstance(row, dict) else None
+            if (isinstance(value, int) and not isinstance(value, bool)
+                    and value >= 0):
+                largest = value if largest is None else max(largest, value)
+    if largest is None:
+        raise ValueError(f"no valid think round in {path}")
+    return largest
+
+
+def _telemetry_json(url: str, *, timeout: float,
+                    headers: dict[str, str] | None = None):
+    request = urllib.request.Request(
+        url, headers={**(headers or {}), "Accept": "application/json"},
+        method="GET")
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def send_telemetry(repo, *, url: str, token_file: str, root_url: str,
+                   root_token_file: str, identity_file: str,
+                   think_ledger: str,
+                   timeout: float = TELEMETRY_TIMEOUT_S) -> dict:
+    """Push one signed root snapshot to the Mac. Never raises.
+
+    This deliberately runs *after* adoption and restart. The observation says
+    what this checkout contains and how far the proposer has got, so sending
+    it before those steps would describe a state that is already obsolete.
+    Any failure is returned in the code-sync ledger row; it never changes the
+    updater's exit code, because losing a mirror must not stop self-update.
+    """
+    try:
+        repo = Path(repo).expanduser().resolve()
+        # This file runs from a copy outside the checkout. Prefer the synced
+        # checkout's modules over whatever the interpreter may have installed.
+        sys.path.insert(0, str(repo))
+        from pando.identity import Identity
+        from pando.net import open_url
+        from pando.telemetry import build_envelope
+
+        root_token = _read_telemetry_token(root_token_file)
+        payload = _telemetry_json(
+            root_url.rstrip("/") + "/nodes",
+            timeout=timeout, headers={"X-Pairing-Token": root_token})
+        nodes = payload.get("nodes") if isinstance(payload, dict) else None
+        if not isinstance(nodes, dict) or not nodes:
+            raise ValueError("Pi5 root returned no node table")
+
+        status = None
+        try:
+            candidate = _telemetry_json(
+                root_url.rstrip("/") + "/status",
+                timeout=timeout, headers={"X-Pairing-Token": root_token})
+            if isinstance(candidate, dict):
+                status = candidate
+        except (OSError, ValueError, urllib.error.URLError):
+            # /nodes is the observation. Status is a useful appendix, not a
+            # second prerequisite that can suppress the primary evidence.
+            pass
+
+        identity_doc = json.loads(Path(identity_file).expanduser()
+                                  .read_text(encoding="utf-8"))
+        identity = Identity.from_json(identity_doc)
+        think_round = _telemetry_round(think_ledger)
+        code_head = _head(repo, _env())
+        if not code_head:
+            raise ValueError("checkout HEAD is unreadable")
+        envelope = build_envelope(identity, nodes=nodes, code_head=code_head,
+                                  think_round=think_round, status=status)
+        token = _read_telemetry_token(token_file)
+        request = urllib.request.Request(
+            url, data=json.dumps(envelope, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json",
+                     "Accept": "application/json",
+                     "Authorization": f"Bearer {token}"},
+            method="POST")
+        with open_url(request, timeout) as response:
+            answer = json.loads(response.read().decode("utf-8"))
+        return {"sent": True, "members": len(nodes),
+                "code_head": code_head, "think_round": think_round,
+                "mirrored_at": (answer.get("mirrored_at")
+                                if isinstance(answer, dict) else None),
+                "status": "sent"}
+    except Exception as exc:
+        detail = str(exc).strip()[:300]
+        return {"sent": False, "status": "failed",
+                "reason": "telemetry-failed",
+                "error": f"{type(exc).__name__}: {detail}"}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--repo", default="",
@@ -1065,6 +1179,18 @@ def main(argv: list[str] | None = None) -> int:
                         help="checkout directory of systemd unit templates")
     parser.add_argument("--install-units-target", default="",
                         help="where this node's units are deployed")
+    parser.add_argument("--telemetry-url", default="",
+                        help="mailbox endpoint for this node's signed push")
+    parser.add_argument("--telemetry-token-file", default="",
+                        help="mailbox bearer token used to send telemetry")
+    parser.add_argument("--telemetry-root-url", default="",
+                        help="this node's root URL, read after adoption")
+    parser.add_argument("--telemetry-root-token-file", default="",
+                        help="pairing token for this node's own root")
+    parser.add_argument("--telemetry-identity", default="",
+                        help="identity whose signature the receiver pins")
+    parser.add_argument("--telemetry-think-ledger", default="",
+                        help="JSONL ledger whose largest round is reported")
     args = parser.parse_args(argv)
     if args.restart_clients:
         done = restart_units(list(CLIENT_UNITS), platform=args.platform)
@@ -1112,6 +1238,28 @@ def main(argv: list[str] | None = None) -> int:
                                             platform=args.platform)
         else:
             result["units"] = {"changed": [], "reloaded": False, **unconfirmed}
+    if args.telemetry_url:
+        required = {
+            "--telemetry-token-file": args.telemetry_token_file,
+            "--telemetry-root-url": args.telemetry_root_url,
+            "--telemetry-root-token-file": args.telemetry_root_token_file,
+            "--telemetry-identity": args.telemetry_identity,
+            "--telemetry-think-ledger": args.telemetry_think_ledger,
+        }
+        absent = [flag for flag, value in required.items() if not value]
+        if absent:
+            result["telemetry"] = {
+                "sent": False, "status": "failed", "reason": "not-configured",
+                "error": "missing " + ", ".join(absent),
+            }
+        else:
+            result["telemetry"] = send_telemetry(
+                args.repo, url=args.telemetry_url,
+                token_file=args.telemetry_token_file,
+                root_url=args.telemetry_root_url,
+                root_token_file=args.telemetry_root_token_file,
+                identity_file=args.telemetry_identity,
+                think_ledger=args.telemetry_think_ledger)
     print(json.dumps(result, ensure_ascii=False, sort_keys=True), flush=True)
     return 0 if result["reason"] in ("already", "fast-forward") else 2
 

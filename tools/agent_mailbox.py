@@ -48,6 +48,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from pando.net import open_url  # noqa: E402 - repo root must be importable
+from pando.telemetry import (  # noqa: E402 - repo root must be importable
+    PI5_PUBKEY, TelemetryError, TelemetryReceiver,
+    TelemetrySignatureError,
+)
 
 OPEN, CLAIMED, DONE, FAILED, BLOCKED = "open", "claimed", "done", \
     "failed", "blocked"
@@ -207,7 +211,7 @@ class Mailbox:
             return chosen, True
 
 
-def build_handler(mailbox: Mailbox, token: str):
+def build_handler(mailbox: Mailbox, token: str, telemetry=None):
     class MailboxHandler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
             pass
@@ -273,6 +277,27 @@ def build_handler(mailbox: Mailbox, token: str):
                 return
             path = self.path.split("?", 1)[0]
             payload = self._body()
+            if path == "/telemetry/pi5":
+                if telemetry is None:
+                    self._send(404, {"error": "not found"})
+                    return
+                try:
+                    answer = telemetry.receive(payload)
+                except TelemetrySignatureError as exc:
+                    self._send(403, {"error": str(exc)[:200]})
+                    return
+                except TelemetryError as exc:
+                    self._send(400, {"error": str(exc)[:200]})
+                    return
+                except OSError as exc:
+                    # Validation succeeded, so the old snapshot is still the
+                    # last valid observation. Do not pretend this new one
+                    # landed when the atomic replace failed.
+                    self._send(500, {"error": "telemetry write failed",
+                                     "detail": str(exc)[:200]})
+                    return
+                self._send(200, answer)
+                return
             if path == "/tasks/bodies":
                 # A listing carries ids and titles but no bodies. Reading a
                 # round's worth of rows one ``/task/<id>`` at a time is a round
@@ -374,8 +399,10 @@ def serve(args) -> int:
         print(f"generated a new token into {token_file}: {generated}")
     token = token_file.read_text(encoding="utf-8").strip()
     mailbox = Mailbox(directory)
+    telemetry = (TelemetryReceiver(args.telemetry_root)
+                 if getattr(args, "telemetry_root", "") else None)
     server = _MailboxServer((args.host, args.port),
-                            build_handler(mailbox, token))
+                            build_handler(mailbox, token, telemetry))
     print(f"agent mailbox serving on http://{args.host}:{args.port} "
           f"(dir {directory}, {len(mailbox.list(OPEN))} open task(s))",
           flush=True)
@@ -512,6 +539,10 @@ def main() -> int:
     server.add_argument("--port", type=int, default=8766)
     server.add_argument("--dir", default="~/.pando/mailbox")
     server.add_argument("--token-file", default="~/.pando/mailbox.token")
+    server.add_argument(
+        "--telemetry-root", default="",
+        help="atomically publish signed Pi5 telemetry at this root-table path; "
+             f"the signer is pinned to {PI5_PUBKEY}")
     server.set_defaults(func=serve)
 
     def client_parser(verb: str, help_text: str):

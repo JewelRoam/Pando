@@ -9836,6 +9836,246 @@ class TestCodeSync(unittest.TestCase):
             self.assertEqual(len(seen), 1)
 
 
+class TestPi5Telemetry(unittest.TestCase):
+    """Pi5 must be observable over the same direction it already talks.
+
+    A root table the Mac cannot dial is not evidence that Pi5 stopped. The
+    sender therefore proves its identity with the durable node key, and the
+    receiver stamps its *own* clock. These tests pin both halves of that
+    contract, including the failures that must leave the previous snapshot
+    untouched.
+    """
+
+    def _modules(self):
+        from pando import telemetry
+        from tools import agent_mailbox, code_sync
+        return telemetry, agent_mailbox, code_sync
+
+    @staticmethod
+    def _identity():
+        from pando.identity import Identity
+        return Identity.generate()
+
+    def test_the_receiver_accepts_the_pinned_key_and_stamps_its_clock(self):
+        telemetry, _, _ = self._modules()
+        identity = self._identity()
+        envelope = telemetry.build_envelope(
+            identity, nodes={"pandosi-pi5-x": {"host": "192.168.31.22"}},
+            code_head="a" * 40, think_round=42, sent_at=1.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            destination = Path(tmp) / "pi5-root.json"
+            receiver = telemetry.TelemetryReceiver(
+                destination, expected_pubkey=identity.public_key)
+            answer = receiver.receive(envelope, now=2000.0)
+            document = json.loads(destination.read_text(encoding="utf-8"))
+        self.assertTrue(answer["ok"])
+        self.assertEqual(document["mirrored_at"], 2000.0)
+        self.assertEqual(document["sent_at"], 1.0,
+                         "the sender clock is diagnostic, not freshness")
+        self.assertEqual(document["telemetry"]["host"], "pi5")
+        self.assertEqual(document["code_head"], "a" * 40)
+
+    def test_any_payload_change_or_unknown_field_breaks_the_signature(self):
+        telemetry, _, _ = self._modules()
+        identity = self._identity()
+        envelope = telemetry.build_envelope(
+            identity, nodes={"pandosi-pi5-x": {"host": "192.168.31.22"}},
+            code_head="a" * 40, think_round=42)
+        changed = json.loads(json.dumps(envelope))
+        changed["payload"]["nodes"]["pandosi-pi5-x"]["host"] = "10.0.0.1"
+        with self.assertRaises(telemetry.TelemetrySignatureError):
+            telemetry.validate_envelope(changed, identity.public_key)
+
+        unknown = json.loads(json.dumps(envelope))
+        unknown["payload"]["surprise"] = True
+        with self.assertRaises(telemetry.TelemetryError):
+            telemetry.validate_envelope(unknown, identity.public_key)
+        extra_top = json.loads(json.dumps(envelope))
+        extra_top["surprise"] = True
+        with self.assertRaises(telemetry.TelemetryError):
+            telemetry.validate_envelope(extra_top, identity.public_key)
+
+    def test_wrong_signer_and_missing_signature_are_refused(self):
+        telemetry, _, _ = self._modules()
+        identity = self._identity()
+        other = self._identity()
+        envelope = telemetry.build_envelope(
+            identity, nodes={"pandosi-pi5-x": {}}, code_head="a" * 40,
+            think_round=1)
+        with self.assertRaises(telemetry.TelemetrySignatureError):
+            telemetry.validate_envelope(envelope, other.public_key)
+        envelope["sig"] = ""
+        with self.assertRaises(telemetry.TelemetrySignatureError):
+            telemetry.validate_envelope(envelope, identity.public_key)
+
+    def test_a_failed_replace_leaves_the_last_valid_mirror_intact(self):
+        telemetry, _, _ = self._modules()
+        from unittest import mock
+        identity = self._identity()
+        envelope = telemetry.build_envelope(
+            identity, nodes={"pandosi-pi5-x": {}}, code_head="b" * 40,
+            think_round=9)
+        with tempfile.TemporaryDirectory() as tmp:
+            destination = Path(tmp) / "pi5-root.json"
+            destination.write_text('{"mirrored_at": 10}\n', encoding="utf-8")
+            receiver = telemetry.TelemetryReceiver(
+                destination, expected_pubkey=identity.public_key)
+            with mock.patch.object(telemetry.os, "replace",
+                                   side_effect=OSError("disk full")):
+                with self.assertRaises(OSError):
+                    receiver.receive(envelope, now=2000.0)
+            self.assertEqual(destination.read_text(encoding="utf-8"),
+                             '{"mirrored_at": 10}\n')
+
+    def test_the_http_endpoint_requires_both_tokens_and_creates_no_task(self):
+        telemetry, mailbox_tool, _ = self._modules()
+        identity = self._identity()
+        envelope = telemetry.build_envelope(
+            identity, nodes={"pandosi-pi5-x": {}}, code_head="c" * 40,
+            think_round=7)
+        with tempfile.TemporaryDirectory() as tmp:
+            box = mailbox_tool.Mailbox(Path(tmp) / "mailbox")
+            receiver = telemetry.TelemetryReceiver(
+                Path(tmp) / "pi5-root.json",
+                expected_pubkey=identity.public_key)
+            server = mailbox_tool.ThreadingHTTPServer(
+                ("127.0.0.1", 0),
+                mailbox_tool.build_handler(box, "mail-token", receiver))
+            endpoint = (f"http://127.0.0.1:{server.server_address[1]}"
+                        "/telemetry/pi5")
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                body = json.dumps(envelope).encode("utf-8")
+                wrong = urllib.request.Request(
+                    endpoint, data=body,
+                    headers={"Authorization": "Bearer wrong",
+                             "Content-Type": "application/json"}, method="POST")
+                with self.assertRaises(urllib.error.HTTPError) as caught:
+                    urllib.request.urlopen(wrong, timeout=3)
+                self.assertEqual(caught.exception.code, 403)
+                caught.exception.close()
+
+                right = urllib.request.Request(
+                    endpoint, data=body,
+                    headers={"Authorization": "Bearer mail-token",
+                             "Content-Type": "application/json"}, method="POST")
+                with urllib.request.urlopen(right, timeout=3) as response:
+                    self.assertEqual(response.status, 200)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+            self.assertEqual(box.list("open"), [], "telemetry is not work")
+            self.assertTrue((Path(tmp) / "pi5-root.json").is_file())
+
+    def test_the_sender_signs_the_live_table_and_largest_ledger_round(self):
+        telemetry, mailbox_tool, sync = self._modules()
+        from unittest import mock
+        identity = self._identity()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = root / "repo"
+            repo.mkdir()
+            identity_file = root / "identity.json"
+            identity_file.write_text(json.dumps(identity.to_json()),
+                                     encoding="utf-8")
+            think_ledger = root / "think-ledger.jsonl"
+            think_ledger.write_text(
+                '{"round": 4}\nnot-json\n{"round": 19}\n', encoding="utf-8")
+            root_token = root / "root.token"
+            root_token.write_text("root-token", encoding="utf-8")
+            mail_token = root / "mail.token"
+            mail_token.write_text("mail-token", encoding="utf-8")
+            destination = root / "received.json"
+            receiver = telemetry.TelemetryReceiver(
+                destination, expected_pubkey=identity.public_key)
+            state: dict = {}
+
+            class Handler(mailbox_tool.BaseHTTPRequestHandler):
+                def log_message(self, *_args):
+                    pass
+
+                def _send(self, code, payload):
+                    data = json.dumps(payload).encode("utf-8")
+                    self.send_response(code)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+
+                def do_GET(self):  # noqa: N802
+                    if self.headers.get("X-Pairing-Token") != "root-token":
+                        self._send(403, {"error": "pairing"})
+                    elif self.path == "/nodes":
+                        self._send(200, {"nodes": {
+                            "pandosi-pi5-x": {"host": "192.168.31.22"},
+                            "pandosi-pi5-laya": {"host": "192.168.31.22"},
+                        }})
+                    elif self.path == "/status":
+                        self._send(200, {"members": 2, "quorum_k": 1})
+                    else:
+                        self._send(404, {"error": "not found"})
+
+                def do_POST(self):  # noqa: N802
+                    if self.headers.get("Authorization") != "Bearer mail-token":
+                        self._send(403, {"error": "bearer"})
+                        return
+                    length = int(self.headers.get("Content-Length", 0))
+                    state["envelope"] = json.loads(
+                        self.rfile.read(length).decode("utf-8"))
+                    try:
+                        answer = receiver.receive(state["envelope"])
+                    except telemetry.TelemetryError as exc:
+                        self._send(403, {"error": str(exc)})
+                        return
+                    self._send(200, answer)
+
+            server = mailbox_tool.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                endpoint = (f"http://127.0.0.1:{server.server_address[1]}"
+                            "/telemetry/pi5")
+                root_url = f"http://127.0.0.1:{server.server_address[1]}"
+                with mock.patch.object(sync, "_head", return_value="d" * 40):
+                    result = sync.send_telemetry(
+                        repo, url=endpoint, token_file=str(mail_token),
+                        root_url=root_url,
+                        root_token_file=str(root_token),
+                        identity_file=str(identity_file),
+                        think_ledger=str(think_ledger), timeout=3)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+            self.assertTrue(result["sent"], result)
+            self.assertEqual(result["think_round"], 19)
+            self.assertEqual(state["envelope"]["payload"]["status"],
+                             {"members": 2, "quorum_k": 1})
+            self.assertEqual(destination.read_text(encoding="utf-8").count(
+                "pandosi-pi5-x"), 1)
+
+    def test_a_telemetry_failure_never_changes_the_updater_exit_code(self):
+        _, _, sync = self._modules()
+        from unittest import mock
+        failed = {"sent": False, "status": "failed",
+                  "reason": "telemetry-failed", "error": "offline"}
+        argv = ["--repo", ".", "--telemetry-url", "http://127.0.0.1:1/x",
+                "--telemetry-token-file", "m", "--telemetry-root-url", "r",
+                "--telemetry-root-token-file", "rt",
+                "--telemetry-identity", "i", "--telemetry-think-ledger", "l"]
+        output = io.StringIO()
+        with mock.patch.object(sync, "sync_repo", return_value={
+                "reason": "already", "updated": False, "before": "a",
+                "after": "a", "restarted": []}), \
+                mock.patch.object(sync, "send_telemetry", return_value=failed), \
+                contextlib.redirect_stdout(output):
+            code = sync.main(argv)
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(output.getvalue())["telemetry"], failed)
+
+
 class TestCodeIdentity(unittest.TestCase):
     """A member that cannot say which commit it runs is a member nobody can audit.
 
