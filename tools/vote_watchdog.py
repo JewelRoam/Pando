@@ -187,6 +187,20 @@ def _target_of(task: dict) -> str:
     return ""
 
 
+def exclude_members(rows: dict[str, list[tuple[float, float]]],
+                    ignored: list[str]) -> dict[str, list[tuple[float, float]]]:
+    """Drop members whose host is explicitly outside the always-on set.
+
+    A laptop that is allowed to sleep accumulates stale reactions while it is
+    suspended. Those reactions are real mailbox traffic but not evidence that
+    an always-on deployment is falling behind, so callers must be able to
+    remove those members before the slope survey sees them.
+    """
+    ignored_names = {name for name in ignored if name}
+    return {member: member_rows for member, member_rows in rows.items()
+            if member not in ignored_names}
+
+
 def member_slope(rows: list[tuple[float, float]], now: float,
                  window_s: float = DEFAULT_WINDOW_S,
                  min_samples: int = DEFAULT_MIN_SAMPLES,
@@ -352,6 +366,10 @@ def main(argv: list[str] | None = None) -> int:
                              "as falling behind (default: %(default)s)")
     parser.add_argument("--decision", action="append", default=[], metavar="NAME",
                         help="repeatable: a member that must be voting")
+    parser.add_argument("--ignore-member", action="append", default=[],
+                        metavar="NAME",
+                        help="repeatable: omit a member entirely; use for a "
+                             "host allowed to sleep or outside the always-on set")
     parser.add_argument("--now", type=float, default=None,
                         help="override clock (testing only)")
     parser.add_argument("--json", action="store_true",
@@ -378,7 +396,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     tasks = (payload or {}).get("tasks") or []
 
-    rows = lag_rows(tasks)
+    rows = exclude_members(lag_rows(tasks), args.ignore_member)
     verdicts = survey(rows, args.decision, now,
                       window_s=args.window_seconds,
                       min_samples=args.min_samples,

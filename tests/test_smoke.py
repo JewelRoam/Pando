@@ -3596,6 +3596,29 @@ class TestThinkWatchdogCodeDelivery(unittest.TestCase):
         self.assertNotIn("code-drift-alarms.json", plist)
         self.assertTrue((root / "tools" / "code_drift_check.py").exists())
 
+    def test_the_installed_voter_only_checks_deployed_members(self):
+        """Mac may sleep, so its stale voters are not a 24h deployment fault.
+
+        The voter leg used Mac decision members that necessarily fall behind
+        whenever the laptop wakes. That produced a wedge alarm for a machine
+        the user explicitly excluded from the always-on acceptance set. Only
+        voters hosted on the two always-on deployments may page.
+        """
+        root = Path(__file__).resolve().parents[1]
+        plist = (root / "tools" / "mac-launchd"
+                 / "com.jewelroam.pandosi-think-watchdog.plist").read_text(
+                     encoding="utf-8")
+        args = plistlib.loads(plist.encode("utf-8"))["ProgramArguments"]
+        vote_index = args.index("--vote-cmd")
+        cmd = args[vote_index + 1]
+        self.assertNotIn("--decision mac-text", cmd)
+        self.assertNotIn("--decision mac-laya-int8", cmd)
+        self.assertIn("--ignore-member mac-text", cmd)
+        self.assertIn("--ignore-member mac-laya-int8", cmd)
+        self.assertIn("--decision pandosi-pi5-x", cmd)
+        self.assertIn("--decision pandosi-pi5-laya", cmd)
+        self.assertIn("--decision win-laya-int8", cmd)
+
     def test_the_body_names_the_action_and_the_falsifier(self):
         """The cheap bounded fix, and what would prove the alarm wrong."""
         wd = self._tool()
@@ -11071,6 +11094,21 @@ class TestVoteWatchdog(unittest.TestCase):
         verdict = wd.member_slope(rows, now)
         self.assertEqual(verdict["status"], wd.UNKNOWN)
         self.assertIn("span", verdict["why"])
+
+    def test_sleepable_members_can_be_excluded_before_the_survey(self):
+        """Mac may sleep; its stale reactions must not become a fleet alarm."""
+        wd = self._tool()
+        now = 1_800_000_000.0
+        stale = [(now - 3200 + i * 60, 1200.0 + i * 60)
+                 for i in range(18)]
+        rows = {
+            "mac-text": stale,
+            "win-laya-int8": [(now - 600 + i * 60, 20.0) for i in range(12)],
+        }
+        visible = wd.exclude_members(rows, ["mac-text", "mac-laya-int8"])
+        verdicts = wd.survey(visible, ["win-laya-int8"], now)
+        self.assertNotIn("mac-text", verdicts)
+        self.assertEqual(verdicts["win-laya-int8"]["status"], wd.OK)
 
     def test_a_named_decision_member_that_stops_voting_is_silent(self):
         """Having no slope is its own finding when the caller said "must vote"."""
