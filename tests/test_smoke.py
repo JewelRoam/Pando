@@ -7734,13 +7734,31 @@ class TestLedgerMirror(unittest.TestCase):
 
 
 class TestLocalCi(unittest.TestCase):
-    def test_the_local_gate_names_every_check_the_workflow_runs(self):
+    def _module(self):
         import importlib.util
         path = Path(__file__).resolve().parents[1] / "tools" / "local_ci.py"
         spec = importlib.util.spec_from_file_location("local_ci_under_test", path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
+        return module
+
+    def test_the_local_gate_names_every_check_the_workflow_runs(self):
+        module = self._module()
         self.assertEqual(module.drift(module.WORKFLOW.read_text(encoding="utf-8")), [])
+
+    def test_the_local_gate_also_runs_where_the_history_is_missing(self):
+        """The mirror that would have caught 2026-10-19 before the push.
+
+        On 2026-10-19 ten drift tests reached for ``HEAD~1`` and errored on
+        the runner, twenty pushes running, while this machine stayed green --
+        full history here, one commit there. A gate that only ever ran here
+        cannot tell the two apart, so it must run the suite in a depth-1
+        checkout too, and it must be wired into ``main`` to matter.
+        """
+        module = self._module()
+        self.assertTrue(callable(getattr(module, "shallow_parity", None)))
+        source = Path(module.__file__).read_text(encoding="utf-8")
+        self.assertIn("shallow_parity()", source)
 
     def test_pre_push_runs_the_local_gate(self):
         hook = Path(__file__).resolve().parents[1] / "tools" / "githooks" / "pre-push"
@@ -10484,8 +10502,62 @@ class TestCodeDriftCheck(unittest.TestCase):
         spec.loader.exec_module(mod)
         return mod
 
+    #: The checkout these tests measure is one this class builds, not the one
+    #: the developer happens to be sitting in. Exercising "behind by N" needs
+    #: real ancestry -- ``HEAD~1`` -- and that name does not exist in a
+    #: shallow clone: ``actions/checkout@v4`` fetches at depth 1 by default.
+    #: On 2026-10-19 this class passed on the machine that pushed it and
+    #: errored on the runner with ``rev-parse HEAD~1`` exit 128, ten tests at
+    #: a time, for twenty consecutive pushes. Three fixture commits have the
+    #: ancestry wherever it runs, and no fact about the repository under test
+    #: can turn them green.
+    _fixture_dir: "tempfile.TemporaryDirectory[str] | None" = None
+    _fixture: Path | None = None
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._fixture_dir = tempfile.TemporaryDirectory(prefix="code-drift-repo-")
+        cls._fixture = Path(cls._fixture_dir.name) / "checkout"
+        cls._fixture.mkdir()
+        cls._fixture_git("init", "-b", "main")
+        for index in range(3):
+            (cls._fixture / "README").write_text(
+                f"fixture {index}\n", encoding="utf-8")
+            cls._fixture_git("add", "README")
+            cls._fixture_git("commit", "-m", f"fixture {index}")
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        if cls._fixture_dir is not None:
+            cls._fixture_dir.cleanup()
+            cls._fixture_dir = None
+        cls._fixture = None
+
+    @classmethod
+    def _fixture_git(cls, *args: str) -> None:
+        """One commit chain that owes nothing to the host's git identity."""
+        subprocess.run(
+            ["git", "-C", str(cls._fixture), "-c", "user.name=fixture",
+             "-c", "user.email=fixture@localhost", "-c", "commit.gpgsign=false",
+             *args],
+            check=True, capture_output=True, text=True)
+
     def _repo(self) -> Path:
-        return Path(__file__).resolve().parents[1]
+        """The fixture checkout. Never this working tree; see ``_fixture``."""
+        assert self._fixture is not None, "setUpClass did not build a fixture"
+        return self._fixture
+
+    def test_the_measured_checkout_is_a_fixture_not_this_working_tree(self):
+        """The defect stated as a test: history depth must not decide it.
+
+        The runner clones at depth 1 and this machine has the whole history,
+        so a test that measures the tree it is running in cannot mean the same
+        thing in both places. Pinned here so an edit that reaches back for
+        ``Path(__file__).resolve().parents[1]`` fails on the developer's
+        machine, which is the only place it can still be caught cheaply.
+        """
+        here = Path(__file__).resolve().parents[1].resolve()
+        self.assertNotEqual(self._repo().resolve(), here)
 
     def _rev(self, ref: str) -> str:
         proc = subprocess.run(

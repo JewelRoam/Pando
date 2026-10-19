@@ -1,7 +1,10 @@
 """The checks in .github/workflows/ci.yml, run on this machine before a push.
 
 CI is a second copy of this list, not the first time it runs. A red remote
-run means this command was skipped.
+run means this command was skipped. The list mirrors the workflow, and one
+step goes further: the suite also runs from a depth-1 checkout, because that
+is what ``actions/checkout@v4`` hands the runner and a full local history
+cannot see the difference (see ``shallow_parity``).
 
     .venv/bin/python tools/local_ci.py
 """
@@ -11,6 +14,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -100,6 +104,52 @@ def _argv(marker: str, args: list[str]) -> list[str]:
     return [sys.executable, *args]
 
 
+def _shallow_checkout(dest: Path) -> None:
+    """A depth-1 copy of this tree, including what is not committed yet.
+
+    ``git clone`` only carries commits, so the checkout lands on HEAD while
+    the working tree may be ahead of it. Every path git tracks or would track
+    is copied over that HEAD, so the depth-1 copy is the code about to be
+    pushed rather than the code last committed.
+    """
+    subprocess.run(
+        ["git", "clone", "--depth", "1", "--quiet", f"file://{ROOT}", str(dest)],
+        check=True)
+    listing = subprocess.run(
+        ["git", "-C", str(ROOT), "ls-files", "-z",
+         "--cached", "--others", "--exclude-standard"],
+        check=True, capture_output=True).stdout.decode("utf-8")
+    for rel in listing.split("\0"):
+        if not rel:
+            continue
+        src, dst = ROOT / rel, dest / rel
+        if src.exists():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+        elif dst.exists():
+            dst.unlink()
+
+
+def shallow_parity() -> int:
+    """Run the suite where CI runs it: a checkout with no ancestry.
+
+    ``actions/checkout@v4`` fetches one commit. On 2026-10-19 ten drift tests
+    reached for ``HEAD~1`` and errored on the runner, ten tests at a time, for
+    twenty consecutive pushes, while every push was green here -- this working
+    tree has the whole history and the runner has a single commit. The
+    variable was never the code; it was the depth. A depth-1 clone has the
+    same blindness, so the same discovery CI runs also runs here, on the
+    machine that can still see the problem cheaply.
+    """
+    with tempfile.TemporaryDirectory(prefix="pandosi-shallow-") as tmp:
+        dest = Path(tmp) / "checkout"
+        _shallow_checkout(dest)
+        completed = subprocess.run(
+            [sys.executable, "-m", "unittest", "discover", "-s", "tests"],
+            cwd=dest)
+    return completed.returncode
+
+
 def main() -> int:
     problems = drift(WORKFLOW.read_text(encoding="utf-8"))
     if problems:
@@ -115,6 +165,14 @@ def main() -> int:
             print(f"\nlocal_ci failed at {marker} (exit {completed.returncode})",
                   file=sys.stderr)
             return completed.returncode
+    print("\n== depth-1 checkout (the tree CI is actually handed) ==",
+          flush=True)
+    parity = shallow_parity()
+    if parity != 0:
+        print("\nlocal_ci failed at the depth-1 checkout "
+              f"(exit {parity}): a test leaned on history the runner does not "
+              "have", file=sys.stderr)
+        return parity
     print("\nlocal_ci passed", flush=True)
     return 0
 
