@@ -3271,6 +3271,99 @@ class TestThinkWatchdogCodeDelivery(unittest.TestCase):
             self.assertEqual(len(tasks), 2,
                              "a drift after a catch-up is a new alarm")
 
+    def test_a_churning_member_set_refreshes_one_task_not_two(self):
+        """Identity is the family, never the title.
+
+        On 2026-10-19 a two-minute LAN blip made the first poll name two
+        members and the very next poll name five. Keyed on the title those are
+        two different alarms: a second task appears, and the first one - whose
+        body now *understates* the fault and can never be rewritten, because no
+        later poll will ever produce that title again - stays open forever
+        reading like a final word.
+        """
+        wd = self._tool()
+        first = {"members": {"mac-text": {"status": "stale", "behind": 51,
+                                          "behind_for_s": 91200.0}}}
+        second = {"members": {
+            "mac-text": {"status": "stale", "behind": 51,
+                         "behind_for_s": 95000.0},
+            "mac-llm-8b-local": {"status": "stale", "behind": 51,
+                                 "behind_for_s": 95000.0},
+            "win-gemma-12b": {"status": "stale", "behind": 51,
+                              "behind_for_s": 95000.0},
+            "win-laya-int8": {"status": "stale", "behind": 51,
+                              "behind_for_s": 95000.0},
+            "win-yi-9b": {"status": "stale", "behind": 51,
+                          "behind_for_s": 95000.0},
+        }}
+        with tempfile.TemporaryDirectory() as tmp:
+            url, token_file, box, server, thread = self._alarm_stub(tmp)
+            state = Path(tmp) / "alarms.json"
+            extra = ("--alarm-state-file", str(state),
+                     "--alarm-refresh-seconds", "0")
+            try:
+                self._run(wd, tmp, self._probe_cmd(tmp, first, 2, "g1"),
+                          alarm_url=url, token_file=token_file, extra=extra)
+                self._run(wd, tmp, self._probe_cmd(tmp, second, 2, "g2"),
+                          alarm_url=url, token_file=token_file, extra=extra)
+                tasks = box.list(None)
+                saved = json.loads(state.read_text())
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=3)
+
+            self.assertEqual(len(tasks), 1, [t["title"] for t in tasks])
+            task = tasks[0]
+            self.assertIn("mac-text", task["title"])
+            # The title is a label and cannot be rewritten; the body is the
+            # part every re-check refreshes, so it is the part that must be
+            # present-tense.
+            self.assertIn("win-gemma-12b", task["output"])
+            self.assertIn("win-yi-9b", task["output"])
+            self.assertEqual(list(saved), [wd.CODE_FAMILY],
+                             "one fault, one state key")
+
+    def test_an_alarm_opened_under_the_old_title_key_is_adopted(self):
+        """Changing the key must not file a second task for a live fault.
+
+        The key *was* the title. Any alarm already open carries a title key, so
+        the first poll after the change has to recognise it as the same fault
+        and re-key it - otherwise this fix creates exactly the duplicate it was
+        written to prevent.
+        """
+        wd = self._tool()
+        now = time.time()
+        with tempfile.TemporaryDirectory() as tmp:
+            url, token_file, box, server, thread = self._alarm_stub(tmp)
+            state = Path(tmp) / "alarms.json"
+            legacy = wd.alarm_title(wd.code_alarms(self.DRIFT))
+            self.assertNotEqual(legacy, wd.CODE_FAMILY, "the test needs a change")
+            state.write_text(json.dumps({legacy: {
+                "task_id": "t-legacy", "issued_at": now - 3600.0,
+                "last_append_at": now, "appends": 0}}), encoding="utf-8")
+            extra = ("--alarm-state-file", str(state),
+                     "--alarm-refresh-seconds", "21600")
+            out = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(out):
+                    self._run(wd, tmp, self._probe_cmd(tmp, self.DRIFT, 2, "lg"),
+                              alarm_url=url, token_file=token_file, extra=extra)
+                tasks = box.list(None)
+                saved = json.loads(state.read_text())
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=3)
+
+            self.assertEqual(tasks, [], "adoption must not file a second task")
+            self.assertEqual(list(saved), [wd.CODE_FAMILY])
+            self.assertEqual(saved[wd.CODE_FAMILY]["task_id"], "t-legacy")
+            self.assertIn("adopting", out.getvalue())
+
+    def test_every_recheck_says_which_set_it_is_describing(self):
+        """A title that lags must not be read as the present tense."""
+        wd = self._tool()
+        block = wd.build_recheck_block(wd.code_alarms(self.DRIFT),
+                                       1_800_000_000.0, 3600.0, False)
+        self.assertIn(wd.CURRENT_SET_NOTE, block)
+
     def test_the_installed_timer_actually_carries_the_code_leg(self):
         """The lesson of this file, applied to this file's own wiring.
 
@@ -8375,6 +8468,7 @@ class TestCodeDriftCheck(unittest.TestCase):
             base = ["--repo", str(repo),
                     "--root", "mac", "http://mac", "",
                     "--root", "ghost", "http://ghost", "",
+                    "--retry-delay", "0",
                     "--state-file", str(Path(tmp) / "state.json"),
                     "--snapshot-file", "", "--json"]
             self.assertEqual(self._run(mod, base + ["--now", "1000.0"]), 1)
@@ -8399,11 +8493,94 @@ class TestCodeDriftCheck(unittest.TestCase):
             base = ["--repo", str(repo),
                     "--root", "mac", "http://mac", "",
                     "--root", "ghost", "http://ghost", "",
+                    "--retry-delay", "0",
                     "--min-persist-seconds", "900",
                     "--state-file", str(state),
                     "--snapshot-file", "", "--json"]
             self.assertEqual(self._run(mod, base + ["--now", "10000.0"]), 2)
 
+
+    def test_a_dropped_packet_is_retried_and_an_http_error_is_not(self):
+        """A transport blip must not delete a host from the page.
+
+        On 2026-10-19 the first drift page named only the Mac's own two
+        members. Win and pi5 dropped a packet at that instant, so the three
+        frozen members the tool exists to name were the three missing from it.
+        "We could not see them" and "they are gone" are different claims and
+        only one of them is what a retry buys back. A 403 is an answer, not a
+        dropped packet, so it is never retried.
+        """
+        mod = self._tool()
+        calls = []
+        slept = []
+
+        def flaky(url, token, timeout=mod.DEFAULT_TIMEOUT_S):
+            calls.append(url)
+            if len(calls) < 3:
+                raise urllib.error.URLError("no route to host")
+            return {"nodes": {}}
+
+        real_sleep = mod.time.sleep
+        try:
+            mod.fetch_nodes = flaky
+            mod.time.sleep = slept.append
+            got = mod.fetch_nodes_retrying("http://x/nodes", None,
+                                           retries=2, delay=0.5)
+        finally:
+            mod.time.sleep = real_sleep
+        self.assertEqual(got, {"nodes": {}})
+        self.assertEqual(len(calls), 3, "two retries after the first failure")
+        self.assertEqual(slept, [0.5, 0.5])
+
+        calls.clear(); slept.clear()
+
+        def forbidden(url, token, timeout=mod.DEFAULT_TIMEOUT_S):
+            calls.append(url)
+            raise urllib.error.HTTPError(url, 403, "Forbidden", {}, None)
+
+        try:
+            mod.fetch_nodes = forbidden
+            mod.time.sleep = slept.append
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                mod.fetch_nodes_retrying("http://x/nodes", None,
+                                         retries=2, delay=0.5)
+        finally:
+            mod.time.sleep = real_sleep
+        caught.exception.close()  # HTTPError is file-like; close it, don't leak
+        self.assertEqual(len(calls), 1, "a 403 is a definitive answer")
+        self.assertEqual(slept, [])
+
+    def test_one_unreadable_moment_does_not_hide_a_frozen_member(self):
+        """End to end: the page names the frozen member, not the wifi."""
+        mod = self._tool()
+        repo = self._repo()
+        older = self._rev("HEAD~1")
+        attempts = {"n": 0}
+
+        def fetch(url, token, timeout=mod.DEFAULT_TIMEOUT_S):
+            if "8790" in url:
+                attempts["n"] += 1
+                if attempts["n"] == 1:
+                    raise urllib.error.URLError("no route to host")
+                return {"nodes": {"win-laya-int8": {
+                    "capability": {"code_head": older}}}}
+            return {"nodes": {"mac-text": {
+                "capability": {"code_head": mod.head_of(repo)}}}}
+
+        real_sleep = mod.time.sleep
+        try:
+            mod.fetch_nodes = fetch
+            mod.time.sleep = lambda _s: None
+            rows, unreadable = mod.survey(
+                repo, mod.head_of(repo),
+                [("mac", "http://127.0.0.1:8765", ""),
+                 ("win", "http://192.168.31.100:8790", "")],
+                retries=1, retry_delay=0.0)
+        finally:
+            mod.time.sleep = real_sleep
+        self.assertEqual(unreadable, [], "one blip is not a blind spot")
+        self.assertEqual(attempts["n"], 2, "the second attempt answered")
+        self.assertEqual(rows["win-laya-int8"]["raw"], mod.BEHIND)
 
 class TestVoteAblation(unittest.TestCase):
     """tools/vote_ablation.py - the questions the headline hides.

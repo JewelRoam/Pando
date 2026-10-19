@@ -69,6 +69,15 @@ CODE_STATUSES = (STALE,)
 #: fleet every time anybody commits.
 DEFAULT_MIN_PERSIST_S = 900.0
 DEFAULT_TIMEOUT_S = 20.0
+#: A root table that does not answer is measured as nothing at all, and the
+#: members behind it silently drop out of the page. On 2026-10-19 the first
+#: drift page named only the Mac's own two members because a two-minute LAN
+#: blip made win and pi5 unreachable at that instant - the three frozen
+#: members the tool existed to name were the ones missing from it. So a
+#: transport failure is retried before it is believed. HTTP errors are not
+#: retried: a 403 is an answer, not a dropped packet.
+DEFAULT_RETRIES = 2
+DEFAULT_RETRY_DELAY_S = 2.0
 
 
 def _read_token(path: str | None) -> str | None:
@@ -87,6 +96,31 @@ def fetch_nodes(url: str, token: str | None, timeout: float = DEFAULT_TIMEOUT_S)
     request = urllib.request.Request(url.rstrip("/") + "/nodes", headers=headers)
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def fetch_nodes_retrying(url: str, token: str | None,
+                         timeout: float = DEFAULT_TIMEOUT_S,
+                         retries: int = DEFAULT_RETRIES,
+                         delay: float = DEFAULT_RETRY_DELAY_S):
+    """``fetch_nodes``, but a dropped packet is not the same as a silent host.
+
+    Retries only transport failures. An ``HTTPError`` is a definitive answer
+    (the token is wrong, the path moved) and retrying it three times only makes
+    the job slower; a ``URLError`` without a status is usually the wifi.
+    ``sleep`` is injected so the tests do not wait in real time.
+    """
+    attempt = 0
+    while True:
+        try:
+            return fetch_nodes(url, token, timeout)
+        except urllib.error.HTTPError:
+            raise
+        except (urllib.error.URLError, OSError):
+            if attempt >= max(0, int(retries)):
+                raise
+            attempt += 1
+            if delay > 0:
+                time.sleep(delay)
 
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
@@ -164,13 +198,16 @@ def classify(repo: Path, tip: str, member_head: str) -> tuple[str, int | None, s
     return DIVERGED, None, "shares no ancestry with this checkout"
 
 
-def survey(repo: Path, tip: str, roots, timeout: float = DEFAULT_TIMEOUT_S):
+def survey(repo: Path, tip: str, roots, timeout: float = DEFAULT_TIMEOUT_S,
+           retries: int = DEFAULT_RETRIES,
+           retry_delay: float = DEFAULT_RETRY_DELAY_S):
     """(rows, unreadable). One pass over every root; never raises for a root."""
     rows: dict[str, dict] = {}
     unreadable: list[dict] = []
     for name, url, token_file in roots:
         try:
-            payload = fetch_nodes(url, _read_token(token_file), timeout)
+            payload = fetch_nodes_retrying(url, _read_token(token_file),
+                                           timeout, retries, retry_delay)
         except (urllib.error.URLError, OSError, ValueError) as exc:
             unreadable.append({"root": name, "url": url, "error": str(exc)[:200]})
             continue
@@ -294,6 +331,12 @@ def main(argv: list[str] | None = None) -> int:
                         default=DEFAULT_MIN_PERSIST_S,
                         help="how long a member may stay behind before it pages")
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_S)
+    parser.add_argument("--retries", type=int, default=DEFAULT_RETRIES,
+                        help="extra attempts after a root drops a packet "
+                             "(HTTP errors are never retried)")
+    parser.add_argument("--retry-delay", type=float,
+                        default=DEFAULT_RETRY_DELAY_S,
+                        help="seconds between those attempts")
     parser.add_argument("--state-file", default="~/.pandosi/code-drift-state.json",
                         help="where the first-seen record lives (empty=stateless, "
                              "which makes every poll a fresh grace window)")
@@ -314,7 +357,8 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return 1
 
-    rows, unreadable = survey(repo, tip, args.root, args.timeout)
+    rows, unreadable = survey(repo, tip, args.root, args.timeout,
+                              args.retries, args.retry_delay)
     state_path = Path(args.state_file) if args.state_file else None
     state = load_state(state_path)
     rows = track(state, rows, now, args.min_persist_seconds)

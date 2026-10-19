@@ -95,9 +95,10 @@ CODE_STATUSES = ("stale",)
 #: order and the same reason: a hung peer must not hold the job past launchd's
 #: next interval.
 DEFAULT_CODE_TIMEOUT_S = 120.0
-#: Alarm-state keys are mailbox titles, and the state file is shared by both
-#: legs. Scoping recovery to the family prefix is what stops a clean vote poll
-#: from erasing an open drift (or the reverse).
+#: One open task per fault family, not per member list. Scoping both the state
+#: key and recovery to the family is what stops a clean vote poll from erasing
+#: an open drift (or the reverse) - and it is also what stops a member set that
+#: churns from minting a task per generation (see ``alarm_key``).
 VOTE_FAMILY = "[alarm] vote-"
 CODE_FAMILY = "[alarm] code-drift"
 #: How often a still-open alarm gets a fresh re-check appended to the *same*
@@ -255,13 +256,30 @@ def alarm_title(alarms: list[dict]) -> str:
     return f"[alarm] {alarm_kind(alarms)}: {named}"
 
 
-def alarm_key(alarms: list[dict]) -> str:
-    """A stable identity for "this same alarm", used to find its open task.
+def alarm_family(alarms: list[dict]) -> str:
+    """The stable name of the fault class this alarm belongs to.
 
-    The title is the identity on purpose: it is what a human searches the
-    mailbox for, and two polls that name the same members are the same alarm.
+    This is the unit the state file is keyed on, and the unit recovery clears.
+    It is deliberately *not* the title.  On 2026-10-19 the first code-drift
+    poll could not read the win and pi5 root tables (a two-minute LAN blip),
+    so it named two members; the very next poll measured all nine and named
+    five.  Keyed on the title those are two alarms: a second task appears, and
+    the first one - whose body is now wrong and can never be updated, because
+    no later poll will ever produce that title again - stays open forever
+    saying the fault is smaller than it is.  A frozen body that reads like a
+    final word is worse than a title that lags, so identity is the family and
+    the member list is carried by the body, which every re-check refreshes.
     """
-    return alarm_title(alarms)
+    return CODE_FAMILY if alarm_kind(alarms) == "code-drift" else VOTE_FAMILY
+
+
+def alarm_key(alarms: list[dict]) -> str:
+    """The state key for "this same alarm": the family, so a churning member
+    set refreshes one task instead of minting a second and abandoning the
+    first.  The mailbox title is still ``alarm_title`` - readable, and naming
+    the members as of the first raise - because a title is a label, not an
+    index, and no poll can rewrite one."""
+    return alarm_family(alarms)
 
 
 def age_phrase(seconds: float) -> str:
@@ -468,6 +486,13 @@ def build_alarm_body(alarms: list[dict], raw: str, now: float,
     return alarm_body(alarms, raw, now, **kw)
 
 
+#: One task per family means the title names the members as of the first
+#: raise, which a later poll cannot rewrite. Say so where the current list is,
+#: so nobody reads a lagging title as the present tense.
+CURRENT_SET_NOTE = ("The task title names the members as of the first raise and "
+                    "cannot be rewritten; the list below is the current one.")
+
+
 def recheck_block(alarms: list[dict], now: float, age_s: float,
                   overdue: bool, note: str = "",
                   escalated: str = "") -> str:
@@ -481,6 +506,7 @@ def recheck_block(alarms: list[dict], now: float, age_s: float,
     stamp = time.strftime("%F %T %Z", time.localtime(now))
     lines = ["", "---", "",
              f"{stamp} RE-CHECK: first raised {age_phrase(age_s)} ago, still open.",
+             CURRENT_SET_NOTE,
              ""]
     for row in alarms:
         if row["status"] == "wedge":
@@ -513,6 +539,7 @@ def code_recheck_block(alarms: list[dict], now: float, age_s: float,
     stamp = time.strftime("%F %T %Z", time.localtime(now))
     lines = ["", "---", "",
              f"{stamp} RE-CHECK: first raised {age_phrase(age_s)} ago, still open.",
+             CURRENT_SET_NOTE,
              ""]
     for row in alarms:
         where = (f"on {str(row.get('head') or '')[:12]}"
@@ -695,6 +722,23 @@ def page_open_alarm(args, alarms: list[dict], raw: str, now: float,
     entry = state.get(key)
     if not isinstance(entry, dict):
         entry = None
+    if entry is None:
+        # Adopt a task opened before the key became the family: those state
+        # entries are keyed by title, which still carries the family prefix.
+        # Without this the first poll after the change posts a second task for
+        # a fault that already has one, which is the exact duplicate this key
+        # exists to prevent. Newest wins when several generations piled up.
+        legacy = [k for k in state
+                  if k != key and family and k.startswith(family)
+                  and isinstance(state.get(k), dict)]
+        if legacy:
+            newest = max(legacy, key=lambda k: float(
+                state[k].get("issued_at") or 0.0))
+            print(f"{stamp} think-watchdog adopting open alarm {newest!r} "
+                  f"as {key!r}", flush=True)
+            state[key] = state.pop(newest)
+            entry = state[key]
+            save_alarm_state(state_path, state)
 
     token = ""
     if args.alarm_token_file:
@@ -712,7 +756,7 @@ def page_open_alarm(args, alarms: list[dict], raw: str, now: float,
                   flush=True)
             return
         ok, detail = post_alarm(args.alarm_url, token or None, args.alarm_by,
-                                key, body)
+                                alarm_title(alarms), body)
         if not ok:
             print(f"{stamp} think-watchdog alarm NOT delivered ({detail}); "
                   f"the line above is the only record", flush=True)

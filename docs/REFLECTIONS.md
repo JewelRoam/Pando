@@ -472,3 +472,54 @@ must not erase an open wedge. Both directions are asserted in `TestThinkWatchdog
   tool: the equal-memory-budget control (many small models vs one large model) still does not exist.
   Detecting that a member runs old code is a statement about maintenance, not about intelligence, and
   a fleet that notices its own drift is not thereby evidence of anything collective.
+
+## 2026-10-19 — the pager lied twice on its first day (mac-side, identity and a dropped packet)
+
+The drift tool's first real page (08:07:55) named two members. The next poll named five. Both were
+true at their moment and the pair of them is the whole lesson: the tool was measuring a fleet that
+was *changing under it* — win's three frozen members and one Mac member — while two of the three root
+tables were unreachable for about two minutes of LAN blip. Two defects fell out of that, and neither
+was in the measurement.
+
+**One: the alarm's identity was the title.** The title is what a human searches the mailbox for, so
+it was used as the state key, and a key is an index. But the title names the members, and the member
+set is exactly the part that churns. Keyed on the title, the two polls above are two different
+alarms: the second mints a new task, and the first — whose body now *understates* the fault, and can
+never be rewritten because no later poll will ever produce that title again — stays open forever
+reading like a final word. A frozen body that names too few members is worse than no body, because it
+is a claim, and it is wrong. The key is now the alarm *family* (one open task per fault class), the
+title stays a human-readable label, every re-check refreshes the member list in the body where it can
+actually be corrected, and a `CURRENT_SET_NOTE` in each re-check says out loud that the title is the
+set as of the first raise. A state file written by the old code is *adopted* by title-prefix on the
+first poll rather than duplicated, because a fix that files a second task for a live fault has
+reproduced the bug it was written to remove.
+
+**Two: a dropped packet was read as a departed host.** `survey` treats an unreadable root as no rows
+at all, which is right — our blind spot is not a member's lag — but "unreadable" was granted after a
+single attempt. Win and pi5 each dropped one request and were silently deleted from the page: the
+three members the tool exists to name were the three missing from it, and the page looked *smaller*
+rather than *blind*. Transport failures (`URLError` without a status) are now retried twice; HTTP
+errors are not, because a 403 is an answer and retrying it three times only makes the job slower. The
+retry does not invent certainty — a root that is still unreachable after three attempts is still
+reported as unreadable, at rc 1, and pages nobody.
+
+- Sample size and error bars: n=2 polls, n=1 blip. There is nothing statistical here and no standard
+  error to quote; two code paths were exercised once each on the day they were written, and the
+  second was only visible because it happened to be logged before an unrelated reboot.
+- The control that is still missing: a *non*-blip day. Both defects need a churning member set and a
+  lossy transport to show themselves, and today supplied both by accident. Nothing here shows the
+  tooling behaves under ordinary conditions — which is also the state in which nobody would look.
+- Externally anchored? No. Every number in this entry is from this fleet's own machines, on one LAN,
+  over one afternoon. There is no outside measurement to check them against, which is why they are
+  written as incidents and not as accuracy.
+- Falsifier, one command each, after the deploy: change the member set between two polls with
+  `--alarm-refresh-seconds 0` and count tasks (must stay 1, the re-check body must name the current
+  set); and point a root at a port that drops packets instead of refusing them (must still end
+  unreadable, not empty). Both are regression tests; the first was confirmed against the live
+  operative mailbox, where the existing title-keyed open task was adopted rather than duplicated.
+- Operating cost: zero new processes and zero new timers — both fixes are inside a 300s job that
+  already runs — and zero human approvals, since neither touches a grant. The recurring human cost
+  is unchanged and still the real one: win cannot start its own updater, so the ~51-commit freeze is
+  closed by a paste, not by this commit.
+- Standing caveat, unchanged: the equal-memory-budget control (many small models vs one large model)
+  still does not exist. Paging correctly about stale code is maintenance, not collective intelligence.
