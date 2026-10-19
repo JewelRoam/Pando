@@ -3160,7 +3160,7 @@ class TestThinkWatchdogVoteDelivery(unittest.TestCase):
         wd = self._tool()
         self.assertIn("no escalation target configured", wd.escalate("", True))
         self.assertIn("not due yet", wd.escalate("true", False))
-        self.assertIn("rc=0", wd.escalate("true", True))
+        self.assertIn("rc=0", wd.escalate("exit 0", True))
 
 
 class TestThinkWatchdogCodeDelivery(unittest.TestCase):
@@ -5756,8 +5756,9 @@ class TestExecution(unittest.TestCase):
             self.assertEqual(body["author"], "mac-proposer")
             self.assertTrue(body["token"])
             # The credential is 0600 and the signed payload verifies.
-            self.assertEqual((root / "invite.json").stat().st_mode & 0o777,
-                             0o600)
+            if os.name != "nt":  # NTFS has no POSIX permission bits
+                self.assertEqual((root / "invite.json").stat().st_mode & 0o777,
+                                 0o600)
             self.assertTrue(verify_invite(root))
             # Nothing live changed: no policy store, no member table.
             self.assertFalse(Path(args.policy_path).exists())
@@ -5879,7 +5880,8 @@ class TestExecution(unittest.TestCase):
             self.assertEqual(rows[0]["action"], "reproduce.spawn")
             self.assertNotIn("spawned", rows[0])
             root = Path(args.spawn_outbox) / "p-spawn"
-            self.assertEqual(root.stat().st_mode & 0o777, 0o700)
+            if os.name != "nt":
+                self.assertEqual(root.stat().st_mode & 0o777, 0o700)
             plan = json.loads((root / "plan.json").read_text(encoding="utf-8"))
             self.assertIs(plan["approved"], False)
             self.assertIs(plan["spawned"], False)
@@ -5887,8 +5889,9 @@ class TestExecution(unittest.TestCase):
                              {"node_id": "pi6", "lineage": "spawn-v1"})
             self.assertTrue(plan["refusals"])
             self.assertTrue(plan["requires"])
-            self.assertEqual((root / "plan.json").stat().st_mode & 0o777,
-                             0o600)
+            if os.name != "nt":
+                self.assertEqual((root / "plan.json").stat().st_mode & 0o777,
+                                 0o600)
             self.assertTrue(verify_spawn(root))
             # The draft is inert: no member was added and no rule changed.
             self.assertFalse(Path(args.policy_path).exists())
@@ -5975,7 +5978,8 @@ class TestExecution(unittest.TestCase):
             self.assertTrue(rows[0]["executed"])
             self.assertEqual(rows[0]["action"], "resource.rebalance")
             root = Path(args.rebalance_outbox) / "p-move"
-            self.assertEqual(root.stat().st_mode & 0o777, 0o700)
+            if os.name != "nt":
+                self.assertEqual(root.stat().st_mode & 0o777, 0o700)
             plan = json.loads((root / "plan.json").read_text(encoding="utf-8"))
             self.assertIs(plan["approved"], False)
             self.assertIs(plan["moved"], False)
@@ -5985,8 +5989,9 @@ class TestExecution(unittest.TestCase):
             self.assertTrue(plan["refusals"])
             self.assertTrue(plan["requires"])
             self.assertIn("service_autostart", plan["grants"])
-            self.assertEqual((root / "plan.json").stat().st_mode & 0o777,
-                             0o600)
+            if os.name != "nt":
+                self.assertEqual((root / "plan.json").stat().st_mode & 0o777,
+                                 0o600)
             self.assertTrue(verify_move(root))
             self.assertFalse(Path(args.policy_path).exists())
 
@@ -6088,7 +6093,8 @@ class TestExecution(unittest.TestCase):
             self.assertTrue(rows[0]["executed"])
             self.assertEqual(rows[0]["action"], "meta.propose")
             root = Path(args.operator_outbox) / "p-meta"
-            self.assertEqual(root.stat().st_mode & 0o777, 0o700)
+            if os.name != "nt":
+                self.assertEqual(root.stat().st_mode & 0o777, 0o700)
             spec = json.loads((root / "spec.json").read_text(encoding="utf-8"))
             self.assertIs(spec["approved"], False)
             self.assertIs(spec["installed"], False)
@@ -6097,8 +6103,9 @@ class TestExecution(unittest.TestCase):
             self.assertIn("novelty-sampler", spec["rationale"] + "novelty-sampler")
             self.assertTrue(spec["refusals"])
             self.assertTrue(spec["requires"])
-            self.assertEqual((root / "spec.json").stat().st_mode & 0o777,
-                             0o600)
+            if os.name != "nt":
+                self.assertEqual((root / "spec.json").stat().st_mode & 0o777,
+                                 0o600)
             self.assertTrue(verify_spec(root))
             self.assertFalse(Path(args.policy_path).exists())
 
@@ -6241,7 +6248,8 @@ class TestExecution(unittest.TestCase):
             written = installs / "novelty-sampler.json"
             self.assertEqual(json.loads(written.read_text(encoding="utf-8")),
                              record)
-            self.assertEqual(written.stat().st_mode & 0o777, 0o600)
+            if os.name != "nt":
+                self.assertEqual(written.stat().st_mode & 0o777, 0o600)
             # The one thing a new verb must never be: a source file.
             self.assertEqual(list(installs.glob("*.py")), [])
 
@@ -8846,8 +8854,10 @@ class TestExecuteStateResolution(unittest.TestCase):
         from pando.execute import STATE_PATHS
         args = self._resolve(["--state-dir", "/tmp/pi5-state"])
         for name, (leaf, _) in STATE_PATHS.items():
-            self.assertEqual(getattr(args, name), f"/tmp/pi5-state/{leaf}", name)
-        self.assertEqual(args.seed_home, "/tmp/pi5-state/seed-home-empty")
+            self.assertEqual(getattr(args, name),
+                             str(Path("/tmp/pi5-state") / leaf), name)
+        self.assertEqual(args.seed_home,
+                         str(Path("/tmp/pi5-state") / "seed-home-empty"))
         self.assertEqual(args.policy_path, args.policy)
 
     def test_the_default_is_still_the_mac_tree(self):
@@ -8867,7 +8877,8 @@ class TestExecuteStateResolution(unittest.TestCase):
         args = self._resolve(["--state-dir", "/tmp/pi5-state",
                               "--ledger", "/tmp/elsewhere/ledger.jsonl"])
         self.assertEqual(args.ledger, "/tmp/elsewhere/ledger.jsonl")
-        self.assertEqual(args.policy, "/tmp/pi5-state/policy.json")
+        self.assertEqual(args.policy,
+                         str(Path("/tmp/pi5-state") / "policy.json"))
 
     def test_identity_is_not_relocated_by_the_state_dir(self):
         """Both hosts predate this flag with ~/.pando/identity.json.
@@ -8932,7 +8943,10 @@ class TestExecuteLoop(unittest.TestCase):
             Path("/home/admin/.pando/hosts.json"))
         self.assertEqual(command[1:4], ["-m", "pando.execute", "--once"])
         self.assertEqual(
-            command[command.index("--hosts") + 1], "/home/admin/.pando/hosts.json")
+            command[command.index("--hosts") + 1],
+            str(Path("/home/admin/.pando/hosts.json")))
+        # --state-dir comes straight from argparse, so it stays the literal
+        # string the caller passed (no Path round-trip on Windows).
         self.assertEqual(
             command[command.index("--state-dir") + 1], "/home/admin/.pando")
         self.assertEqual(
