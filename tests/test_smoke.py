@@ -7841,6 +7841,35 @@ class TestLocalCi(unittest.TestCase):
         self.assertEqual(module.installed_problems(pins), [])
         self.assertEqual(module.workflow_problems(), [])
 
+    def test_runner_and_action_versions_are_pinned(self):
+        """The runner image and action code are inputs, so name them exactly.
+
+        On 2026-10-19 GitHub announced that ``ubuntu-latest`` was moving to
+        Ubuntu 26. A green commit can turn red when that alias changes. The
+        same goes for a floating action tag: it silently changes the code that
+        checks out the tree and installs Python. Require an explicit runner
+        and a full commit SHA for every action used by these workflows.
+        """
+        workflows = Path(__file__).resolve().parents[1] / ".github" / "workflows"
+        for path in sorted(workflows.glob("*.yml")):
+            text = path.read_text(encoding="utf-8")
+            self.assertNotIn("-latest", text, path.name)
+            for line in text.splitlines():
+                if "runs-on:" in line:
+                    self.assertRegex(line, r"^\s*runs-on:\s+[A-Za-z0-9_.-]+\s*$",
+                                     path.name)
+            for line in text.splitlines():
+                if "uses:" not in line or line.lstrip().startswith("#"):
+                    continue
+                match = re.search(r"uses:\s+([^\s#]+)", line)
+                self.assertIsNotNone(match, f"{path.name}: malformed uses line: {line}")
+                action = match.group(1)
+                self.assertRegex(
+                    action,
+                    r"^[^@\s]+@[0-9a-f]{40}$",
+                    f"{path.name}: action must be pinned to a full commit SHA: {action}",
+                )
+
     def test_pre_push_runs_the_local_gate(self):
         hook = Path(__file__).resolve().parents[1] / "tools" / "githooks" / "pre-push"
         text = hook.read_text(encoding="utf-8")
@@ -10610,7 +10639,7 @@ class TestCodeDriftCheck(unittest.TestCase):
     #: The checkout these tests measure is one this class builds, not the one
     #: the developer happens to be sitting in. Exercising "behind by N" needs
     #: real ancestry -- ``HEAD~1`` -- and that name does not exist in a
-    #: shallow clone: ``actions/checkout@v4`` fetches at depth 1 by default.
+    #: shallow clone: ``actions/checkout@v7.0.1`` fetches at depth 1 by default.
     #: On 2026-10-19 this class passed on the machine that pushed it and
     #: errored on the runner with ``rev-parse HEAD~1`` exit 128, ten tests at
     #: a time, for twenty consecutive pushes. Three fixture commits have the

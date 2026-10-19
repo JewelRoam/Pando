@@ -8,7 +8,7 @@ green gate could still be followed by a red run. Two steps go further than
 any runner:
 
 * the suite also runs from a depth-1 checkout, because that is what
-  ``actions/checkout@v4`` hands the runner and a full local history cannot
+  ``actions/checkout@v7.0.1`` hands the runner and a full local history cannot
   see the difference (see ``shallow_parity``);
 * ``service.yml`` is Linux-systemd-only and is skipped here with a printed
   reason instead of silently claiming coverage.
@@ -221,7 +221,7 @@ def _shallow_checkout(dest: Path) -> None:
 def shallow_parity() -> int:
     """Run the suite where CI runs it: a checkout with no ancestry.
 
-    ``actions/checkout@v4`` fetches one commit. On 2026-10-19 ten drift tests
+    ``actions/checkout@v7.0.1`` fetches one commit. On 2026-10-19 ten drift tests
     reached for ``HEAD~1`` and errored on the runner, ten tests at a time, for
     twenty consecutive pushes, while every push was green here -- this working
     tree has the whole history and the runner has a single commit. The
