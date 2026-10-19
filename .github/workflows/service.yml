@@ -11,6 +11,9 @@ on:
       - "tools/service_check.py"
   workflow_dispatch:
 
+env:
+  PIP_CONSTRAINT: ${{ github.workspace }}/constraints.txt
+
 jobs:
   linux-systemd-user:
     runs-on: ubuntu-latest
@@ -20,7 +23,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install dependencies
-        run: python -m pip install PyNaCl
+        run: python -m pip install --upgrade PyNaCl
       - name: Prepare user systemd bus
         run: |
           set -euxo pipefail

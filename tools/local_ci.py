@@ -61,6 +61,7 @@ def _ci_env() -> dict[str, str]:
 # marker is a substring of one `run:` line in ci.yml. The argv is what this
 # machine executes. pip installs are the runner image, not checks.
 CHECKS: list[tuple[str, list[str]]] = [
+    ("tools/ci_constraints.py", ["tools/ci_constraints.py", "--installed", "--workflows"]),
     ("py_compile", ["-m", "py_compile"]),
     ("tools/check_no_weights.py", ["tools/check_no_weights.py"]),
     ("unittest discover -s tests", ["-m", "unittest", "discover", "-s", "tests", "-v"]),

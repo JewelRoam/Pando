@@ -7821,6 +7821,26 @@ class TestLocalCi(unittest.TestCase):
                 else:
                     os.environ[key] = value
 
+    def test_ci_dependency_pins_are_exact_and_used_by_every_workflow(self):
+        """An unpinned install is a different test every morning.
+
+        On 2026-10-19 the runner resolved exactly the same versions as this
+        machine, but only by luck. A new transitive release could turn an
+        untouched commit red. The constraints file is the one place the
+        tested set lives; this test refuses a range, a missing pin, or a
+        workflow that installs packages without pointing pip at it.
+        """
+        import importlib.util
+        path = Path(__file__).resolve().parents[1] / "tools" / "ci_constraints.py"
+        spec = importlib.util.spec_from_file_location("ci_constraints_under_test", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        pins = module.read_constraints()
+        self.assertEqual(pins["onnx"], "1.23.2")
+        self.assertEqual(pins["onnxruntime"], "1.31.0")
+        self.assertEqual(module.installed_problems(pins), [])
+        self.assertEqual(module.workflow_problems(), [])
+
     def test_pre_push_runs_the_local_gate(self):
         hook = Path(__file__).resolve().parents[1] / "tools" / "githooks" / "pre-push"
         text = hook.read_text(encoding="utf-8")

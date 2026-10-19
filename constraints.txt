@@ -1,0 +1,23 @@
+# Exact versions CI installs. This is not a general lockfile: it pins the
+# dependencies that execute the test and build paths, so a green local run
+# means the same packages the next runner resolves. Update this file and the
+# local venv together; tools/ci_constraints.py fails when they disagree.
+
+PyNaCl==1.6.2
+zeroconf==0.151.5
+onnxruntime==1.31.0
+onnx==1.23.2
+numpy==2.5.4
+build==1.6.1
+
+# Transitive packages that decide runtime behavior. Pinning only the four
+# direct names would still let protobuf or numpy change under the same lock.
+cffi==2.1.1
+ifaddr==0.2.0
+flatbuffers==25.12.19
+ml_dtypes==0.6.0
+packaging==26.3
+protobuf==7.36.2
+pycparser==3.11
+typing_extensions==4.16.0
+pyproject_hooks==1.3.3
