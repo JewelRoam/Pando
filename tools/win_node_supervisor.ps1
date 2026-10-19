@@ -125,8 +125,11 @@ $codeWatchArgs = @("$repo\tools\node_code_watch.py", '--repo', "$repo",
   '--peer', 'http://100.92.184.4:8478/code.bundle',
   '--peer-token-file', "$repo\metrics\lan-check\mac-mailbox.token",
   '--on-update', 'clients',
-  '--client-cmd', "powershell -NoProfile -ExecutionPolicy Bypass -File $repo\tools\win_restart_clients.ps1",
-  '--node-cmd', "powershell -NoProfile -ExecutionPolicy Bypass -File $repo\tools\win_stack_restart.ps1",
+  # Start-Process joins ArgumentList with spaces; a command value with
+  # spaces must carry its own quotes or argparse receives five extra
+  # tokens (node_code_watch crash-looped on this, 2026-10-19 12:09).
+  '--client-cmd', "`"powershell -NoProfile -ExecutionPolicy Bypass -File $repo\tools\win_restart_clients.ps1`"",
+  '--node-cmd', "`"powershell -NoProfile -ExecutionPolicy Bypass -File $repo\tools\win_stack_restart.ps1`"",
   '--supervisor', "$repo\tools\win_node_supervisor.ps1",
   '--ledger', 'D:\pando-models\code-sync-ledger.jsonl',
   '--interval', '300')
