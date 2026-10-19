@@ -109,3 +109,53 @@ def next_reply(members: list[dict], chat_ids: set[str], tasks: list[dict],
             if should_answer(node_id, sender, addressee, known, run):
                 return {"member": member, "task": task}
     return None
+
+
+OPEN_COOLDOWN = 3600.0
+
+
+def next_opening(members: list[dict], known: set[str],
+                 opened: dict[tuple[str, str], float], now: float,
+                 cooldown: float = OPEN_COOLDOWN) -> dict | None:
+    """A conversation this machine should start, or None.
+
+    Every ``[chat]`` row this colony has ever written is an answer:
+    2026-10-19, 159 chat tasks, zero of them member-to-member.
+    ``should_answer`` already lets one member reach another by naming it --
+    nothing was ever going to use that, because nothing initiates. A colony
+    of members who can only answer is a panel of respondents, not a group.
+
+    Peers are the chat members that are *not* on this host. A member talking
+    to a sibling it shares a chatd with is one process talking to itself, and
+    it would satisfy the letter of "member-to-member" while leaving the
+    colony exactly as silent as before.
+
+    The pick is a rotation, not a latch: the local member that opened least
+    recently speaks, to the peer it has opened to least recently, ties broken
+    by node id so the choice is stable across restarts. *cooldown* is per
+    host, not per pair -- a per-pair throttle would scale its total allowed
+    chatter with the square of the colony, which is the direction the wrong
+    one grows.
+    """
+    local = [str(item.get("node_id") or "") for item in members]
+    local = [node_id for node_id in local if node_id]
+    if not local:
+        return None
+    here = set(local)
+    peers = sorted(str(node) for node in (known or set())
+                   if node and str(node) not in here)
+    if not peers:
+        return None
+    if opened and now - max(opened.values()) < cooldown:
+        return None
+
+    def last_from(sender: str) -> float:
+        return max((opened.get((sender, peer), float("-inf")) for peer in peers),
+                   default=float("-inf"))
+
+    sender = min(local, key=lambda node_id: (last_from(node_id), node_id))
+    peer = min(peers, key=lambda node_id: (opened.get((sender, node_id),
+                                                      float("-inf")), node_id))
+    member = next(item for item in members
+                  if str(item.get("node_id") or "") == sender)
+    return {"member": member, "to": peer}

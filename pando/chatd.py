@@ -19,7 +19,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from .chat import message_text, next_reply, normalize_chat
+from .chat import (OPEN_COOLDOWN, message_text, next_opening, next_reply,
+                   normalize_chat)
 from .common import PROPOSING_ROLE
 from .net import local_addresses, open_url
 from .proposal_mail import delivery_failed, mailbox_chain
@@ -154,6 +155,130 @@ def append_ledger(path: Path, row: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def load_openings(path: Path) -> dict[tuple[str, str], float]:
+    """When this host last tried to start a conversation with whom.
+
+    The same ledger, read for its own rows: an opening carries ``open``,
+    ``node_id`` and ``to`` and has no ``source_id``, so ``load_ledger`` can
+    never read one as an answer to somebody's message.
+    """
+    opened: dict[tuple[str, str], float] = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return opened
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(row, dict) or not row.get("open"):
+            continue
+        node_id = str(row.get("node_id") or "")
+        peer = str(row.get("to") or "")
+        if not node_id or not peer:
+            continue
+        try:
+            opened[(node_id, peer)] = float(row.get("at") or 0.0)
+        except (TypeError, ValueError):
+            continue
+    return opened
+
+
+def newest_proposal(tasks: list[dict]) -> dict | None:
+    """The most recent ``[proposal]`` row, as the topic of an opening.
+
+    A member with nothing to answer and no topic would open with a greeting,
+    which is the one thing a group of models produces for free and nobody
+    needs. An id, a title and a proposer are shared, checkable context that
+    every host already replicates, so that is what the opening asks about.
+    """
+    best = None
+    for task in tasks or []:
+        if not isinstance(task, dict):
+            continue
+        if not str(task.get("title") or "").startswith("[proposal]"):
+            continue
+        if not str(task.get("id") or ""):
+            continue
+        if best is None or (str(task.get("created_at") or "")
+                            > str(best.get("created_at") or "")):
+            best = task
+    return best
+
+
+def opening_prompt(sender: str, peer: str, topic: dict | None) -> str:
+    lines = [
+        f"你是群成员 {sender}。群里现在没有待回答的消息。",
+        f"请主动对另一个群成员 {peer} 说一句话，开一个具体的、对方一两句就能回答的话题。",
+        "最多两句。不要打招呼，不要自我介绍，不要复述这段说明。",
+    ]
+    if topic:
+        lines.append(f"可以问的是最近这条提案：{topic.get('title')}"
+                     f"（id {topic.get('id')}，由 {topic.get('from')} 提出）。")
+    return "\n".join(lines)
+
+
+def usable_opening(text: str) -> bool:
+    """Reject a reply that is not an opening somebody could answer."""
+    body = str(text or "").strip()
+    if len(body) < 6 or len(body) > 400:
+        return False
+    return not body.startswith("系统")
+
+
+def fallback_opening(sender: str, peer: str, topic: dict | None) -> str:
+    """What the member opens with when its own model has nothing usable.
+
+    Deterministic and grounded, never empty: an initiator that went silent
+    whenever a stem hiccuped would be indistinguishable from the colony
+    before it existed.
+    """
+    if topic:
+        return (f"{peer}，最近这条提案 {topic.get('id')}（{topic.get('title')}）"
+                f"是 {topic.get('from')} 提的，你那边实跑下来怎么样？")
+    return f"{peer}，你那边现在在做什么？我是 {sender}。"
+
+
+def _open_conversation(urls, token: str | None, members: list[dict],
+                       known: set[str], tasks: list[dict],
+                       opened: dict[tuple[str, str], float], now: float,
+                       cooldown: float, timeout: float) -> dict | None:
+    """Start one member-to-member conversation, or None when none is due.
+
+    The row this writes is the thing the colony never had: ``from`` a chat
+    member, addressed by name to a chat member on another host. Everything
+    downstream already works -- the peer's chatd sees a chat member naming it
+    and answers, and PEER_CAP stops the exchange after two replies each way.
+    """
+    pick = next_opening(members, known, opened, now, cooldown)
+    if pick is None:
+        return None
+    member = pick["member"]
+    peer = pick["to"]
+    sender = str(member["node_id"])
+    topic = newest_proposal(tasks)
+    try:
+        text = ask_member(member, "系统",
+                          opening_prompt(sender, peer, topic), timeout)
+        if not usable_opening(text):
+            raise RuntimeError("the model did not produce a usable opening")
+    except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError,
+            RuntimeError, KeyError, ValueError) as exc:
+        text = fallback_opening(sender, peer, topic)
+        note = str(exc)
+    else:
+        note = None
+    posted = publish_any(urls, token, sender, peer, text, timeout)
+    if not posted.get("id"):
+        return {"did": "open-failed", "member": sender, "to": peer, "at": now,
+                "error": str(posted.get("error") or posted)[:200]}
+    return {"did": "opened", "member": sender, "model": member.get("model"),
+            "to": peer, "id": posted["id"], "at": now, "text": text[:200],
+            "topic": (topic or {}).get("id"), "model_note": note,
+            "claimed": posted.get("claimed"), "mailbox": posted.get("mailbox")}
 
 
 def system_prompt(node_id: str, model: str) -> str:
@@ -320,7 +445,10 @@ def bootstrap_ids(tasks: list[dict]) -> list[str]:
 def pass_once(urls, token: str | None, members: list[dict],
               chat_ids: set[str], answered: set[tuple[str, str]],
               peers: dict[str, list[str]], timeout: float,
-              bootstrapped: bool) -> dict:
+              bootstrapped: bool,
+              opened: dict[tuple[str, str], float] | None = None,
+              now: float | None = None,
+              open_cooldown: float | None = OPEN_COOLDOWN) -> dict:
     tasks, read_from, read_error = fetch_tasks_any(urls, token, timeout)
     if read_error and not tasks:
         raise RuntimeError(read_error)
@@ -343,6 +471,12 @@ def pass_once(urls, token: str | None, members: list[dict],
         visible.append(full_task_any(urls, token, task, timeout))
     choice = next_reply(members, chat_ids, visible, answered, peers)
     if choice is None:
+        if open_cooldown is not None:
+            opened_report = _open_conversation(
+                urls, token, members, chat_ids, tasks, opened or {},
+                time.time() if now is None else now, open_cooldown, timeout)
+            if opened_report is not None:
+                return opened_report
         return {"did": "idle", "members": [item["node_id"] for item in members]}
     member = choice["member"]
     task = choice["task"]
@@ -376,6 +510,11 @@ def main() -> int:
         "PANDOSI_MAILBOX_TOKEN_FILE", "~/.pandosi/mailbox.token"))
     parser.add_argument("--ledger", default="~/.pandosi/chat-ledger.jsonl")
     parser.add_argument("--interval", type=float, default=20)
+    parser.add_argument("--open-cooldown", type=float, default=OPEN_COOLDOWN,
+                        help="seconds between conversations this host starts "
+                             "(one member, one peer, per window)")
+    parser.add_argument("--no-open", action="store_true",
+                        help="answer only; never start a conversation")
     parser.add_argument("--timeout", type=float, default=180)
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
@@ -396,6 +535,8 @@ def main() -> int:
     ledger = Path(args.ledger).expanduser()
     addresses = local_addresses()
     answered, peers, bootstrapped = load_ledger(ledger)
+    opened = load_openings(ledger)
+    open_cooldown = None if args.no_open else args.open_cooldown
 
     while True:
         try:
@@ -411,7 +552,8 @@ def main() -> int:
                 nodes, addresses,
                 health_of=lambda url: fetch_health(url, min(4, args.timeout)))
             report = pass_once(mailboxes, mail_token, members, known,
-                               answered, peers, args.timeout, bootstrapped)
+                               answered, peers, args.timeout, bootstrapped,
+                               opened, None, open_cooldown)
             if report.get("did") == "bootstrap":
                 append_ledger(ledger, {"bootstrap": True, "at": time.time(),
                                        "ids": report.get("ids") or []})
@@ -423,6 +565,17 @@ def main() -> int:
                 })
                 answered.add((report["member"], str(report["source"])))
                 peers.setdefault(report["member"], []).append(str(report["sender"]))
+            elif report.get("did") in ("opened", "open-failed"):
+                # A failed attempt is recorded too: a wedged stem must not turn
+                # the initiator into a loop that calls a model every interval.
+                append_ledger(ledger, {
+                    "open": True, "node_id": report.get("member"),
+                    "to": report.get("to"), "id": report.get("id"),
+                    "error": report.get("error"), "at": report.get("at"),
+                })
+                opened[(str(report.get("member") or ""),
+                        str(report.get("to") or ""))] = float(
+                            report.get("at") or time.time())
             elif report.get("did") == "error" and report.get("source"):
                 append_ledger(ledger, {
                     "node_id": report.get("member"), "source_id": report["source"],

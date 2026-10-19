@@ -4818,6 +4818,124 @@ class TestChatMailboxPartition(unittest.TestCase):
         self.assertEqual(report["read_from"], "http://fallback")
 
 
+    def test_an_idle_chatd_opens_a_row_a_peer_is_meant_to_answer(self):
+        """The row this writes is the one the colony never produced.
+
+        It has to be a chat member on another host, by name, so the peer's own
+        chatd sees a member naming it and answers -- the same path a person's
+        message takes. A failed attempt is recorded as well, or a wedged stem
+        would be called every interval.
+        """
+        from unittest import mock
+        from pando import chatd
+
+        posts = []
+
+        def fake_request(url, token, method, payload, timeout):
+            if method == "POST" and url.endswith("/task"):
+                posts.append(payload)
+                return {"task": {"id": "t-open-1"}}
+            if method == "POST" and url.endswith("/claim"):
+                return {"task": {"id": payload.get("id")}}
+            return {"tasks": [{"id": "p1", "from": "mac-proposer",
+                               "title": "[proposal] mac-proposer-r715 "
+                                        "adaptive.governance by mac-proposer",
+                               "created_at": "2026-10-19T12:33:57"}]}
+
+        members = [{"node_id": "mac-llm-8b-local", "url": "http://127.0.0.1:9",
+                    "model": "qwen-test"}]
+        known = {"mac-llm-8b-local", "win-gemma-12b"}
+        ask = mock.Mock(return_value="win-gemma-12b，你那边 reproduce.spawn 跑通了吗？")
+        with mock.patch.object(chatd, "_request", fake_request), \
+                mock.patch.object(chatd, "ask_member", ask):
+            report = chatd.pass_once(["http://mailbox"], None, members, known,
+                                     set(), {}, 5, True, {}, 1000.0)
+
+        self.assertEqual(report["did"], "opened")
+        self.assertEqual(report["member"], "mac-llm-8b-local")
+        self.assertEqual(report["to"], "win-gemma-12b")
+        self.assertEqual(report["topic"], "p1")
+        self.assertEqual(len(posts), 1)
+        self.assertEqual(posts[0]["from"], "mac-llm-8b-local")
+        self.assertTrue(posts[0]["title"].startswith("[chat] @win-gemma-12b: "))
+        self.assertIn("win-gemma-12b", posts[0]["body"])
+
+        # The same host does not open again inside the window.
+        ask.reset_mock()
+        posts.clear()
+        with mock.patch.object(chatd, "_request", fake_request), \
+                mock.patch.object(chatd, "ask_member", ask):
+            quiet = chatd.pass_once(["http://mailbox"], None, members, known,
+                                    set(), {}, 5, True,
+                                    {("mac-llm-8b-local", "win-gemma-12b"): 1000.0},
+                                    1000.0 + 60)
+        self.assertEqual(quiet["did"], "idle")
+        self.assertEqual(posts, [])
+        ask.assert_not_called()
+
+    def test_a_stem_that_will_not_open_gets_a_grounded_sentence_not_silence(self):
+        """An initiator that goes quiet whenever a model hiccups is no initiator."""
+        from unittest import mock
+        from pando import chatd
+
+        posts = []
+
+        def fake_request(url, token, method, payload, timeout):
+            if method == "POST" and url.endswith("/task"):
+                posts.append(payload)
+                return {"task": {"id": "t-open-2"}}
+            if method == "POST" and url.endswith("/claim"):
+                return {"task": {"id": payload.get("id")}}
+            return {"tasks": [{"id": "p1", "from": "win-gpu-proposer",
+                               "title": "[proposal] win-gpu-proposer-r724 "
+                                        "resource.rebalance by win-gpu-proposer",
+                               "created_at": "2026-10-19T12:32:39"}]}
+
+        members = [{"node_id": "mac-llm-8b-local", "url": "http://127.0.0.1:9",
+                    "model": "qwen-test"}]
+        boom = mock.Mock(side_effect=RuntimeError("empty reply from mac-llm"))
+        with mock.patch.object(chatd, "_request", fake_request), \
+                mock.patch.object(chatd, "ask_member", boom):
+            report = chatd.pass_once(["http://mailbox"], None, members,
+                                     {"mac-llm-8b-local", "win-gemma-12b"},
+                                     set(), {}, 5, True, {}, 1000.0)
+
+        self.assertEqual(report["did"], "opened")
+        self.assertEqual(report["topic"], "p1")
+        self.assertIn("p1", posts[0]["body"])
+        self.assertNotEqual(report.get("model_note"), None)
+
+    def test_an_opening_somewhere_else_never_hides_a_message_meant_for_us(self):
+        """Openings are what happens when there is nothing to answer."""
+        from unittest import mock
+        from pando import chatd
+
+        posts = []
+
+        def fake_request(url, token, method, payload, timeout):
+            if method == "POST" and url.endswith("/task"):
+                posts.append(payload)
+                return {"task": {"id": "t-reply-1"}}
+            if method == "POST":
+                return {"task": {"id": payload.get("id")}}
+            return {"tasks": [{"id": "t1", "from": "mac-codex",
+                               "title": "[chat] @mac-llm-8b-local: hi",
+                               "body": "hi", "created_at": "1"}]}
+
+        members = [{"node_id": "mac-llm-8b-local", "url": "http://127.0.0.1:9",
+                    "model": "qwen-test"}]
+        with mock.patch.object(chatd, "_request", fake_request), \
+                mock.patch.object(chatd, "ask_member", mock.Mock(return_value="在")):
+            report = chatd.pass_once(["http://mailbox"], None, members,
+                                     {"mac-llm-8b-local", "win-gemma-12b"},
+                                     set(), {}, 5, True, {}, 1000.0)
+        self.assertEqual(report["did"], "spoke")
+        # One row, and it is the answer to the person -- not an opening that
+        # happened to be written first because the loop was idle for a moment.
+        self.assertEqual(len(posts), 1)
+        self.assertTrue(posts[0]["title"].startswith("[chat] @mac-codex: "))
+
+
 class TestObservatoryFeed(unittest.TestCase):
     def test_an_address_is_stored_once(self):
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
@@ -7258,6 +7376,45 @@ class TestChat(unittest.TestCase):
             speaker.stop()
             silent.stop()
             root.stop()
+
+
+    def test_a_member_that_can_only_answer_is_a_respondent_not_a_participant(self):
+        """Nothing in this colony ever started a conversation.
+
+        2026-10-19: 159 ``[chat]`` rows across the mailbox, zero of them a
+        chat member addressing another chat member. ``should_answer`` already
+        allowed peer-to-peer by name, and PEER_CAP already bounded it, so the
+        missing piece was never permission -- it was that no member ever
+        spoke first. This picks who speaks first, and to whom.
+        """
+        from pando.chat import next_opening
+
+        members = [{"node_id": "mac-llm-8b-local", "url": "http://127.0.0.1:9",
+                    "model": "qwen-test"}]
+        known = {"mac-llm-8b-local", "win-gemma-12b", "win-yi-9b",
+                 "pandosi-pi5-llm"}
+
+        first = next_opening(members, known, {}, 1000.0)
+        self.assertEqual(first["member"]["node_id"], "mac-llm-8b-local")
+        # Never itself, and never a member whose host is this one.
+        self.assertNotIn(first["to"], {"mac-llm-8b-local"})
+        self.assertIn(first["to"], {"win-gemma-12b", "win-yi-9b",
+                                    "pandosi-pi5-llm"})
+
+        # A host opens one conversation per window, not one per peer: a
+        # per-pair throttle would grow with the square of the colony.
+        opened = {("mac-llm-8b-local", first["to"]): 1000.0}
+        self.assertIsNone(next_opening(members, known, opened, 1000.0 + 60))
+        later = next_opening(members, known, opened, 1000.0 + 3601)
+        self.assertIsNotNone(later)
+        # The peer least recently addressed comes first, not the same one.
+        self.assertNotEqual(later["to"], first["to"])
+
+        # No peer off this host, no opening: two members sharing one chatd
+        # would satisfy the letter of member-to-member and change nothing.
+        self.assertIsNone(next_opening(members, {"mac-llm-8b-local"}, {}, 1.0))
+        # A decision model has no chat.model, so it is not in known at all.
+        self.assertIsNone(next_opening([], known, {}, 1.0))
 
 
 class TestMailboxReplica(unittest.TestCase):
