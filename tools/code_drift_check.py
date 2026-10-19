@@ -30,7 +30,13 @@ is never accepted as evidence here.
 Usage:
   python tools/code_drift_check.py --repo . \\
       --root mac http://127.0.0.1:8765 ~/.pandosi/pairing.token \\
-      --root win http://192.168.31.100:8790 ~/.pandosi/win-pairing.token --json
+      --root win http://192.168.31.100:8790 ~/.pandosi/win-pairing.token \\
+      --root-json pi5 ~/.pandosi/remote/pi5-root.json --json
+
+``--root NAME URL TOKEN_FILE`` dials a root table. ``--root-json NAME FILE``
+reads one that another process copied here, which is how a host this job may
+not dial stays measured instead of merely mentioned. A mirror is evidence
+only while it is fresh; see ``load_root_json``.
 
 Exit codes: 0 = every member is on the tip, 2 = at least one member has been
 behind for longer than the grace window, 1 = a root table could not be read or
@@ -78,6 +84,11 @@ DEFAULT_TIMEOUT_S = 20.0
 #: retried: a 403 is an answer, not a dropped packet.
 DEFAULT_RETRIES = 2
 DEFAULT_RETRY_DELAY_S = 2.0
+#: A mirrored root table is a copy of somebody else's answer, so its own age
+#: is part of the measurement. tools/mirror_ledger.py refreshes pi5's every
+#: 60s; five missed refreshes is where the copy stops being evidence about
+#: the host and starts being evidence about the copier.
+DEFAULT_ROOT_JSON_MAX_AGE_S = 300.0
 
 
 def _read_token(path: str | None) -> str | None:
@@ -121,6 +132,72 @@ def fetch_nodes_retrying(url: str, token: str | None,
             attempt += 1
             if delay > 0:
                 time.sleep(delay)
+
+
+def load_root_json(path: str, now: float,
+                   max_age: float = DEFAULT_ROOT_JSON_MAX_AGE_S) -> dict:
+    """A root table that reached us as a file, or raise ``ValueError``.
+
+    This exists because macOS 27 gates local-network reachability per
+    *responsible process*, and a launchd job led by the Homebrew interpreter
+    may not open 192.168.31.0/24 at all - a refusal that follows it into its
+    children, so it cannot be worked around inside this tool. A process that
+    *can* reach the peer (an ssh from a job led by ``/bin/sh``; see
+    tools/mirror_ledger.py) writes the peer's ``/nodes`` here instead.
+
+    The copy is the peer's own answer, so it is as good as the peer for reading
+    ``capability.code_head`` - but only while it is fresh. A mirror older than
+    ``max_age`` is this machine's blind spot, not a member falling behind, and
+    the caller reports it as unreadable rather than paging a member.
+    ``max_age <= 0`` reads the file without any freshness claim.
+    """
+    try:
+        text = Path(path).expanduser().read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ValueError(f"cannot read mirror: {exc}") from exc
+    try:
+        payload = json.loads(text)
+    except ValueError as exc:
+        raise ValueError(f"mirror is not JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("mirror is not a root table")
+    if max_age > 0:
+        stamped = payload.get("mirrored_at")
+        if not isinstance(stamped, (int, float)) or isinstance(stamped, bool):
+            raise ValueError("mirror carries no mirrored_at; it cannot say how "
+                             "old it is")
+        age = now - float(stamped)
+        if age > max_age:
+            raise ValueError(f"mirror is {age / 60:.0f}m old, past the "
+                             f"{max_age / 60:.0f}m freshness window")
+    return payload
+
+
+def _read_source(source, now: float, max_age: float, timeout: float,
+                 retries: int, retry_delay: float):
+    """(name, where, payload, blind). ``blind`` is why we saw nothing."""
+    if isinstance(source, dict):
+        name = str(source.get("name") or "")
+        if source.get("file"):
+            path = str(source["file"])
+            where = {"path": path}
+            try:
+                return name, where, load_root_json(path, now, max_age), None
+            except (OSError, ValueError) as exc:
+                return name, where, {}, str(exc)[:200]
+        url = str(source.get("url") or "")
+        token_file = source.get("token_file")
+        where = {"url": url}
+    else:
+        name, url, token_file = source
+        name, url = str(name), str(url)
+        where = {"url": url}
+    try:
+        payload = fetch_nodes_retrying(url, _read_token(token_file),
+                                       timeout, retries, retry_delay)
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        return name, where, {}, str(exc)[:200]
+    return name, where, payload, None
 
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
@@ -200,20 +277,28 @@ def classify(repo: Path, tip: str, member_head: str) -> tuple[str, int | None, s
 
 def survey(repo: Path, tip: str, roots, timeout: float = DEFAULT_TIMEOUT_S,
            retries: int = DEFAULT_RETRIES,
-           retry_delay: float = DEFAULT_RETRY_DELAY_S):
-    """(rows, unreadable). One pass over every root; never raises for a root."""
+           retry_delay: float = DEFAULT_RETRY_DELAY_S,
+           now: float | None = None,
+           max_age: float = DEFAULT_ROOT_JSON_MAX_AGE_S):
+    """(rows, unreadable). One pass over every root; never raises for a root.
+
+    Each entry of ``roots`` is either the historical ``(name, url,
+    token_file)`` triple or a dict naming either ``url``+``token_file`` or
+    ``file``. A root that could not be read lands in ``unreadable`` with the
+    reason - never as a member that fell behind.
+    """
     rows: dict[str, dict] = {}
     unreadable: list[dict] = []
-    for name, url, token_file in roots:
-        try:
-            payload = fetch_nodes_retrying(url, _read_token(token_file),
-                                           timeout, retries, retry_delay)
-        except (urllib.error.URLError, OSError, ValueError) as exc:
-            unreadable.append({"root": name, "url": url, "error": str(exc)[:200]})
+    stamp = time.time() if now is None else now
+    for source in roots:
+        name, where, payload, blind = _read_source(
+            source, stamp, max_age, timeout, retries, retry_delay)
+        if blind is not None:
+            unreadable.append({"root": name, **where, "error": blind})
             continue
         nodes = payload.get("nodes") if isinstance(payload, dict) else None
         if not isinstance(nodes, dict):
-            unreadable.append({"root": name, "url": url,
+            unreadable.append({"root": name, **where,
                                "error": "root table has no nodes"})
             continue
         for node_id, info in nodes.items():
@@ -327,6 +412,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", nargs=3, action="append", default=[],
                         metavar=("NAME", "URL", "TOKEN_FILE"),
                         help="a root table to read (repeat for each host)")
+    parser.add_argument("--root-json", nargs=2, action="append", default=[],
+                        metavar=("NAME", "FILE"),
+                        help="a root table that a process which *can* reach "
+                             "the host copied here (repeat for each host)")
+    parser.add_argument("--root-json-max-age", type=float,
+                        default=DEFAULT_ROOT_JSON_MAX_AGE_S,
+                        help="how old a --root-json mirror may be before it "
+                             "counts as a blind spot instead of evidence "
+                             "(0 = make no freshness claim)")
     parser.add_argument("--min-persist-seconds", type=float,
                         default=DEFAULT_MIN_PERSIST_S,
                         help="how long a member may stay behind before it pages")
@@ -357,8 +451,12 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return 1
 
-    rows, unreadable = survey(repo, tip, args.root, args.timeout,
-                              args.retries, args.retry_delay)
+    sources = [{"name": name, "url": url, "token_file": token_file}
+               for name, url, token_file in args.root]
+    sources += [{"name": name, "file": path} for name, path in args.root_json]
+    rows, unreadable = survey(repo, tip, sources, args.timeout,
+                              args.retries, args.retry_delay, now,
+                              args.root_json_max_age)
     state_path = Path(args.state_file) if args.state_file else None
     state = load_state(state_path)
     rows = track(state, rows, now, args.min_persist_seconds)

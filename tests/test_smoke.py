@@ -13,6 +13,7 @@ import hashlib
 import io
 import json
 import os
+import plistlib
 import re
 import shutil
 import sys
@@ -3380,7 +3381,19 @@ class TestThinkWatchdogCodeDelivery(unittest.TestCase):
         self.assertIn("--code-timeout", plist)
         # Every host in the fleet, or a frozen node is simply invisible.
         self.assertIn("127.0.0.1:8765", plist)
-        self.assertIn("192.168.31.22:8791", plist)
+        # pi5 sits behind the LAN that this job's responsible process may not
+        # open, so it arrives as the mirror tools/mirror_ledger.py refreshes
+        # over ssh. A LAN address here would look like coverage and be none:
+        # the leg would report pi5 unreadable on every single poll.
+        self.assertNotIn("192.168.31.22", plist)
+        pi5 = re.search(r"--root-json pi5 (\S+)", plist)
+        self.assertIsNotNone(pi5, "pi5 must still be a measured root")
+        self.assertTrue(pi5.group(1).endswith("pi5-root.json"),
+                        f"pi5 is read at {pi5.group(1)}")
+        # An XML comment may not contain a doubled hyphen, and a plist that
+        # does not parse is a timer that silently never runs - both of which
+        # this file has already been through once.
+        self.assertIsInstance(plistlib.loads(plist.encode("utf-8")), dict)
         # ...but the *address* win is read at matters as much as mentioning it.
         # A launchd agent whose program is the Homebrew interpreter is refused
         # on 192.168.31.x - Errno 65 for its own socket, curl rc=7 for a curl it
@@ -8316,6 +8329,11 @@ class TestCodeDriftCheck(unittest.TestCase):
     *staying* behind is. A member reporting a commit this checkout has never
     seen is ``diverged``, never "behind" - that would be a lookup failure
     wearing a measurement's clothes.
+
+    A root that reaches this tool as a file (``--root-json``) carries the same
+    weight as one it dialled, but only while the copy is fresh. A mirror nobody
+    refreshed is this machine's blind spot; filed as a member fault it would
+    page a human about a host that may be perfectly current.
     """
 
     def _tool(self):
@@ -8591,6 +8609,79 @@ class TestCodeDriftCheck(unittest.TestCase):
         self.assertEqual(unreadable, [], "one blip is not a blind spot")
         self.assertEqual(attempts["n"], 2, "the second attempt answered")
         self.assertEqual(rows["win-laya-int8"]["raw"], mod.BEHIND)
+
+    def _mirror(self, tmp, members, mirrored_at=None) -> Path:
+        """A root table as the copier leaves it: /nodes plus when it was read."""
+        payload: dict = {"nodes": members}
+        if mirrored_at is not None:
+            payload["mirrored_at"] = mirrored_at
+        path = Path(tmp) / "pi5-root.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return path
+
+    def test_a_fresh_mirror_measures_the_member_behind_it(self):
+        """A copied answer is an answer: pi5 gets rows, not an exemption."""
+        mod = self._tool()
+        repo = self._repo()
+        older = self._rev("HEAD~1")
+        members = {"pandosi-pi5-x": {"capability": {"code_head": older}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            argv = ["--repo", str(repo),
+                    "--root-json", "pi5", str(self._mirror(tmp, members, 1100.0)),
+                    "--min-persist-seconds", "900",
+                    "--state-file", str(Path(tmp) / "state.json"),
+                    "--snapshot-file", "", "--json"]
+            # Inside the grace window a push is a lag, not a fault.
+            self.assertEqual(self._run(mod, argv + ["--now", "1100.0"]), 0)
+            # The copier refreshes the file; the member is still behind, so now
+            # it has *stayed* behind and the timer may page.
+            self._mirror(tmp, members, 2900.0)
+            self.assertEqual(self._run(mod, argv + ["--now", "2900.0"]), 2)
+
+    def test_a_mirror_nobody_refreshed_is_our_blind_spot(self):
+        """A dead copier must never be filed as the peer falling behind.
+
+        rc=1 is the whole point: the host is invisible to us, which is our
+        fault to report, while rc=2 would name a member that may be current.
+        """
+        mod = self._tool()
+        repo = self._repo()
+        older = self._rev("HEAD~1")
+        members = {"pandosi-pi5-x": {"capability": {"code_head": older}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            argv = ["--repo", str(repo),
+                    "--root-json", "pi5", str(self._mirror(tmp, members, 1000.0)),
+                    "--state-file", str(Path(tmp) / "state.json"),
+                    "--snapshot-file", "", "--json"]
+            self.assertEqual(self._run(mod, argv + ["--now", "2000.0"]), 1)
+
+    def test_a_mirror_that_cannot_say_its_age_is_not_evidence(self):
+        """Fail closed: an undated copy could be last week's answer."""
+        mod = self._tool()
+        repo = self._repo()
+        tip = mod.head_of(repo)
+        members = {"pandosi-pi5-x": {"capability": {"code_head": tip}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            argv = ["--repo", str(repo),
+                    "--root-json", "pi5", str(self._mirror(tmp, members)),
+                    "--state-file", str(Path(tmp) / "state.json"),
+                    "--snapshot-file", "", "--json"]
+            self.assertEqual(self._run(mod, argv + ["--now", "2000.0"]), 1)
+
+    def test_a_hand_made_table_can_opt_out_of_the_freshness_claim(self):
+        """The escape hatch, so a one-off file is not permanently unreadable."""
+        mod = self._tool()
+        repo = self._repo()
+        tip = mod.head_of(repo)
+        members = {"pandosi-pi5-x": {"capability": {"code_head": tip}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            argv = ["--repo", str(repo),
+                    "--root-json", "pi5", str(self._mirror(tmp, members)),
+                    "--root-json-max-age", "0",
+                    "--state-file", str(Path(tmp) / "state.json"),
+                    "--snapshot-file", "", "--json"]
+            self.assertEqual(self._run(mod, argv + ["--now", "2000.0"]), 0)
+
 
 class TestVoteAblation(unittest.TestCase):
     """tools/vote_ablation.py - the questions the headline hides.

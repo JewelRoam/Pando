@@ -30,16 +30,24 @@
   shares the state file with the vote leg, scoped by alarm family.
 
   The win root is read over the tailnet (100.93.216.90), not over the LAN.
-  macOS 27 grants local-network reachability per *binary*, and a launchd agent
-  led by the Homebrew interpreter is refused on 192.168.31.x: Errno 65 on the
-  interpreter's own socket, and curl rc=7 for a curl *spawned by* that
-  interpreter, because the refusal follows the responsible process into its
-  children. So swapping the transport inside the tool cannot fix it - only
-  removing the denied process from the chain can. The tailnet is not "local
-  network" and answers that same interpreter every time (verified from a
-  launchd job on 2026-10-19). pi5 has no tailnet address yet, so its root stays
-  unreadable from here: an unreadable root is printed, never paged, which is
-  exactly why pi5 should be put on the tailnet too.
+  macOS 27 grants local-network reachability per *responsible process*, and for
+  a launchd job that runs the Homebrew interpreter, that process is the
+  interpreter: the job gets Errno 65 on its own socket for 192.168.31.x, and
+  curl rc=7 for a curl *spawned by* it, because a child inherits the refusal
+  from its parent. Measured from launchd jobs on 2026-10-19: a job led by
+  /bin/sh reaches the LAN fine, and so does a /usr/bin/curl or /usr/bin/ssh it
+  spawns directly - but this watchdog's chain starts at the interpreter, so
+  swapping the transport inside the tool cannot fix it and re-rooting the job
+  would cost it its Python. The tailnet is not "local network" and answers that
+  interpreter every time.
+
+  pi5 has no tailnet address, so it is read through the local mirror that
+  tools/mirror_ledger.py refreshes over ssh every 60s (the root-json source
+  below, written by a job led by /bin/sh for exactly the reason above). The
+  mirror is evidence only while it is fresh: past its max-age window it is
+  reported unreadable instead, because a dead copier is this Mac's blind spot
+  and not a member falling behind. (An XML comment may not contain a doubled
+  hyphen, which is why the flags above are named in prose here.)
 
   Install:
     cp tools/mac-launchd/com.jewelroam.pandosi-think-watchdog.plist ~/Library/LaunchAgents/
@@ -68,7 +76,7 @@
     <string>--vote-timeout</string>
     <string>120</string>
     <string>--code-cmd</string>
-    <string>/Users/zhengenrong/Downloads/PandoSI-island/.venv/bin/python /Users/zhengenrong/Downloads/PandoSI-island/tools/code_drift_check.py --repo /Users/zhengenrong/Downloads/PandoSI-island --root mac http://127.0.0.1:8765 /Users/zhengenrong/.pandosi/pairing.token --root win http://100.93.216.90:8790 /Users/zhengenrong/.pandosi/win-pairing.token --root pi5 http://192.168.31.22:8791 /Users/zhengenrong/.pandosi/pi5-pairing.token --state-file /Users/zhengenrong/.pandosi/code-drift-state.json --snapshot-file /Users/zhengenrong/.pandosi/code-drift-check.json --json</string>
+    <string>/Users/zhengenrong/Downloads/PandoSI-island/.venv/bin/python /Users/zhengenrong/Downloads/PandoSI-island/tools/code_drift_check.py --repo /Users/zhengenrong/Downloads/PandoSI-island --root mac http://127.0.0.1:8765 /Users/zhengenrong/.pandosi/pairing.token --root win http://100.93.216.90:8790 /Users/zhengenrong/.pandosi/win-pairing.token --root-json pi5 /Users/zhengenrong/.pandosi/remote/pi5-root.json --state-file /Users/zhengenrong/.pandosi/code-drift-state.json --snapshot-file /Users/zhengenrong/.pandosi/code-drift-check.json --json</string>
     <string>--code-timeout</string>
     <string>120</string>
     <string>--alarm-url</string>
