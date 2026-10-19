@@ -146,11 +146,24 @@ def main() -> int:
                   f"{len(full_quorum)} "
                   f"(tiers {[o.tier for o in full_quorum]})")
 
-            # Lose two workers: the quorum can no longer be met, so the swarm
-            # escalates and the loop must stop acting on its own.
-            for proc in procs[1:3]:
+            # Lose the original workers: the quorum can no longer be met, so
+            # the swarm escalates and the loop must stop acting on its own.
+            # Start a fresh survivor after all three expire instead of relying
+            # on whichever worker happened to retain its heartbeat under load.
+            # The survivor still serves real `/decide` calls; only the flaky
+            # identity of the process left behind is removed.
+            workers = procs[1:]
+            for proc in workers:
                 proc.terminate()
-            wait_nodes(root_url, token, 1, deadline=TTL_WAIT_S + 20)
+            for proc in workers:
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=5)
+            wait_nodes(root_url, token, 0, deadline=TTL_WAIT_S + 20)
+            start_stem("worker-survivor", "mock")
+            wait_nodes(root_url, token, 1)
 
             held_loop = AutonomyLoop(decide=RootDecider(root_url, token),
                                      actuator=actuator,
