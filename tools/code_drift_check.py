@@ -236,6 +236,29 @@ def head_of(repo: Path) -> str | None:
     return text if proc.returncode == 0 and text else None
 
 
+def deploy_tip(repo: Path) -> str | None:
+    """The commit the fleet can actually pull, falling back to local HEAD.
+
+    A developer may commit locally and wait before pushing. Comparing members
+    to that private HEAD starts the fifteen-minute grace window before the
+    commit is deployable, so a healthy fleet can be paged for not pulling an
+    object that was never published. Prefer the branch upstream (for this
+    checkout, ``origin/main``); a repository without an upstream keeps the old
+    local-HEAD behaviour.
+    """
+    try:
+        proc = _git(repo, "rev-parse", "--abbrev-ref", "--symbolic-full-name",
+                    "@{upstream}")
+    except (OSError, subprocess.SubprocessError):
+        return head_of(repo)
+    upstream = (proc.stdout or "").strip()
+    if proc.returncode == 0 and upstream:
+        resolved = resolve(repo, upstream)
+        if resolved is not None:
+            return resolved
+    return head_of(repo)
+
+
 def resolve(repo: Path, commit: str) -> str | None:
     """The full hash of ``commit`` if this repo knows it, else None.
 
@@ -466,7 +489,7 @@ def main(argv: list[str] | None = None) -> int:
     now = time.time() if args.now is None else args.now
     repo = Path(args.repo).expanduser().resolve()
 
-    tip = head_of(repo)
+    tip = deploy_tip(repo)
     if tip is None:
         print(f"code-drift-check UNREADABLE: {repo} is not a git checkout",
               file=sys.stderr)

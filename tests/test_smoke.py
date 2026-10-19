@@ -11326,6 +11326,45 @@ class TestCodeDriftCheck(unittest.TestCase):
         self.assertIsNone(behind)
         self.assertIn("ahead", why)
 
+    def test_unpushed_local_commits_do_not_start_the_fleet_grace_clock(self):
+        """Only a published commit can make a member late.
+
+        A local commit starts the clock before anyone outside this checkout
+        can pull it. On 2026-10-19 that produced a real Windows false alarm:
+        the alarm fired after fifteen minutes, and Windows converged to the
+        newly pushed tip two minutes later. The comparison base must be the
+        branch upstream; HEAD remains the fallback for a repo with no remote.
+        """
+        mod = self._tool()
+        with tempfile.TemporaryDirectory(prefix="code-drift-upstream-") as tmp:
+            root = Path(tmp)
+            bare, seed = root / "origin.git", root / "seed"
+            bare.mkdir()
+            seed.mkdir()
+            _git_in(bare, "init", "--bare")
+            _git_in(seed, "init", "-b", "main")
+            (seed / "README").write_text("published\n", encoding="utf-8")
+            _git_in(seed, "-c", "user.name=fixture",
+                    "-c", "user.email=fixture@localhost",
+                    "-c", "commit.gpgsign=false", "add", "README")
+            _git_in(seed, "-c", "user.name=fixture",
+                    "-c", "user.email=fixture@localhost",
+                    "-c", "commit.gpgsign=false", "commit", "-m", "published")
+            _git_in(seed, "remote", "add", "origin", str(bare))
+            _git_in(seed, "push", "-u", "origin", "main")
+            published = mod.head_of(seed)
+
+            (seed / "README").write_text("local only\n", encoding="utf-8")
+            _git_in(seed, "-c", "user.name=fixture",
+                    "-c", "user.email=fixture@localhost",
+                    "-c", "commit.gpgsign=false", "add", "README")
+            _git_in(seed, "-c", "user.name=fixture",
+                    "-c", "user.email=fixture@localhost",
+                    "-c", "commit.gpgsign=false", "commit", "-m", "local")
+
+            self.assertNotEqual(mod.head_of(seed), published)
+            self.assertEqual(mod.deploy_tip(seed), published)
+
     def test_a_fresh_drift_lags_and_only_persisting_drift_pages(self):
         """The grace window, end to end through main().
 
