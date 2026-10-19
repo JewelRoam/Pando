@@ -7746,7 +7746,36 @@ class TestLocalCi(unittest.TestCase):
         module = self._module()
         self.assertEqual(module.drift(module.WORKFLOW.read_text(encoding="utf-8")), [])
 
-    def test_the_local_gate_also_runs_where_the_history_is_missing(self):
+    def test_the_gate_mirrors_the_swarm_workflow_too(self):
+        """``swarm.yml`` fires on pushes touching rootd/stemd; mirror it.
+
+        Until 2026-10-19 this gate mirrored only ``ci.yml``. A push touching
+        ``pando/rootd.py`` starts nine swarm checks on the runner and none
+        here, so the gate could pass and the user still got a red run. A gate
+        that mirrors one of two workflows is not a gate, it is a coin flip.
+        """
+        module = self._module()
+        self.assertTrue(module.SWARM_WORKFLOW.is_file())
+        problems = module.drift(
+            module.SWARM_WORKFLOW.read_text(encoding="utf-8"),
+            module.SWARM_CHECKS, "swarm.yml")
+        self.assertEqual(problems, [])
+        self.assertGreaterEqual(len(module.SWARM_CHECKS), 9)
+
+    def test_the_gate_says_out_loud_what_it_cannot_run_here(self):
+        """A skipped workflow must be printed, never silently counted as green.
+
+        ``service.yml`` needs a Linux user systemd bus. macOS has launchd, so
+        this machine cannot run it. The honest options are to skip it loudly
+        or to lie; the gate prints the reason on every run.
+        """
+        module = self._module()
+        self.assertIn("service.yml", module.PLATFORM_SKIPS)
+        reason = module.PLATFORM_SKIPS["service.yml"].lower()
+        self.assertIn("systemd", reason)
+        self.assertIn("launchd", reason)
+
+    def test_the_gate_also_runs_where_the_history_is_missing(self):
         """The mirror that would have caught 2026-10-19 before the push.
 
         On 2026-10-19 ten drift tests reached for ``HEAD~1`` and errored on
