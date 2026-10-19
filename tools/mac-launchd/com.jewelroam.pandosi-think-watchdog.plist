@@ -41,13 +41,14 @@
   would cost it its Python. The tailnet is not "local network" and answers that
   interpreter every time.
 
-  pi5 has no tailnet address, so it is read through the local mirror that
-  tools/mirror_ledger.py refreshes over ssh every 60s (the root-json source
-  below, written by a job led by /bin/sh for exactly the reason above). The
-  mirror is evidence only while it is fresh: past its max-age window it is
-  reported unreadable instead, because a dead copier is this Mac's blind spot
-  and not a member falling behind. (An XML comment may not contain a doubled
-  hyphen, which is why the flags above are named in prose here.)
+  pi5 has no tailnet address, so it is read through a local mirror of its
+  /nodes table (the root-json source below), refreshed over ssh every 60s by
+  tools/mirror_ledger.py. That copier needs the same /bin/sh root as any other
+  LAN reader here, so it is deliberately not a child of this interpreter-led
+  job. The mirror is evidence only while it is fresh: past its max-age window
+  it is reported unreadable instead, because a dead copier is this Mac's blind
+  spot and not a member falling behind. (An XML comment may not contain a
+  doubled hyphen, which is why the flags above are named in prose here.)
 
   Install:
     cp tools/mac-launchd/com.jewelroam.pandosi-think-watchdog.plist ~/Library/LaunchAgents/
