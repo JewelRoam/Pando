@@ -8731,6 +8731,43 @@ class TestPairedDifferenceStandardError(unittest.TestCase):
         self.assertAlmostEqual(paired["delta_in_se"], -1.0)
         self.assertGreater(paired["mcnemar_exact_p"], 0.05)
 
+    def test_every_stored_bracket_report_carries_the_corrected_standard_error(self):
+        """002 was the report the 07:35 correction was written into.
+
+        003/004/005 were regenerated in the same commit and nothing pinned
+        them, so the next edit to any of the four could have put the halved SE
+        back on a page with every test still green -- the failure the class
+        exists for is a *published number*, so the assertion belongs on the
+        page. Each report is re-derived from its own two discordant counts:
+        the helper and the artifact must agree, and the direction must be the
+        one the decision rule read.
+        """
+        votes_dir = Path(__file__).resolve().parents[1] / "assets" / "votes"
+        expected = {
+            # name: (a_right_b_wrong, b_right_a_wrong, delta_b_minus_a)
+            "002": (21, 15, -6),
+            "003": (22, 15, -7),
+            "004": (14, 32, 18),
+            "005": (23, 7, -16),
+        }
+        for name, (a_wrong, b_wrong, delta) in expected.items():
+            with self.subTest(report=name):
+                report = json.loads(
+                    (votes_dir / f"equal-budget-{name}.json").read_text(
+                        encoding="utf-8"))
+                paired = report["paired"]
+                self.assertEqual(paired["a_right_b_wrong"], a_wrong)
+                self.assertEqual(paired["b_right_a_wrong"], b_wrong)
+                self.assertEqual(paired["delta_b_minus_a"], delta)
+                derived = mcnemar_test(a_wrong, b_wrong)
+                self.assertEqual(derived["delta"], delta)
+                self.assertAlmostEqual(paired["se_delta"], derived["se"],
+                                       places=3)
+                self.assertAlmostEqual(paired["delta_in_se"], derived["z"],
+                                       places=3)
+                self.assertAlmostEqual(paired["mcnemar_exact_p"],
+                                       derived["p_exact"], places=6)
+
 
 class TestBracketHoldsTheHeldArmStill(unittest.TestCase):
     """tools/equal_budget_check.py --reuse-arm-b - a bracket moves one arm.
