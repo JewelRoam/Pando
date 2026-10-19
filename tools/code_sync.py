@@ -239,9 +239,102 @@ def _fetch(repo: Path, env: dict[str, str], remote: str, token: str = "") -> boo
             temporary.unlink(missing_ok=True)
 
 
+def source_list(path: str) -> list[str]:
+    """Read one bundle URL per line from ``path``.
+
+    Blank lines and ``#`` comments are skipped, and a line may carry a
+    trailing ``#`` comment. A file that cannot be read is an empty list, not
+    an exception: the point of a sources file is to add a fallback without
+    editing the unit that starts the updater, and a typo in a *fallback* must
+    not be able to stop the *primary* fetch.
+
+    The file is what makes this adapt without a code change. When the Mac
+    moves off the home LAN its old address dies, and the honest repair is to
+    write a line -- not to hand-edit three service definitions on three
+    operating systems. Measured 2026-10-19: the Mac went
+    ``192.168.31.41`` -> ``172.24.19.146`` and every node that had one
+    hardcoded peer went silently unfetched; a list would have kept pulling
+    from the Tailscale address further down it.
+    """
+    try:
+        lines = Path(path).expanduser().read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    return [seen for seen in (line.split("#", 1)[0].strip() for line in lines)
+            if seen]
+
+
+#: Where a node keeps its list of fallback peers, one spelling per place a
+#: node has been set up. Probed in order; the first file that exists wins.
+#: This list is the whole of the per-platform difference: a Windows box, a
+#: Raspberry Pi and a laptop read the same format with the same parser, and
+#: none of them needs a branch in the code to find its own file. Two kinds
+#: because the two consumers want different things in the URL: the code
+#: updater wants a git bundle, the seed puller wants an outbox base it can
+#: append ``/offers`` to. Same file format, same reader.
+SOURCE_FILES: dict[str, tuple[str, ...]] = {
+    "code": ("~/.pandosi/code-sources.txt",
+             "~/.pando/code-sources.txt",
+             "D:/pando-models/code-sources.txt"),
+    "seed": ("~/.pandosi/seed-sources.txt",
+             "~/.pando/seed-sources.txt",
+             "D:/pando-models/seed-sources.txt"),
+}
+
+
+def source_file(explicit: str = "", *, kind: str = "code") -> str:
+    """The sources file this node has, or "" when it has none.
+
+    ``explicit`` is the flag and always wins, so a unit that names its own
+    file keeps the last word. With no flag the conventional names are probed,
+    which is what lets one unit definition run unmodified on a host whose
+    state directory is ``~/.pandosi``, ``~/.pando`` or ``D:\\pando-models``.
+    Returning "" rather than raising keeps the case that matters most safe:
+    a node with no sources file behaves exactly as it did before this
+    existed, and the primary fetch is untouched.
+    """
+    if explicit:
+        return explicit
+    for name in SOURCE_FILES.get(kind, SOURCE_FILES["code"]):
+        path = Path(name).expanduser()
+        try:
+            if path.is_file():
+                return str(path)
+        except OSError:
+            continue
+    return ""
+
+
+def peer_sources(peer: str = "", peers=None, peer_file: str = "") -> list[str]:
+    """The ordered fallback sources, deduplicated, flags before file.
+
+    One list, built once, so every host resolves "which peers do I have" the
+    same way. ``peer`` is the single-value spelling the first callers used and
+    ``peers`` is the list; a duplicate is dropped so a node that names the
+    same bundle twice does not pay for the same failed fetch twice.
+    """
+    ordered: list[str] = []
+    for candidate in [peer, *(peers or [])]:
+        url = str(candidate or "").strip()
+        if url and url not in ordered:
+            ordered.append(url)
+    for url in source_list(peer_file) if peer_file else []:
+        if url not in ordered:
+            ordered.append(url)
+    return ordered
+
+
 def sync_repo(repo, *, remote: str = "origin", peer: str = "",
-              peer_token: str = "") -> dict:
-    """Fetch ``main`` and fast-forward. Never discards local edits."""
+              peers=None, peer_token: str = "") -> dict:
+    """Fetch ``main`` and fast-forward. Never discards local edits.
+
+    ``remote`` (GitHub, normally) is tried first. Only when that fetch fails
+    are the fallbacks tried, in order, and the first one that fetches wins --
+    so the working path stays the cheap one and a dead fallback costs one
+    failed fetch, not the round. Every attempt is named in ``tried`` when
+    they all fail, because "fetch-failed" on its own cannot tell a node whose
+    address moved from a node with no network at all.
+    """
     repo = Path(repo).expanduser()
     env = _env()
     before = _head(repo, env)
@@ -252,13 +345,19 @@ def sync_repo(repo, *, remote: str = "origin", peer: str = "",
     if _dirty(repo, env):
         result["reason"] = "dirty"
         return result
-    if not _fetch(repo, env, remote):
-        if not peer or not _fetch(repo, env, peer, peer_token):
+    if _fetch(repo, env, remote):
+        result["via"] = "origin"
+    else:
+        sources = peer_sources(peer, peers)
+        result["tried"] = [remote, *sources]
+        for candidate in sources:
+            if _fetch(repo, env, candidate, peer_token):
+                result["via"] = "peer"
+                result["peer"] = candidate
+                break
+        else:
             result["reason"] = "fetch-failed"
             return result
-        result["via"] = "peer"
-    else:
-        result["via"] = "origin"
     merged = _git(repo, ["merge", "--ff-only", "FETCH_HEAD"], env)
     after = _head(repo, env)
     result["after"] = after
@@ -937,8 +1036,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="checkout to fast-forward; not needed with "
                              "--restart-clients")
     parser.add_argument("--remote", default="origin")
-    parser.add_argument("--peer", default="",
-                        help="used only when --remote cannot be fetched")
+    parser.add_argument("--peer", action="append", default=[],
+                        help="fallback bundle, tried in order only when "
+                             "--remote cannot be fetched; repeatable")
+    parser.add_argument("--peer-file", default="",
+                        help="file of fallback bundle URLs, one per line; "
+                             "appended after repeated --peer")
     parser.add_argument("--peer-token-file", default="",
                         help="bearer token for an http peer bundle")
     parser.add_argument("--install-python", default="",
@@ -970,7 +1073,9 @@ def main(argv: list[str] | None = None) -> int:
     token = ""
     if args.peer_token_file:
         token = Path(args.peer_token_file).expanduser().read_text(encoding="utf-8").strip()
-    result = sync_repo(args.repo, remote=args.remote, peer=args.peer, peer_token=token)
+    sources = peer_sources("", args.peer, source_file(args.peer_file))
+    result = sync_repo(args.repo, remote=args.remote,
+                       peers=sources, peer_token=token)
     if result.get("updated") and args.install_python:
         result["installed"] = install_checkout(args.install_python, Path(args.repo))
         if result["installed"] and args.restart:

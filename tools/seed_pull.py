@@ -5,11 +5,20 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import sys
 import tarfile
 import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+# The same list-in-a-file reader the code updater uses, so "which peers does
+# this node have" is written in one format and parsed by one function.
+from tools.code_sync import source_file, source_list  # noqa: E402
 
 
 def _seed():
@@ -64,11 +73,39 @@ def _extract(packed: bytes, dest: Path, seed) -> bool:
     return (dest / seed.MANIFEST).is_file()
 
 
-def pull_once(base: str, token: str, inbox: Path, ledger: Path | None = None) -> dict:
+def pick_source(bases, token: str) -> tuple[str, list[str], dict]:
+    """The first source whose shelf answers, and every source tried.
+
+    A round has to stay on one shelf: the listing it read and the bytes it
+    fetches have to come from the same place, or a node acks an offer it
+    never received. So the choice is made once, here, and the round does not
+    hop between sources afterwards.
+
+    Nothing answers is an error, not an empty round. An empty round is
+    indistinguishable from a healthy, up-to-date landing point, and this
+    exact ambiguity is what hid the Mac's shelf going unpulled for hours on
+    2026-10-19 while every node's log showed a live process.
+    """
+    tried: list[str] = []
+    for candidate in bases:
+        url = str(candidate or "").rstrip("/")
+        if not url or url in tried:
+            continue
+        tried.append(url)
+        try:
+            listing = json.loads(_request(f"{url}/offers", token).decode("utf-8"))
+        except Exception:  # noqa: BLE001 - a dead source is the next one's turn
+            continue
+        return url, tried, listing
+    raise urllib.error.URLError(
+        "no source answered /offers; tried " + ", ".join(tried or ["(none)"]))
+
+
+def pull_once(base: str, token: str, inbox: Path, ledger: Path | None = None,
+              fallbacks=None) -> dict:
     """Download every sealed offer and keep the ones that still verify."""
     seed = _seed()
-    base = base.rstrip("/")
-    listing = json.loads(_request(f"{base}/offers", token).decode("utf-8"))
+    base, tried, listing = pick_source([base, *(fallbacks or [])], token)
     copied = []
     refused = []
     duplicates = []
@@ -111,22 +148,39 @@ def pull_once(base: str, token: str, inbox: Path, ledger: Path | None = None) ->
         _request(f"{base}/offer/{proposal_id}/ack", token, method="POST", body=ack)
         copied.append(proposal_id)
     return {"copied": copied, "refused": refused, "duplicate": duplicates,
+            "via": base, "tried": tried if len(tried) > 1 else [],
             "unwrapped": False, "started_model": False}
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--from", dest="base", required=True)
+    parser.add_argument("--from", dest="bases", action="append",
+                        required=True,
+                        help="outbox base URL; repeat for fallbacks, tried "
+                             "in order")
+    parser.add_argument("--from-file", default="",
+                        help="file of outbox base URLs, one per line; "
+                             "appended after repeated --from. Put the "
+                             "addresses here so a peer that moves is a file "
+                             "edit, not a service-definition edit on every "
+                             "host.")
     parser.add_argument("--token-file", required=True)
     parser.add_argument("--inbox", default="~/.pandosi/inbox")
     parser.add_argument("--ledger", default="")
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args(argv)
     token = Path(args.token_file).expanduser().read_text(encoding="utf-8").strip()
+    # `--from-file` may be empty: then the conventional names are probed, so
+    # the same unit definition serves a host whose state directory is
+    # `~/.pandosi`, `~/.pando` or `D:\pando-models`.
+    bases = list(args.bases) + source_list(
+        source_file(args.from_file, kind="seed"))
     ledger = Path(args.ledger).expanduser() if args.ledger else None
+    base, fallbacks = bases[0], bases[1:]
 
     def run(announce: bool) -> int:
-        result = pull_once(args.base, token, Path(args.inbox), ledger)
+        result = pull_once(base, token, Path(args.inbox), ledger,
+                           fallbacks=fallbacks)
         if (announce or result["copied"] or result["refused"]
                 or result["duplicate"]):
             print(json.dumps(result, ensure_ascii=False, sort_keys=True), flush=True)

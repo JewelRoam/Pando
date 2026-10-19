@@ -55,7 +55,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tools.code_sync import CLIENT_UNITS, restart_units, sync_repo  # noqa: E402
+from tools.code_sync import (  # noqa: E402
+    CLIENT_UNITS,
+    peer_sources,
+    restart_units,
+    source_file,
+    sync_repo,
+)
 
 
 def _sha256(path: Path) -> str:
@@ -152,7 +158,7 @@ def _spawn(command: str) -> dict:
     return {"ran": True, "pid": process.pid}
 
 
-def watch_round(*, repo, remote="origin", peer="", peer_token="",
+def watch_round(*, repo, remote="origin", peer="", peers=None, peer_token="",
                 on_update="none", client_cmd="", node_cmd="",
                 supervisor="", ledger=None, platform="") -> dict:
     """One sync. Restart whenever the running clients are not on HEAD.
@@ -167,7 +173,8 @@ def watch_round(*, repo, remote="origin", peer="", peer_token="",
     repo = Path(repo).expanduser()
     supervisor_path = Path(supervisor).expanduser() if supervisor else None
     roster_before = _sha256(supervisor_path) if supervisor_path else ""
-    result = sync_repo(repo, remote=remote, peer=peer, peer_token=peer_token)
+    result = sync_repo(repo, remote=remote, peer=peer, peers=peers,
+                       peer_token=peer_token)
     roster_after = _sha256(supervisor_path) if supervisor_path else ""
     roster_changed = bool(roster_before) and roster_before != roster_after
 
@@ -216,8 +223,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--repo", required=True)
     parser.add_argument("--remote", default="origin")
-    parser.add_argument("--peer", default="",
-                        help="used only when --remote cannot be fetched")
+    parser.add_argument("--peer", action="append", default=[],
+                        help="fallback bundle, tried in order only when "
+                             "--remote cannot be fetched; repeatable")
+    parser.add_argument("--peer-file", default="",
+                        help="file of fallback bundle URLs, one per line; "
+                             "appended after repeated --peer. Keep the list "
+                             "here so a peer that moves is a file edit and "
+                             "not a service-definition edit.")
     parser.add_argument("--peer-token-file", default="")
     parser.add_argument("--on-update", default="none",
                         choices=("none", "clients", "node"))
@@ -239,10 +252,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.peer_token_file:
         token = Path(args.peer_token_file).expanduser().read_text(
             encoding="utf-8").strip()
+    # `--peer-file` may be empty: then the conventional names are probed, so
+    # one unit definition runs on a host whose state directory is
+    # `~/.pandosi`, `~/.pando` or `D:\pando-models`.
+    peers = peer_sources("", args.peer, source_file(args.peer_file))
     ledger = Path(args.ledger).expanduser() if args.ledger else None
 
     def run(announce: bool) -> int:
-        row = watch_round(repo=args.repo, remote=args.remote, peer=args.peer,
+        row = watch_round(repo=args.repo, remote=args.remote, peers=peers,
                           peer_token=token, on_update=args.on_update,
                           client_cmd=args.client_cmd, node_cmd=args.node_cmd,
                           supervisor=args.supervisor, ledger=ledger,

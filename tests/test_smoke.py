@@ -8089,6 +8089,94 @@ class TestSeedReceive(unittest.TestCase):
                              ["mac-proposer-once"])
 
 
+    def test_a_dead_shelf_is_not_an_empty_shelf(self):
+        """A shelf that answers nothing must not look like a shelf with nothing.
+
+        Measured 2026-10-19: the Mac left the home LAN, and every node's
+        seed-pull pointed at ``192.168.31.41:8478``. The pull is a loop that
+        prints and continues on any exception, so a dead shelf and a healthy
+        empty one both produced silence on the node side while the Mac's shelf
+        went unpulled for hours. The two facts need opposite responses, so
+        "no source answered" is now an error that names every address tried,
+        and the list of addresses is a file so the repair is a line edit.
+
+        A round stays on one shelf: the listing it read and the bytes it
+        fetches come from the same place, or a node acks an offer it never
+        received. That is why the choice is made once, in ``pick_source``.
+        """
+        import importlib.util
+        import socket
+        from pando.execute import offer_replication
+
+        seed = self._seed()
+        root_dir = Path(__file__).resolve().parents[1]
+
+        def load(name, filename):
+            spec = importlib.util.spec_from_file_location(
+                name, root_dir / "tools" / filename)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+
+        pull_mod = load("pull_fallback_under_test", "seed_pull.py")
+
+        def dead_url():
+            """A URL nothing is listening on: bind, read the port, close."""
+            probe = socket.socket()
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+            probe.close()
+            return f"http://127.0.0.1:{port}"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            phrase = root / "phrase"
+            phrase.write_text("correct horse battery staple")
+            bundle, _live = self._export(seed, root, phrase, "mac-proposer-fb")
+            outbox = root / "outbox"
+            self.assertEqual(
+                offer_replication("repl-fb", "win", bundle=bundle,
+                                  outbox=outbox)["skipped"], "offered")
+
+            from tools import seed_outbox as outbox_mod
+            server = outbox_mod.ThreadingHTTPServer(
+                ("127.0.0.1", 0), outbox_mod.make_handler(outbox, "fb-token"))
+            live = f"http://127.0.0.1:{server.server_address[1]}"
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            try:
+                nothing = dead_url()
+                # The first shelf that answers wins, and the address that did
+                # not answer is still named.
+                chosen, tried, listing = pull_mod.pick_source(
+                    [nothing, live], "fb-token")
+                self.assertEqual(chosen, live)
+                self.assertEqual(tried, [nothing, live])
+                self.assertEqual([row["proposal_id"] for row in listing["offers"]],
+                                 ["repl-fb"])
+                # Nothing answers at all: an error, not an empty round.
+                with self.assertRaises(urllib.error.URLError) as caught:
+                    pull_mod.pick_source([dead_url(), dead_url()], "fb-token")
+                self.assertIn("no source answered", str(caught.exception))
+
+                # A round that fell through to the live shelf says so, and the
+                # tree it wrote is the one the live shelf served.
+                fell_through = pull_mod.pull_once(
+                    nothing, "fb-token", root / "inbox", fallbacks=[live])
+                self.assertEqual(fell_through["copied"], ["repl-fb"])
+                self.assertEqual(fell_through["via"], live)
+                self.assertEqual(fell_through["tried"], [nothing, live])
+                self.assertTrue(
+                    (root / "inbox" / "mac-proposer-fb" / "identity" /
+                     "identity.json").is_file())
+                # A round served by the first shelf reports no detour, so
+                # "tried" is only ever the evidence of a fallback.
+                direct = pull_mod.pull_once(live, "fb-token", root / "inbox2")
+                self.assertEqual(direct["via"], live)
+                self.assertEqual(direct["tried"], [])
+            finally:
+                server.shutdown()
+
+
 class TestWindowsSeedPull(unittest.TestCase):
     def test_windows_supervisor_starts_and_restarts_the_seed_pull_client(self):
         root = Path(__file__).resolve().parents[1]
@@ -8141,6 +8229,63 @@ class TestWindowsSeedPull(unittest.TestCase):
                    for name in ("names", "exes", "argsList", "cwds")}
         self.assertEqual(len(set(lengths.values())), 1, lengths)
         self.assertEqual(lengths["names"], 16)
+
+
+class TestResidentPullAllPlatforms(unittest.TestCase):
+    """One updater, three platforms, and a moved peer is a line in a file.
+
+    Measured 2026-10-19: the Mac left the home LAN, and every unit on every
+    other node that named that one address went on running a healthy-looking
+    process against a dead peer. The repair has two halves that must both be
+    installed, so both are pinned here: each host passes the *same* flag to
+    the *same* script, and each host is given a file in the same format to
+    edit when an address moves.
+    """
+
+    def _root(self) -> Path:
+        return Path(__file__).resolve().parents[1]
+
+    def test_the_windows_supervisor_writes_and_reads_the_peer_lists(self):
+        text = (self._root() / "tools" /
+                "win_node_supervisor.ps1").read_text(encoding="utf-8")
+        # The node writes its own lists on first boot, so no human paste and
+        # no other machine is needed to start pulling. Same two-part shape as
+        # the dummy key above it: create if absent, then leave it alone.
+        for variable, filename in (("$codeSources", "code-sources.txt"),
+                                   ("$seedSources", "seed-sources.txt")):
+            self.assertIn(f"{variable} = 'D:\\pando-models\\{filename}'", text)
+        self.assertEqual(text.count("if (-not (Test-Path $codeSources))"), 1)
+        self.assertEqual(text.count("if (-not (Test-Path $seedSources))"), 1)
+        # Tailscale is written before the home-LAN address on purpose: it is
+        # the one that survives the Mac changing networks.
+        self.assertLess(text.index("100.92.184.4:8478/code.bundle"),
+                        text.index("192.168.31.41:8478/code.bundle"))
+        self.assertLess(text.index("100.92.184.4:8478  # mac"),
+                        text.index("192.168.31.41:8478 # mac"))
+        # And the two consumers are pointed at them.
+        self.assertIn("'--peer-file', 'D:\\pando-models\\code-sources.txt'", text)
+        self.assertIn("'--from-file', 'D:\\pando-models\\seed-sources.txt'", text)
+
+    def test_the_mac_agent_and_the_pi5_units_read_the_same_flag(self):
+        root = self._root()
+        plist = (root / "tools" / "mac-launchd" /
+                 "com.jewelroam.pandosi-code-watch.plist").read_text(
+                     encoding="utf-8")
+        self.assertIn("<string>--peer-file</string>", plist)
+        self.assertIn("<string>/Users/zhengenrong/.pandosi/code-sources.txt</string>",
+                      plist)
+        units = root / "tools" / "pi5-systemd"
+        sync = (units / "pandosi-code-sync.service").read_text(encoding="utf-8")
+        seed = (units / "pandosi-seed-pull.service").read_text(encoding="utf-8")
+        self.assertIn("--peer-file /home/admin/.pando/code-sources.txt", sync)
+        self.assertIn("--from-file /home/admin/.pando/seed-sources.txt", seed)
+        # The baked-in bootstrap address is Tailscale, not the LAN address
+        # that died: a unit installed from this file must dial something that
+        # can actually answer today.
+        self.assertIn("--peer http://100.92.184.4:8478/code.bundle", sync)
+        self.assertIn("--from http://100.92.184.4:8478", seed)
+        for text in (sync, seed):
+            self.assertNotIn("192.168.31.41", text)
 
 
 class TestCodeSync(unittest.TestCase):
@@ -8312,6 +8457,132 @@ class TestCodeSync(unittest.TestCase):
             fetched = sync.sync_repo(client, peer=str(bare))
             self.assertTrue(fetched["updated"])
             self.assertEqual(fetched["via"], "peer")
+            self.assertEqual((client / "README").read_text(), "peer\n")
+
+    def test_a_sources_file_names_the_fallbacks_and_a_typo_cannot_wedge_it(self):
+        """The list lives in a file so a peer that moves is a file edit.
+
+        This is the whole repair for 2026-10-19: every node had exactly one
+        hardcoded peer URL, the Mac left the home LAN, and each node's updater
+        went on reporting a live, healthy process against a dead address. The
+        file is what makes one codebase adapt to all three platforms without
+        a branch -- a Windows path, a LaunchAgent and a systemd unit all pass
+        the same `--peer-file` and read the same format.
+
+        The unreadable-file case is the one that matters most: a sources file
+        is a *fallback*, so a missing or mistyped one must leave the primary
+        fetch alone rather than becoming a new way to stop the updater.
+        """
+        sync = self._load()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sources = root / "code-sources.txt"
+            sources.write_text(
+                "# the Mac, tailnet first\n"
+                "\n"
+                "http://100.92.184.4:8478/code.bundle  # tailnet\n"
+                "   \n"
+                "http://192.168.31.41:8478/code.bundle\n"
+                "http://192.168.31.41:8478/code.bundle\n",  # a repeat
+                encoding="utf-8")
+            # The reader is literal: comments and blanks drop, a repeat is
+            # kept as written. Dedupe belongs to `peer_sources`, which is the
+            # one place that decides the order actually dialed.
+            self.assertEqual(sync.source_list(str(sources)), [
+                "http://100.92.184.4:8478/code.bundle",
+                "http://192.168.31.41:8478/code.bundle",
+                "http://192.168.31.41:8478/code.bundle",
+            ])
+            # A path nobody wrote is not an error, it is an empty fallback set.
+            self.assertEqual(sync.source_list(str(root / "absent.txt")), [])
+            # Flags come first, then the file, and a repeat is dropped: a node
+            # that names one bundle twice does not pay for the same failure
+            # twice, and the order a human wrote is the order tried.
+            self.assertEqual(
+                sync.peer_sources("", ["http://a", "http://b", "http://a"],
+                                  str(sources)),
+                ["http://a", "http://b",
+                 "http://100.92.184.4:8478/code.bundle",
+                 "http://192.168.31.41:8478/code.bundle"])
+            # The single-value spelling the first callers used still works.
+            self.assertEqual(sync.peer_sources("http://only"), ["http://only"])
+
+    def test_one_resolver_finds_each_platforms_file_without_a_flag(self):
+        """No flag, same code, three state directories: the file is the adapter.
+
+        The point of resolving by probe instead of by branch is that a unit
+        definition, a LaunchAgent and a supervisor entry can pass the same
+        empty flag and each host still finds its own file -- ``~/.pandosi`` on
+        the Mac, ``~/.pando`` on the Pi, ``D:\\pando-models`` on Windows. A
+        host with none keeps the old behaviour exactly, and an explicit flag
+        keeps the last word over the probe.
+        """
+        sync = self._load()
+        real = sync.SOURCE_FILES
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            try:
+                first, second = root / "first.txt", root / "second.txt"
+                sync.SOURCE_FILES = {
+                    "code": (str(first), str(second)),
+                    "seed": (str(first), str(second)),
+                }
+                # None exists: no file, and that is not an error.
+                self.assertEqual(sync.source_file(), "")
+                self.assertEqual(sync.source_list(sync.source_file()), [])
+                second.write_text("http://second/code.bundle\n", encoding="utf-8")
+                self.assertEqual(sync.source_file(), str(second))
+                # The first that exists wins, not the last: order is the
+                # contract a human reads off the list.
+                first.write_text("http://first/code.bundle\n", encoding="utf-8")
+                self.assertEqual(sync.source_file(), str(first))
+                self.assertEqual(
+                    sync.source_list(sync.source_file()),
+                    ["http://first/code.bundle"])
+                # An explicit path beats the probe, even to a file that is not
+                # there -- an operator who names a file gets that file's
+                # answer, including "empty", not a surprise fallback.
+                self.assertEqual(
+                    sync.source_file(str(root / "absent.txt")),
+                    str(root / "absent.txt"))
+                self.assertEqual(
+                    sync.source_list(sync.source_file(str(root / "absent.txt"))),
+                    [])
+            finally:
+                sync.SOURCE_FILES = real
+
+    def test_a_dead_fallback_costs_one_fetch_and_the_first_live_one_wins(self):
+        """`origin` first, then the list in order, and one winner per round.
+
+        The order is the contract: the cheap path stays first, and a dead
+        fallback costs exactly one failed fetch rather than the round. When
+        everything fails the ledger has to name every address it dialed --
+        "fetch-failed" on its own cannot tell a node whose peer moved from a
+        node with no network, and that ambiguity is what let a stale address
+        sit unnoticed for hours.
+        """
+        sync = self._load()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env, src, bare, client = self._world(root)
+            self._advance_origin(env, src, bare, "peer\n")
+            dead = root / "dead.git"          # never created; fetch fails
+            self._run(env, "git", "-C", str(client), "remote", "set-url",
+                      "origin", str(root / "missing.git"))
+            # Order matters: a dead entry before the live one is survived.
+            fetched = sync.sync_repo(client, peers=[str(dead), str(bare)])
+            self.assertTrue(fetched["updated"])
+            self.assertEqual(fetched["via"], "peer")
+            self.assertEqual(fetched["peer"], str(bare))
+            self.assertEqual((client / "README").read_text(), "peer\n")
+            # Nothing answers: every address is named, and the tree does not
+            # move. This is the row an operator reads to see the address moved.
+            self._advance_origin(env, src, bare, "three\n")
+            stranded = sync.sync_repo(client, peers=[str(dead), "http://127.0.0.1:1/x.bundle"])
+            self.assertEqual(stranded["reason"], "fetch-failed")
+            self.assertFalse(stranded["updated"])
+            self.assertEqual(stranded["tried"], [
+                "origin", str(dead), "http://127.0.0.1:1/x.bundle"])
             self.assertEqual((client / "README").read_text(), "peer\n")
 
     def _load_watch(self):

@@ -12,6 +12,12 @@
     <string>/Users/zhengenrong/Downloads/PandoSI-island</string>
     <string>--peer</string>
     <string>http://127.0.0.1:8478/code.bundle</string>
+    <!-- The node-local list of fallback bundles, one URL per line. The
+         baked-in --peer above is the bootstrap address; this file is where a
+         moved address is repaired, so the repair is a line edit and not a
+         new plist on every host. -->
+    <string>--peer-file</string>
+    <string>/Users/zhengenrong/.pandosi/code-sources.txt</string>
     <string>--peer-token-file</string>
     <string>/Users/zhengenrong/.pandosi/mailbox.token</string>
     <string>--on-update</string>

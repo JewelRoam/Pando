@@ -14,6 +14,35 @@ if (-not (Test-Path $dummyKey)) {
   Set-Content -LiteralPath $dummyKey -Value 'x' -Encoding ascii
 }
 
+# The fallback peer lists. One line per address, tried in the order written,
+# and the same format read by the same parser on every platform
+# (tools/code_sync.py `source_list`). Written here once and then owned by the
+# node: when the Mac moves again, the repair is a line in this file, not an
+# edit to this script and not a paste from a human on another machine.
+#
+# Tailscale first on purpose. It reaches the Mac from wherever it is; the LAN
+# address below it only works when both ends are on the home network, and on
+# 2026-10-19 the Mac left that network (192.168.31.41 -> 172.24.19.146) and
+# silently killed every unit on this node whose only peer was the LAN one.
+$codeSources = 'D:\pando-models\code-sources.txt'
+if (-not (Test-Path $codeSources)) {
+  Set-Content -LiteralPath $codeSources -Encoding ascii -Value @(
+    '# Fallback code bundles for tools/node_code_watch.py.',
+    '# Order is the order tried; the first one that fetches wins.',
+    'http://100.92.184.4:8478/code.bundle  # mac, tailnet (survives a move)',
+    'http://192.168.31.41:8478/code.bundle # mac, home LAN'
+  )
+}
+$seedSources = 'D:\pando-models\seed-sources.txt'
+if (-not (Test-Path $seedSources)) {
+  Set-Content -LiteralPath $seedSources -Encoding ascii -Value @(
+    '# Fallback outbox bases for tools/seed_pull.py.',
+    '# Order is the order tried; the first one that answers wins.',
+    'http://100.92.184.4:8478  # mac, tailnet (survives a move)',
+    'http://192.168.31.41:8478 # mac, home LAN'
+  )
+}
+
 # Peer addresses are the Mac's Tailscale name, not its old LAN address.
 # On 2026-10-19 the Mac left the home LAN (192.168.31.41 -> 172.24.19.146),
 # which silently killed every fallback on this node that dialed that address:
@@ -110,6 +139,7 @@ $executorArgs = @("$repo\tools\execute_loop.py", '300')
 # never decrypts a seed, starts a model, or accepts a non-sealed bundle.
 $seedPullArgs = @("$repo\tools\seed_pull.py", '--from',
   'http://100.92.184.4:8478',
+  '--from-file', 'D:\pando-models\seed-sources.txt',
   '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
   '--inbox', 'D:\pando-models\seed-inbox',
   '--ledger', 'D:\pando-models\seed-receive-ledger.jsonl')
@@ -123,6 +153,7 @@ $seedPullArgs = @("$repo\tools\seed_pull.py", '--from',
 $codeWatchArgs = @("$repo\tools\node_code_watch.py", '--repo', "$repo",
   '--remote', 'origin',
   '--peer', 'http://100.92.184.4:8478/code.bundle',
+  '--peer-file', 'D:\pando-models\code-sources.txt',
   '--peer-token-file', "$repo\metrics\lan-check\mac-mailbox.token",
   '--on-update', 'clients',
   # Start-Process joins ArgumentList with spaces; a command value with
