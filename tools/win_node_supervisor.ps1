@@ -14,6 +14,13 @@ if (-not (Test-Path $dummyKey)) {
   Set-Content -LiteralPath $dummyKey -Value 'x' -Encoding ascii
 }
 
+# Peer addresses are the Mac's Tailscale name, not its old LAN address.
+# On 2026-10-19 the Mac left the home LAN (192.168.31.41 -> 172.24.19.146),
+# which silently killed every fallback on this node that dialed that address:
+# the Mac mailbox, the Mac bundle peer, and the seed-pull source. Tailscale
+# reaches the Mac from wherever it is; using it costs nothing when both ends
+# are still on the same LAN. The Windows node's own advertise-host stays
+# 192.168.31.100 -- that is this box's address, not the Mac's.
 $llamaExe = 'D:\pando-models\llama-cuda\llama-server.exe'
 $llamaArgs = @('-m', 'D:\pando-models\gemma-4-12b-it-Q4_K_M.gguf', '-ngl', '99',
   '-c', '4096', '-fa', 'on', '-ctk', 'q8_0', '-ctv', 'q8_0', '--parallel', '1',
@@ -41,7 +48,7 @@ $thinkArgs = @('-m', 'pando.thinkd', '--node-id', 'win-gpu-proposer',
   '--base-url', 'http://127.0.0.1:8086/v1', '--model', 'gemma-4-12b-it-Q4_K_M',
   '--fallback-base-url', 'http://127.0.0.1:8087/v1',
   '--fallback-model', 'yi-1.5-9b-q4km',
-  '--mailbox', 'http://192.168.31.41:8776',
+  '--mailbox', 'http://100.92.184.4:8776',
   '--mailbox-fallback', 'http://127.0.0.1:8778',
   '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
   '--ledger', 'D:\pando-models\win-gpu-think-ledger.jsonl',
@@ -61,7 +68,7 @@ $yiStemArgs = @('-m', 'pando.stemd', '--node-id', 'win-yi-9b', '--backend',
   '192.168.31.100')
 $yiThinkArgs = @('-m', 'pando.thinkd', '--node-id', 'win-cpu-proposer',
   '--base-url', 'http://127.0.0.1:8087/v1', '--model', 'yi-1.5-9b-q4km',
-  '--mailbox', 'http://192.168.31.41:8776',
+  '--mailbox', 'http://100.92.184.4:8776',
   '--mailbox-fallback', 'http://127.0.0.1:8778',
   '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
   '--ledger', 'D:\pando-models\win-cpu-think-ledger.jsonl',
@@ -74,7 +81,7 @@ $observatoryArgs = @("$repo\tools\observatory.py", '--port', '8799')
 $chatArgs = @('-m', 'pando.chatd',
   '--root', 'http://127.0.0.1:8790',
   '--pairing-token-file', $token,
-  '--mailbox', 'http://192.168.31.41:8776',
+  '--mailbox', 'http://100.92.184.4:8776',
   '--mailbox-fallback', 'http://127.0.0.1:8778',
   '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
   '--ledger', 'D:\pando-models\chat-ledger.jsonl',
@@ -85,7 +92,7 @@ $chatArgs = @('-m', 'pando.chatd',
 $reactArgs = @('-m', 'pando.reactd',
   '--root', 'http://127.0.0.1:8790',
   '--pairing-token-file', $token,
-  '--mailbox', 'http://192.168.31.41:8776',
+  '--mailbox', 'http://100.92.184.4:8776',
   '--mailbox-fallback', 'http://127.0.0.1:8778',
   '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
   '--ledger', 'D:\pando-models\reaction-ledger.jsonl',
@@ -102,7 +109,7 @@ $executorArgs = @("$repo\tools\execute_loop.py", '300')
 # in its outbox; this process pulls and verifies them into a local inbox. It
 # never decrypts a seed, starts a model, or accepts a non-sealed bundle.
 $seedPullArgs = @("$repo\tools\seed_pull.py", '--from',
-  'http://192.168.31.41:8478',
+  'http://100.92.184.4:8478',
   '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
   '--inbox', 'D:\pando-models\seed-inbox',
   '--ledger', 'D:\pando-models\seed-receive-ledger.jsonl')
@@ -115,7 +122,7 @@ $seedPullArgs = @("$repo\tools\seed_pull.py", '--from',
 # itself changed, because a running supervisor cannot learn a new service.
 $codeWatchArgs = @("$repo\tools\node_code_watch.py", '--repo', "$repo",
   '--remote', 'origin',
-  '--peer', 'http://192.168.31.41:8478/code.bundle',
+  '--peer', 'http://100.92.184.4:8478/code.bundle',
   '--peer-token-file', "$repo\metrics\lan-check\mac-mailbox.token",
   '--on-update', 'clients',
   '--client-cmd', "powershell -NoProfile -ExecutionPolicy Bypass -File $repo\tools\win_restart_clients.ps1",
