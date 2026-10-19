@@ -8,7 +8,13 @@ every interval it fast-forwards the checkout -- GitHub first, the Mac's
 ``/code.bundle`` peer when GitHub cannot be reached -- and then records what it
 did in a ledger a peer can read.
 
-What happens after a fast-forward is explicit, never implied:
+What a round does when the checkout is clean and stands somewhere other
+than the head the clients were last restarted onto is the same as what it
+does after a fast-forward: stop them and let their supervisors respawn
+them. That covers the head which moves without a fetch -- a commit made in
+this very checkout, or a hand-applied update -- which ``merge --ff-only``
+reports as "already" and which used to leave every client on old code
+forever. What happens after an update is explicit, never implied:
 
   none     record the new HEAD and change nothing (default)
   clients  stop the client processes so whatever supervises them respawns
@@ -27,7 +33,8 @@ roster file: a supervisor that is already running cannot learn a new service
 name, so only a restart of the whole stack can add one.
 
 A tree with local edits, a diverged history, or a failed fetch is left exactly
-as it was. No dependency is installed and no model is started here.
+as it was, and nothing is restarted. No dependency is installed and no model
+is started here.
 """
 from __future__ import annotations
 
@@ -62,6 +69,33 @@ def _append(ledger: Path | None, row: dict) -> None:
         handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
 
 
+def _acted_head(ledger: Path | None) -> str:
+    """The head the clients were last stopped-and-respawned onto.
+
+    A fetch that changes nothing still has to be reconciled: a Mac that
+    commits in place, or a node that was updated by hand, leaves the
+    checkout on new code while every supervised client keeps running the
+    old interpreter -- ``git merge --ff-only`` would say "already" and
+    nothing would ever restart. Recording the head we acted on is what
+    makes "already" mean "and the clients are already running it".
+    """
+    if ledger is None:
+        return ""
+    try:
+        lines = ledger.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return ""
+    for line in reversed(lines):
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        head = str(row.get("acted_head") or "")
+        if head:
+            return head
+    return ""
+
+
 def _spawn(command: str) -> dict:
     """Start a restart command and do not wait for it.
 
@@ -85,7 +119,15 @@ def _spawn(command: str) -> dict:
 def watch_round(*, repo, remote="origin", peer="", peer_token="",
                 on_update="none", client_cmd="", node_cmd="",
                 supervisor="", ledger=None, platform="") -> dict:
-    """One sync. Restart only if the fast-forward actually moved HEAD."""
+    """One sync. Restart whenever the running clients are not on HEAD.
+
+    Acting on ``updated`` alone is not enough -- it misses the head that
+    moved without a fetch (a commit made in this checkout, or an update
+    somebody applied by hand). Acting on every round is too much. So the
+    ledger remembers the head the clients were last restarted onto, and a
+    round restarts them when the checkout is clean and stands somewhere
+    else. A dirty tree or a failed fetch acts on nothing.
+    """
     repo = Path(repo).expanduser()
     supervisor_path = Path(supervisor).expanduser() if supervisor else None
     roster_before = _sha256(supervisor_path) if supervisor_path else ""
@@ -93,26 +135,31 @@ def watch_round(*, repo, remote="origin", peer="", peer_token="",
     roster_after = _sha256(supervisor_path) if supervisor_path else ""
     roster_changed = bool(roster_before) and roster_before != roster_after
 
+    head = str(result.get("after") or "")
+    clean = result.get("reason") in ("already", "fast-forward")
+    behind = ledger is not None and bool(head) and head != _acted_head(ledger)
+
     row = dict(result)
     row["at"] = round(time.time(), 3)
+    row["head"] = head
     row["roster_changed"] = roster_changed
     row["action"] = "none"
-    if result.get("updated"):
-        if on_update == "none":
-            row["action"] = "recorded"
+    if result.get("updated") and on_update == "none":
+        row["action"] = "recorded"
+    elif clean and on_update != "none" and (result.get("updated") or behind):
+        use_node = roster_changed or on_update == "node"
+        row["action"] = "node-restart" if use_node else "client-restart"
+        command = node_cmd if use_node else client_cmd
+        if command:
+            row["command"] = _spawn(command)
         else:
-            use_node = roster_changed or on_update == "node"
-            row["action"] = "node-restart" if use_node else "client-restart"
-            command = node_cmd if use_node else client_cmd
-            if command:
-                row["command"] = _spawn(command)
-            else:
-                # No shell string: the clients are named, and the platform
-                # underneath this process decides what "restart" means. This
-                # is the branch the Mac uses, and the branch pi5's systemd
-                # timer will use when it is switched off ``--restart``.
-                row["restart"] = restart_units(list(CLIENT_UNITS),
-                                               platform=platform)
+            # No shell string: the clients are named, and the platform
+            # underneath this process decides what "restart" means. This is
+            # the branch the Mac uses, and the branch pi5's systemd timer
+            # will use when it is switched off ``--restart``.
+            row["restart"] = restart_units(list(CLIENT_UNITS),
+                                           platform=platform)
+        row["acted_head"] = head
     _append(ledger, row)
     return row
 

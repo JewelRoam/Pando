@@ -8413,6 +8413,110 @@ class TestCodeSync(unittest.TestCase):
             self.assertEqual(row["action"], "none")
             self.assertEqual(seen, [])
 
+    def test_the_mac_updater_is_a_oneshot_so_it_can_update_itself(self):
+        """A resident updater keeps running the updater code it replaced.
+
+        The loop has to be re-executed to pick up a new ``node_code_watch``,
+        so the shipped agent is a oneshot with an interval and the job stays
+        outside CLIENT_UNITS -- it never restarts itself, launchd does.
+        """
+        src = (Path(__file__).resolve().parents[1]
+               / "tools" / "mac-launchd" / "com.jewelroam.pandosi-code-watch.plist")
+        text = src.read_text(encoding="utf-8")
+        self.assertIn("<string>--once</string>", text)
+        self.assertIn("<key>StartInterval</key>", text)
+        self.assertIn("<key>RunAtLoad</key>", text)
+        self.assertNotIn("<key>KeepAlive</key>", text)
+        self.assertNotIn("<string>--interval</string>", text)
+        sync = self._load()
+        self.assertEqual(
+            [name for name, row in sync.CLIENT_UNITS.items()
+             if "pandosi-code-watch" in str(row.get("darwin", ""))], [])
+
+    def test_a_head_that_moved_without_a_fetch_still_restarts_clients(self):
+        """The Mac commits in its own checkout, so HEAD moves with no fetch.
+
+        ``git merge --ff-only`` then reports "already" and a watcher that
+        acted only on ``updated`` would leave every client on old code for
+        ever. The 2026-10-19 Mac stems were exactly that: the checkout was
+        at HEAD and mac-text/mac-llm-8b-local still reported older heads.
+        """
+        watch = self._load_watch()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env, src, bare, client = self._world(root)
+            ledger = root / "code-sync-ledger.jsonl"
+            def head_of():
+                return subprocess.run(
+                    ["git", "-C", str(client), "rev-parse", "HEAD"],
+                    check=True, capture_output=True, text=True,
+                    env=env).stdout.strip()
+
+            head = head_of()
+            ledger.write_text(json.dumps({"acted_head": head}) + "\n")
+
+            seen = []
+            watch._spawn = lambda command: seen.append(command) or {
+                "ran": True, "pid": 4}
+            # A commit made in this checkout: origin never moves, so the
+            # merge is a no-op and only the recorded head can tell the
+            # watcher that the clients are behind.
+            (client / "README").write_text("committed in place\n")
+            self._run(env, "git", "-C", str(client), "add", "README")
+            self._run(env, "git", "-C", str(client), "commit", "-m", "in place")
+            moved = head_of()
+            self.assertNotEqual(moved, head)
+
+            row = watch.watch_round(repo=client, on_update="clients",
+                                    client_cmd="stop-clients", ledger=ledger)
+            self.assertFalse(row["updated"])
+            self.assertEqual(row["reason"], "already")
+            self.assertEqual(row["action"], "client-restart")
+            self.assertEqual(seen, ["stop-clients"])
+            self.assertEqual(row["acted_head"], moved)
+
+            # And it converges: the next round is quiet, not a restart loop.
+            again = watch.watch_round(repo=client, on_update="clients",
+                                      client_cmd="stop-clients", ledger=ledger)
+            self.assertEqual(again["action"], "none")
+            self.assertEqual(seen, ["stop-clients"])
+
+    def test_the_first_clean_round_takes_responsibility_for_head(self):
+        """A watcher with no memory of acting must not assume clients are fresh.
+
+        This is the one-time convergence: an installed watcher finds a
+        checkout at some head, no record that anything was restarted onto
+        it, so it restarts the clients once and writes the head down.
+        """
+        watch = self._load_watch()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env, src, bare, client = self._world(root)
+            ledger = root / "code-sync-ledger.jsonl"
+
+            seen = []
+            watch._spawn = lambda command: seen.append(command) or {
+                "ran": True, "pid": 5}
+            first = watch.watch_round(repo=client, on_update="clients",
+                                      client_cmd="stop-clients", ledger=ledger)
+            self.assertFalse(first["updated"])
+            self.assertEqual(first["action"], "client-restart")
+            self.assertEqual(seen, ["stop-clients"])
+            self.assertEqual(first["acted_head"], first["after"])
+
+            second = watch.watch_round(repo=client, on_update="clients",
+                                       client_cmd="stop-clients", ledger=ledger)
+            self.assertEqual(second["action"], "none")
+            self.assertEqual(seen, ["stop-clients"])
+
+            # A dirty tree never acts, and never claims to have converged.
+            (client / "README").write_text("edit\n")
+            dirty = watch.watch_round(repo=client, on_update="clients",
+                                      client_cmd="stop-clients", ledger=ledger)
+            self.assertEqual(dirty["reason"], "dirty")
+            self.assertEqual(dirty["action"], "none")
+            self.assertEqual(seen, ["stop-clients"])
+
     def test_code_bundle_follows_head_not_the_cache_age(self):
         outbox = self._load_outbox()
         with tempfile.TemporaryDirectory() as tmp:
