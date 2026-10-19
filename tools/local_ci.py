@@ -11,6 +11,7 @@ cannot see the difference (see ``shallow_parity``).
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,26 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+
+
+def _ci_env() -> dict[str, str]:
+    """The environment CI has: no inherited repository pointer.
+
+    This script is the pre-push hook, and in a linked worktree git hands that
+    hook ``GIT_DIR``. Every git call here names its repository in argv, but an
+    inherited ``GIT_DIR``/``GIT_WORK_TREE`` wins over argv: on 2026-10-19 the
+    depth-1 fixture committed into the real worktree that way, and with both
+    variables set even ``git clone`` refuses to run ("working tree already
+    exists"). A runner has neither variable, so removing them here is not a
+    workaround - it is the difference between measuring this machine and
+    measuring CI.
+    """
+    env = os.environ.copy()
+    for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
+                "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR",
+                "GIT_ALTERNATE_OBJECT_DIRECTORIES"):
+        env.pop(key, None)
+    return env
 
 # marker is a substring of one `run:` line in ci.yml. The argv is what this
 # machine executes. pip installs are the runner image, not checks.
@@ -112,13 +133,14 @@ def _shallow_checkout(dest: Path) -> None:
     is copied over that HEAD, so the depth-1 copy is the code about to be
     pushed rather than the code last committed.
     """
+    env = _ci_env()
     subprocess.run(
         ["git", "clone", "--depth", "1", "--quiet", f"file://{ROOT}", str(dest)],
-        check=True)
+        check=True, env=env)
     listing = subprocess.run(
         ["git", "-C", str(ROOT), "ls-files", "-z",
          "--cached", "--others", "--exclude-standard"],
-        check=True, capture_output=True).stdout.decode("utf-8")
+        check=True, capture_output=True, env=env).stdout.decode("utf-8")
     for rel in listing.split("\0"):
         if not rel:
             continue
@@ -146,7 +168,7 @@ def shallow_parity() -> int:
         _shallow_checkout(dest)
         completed = subprocess.run(
             [sys.executable, "-m", "unittest", "discover", "-s", "tests"],
-            cwd=dest)
+            cwd=dest, env=_ci_env())
     return completed.returncode
 
 
@@ -160,7 +182,7 @@ def main() -> int:
     for marker, args in CHECKS:
         command = _argv(marker, args)
         print(f"\n== {marker} ==", flush=True)
-        completed = subprocess.run(command, cwd=ROOT)
+        completed = subprocess.run(command, cwd=ROOT, env=_ci_env())
         if completed.returncode != 0:
             print(f"\nlocal_ci failed at {marker} (exit {completed.returncode})",
                   file=sys.stderr)

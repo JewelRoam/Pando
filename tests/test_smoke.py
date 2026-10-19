@@ -7760,6 +7760,38 @@ class TestLocalCi(unittest.TestCase):
         source = Path(module.__file__).read_text(encoding="utf-8")
         self.assertIn("shallow_parity()", source)
 
+    def test_the_gate_runs_children_without_an_inherited_repository(self):
+        """The gate is a hook, so it inherits GIT_DIR; its children must not.
+
+        A linked worktree exports ``GIT_DIR`` to its hooks (verified on this
+        machine). With ``GIT_DIR`` *and* ``GIT_WORK_TREE`` set, even
+        ``git clone`` refuses to run -- "working tree already exists" -- so
+        the depth-1 parity check would die before testing anything. CI has
+        neither variable; the gate strips them so it measures CI's
+        environment rather than whatever shell happened to invoke it.
+        """
+        module = self._module()
+        poison = {
+            "GIT_DIR": "/nonexistent/repo.git",
+            "GIT_WORK_TREE": "/nonexistent/tree",
+            "GIT_INDEX_FILE": "/nonexistent/index",
+            "GIT_OBJECT_DIRECTORY": "/nonexistent/objects",
+            "GIT_COMMON_DIR": "/nonexistent/common",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES": "/nonexistent/alt",
+        }
+        saved = {key: os.environ.get(key) for key in poison}
+        try:
+            os.environ.update(poison)
+            clean = module._ci_env()
+            for key in poison:
+                self.assertNotIn(key, clean)
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
     def test_pre_push_runs_the_local_gate(self):
         hook = Path(__file__).resolve().parents[1] / "tools" / "githooks" / "pre-push"
         text = hook.read_text(encoding="utf-8")
