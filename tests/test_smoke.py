@@ -2187,6 +2187,124 @@ class TestResidentThinker(unittest.TestCase):
             self.assertEqual(proposer.calls, 2)
             self.assertEqual(sent, [])
 
+    def test_the_operator_skeleton_is_a_params_block_the_executor_accepts(self):
+        """The repair example must be the exact shape ``pando.operators`` takes.
+
+        The skeleton is handed to a 1.7B model, and the model copies what it is
+        shown. A skeleton ``pando.operators.validate`` refuses would be worse
+        than none: the model would echo it faithfully and still be refused.
+        """
+        from pando.operators import validate as validate_operator
+        from pando.thinkd import operator_skeleton
+
+        skeleton = operator_skeleton()
+        checked, why = validate_operator(skeleton)
+        self.assertEqual(why, "")
+        self.assertEqual(checked["operator"], "vote.weighted")
+        self.assertTrue(checked["rationale"])
+
+    def test_a_meta_propose_without_an_operator_is_repaired_once(self):
+        """Measured on the pi5 ledger (2026-10-19): 33 of the last 40 rounds
+        chose ``meta.propose`` and every one was nameless - until this change
+        the proposer refused *any* params on that action, so the only
+        publishable form was the empty spec the actuator stages and refuses.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            thinker, proposer, _sent = self._thinker(
+                [{"action": "meta.propose",
+                  "goal": "let the group weigh how sure a vote is"},
+                 {"action": "meta.propose",
+                  "goal": "let the group weigh how sure a vote is",
+                  "params": {"operator": "vote.weighted",
+                             "rationale": "one vote each ignores confidence"}}],
+                Path(tmp) / "think.jsonl")
+            round_ = thinker.think(1)
+
+            self.assertTrue(round_.meta_params_repaired)
+            self.assertTrue(round_.published)
+            self.assertEqual(round_.proposal.action, "meta.propose")
+            self.assertEqual(round_.proposal.params["operator"], "vote.weighted")
+            self.assertEqual(proposer.calls, 2)
+            # The retry must carry the shape, not just repeat the prose.
+            self.assertIn('"operator"', proposer.users[1])
+            self.assertIn("vote.weighted", proposer.users[1])
+
+    def test_a_meta_propose_that_never_names_an_operator_is_held_not_signed(self):
+        """One repair, not a loop.
+
+        The cost of signing the empty form instead is measured: every proposal
+        collects one reaction from each decision model, so a nameless
+        ``meta.propose`` buys four to seven inferences and produces a spec
+        whose entire content is the refusal list.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            thinker, proposer, sent = self._thinker(
+                [{"action": "meta.propose", "goal": "a new operator"},
+                 {"action": "meta.propose", "goal": "a new operator"}],
+                Path(tmp) / "think.jsonl")
+            round_ = thinker.think(1)
+
+            self.assertFalse(round_.meta_params_repaired)
+            self.assertFalse(round_.published)
+            self.assertIsNone(round_.proposal)
+            self.assertIn("meta.propose params invalid", round_.error)
+            self.assertEqual(proposer.calls, 2)
+            self.assertEqual(sent, [])
+
+    def test_meta_propose_params_carry_a_name_and_prose_and_nothing_else(self):
+        """The one action whose payload ends up being code keeps the rule the
+        actuator enforces: labels and prose, never an executable surface.
+        """
+        from pando.thinkd import proposal_from_obj
+
+        for raw in ({"code": "import os"}, {"path": "/tmp/x"}, {"url": "http://x"},
+                    {"operator": ""}, {"operator": "   "}, {"operator": 7},
+                    {"operator": "x" * 200}):
+            bad, why = proposal_from_obj(
+                {"action": "meta.propose", "goal": "ask", "params": raw},
+                "n1", "n1", 7)
+            self.assertIsNone(bad, raw)
+            self.assertIn("meta.propose params invalid", why)
+
+        good, why = proposal_from_obj(
+            {"action": "meta.propose", "goal": "ask",
+             "params": {"operator": "vote.weighted", "rationale": "why"}},
+            "n1", "n1", 7)
+        self.assertEqual(why, "")
+        self.assertEqual(good.params["operator"], "vote.weighted")
+
+    def test_a_named_meta_propose_reaches_the_actuator(self):
+        """End to end across the two sides.
+
+        The intent the proposer now signs is the intent the executor stages,
+        and the staged spec names the operator instead of carrying "no
+        operator named" as its whole content. The implementation refusal stays:
+        a name is not code, and nothing here installs anything.
+        """
+        from pando.identity import Identity
+        from pando.operators import stage as stage_operator
+        from pando.thinkd import proposal_from_obj
+
+        proposal, why = proposal_from_obj(
+            {"action": "meta.propose", "goal": "ask for a new operator",
+             "params": {"operator": "vote.weighted",
+                        "rationale": "certainty should count"}},
+            "n1", "n1", 3)
+        self.assertEqual(why, "")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = stage_operator(proposal, identity=Identity.generate(),
+                                    outbox=tmp)
+            spec = json.loads((Path(tmp) / proposal.proposal_id
+                               / "spec.json").read_text(encoding="utf-8"))
+
+        self.assertTrue(result["staged"])
+        self.assertEqual(spec["requested"]["operator"], "vote.weighted")
+        self.assertEqual(spec["rationale"], "certainty should count")
+        self.assertFalse([r for r in spec["refusals"] if "no operator named" in r])
+        self.assertTrue([r for r in spec["refusals"] if "no implementation" in r])
+        self.assertFalse(spec["installed"])
+
     def test_thinkd_requires_valid_signed_params_for_culture_refine(self):
         """The proposer and executor share one culture.refine intent shape.
 

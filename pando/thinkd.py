@@ -69,6 +69,7 @@ from .identity import load_or_create
 from .playbook import parse_playbook
 from .policy import KNOBS, validate as validate_policy
 from .net import open_url
+from .operators import validate as validate_operator
 from .proposal_mail import (delivery_failed, fetch_proposals,
                             mailbox_chain, publish_proposal)
 
@@ -106,6 +107,13 @@ SYSTEM_PROMPT = f"""你是 PandoSI 殖民地的一名提案者。这个群体是
    形状写不对时你的回答会被退回一次，退回时会把一份能通过校验的骨架直接给你。
    这个动作只是把候选签名后放进评审 outbox，不会当场改写规则，
    所以不要指望它在同一轮生效。
+   选了 meta.propose 时，params 必须是单独的 JSON 字段，形如
+   {{"operator": "vote.weighted", "rationale": "为什么需要这个新操作"}}。
+   operator 是你要申请的新操作的名字（例子只是形状，写你自己要的那个名字），
+   rationale 是一句话理由。新操作的实现永远由 gate 那边人工审核后补上，
+   你只给名字和理由；params 里出现 code/source/module/path/command 会被拒。
+   形状写不对或没写 operator 时，你的回答会被退回一次，
+   退回时会把一份能通过校验的例子直接给你。
    其他 action 不要写 params。
 """
 
@@ -156,6 +164,38 @@ def policy_skeleton() -> dict:
     return skeleton
 
 
+def operator_skeleton() -> dict:
+    """A minimal ``meta.propose`` params block the executor accepts.
+
+    Measured on the pi5 ledger (2026-10-19): 33 of the last 40 rounds chose
+    ``meta.propose``, and every one of them was *nameless*. That was not only
+    the model fixating on the most abstract verb: until this change the
+    proposer refused ``meta.propose`` with any params at all ("does not accept
+    params"), so the only publishable form was the empty one - the shape the
+    actuator stages and then refuses for naming nothing. The verb was
+    unreachable by construction, and the group spent four decision-model votes
+    per round on it.
+
+    ``validate_operator`` is called here as well, so the example handed to the
+    model cannot drift from what ``pando.operators`` will demand on the way in.
+    The example name is deliberately a real-looking label: a skeleton the model
+    copies faithfully still has to be something the executor takes (the same
+    argument as the culture and policy skeletons). Whether the models echo
+    ``vote.weighted`` instead of naming their own operator is measurable
+    afterwards - it shows up verbatim in ``requested.operator`` - and that rate
+    is the honest follow-up question, not a reason to hand over a shape nobody
+    could sign.
+    """
+    skeleton = {
+        "operator": "vote.weighted",
+        "rationale": "一句话说明为什么这个新操作会让群体更可能活下去",
+    }
+    checked, why = validate_operator(skeleton)
+    if checked is None or not checked.get("operator"):
+        raise ValueError(why or "operator skeleton names no operator")
+    return skeleton
+
+
 @dataclass
 class Round:
     """One think -> validate -> sign -> publish -> record cycle."""
@@ -186,6 +226,11 @@ class Round:
     # from ``params_repaired`` (culture.refine) because the two repairs ask for
     # different artifacts; mixing them would make the repair-rate unreadable.
     policy_params_repaired: bool = False
+    # The round chose meta.propose without naming the operator it is asking
+    # for. A third counter rather than a share of the other two: "the group
+    # cannot name what it wants" is a different failure from "the group cannot
+    # fill a schema" and has to be readable on its own.
+    meta_params_repaired: bool = False
     # Did this round land on the same action as the one before it? Recorded even
     # when the goal was reworded, because "same verb, new sentence" is still the
     # organism walking into the same wall - and measuring that rate is the only
@@ -222,6 +267,7 @@ class Round:
             "novelty_forced": self.novelty_forced,
             "params_repaired": self.params_repaired,
             "policy_params_repaired": self.policy_params_repaired,
+            "meta_params_repaired": self.meta_params_repaired,
             "repeated": self.repeated,
             "served_by": self.served_by,
         }
@@ -474,6 +520,21 @@ def proposal_from_obj(obj: dict, author: str, node_id: str,
         if checked is None:
             return None, f"culture.refine params invalid: {why}"
         params = {"playbook": checked}
+    elif action == "meta.propose":
+        checked, why = validate_operator(raw_params)
+        if checked is None:
+            return None, f"meta.propose params invalid: {why}"
+        if not checked.get("operator"):
+            # ``pando.operators.validate({})`` accepts an empty intent, and
+            # ``stage`` then writes a spec whose refusal list is the whole
+            # artifact. Signing that is how the group spent 54 rounds asking
+            # for "a new operator" without saying which one, so the proposer
+            # holds it here instead - one schema handover first, then the round
+            # fails loudly rather than publishing a request nobody can review.
+            return None, ("meta.propose params invalid: no operator named "
+                          "(this action must name the operator it is asking "
+                          "for)")
+        params = checked
     elif raw_params not in (None, {}, []):
         return None, f"{action} does not accept params"
     return Proposal(
@@ -894,6 +955,45 @@ class Thinker:
             return None
         return proposal2, text2
 
+    def _ask_for_operator_params(self, user: str, round_no: int, round_, why: str):
+        """One more call, with the exact ``meta.propose`` object.
+
+        Returns ``(proposal, raw_text)`` or ``None``. The validator is
+        unchanged: this hands over a shape, it does not loosen a gate. Any
+        valid action is accepted on the retry, because the model may have
+        chosen ``meta.propose`` for a change that adding an operator cannot
+        express.
+        """
+        try:
+            skeleton = operator_skeleton()
+        except (TypeError, ValueError):  # pragma: no cover - contract drift
+            return None
+        example = {
+            "action": "meta.propose",
+            "goal": "name the operator you are asking for",
+            "params": skeleton,
+        }
+        retry_user = (
+            user + "\n\n【上一轮你的回答被拒绝】" + why
+            + "。params 必须是 JSON 对象，而且必须写明你想申请的那个新操作：\n"
+            + json.dumps(example, ensure_ascii=False)
+            + "\noperator 是名字，要写你自己要申请的那个（例子里的名字只是形状），"
+              "rationale 是一句话理由。params 里不能出现 code/source/module/"
+              "path/command 这类字段——新操作的实现永远由 gate 里人工审核后补上，"
+              "提案只带名字和理由，也不会当场装上任何东西。"
+              "如果你要做的不是申请一个新操作，就换一个动作。只输出一行 JSON。")
+        try:
+            text2, usage2 = self.proposer.complete(SYSTEM_PROMPT, retry_user)
+        except Exception:  # noqa: BLE001 - a failed retry holds the round
+            return None
+        round_.prompt_tokens += int(usage2.get("prompt_tokens") or 0)
+        round_.completion_tokens += int(usage2.get("completion_tokens") or 0)
+        proposal2, _why2 = proposal_from_obj(
+            extract_json(text2) or {}, self.node_id, self.node_id, round_no)
+        if proposal2 is None:
+            return None
+        return proposal2, text2
+
     def _user_prompt(self, round_no: int, group: list[dict]) -> str:
         own = self.ledger.tail(self.history_window)
         lines = [f"这是你的第 {round_no} 轮思考。", "", "【你自己的历史】"]
@@ -1010,6 +1110,17 @@ class Thinker:
                 proposal, text = repaired
                 why = ""
                 round_.policy_params_repaired = True
+
+        # meta.propose had the same disease as policy.set, one step worse: the
+        # action menu taught the verb while the prompt forbade every params
+        # block but two, so a *named* request could never be signed. Same
+        # handover, same validator, one retry.
+        if proposal is None and why.startswith("meta.propose params invalid"):
+            repaired = self._ask_for_operator_params(user, round_no, round_, why)
+            if repaired is not None:
+                proposal, text = repaired
+                why = ""
+                round_.meta_params_repaired = True
 
         # Measured: a 4B model repeats the previous round almost verbatim.
         # Asking for novelty in the prompt is a request, not a constraint, so
