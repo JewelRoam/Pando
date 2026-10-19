@@ -5249,6 +5249,10 @@ class TestExecution(unittest.TestCase):
     def _vote(self, node, stance, target="p1"):
         return {"target_id": target, "node_id": node, "stance": stance}
 
+    def _votes(self, target="p1"):
+        return [self._vote("mac-text", "赞同", target),
+                self._vote("mac-laya-int8", "赞同", target)]
+
     def test_a_seed_export_stays_visible_after_the_window_fills(self):
         from pando.execute import rows_for_execution
         old = {"id": "t-old", "title": "[proposal] p-old seed.export by mac-proposer"}
@@ -5470,7 +5474,11 @@ class TestExecution(unittest.TestCase):
             invite_outbox=str(Path(tmp) / "invite-outbox"),
             spawn_outbox=str(Path(tmp) / "spawn-outbox"),
             rebalance_outbox=str(Path(tmp) / "rebalance-outbox"),
-            operator_outbox=str(Path(tmp) / "operator-outbox"))
+            operator_outbox=str(Path(tmp) / "operator-outbox"),
+            operators_dir=str(Path(tmp) / "operators"),
+            grants=str(Path(tmp) / "grants.toml"),
+            operator_install_ledger=str(Path(tmp) / "install-ledger.jsonl"),
+            operator_deploy_ledger=str(Path(tmp) / "deploy-ledger.jsonl"))
 
     def test_a_raising_export_is_recorded_rather_than_ending_the_loop(self):
         """One broken actuator must not take the executor down with it.
@@ -6487,6 +6495,263 @@ class TestExecution(unittest.TestCase):
             self.assertEqual(rows[0]["skipped"], "other-host")
             self.assertEqual(rows[0]["action"], "meta.propose")
             self.assertFalse((Path(args.operator_outbox) / "p-theirs-o").exists())
+
+    def _stage_catalogue_proposal(self, tmp, *, identity,
+                                  name="adaptive.governance",
+                                  pid="p-catalogue-op"):
+        from pando.operators import stage as stage_operator
+
+        proposal = self._proposal(action="meta.propose", pid=pid)
+        proposal.pubkey = identity.public_key
+        proposal.params = {"operator": name,
+                           "rationale": "fixed catalogue deployment"}
+        staged = stage_operator(proposal, identity=identity,
+                                outbox=Path(tmp) / "operator-outbox")
+        return proposal, Path(staged["directory"])
+
+    def _save_deployment_grant(self, path, *,
+                               resource="profile-catalogue/v1",
+                               scope="operator-host",
+                               evidence=("2026-10-20 explicit authorization: "
+                                         "deploy catalogue-approved operator "
+                                         "profiles automatically")):
+        import datetime as dt
+        from pando.grants import save_grant
+
+        now = dt.datetime.now(dt.timezone.utc)
+        return save_grant(
+            "deploy_operator", resource, scope, "test-user",
+            (now + dt.timedelta(days=7)).isoformat(),
+            evidence=evidence, path=path)
+
+    def _jsonl_rows(self, path):
+        path = Path(path)
+        if not path.exists():
+            return []
+        return [json.loads(line) for line in
+                path.read_text(encoding="utf-8").splitlines() if line]
+
+    def test_catalogue_profiles_match_exactly_and_are_not_mutable(self):
+        from pando.operator_profiles import OperatorProfileError
+        from pando.operator_profiles import names, resolve
+
+        self.assertEqual(names(), ("adaptive.governance",
+                                   "dynamic.threshold.adjustment"))
+        first = resolve("adaptive.governance")
+        first["params"]["playbook"]["meta"]["version"] = 999
+        second = resolve("adaptive.governance")
+        self.assertEqual(second["params"]["playbook"]["meta"]["version"], 1)
+        with self.assertRaises(OperatorProfileError):
+            resolve("adaptive_governance_protocol")
+        with self.assertRaises(OperatorProfileError):
+            resolve("adaptive.governance ")
+
+    def test_an_adopted_catalogue_proposal_without_a_grant_refuses(self):
+        import tempfile
+        from pando.execute import run_once
+        from pando.identity import Identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = Identity.generate()
+            ident_path = Path(tmp) / "identity.json"
+            ident_path.write_text(json.dumps(identity.to_json()),
+                                  encoding="utf-8")
+            (Path(tmp) / "phrase").write_text("pw\n", encoding="utf-8")
+            proposal, _ = self._stage_catalogue_proposal(tmp,
+                                                         identity=identity)
+            args = self._execute_args(tmp, ident_path)
+            run_once([proposal], self._votes(proposal.proposal_id), args)
+
+            deployments = self._jsonl_rows(args.operator_deploy_ledger)
+            self.assertTrue(deployments)
+            self.assertEqual(deployments[-1]["status"], "refused")
+            self.assertIn("grant", deployments[-1]["reason"])
+            self.assertFalse((Path(args.operators_dir) /
+                              "adaptive.governance.json").exists())
+
+    def test_matching_grant_installs_the_fixed_profile_automatically(self):
+        import tempfile
+        from pando.execute import run_once
+        from pando.grants import audit_status
+        from pando.identity import Identity
+        from pando.operator_profiles import resolve
+        from pando.operators import installed
+
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = Identity.generate()
+            ident_path = Path(tmp) / "identity.json"
+            ident_path.write_text(json.dumps(identity.to_json()),
+                                  encoding="utf-8")
+            (Path(tmp) / "phrase").write_text("pw\n", encoding="utf-8")
+            proposal, _ = self._stage_catalogue_proposal(tmp,
+                                                         identity=identity)
+            args = self._execute_args(tmp, ident_path)
+            self._save_deployment_grant(args.grants)
+            run_once([proposal], self._votes(proposal.proposal_id), args)
+
+            deployments = self._jsonl_rows(args.operator_deploy_ledger)
+            self.assertEqual([row["status"] for row in deployments],
+                             ["granted", "installed"])
+            record = installed(args.operators_dir)["adaptive.governance"]
+            expected = resolve("adaptive.governance")
+            self.assertEqual(record["binds_to"], expected["binds_to"])
+            self.assertEqual(record["params"], expected["params"])
+            self.assertEqual(record["reviewer"], "auto-profile-catalogue/v1")
+            self.assertEqual(len(self._jsonl_rows(args.operator_install_ledger)), 1)
+            audit = audit_status(Path(args.grants).with_name(
+                Path(args.grants).name + ".audit.jsonl"))
+            self.assertEqual(audit["status"], "valid")
+
+    def test_replaying_the_same_catalogue_proposal_does_not_reinstall(self):
+        import tempfile
+        from pando.execute import run_once
+        from pando.identity import Identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = Identity.generate()
+            ident_path = Path(tmp) / "identity.json"
+            ident_path.write_text(json.dumps(identity.to_json()),
+                                  encoding="utf-8")
+            (Path(tmp) / "phrase").write_text("pw\n", encoding="utf-8")
+            proposal, _ = self._stage_catalogue_proposal(tmp,
+                                                         identity=identity)
+            args = self._execute_args(tmp, ident_path)
+            self._save_deployment_grant(args.grants)
+            run_once([proposal], self._votes(proposal.proposal_id), args)
+            run_once([proposal], self._votes(proposal.proposal_id), args)
+
+            deployments = self._jsonl_rows(args.operator_deploy_ledger)
+            self.assertEqual([row["status"] for row in deployments],
+                             ["granted", "installed", "already-installed"])
+            self.assertEqual(len(self._jsonl_rows(args.operator_install_ledger)), 1)
+
+    def test_a_catalogue_proposal_cannot_carry_an_executable_field(self):
+        import tempfile
+        from pando.execute import run_once
+        from pando.identity import Identity
+        from pando.operators import OperatorError, stage
+
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = Identity.generate()
+            ident_path = Path(tmp) / "identity.json"
+            ident_path.write_text(json.dumps(identity.to_json()),
+                                  encoding="utf-8")
+            (Path(tmp) / "phrase").write_text("pw\n", encoding="utf-8")
+            for key in ("command", "path", "module", "argv"):
+                with self.subTest(key=key):
+                    proposal = self._proposal(action="meta.propose",
+                                              pid=f"p-code-{key}")
+                    proposal.params = {"operator": "adaptive.governance",
+                                       key: "do-not-run"}
+                    with self.assertRaises(OperatorError):
+                        stage(proposal, identity=identity,
+                              outbox=Path(tmp) / "operator-outbox")
+
+            proposal = self._proposal(action="meta.propose", pid="p-code")
+            proposal.pubkey = identity.public_key
+            proposal.params = {"operator": "adaptive.governance",
+                               "command": "do-not-run"}
+            args = self._execute_args(tmp, ident_path)
+            self._save_deployment_grant(args.grants)
+            run_once([proposal], self._votes(proposal.proposal_id), args)
+            self.assertEqual(self._jsonl_rows(args.operator_deploy_ledger), [])
+            self.assertFalse((Path(args.operators_dir) /
+                              "adaptive.governance.json").exists())
+
+    def test_tampered_catalogue_spec_is_refused_even_with_a_grant(self):
+        import tempfile
+        from pando.execute import auto_deploy_profiles
+        from pando.identity import Identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = Identity.generate()
+            proposal, spec_dir = self._stage_catalogue_proposal(
+                tmp, identity=identity)
+            args = self._execute_args(tmp, Path(tmp) / "identity.json")
+            self._save_deployment_grant(args.grants)
+            attestation = spec_dir / "attestation.json"
+            payload = json.loads(attestation.read_text(encoding="utf-8"))
+            payload["proof"]["sig"] = "00"
+            attestation.write_text(json.dumps(payload), encoding="utf-8")
+
+            attempts = auto_deploy_profiles(
+                [proposal], self._votes(proposal.proposal_id),
+                identity=identity, signer=identity.public_key, knobs=None,
+                outbox=args.operator_outbox,
+                installed_dir=args.operators_dir,
+                install_ledger=args.operator_install_ledger,
+                deploy_ledger=args.operator_deploy_ledger,
+                grants_path=args.grants)
+            self.assertEqual([row["status"] for row in attempts], ["refused"])
+            self.assertIn("verification failed", attempts[0]["reason"])
+            self.assertFalse((Path(args.operators_dir) /
+                              "adaptive.governance.json").exists())
+
+    def test_unwritable_deploy_ledger_refuses_before_install(self):
+        import tempfile
+        from pando.execute import auto_deploy_profiles
+        from pando.identity import Identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = Identity.generate()
+            proposal, _ = self._stage_catalogue_proposal(
+                tmp, identity=identity)
+            args = self._execute_args(tmp, Path(tmp) / "identity.json")
+            self._save_deployment_grant(args.grants)
+            blocker = Path(tmp) / "ledger-parent-is-a-file"
+            blocker.write_text("not a directory", encoding="utf-8")
+
+            attempts = auto_deploy_profiles(
+                [proposal], self._votes(proposal.proposal_id),
+                identity=identity, signer=identity.public_key, knobs=None,
+                outbox=args.operator_outbox,
+                installed_dir=args.operators_dir,
+                install_ledger=args.operator_install_ledger,
+                deploy_ledger=blocker / "deploy-ledger.jsonl",
+                grants_path=args.grants)
+            self.assertEqual(len(attempts), 1)
+            self.assertEqual(attempts[0]["status"], "refused")
+            self.assertIn("ledger_error", attempts[0])
+            self.assertFalse((Path(args.operators_dir) /
+                              "adaptive.governance.json").exists())
+            self.assertEqual(self._jsonl_rows(args.operator_install_ledger), [])
+
+    def test_post_install_ledger_failure_is_not_reported_as_refused(self):
+        import tempfile
+        from unittest import mock
+        import pando.execute as execute_module
+        from pando.identity import Identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = Identity.generate()
+            proposal, _ = self._stage_catalogue_proposal(
+                tmp, identity=identity)
+            args = self._execute_args(tmp, Path(tmp) / "identity.json")
+            self._save_deployment_grant(args.grants)
+            real_append = execute_module._append_deployment_attempt
+
+            def flaky_append(path, row, seen):
+                if row.get("status") == "installed":
+                    raise OSError("simulated ledger failure")
+                return real_append(path, row, seen)
+
+            with mock.patch.object(execute_module,
+                                   "_append_deployment_attempt",
+                                   side_effect=flaky_append):
+                attempts = execute_module.auto_deploy_profiles(
+                    [proposal], self._votes(proposal.proposal_id),
+                    identity=identity, signer=identity.public_key, knobs=None,
+                    outbox=args.operator_outbox,
+                    installed_dir=args.operators_dir,
+                    install_ledger=args.operator_install_ledger,
+                    deploy_ledger=args.operator_deploy_ledger,
+                    grants_path=args.grants)
+
+            self.assertEqual([row["status"] for row in attempts],
+                             ["granted", "installed"])
+            self.assertIn("ledger_error", attempts[-1])
+            self.assertTrue((Path(args.operators_dir) /
+                             "adaptive.governance.json").is_file())
 
     def test_operator_validate_is_pure_and_refuses_code_params(self):
         from pando.operators import validate

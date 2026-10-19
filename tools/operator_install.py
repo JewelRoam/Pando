@@ -31,33 +31,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from pando.culture import validate as validate_culture  # noqa: E402
 from pando.genesis import ACTION_SPACE  # noqa: E402
 from pando.identity import Identity  # noqa: E402
-from pando.invite import validate as validate_invite  # noqa: E402
 from pando.operators import DEFAULT_INSTALL_LEDGER  # noqa: E402
 from pando.operators import DEFAULT_INSTALLED  # noqa: E402
 from pando.operators import OperatorError  # noqa: E402
 from pando.operators import install, installed, uninstall  # noqa: E402
-from pando.operators import validate as validate_operator  # noqa: E402
-from pando.rebalance import validate as validate_rebalance  # noqa: E402
-from pando.spawn import validate as validate_spawn  # noqa: E402
+from pando.operator_profiles import VALIDATORS  # noqa: E402
 
 DEFAULT_IDENTITY = "~/.pando/identity.json"
-
-#: The validator of the actuator a verb binds to. The bound actuator has the
-#: last word on its own params: without this a reviewer could install a verb
-#: whose every round fails inside the stager, which is the empty shell with
-#: extra steps. Kept equal to ``pando.operators.BINDABLE`` by a test, so a
-#: bindable verb can never be installable without a way to check its params.
-VALIDATORS = {
-    "culture.refine": validate_culture,
-    "recruit.invite": validate_invite,
-    "reproduce.spawn": validate_spawn,
-    "resource.rebalance": validate_rebalance,
-    "meta.propose": validate_operator,
-}
-
 
 def _param(text: str) -> tuple[str, object]:
     """``key=value``, with the value read as JSON when it is JSON."""

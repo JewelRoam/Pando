@@ -52,6 +52,12 @@ DEFAULT_INSTALLED = "~/.pandosi/operators"
 #: ``retired/`` and this ledger keeps the reason.
 DEFAULT_INSTALL_LEDGER = "~/.pandosi/operator-install-ledger.jsonl"
 
+#: One row per automatic catalogue deployment attempt. Kept separate from the
+#: install ledger: the latter records the host's operator lifecycle, while this
+#: one records why the standing deployment grant did or did not release a
+#: particular staged spec.
+DEFAULT_DEPLOY_LEDGER = "~/.pandosi/operator-deploy-ledger.jsonl"
+
 #: The keys a reviewer may supply as the operator's *implementation*. Both
 #: describe how an existing actuator is reused; neither carries code, and a key
 #: that would is refused by name rather than ignored.
@@ -253,7 +259,8 @@ def stage(proposal, *, identity: Identity,
     }
 
 
-def verify(directory: str | Path) -> bool:
+def verify(directory: str | Path,
+           expected_pubkey: str | None = None) -> bool:
     """True when a staged operator spec is intact, unsigned-for-nothing, inert.
 
     A reviewer can run this without trusting the manifest: the hash is
@@ -281,8 +288,10 @@ def verify(directory: str | Path) -> bool:
     proof = attestation.get("proof")
     if not isinstance(proof, dict):
         return False
-    return verify_signature(str(proof.get("pubkey") or ""), spec,
-                            str(proof.get("sig") or ""))
+    pubkey = str(proof.get("pubkey") or "")
+    if expected_pubkey is not None and pubkey != expected_pubkey:
+        return False
+    return verify_signature(pubkey, spec, str(proof.get("sig") or ""))
 # ---------------------------------------------------------------------------
 # The gate's half: turning a reviewed draft into a verb the gate will run.
 #

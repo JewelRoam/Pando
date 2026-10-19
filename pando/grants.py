@@ -17,7 +17,7 @@ import tomllib
 from pathlib import Path
 
 GRANT_ACTIONS = ("lan_listen", "lab_replication", "service_autostart",
-                 "reproduce", "retire")
+                 "reproduce", "retire", "deploy_operator")
 
 
 def default_path() -> Path:
@@ -104,6 +104,8 @@ def grant_status(action: str, path: Path | str | None = None,
         resource = "0.0.0.0:8080"
     elif action == "service_autostart":
         resource = "user-agent/pando"
+    elif action == "deploy_operator":
+        resource = "profile-catalogue/v1"
     else:
         resource = "sandbox/lab"
     result["grants_path"] = str(grant_path)
@@ -154,6 +156,62 @@ def require_grant(action: str, path: Path | str | None = None,
     raise PermissionError(message)
 
 
+def require_matching_grant(action: str, *, resource: str, scope: str,
+                           path: Path | str | None = None,
+                           now: dt.datetime | None = None,
+                           audit: bool = True,
+                           audit_path: Path | str | None = None) -> dict:
+    """Require an active grant whose resource, scope and evidence all match.
+
+    A grant action is not a wildcard.  This is the stricter check used by the
+    automatic operator deployment path: a valid ``deploy_operator`` grant for
+    another catalogue or host cannot release this one.
+    """
+    if action not in GRANT_ACTIONS:
+        raise ValueError(f"unknown grant action: {action}")
+    status = grant_status(action, path, now, include_audit=False)
+    grant = status.get("grant")
+    target_audit = Path(audit_path) if audit_path else \
+        default_audit_path(path)
+    problems: list[str] = []
+    if status["status"] != "active":
+        problems.append(f"{status['status']} ({status['reason']})")
+    if not isinstance(grant, dict):
+        problems.append("grant record is not an object")
+    else:
+        if str(grant.get("resource") or "") != resource:
+            problems.append(
+                f"resource is {grant.get('resource')!r}, expected {resource!r}")
+        if str(grant.get("scope") or "") != scope:
+            problems.append(
+                f"scope is {grant.get('scope')!r}, expected {scope!r}")
+        if not str(grant.get("evidence") or "").strip():
+            problems.append("evidence is empty")
+
+    if not problems:
+        reason = (f"matched resource={resource} scope={scope}; "
+                  f"{status['reason']}")
+        if audit:
+            try:
+                append_audit_entry(action, "allowed", reason, path,
+                                   target_audit, grant)
+            except (OSError, PermissionError) as exc:
+                raise PermissionError(
+                    f"{action} refused: grant audit unavailable ({exc})") from exc
+        return grant
+
+    reason = "; ".join(problems)
+    message = f"{action} refused: {reason}"
+    if audit:
+        try:
+            append_audit_entry(action, "denied", reason, path,
+                               target_audit, grant if isinstance(grant, dict)
+                               else None)
+        except (OSError, PermissionError) as exc:
+            message += f" (grant audit unavailable: {exc})"
+    raise PermissionError(message)
+
+
 def default_audit_path(grants_path: Path | str | None = None) -> Path:
     grant_path = Path(grants_path) if grants_path else default_path()
     return grant_path.with_name(grant_path.name + ".audit.jsonl")
@@ -164,7 +222,7 @@ def _canonical_json(value: dict) -> str:
                       separators=(",", ":"))
 
 
-def _grant_fingerprint(grant: dict | None) -> str:
+def grant_fingerprint(grant: dict | None) -> str:
     if not grant:
         return "sha256:" + ("0" * 64)
     digest = hashlib.sha256(_canonical_json(grant).encode("utf-8")).hexdigest()
@@ -191,7 +249,7 @@ def append_audit_entry(action: str, decision: str, reason: str,
         "action": action,
         "decision": decision,
         "reason": reason,
-        "grant": _grant_fingerprint(grant),
+        "grant": grant_fingerprint(grant),
         "previous_hash": prior_hash,
     }
     event["entry_hash"] = hashlib.sha256(

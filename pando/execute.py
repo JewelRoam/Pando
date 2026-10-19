@@ -56,6 +56,8 @@ member move, and a new operator — each recorded in an append-only ledger.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
+import hashlib
 import json
 from collections import Counter
 from pathlib import Path
@@ -64,16 +66,26 @@ from .culture import DEFAULT_OUTBOX as DEFAULT_CULTURE_OUTBOX
 from .culture import CultureError
 from .culture import stage as stage_culture
 from .genesis import ACTION_SPACE, Proposal
+from .grants import grant_fingerprint, require_matching_grant
 from .invite import DEFAULT_OUTBOX as DEFAULT_INVITE_OUTBOX
 from .invite import InviteError
 from .invite import stage as stage_invite
+from .operator_profiles import OperatorProfileError
+from .operator_profiles import VALIDATORS as OPERATOR_VALIDATORS
+from .operator_profiles import names as profile_names
+from .operator_profiles import resolve as resolve_profile
+from .operators import BINDABLE
+from .operators import DEFAULT_DEPLOY_LEDGER
 from .operators import DEFAULT_INSTALLED
+from .operators import DEFAULT_INSTALL_LEDGER
 from .operators import DEFAULT_OUTBOX as DEFAULT_OPERATOR_OUTBOX
 from .operators import OperatorError
 from .operators import binding
 from .operators import installed as load_installed
+from .operators import install as install_operator
 from .operators import rebound
 from .operators import stage as stage_operator
+from .operators import verify as verify_operator
 from .rebalance import DEFAULT_OUTBOX as DEFAULT_REBALANCE_OUTBOX
 from .rebalance import RebalanceError
 from .rebalance import stage as stage_rebalance
@@ -184,6 +196,13 @@ STATE_PATHS: dict[str, tuple[str, str]] = {
     # here as well as in ``pando.operators`` keeps the two spellings of the
     # same directory from drifting apart on a host that relocated its state.
     "operators_dir": ("operators", "installed operator bindings this host runs"),
+    "grants": ("grants.toml", "expiring capability grants"),
+    "operator_install_ledger": (
+        "operator-install-ledger.jsonl",
+        "installed operator lifecycle ledger"),
+    "operator_deploy_ledger": (
+        "operator-deploy-ledger.jsonl",
+        "automatic profile deployment ledger"),
 }
 
 
@@ -1041,6 +1060,260 @@ def next_installed(proposals: list[Proposal], reactions: list[dict],
     return None
 
 
+def _deployment_attempt_key(row: dict) -> tuple[str, str, str, str]:
+    return (str(row.get("proposal_id") or ""),
+            str(row.get("spec_hash") or ""),
+            str(row.get("status") or ""),
+            str(row.get("reason") or ""))
+
+
+def _deployment_attempt_keys(path: Path) -> set[tuple[str, str, str, str]]:
+    found: set[tuple[str, str, str, str]] = set()
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return found
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(row, dict):
+            found.add(_deployment_attempt_key(row))
+    return found
+
+
+def _append_deployment_attempt(path: Path, row: dict,
+                               seen: set[tuple[str, str, str, str]]) -> bool:
+    """Append one distinct attempt and return whether it was new.
+
+    Refusals are retried by the executor, so the same missing grant or invalid
+    spec must not add an identical row every minute. ``at`` is deliberately not
+    part of the key: time passing is not new evidence.
+    """
+    key = _deployment_attempt_key(row)
+    if key in seen:
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+    seen.add(key)
+    return True
+
+
+def _read_operator_spec(path: Path) -> dict:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise OperatorError(f"unreadable operator spec {path.name}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise OperatorError(f"operator spec {path.name} is not an object")
+    return value
+
+
+def auto_deploy_profiles(proposals: list[Proposal], reactions: list[dict], *,
+                         identity, signer: str, knobs: dict | None,
+                         outbox: str | Path, installed_dir: str | Path,
+                         install_ledger: str | Path,
+                         deploy_ledger: str | Path,
+                         grants_path: str | Path | None,
+                         installed_operators: dict | None = None,
+                         installed_error: str = "",
+                         now: dt.datetime | None = None) -> list[dict]:
+    """Install at most one exact catalogue profile from adopted local specs.
+
+    A proposal can name a profile, never supply one. The implementation and
+    params come from ``pando.operator_profiles``; this function only proves
+    that the signed proposal was adopted, its spec is intact and local, and a
+    standing human grant permits the deployment action itself. It then calls
+    the same ``operators.install`` path used by the manual tool.
+    """
+    out_root = Path(outbox).expanduser()
+    ledger_path = Path(deploy_ledger).expanduser()
+    seen = _deployment_attempt_keys(ledger_path)
+    installed = dict(installed_operators or {})
+    attempts: list[dict] = []
+
+    def note(*, proposal_id: str, spec_hash: str, status: str, reason: str,
+             operator: str = "", profile: dict | None = None,
+             grant: dict | None = None, installed_at: int | None = None,
+             directory: Path | None = None) -> dict:
+        row = {
+            "action": "deploy_operator",
+            "proposal_id": proposal_id,
+            "spec_hash": spec_hash,
+            "status": status,
+            "reason": reason,
+        }
+        if operator:
+            row["operator"] = operator
+        if profile:
+            row["profile"] = "auto-profile-catalogue/v1"
+            row["binds_to"] = profile["binds_to"]
+            row["params"] = profile["params"]
+        if grant:
+            row["grant_fingerprint"] = grant_fingerprint(grant)
+            row["grant_evidence"] = str(grant.get("evidence") or "")
+        if installed_at is not None:
+            row["installed_at"] = installed_at
+        if directory is not None:
+            row["path"] = str(directory)
+        try:
+            _append_deployment_attempt(ledger_path, row, seen)
+        except OSError as exc:
+            # The deployment ledger is part of the authorization boundary.
+            # Callers decide whether a failed write must stop before or after
+            # installation; this helper must never turn a disk error into an
+            # unhandled exception or a second, recursive write attempt.
+            row["ledger_error"] = f"{type(exc).__name__}: {exc}"
+        attempts.append(row)
+        return row
+
+    for proposal in proposals:
+        if proposal.action != "meta.propose":
+            continue
+        if not adopted(proposal, reactions, knobs):
+            continue
+        proposal_id = str(proposal.proposal_id or "")
+        if (not proposal_id or proposal_id in {".", ".."}
+                or "/" in proposal_id or "\\" in proposal_id):
+            note(proposal_id=proposal_id, spec_hash="", status="refused",
+                 reason="proposal id is not a safe path component")
+            continue
+        spec_dir = out_root / proposal_id
+        if not spec_dir.is_dir():
+            continue
+
+        if proposal.pubkey != signer:
+            note(proposal_id=proposal_id, spec_hash="", status="refused",
+                 reason="proposal was not signed by this host identity")
+            continue
+        if not verify_operator(spec_dir, expected_pubkey=signer):
+            note(proposal_id=proposal_id, spec_hash="", status="refused",
+                 reason="operator spec signature or hash verification failed")
+            continue
+        try:
+            spec = _read_operator_spec(spec_dir / "spec.json")
+            manifest = _read_operator_spec(spec_dir / "manifest.json")
+        except OperatorError as exc:
+            note(proposal_id=proposal_id, spec_hash="", status="refused",
+                 reason=str(exc))
+            continue
+        spec_hash = str(manifest.get("spec_hash") or "")
+        requested = spec.get("requested")
+        if (spec.get("action") != "meta.propose"
+                or spec.get("proposal_id") != proposal_id
+                or manifest.get("action") != "meta.propose"
+                or manifest.get("proposal_id") != proposal_id):
+            note(proposal_id=proposal_id, spec_hash=spec_hash, status="refused",
+                 reason="operator spec does not identify this meta.propose")
+            continue
+        if not isinstance(requested, dict) or set(requested) != {"operator"}:
+            note(proposal_id=proposal_id, spec_hash=spec_hash, status="refused",
+                 reason="requested must contain exactly one operator key")
+            continue
+        name = requested.get("operator")
+        proposal_params = proposal.params if isinstance(proposal.params, dict) else {}
+        if not isinstance(name, str) or proposal_params.get("operator") != name:
+            note(proposal_id=proposal_id, spec_hash=spec_hash, status="refused",
+                 reason="operator spec does not match the signed proposal")
+            continue
+        if manifest.get("operator") != name:
+            note(proposal_id=proposal_id, spec_hash=spec_hash, status="refused",
+                 operator=name,
+                 reason="manifest operator does not match the signed spec")
+            continue
+        try:
+            profile = resolve_profile(name)
+        except OperatorProfileError as exc:
+            note(proposal_id=proposal_id, spec_hash=spec_hash, status="refused",
+                 operator=name, reason=str(exc))
+            continue
+        if profile["binds_to"] not in BINDABLE:
+            note(proposal_id=proposal_id, spec_hash=spec_hash, status="refused",
+                 operator=name, profile=profile,
+                 reason="catalogue binding is outside the executor boundary")
+            continue
+        checked, why = OPERATOR_VALIDATORS[profile["binds_to"]](profile["params"])
+        if checked is None:
+            note(proposal_id=proposal_id, spec_hash=spec_hash, status="refused",
+                 operator=name, profile=profile,
+                 reason=f"catalogue params failed validation: {why}")
+            continue
+
+        existing = installed.get(name)
+        if existing is not None:
+            same_spec = str(existing.get("source_spec_hash") or "") == spec_hash
+            same_binding = (existing.get("binds_to") == profile["binds_to"]
+                            and existing.get("params") == profile["params"])
+            if same_spec and same_binding:
+                note(proposal_id=proposal_id, spec_hash=spec_hash,
+                     status="already-installed", operator=name,
+                     profile=profile, installed_at=existing.get("installed_at"),
+                     directory=Path(installed_dir).expanduser() / f"{name}.json",
+                     reason="this exact spec and catalogue binding are installed")
+                continue
+            note(proposal_id=proposal_id, spec_hash=spec_hash, status="refused",
+                 operator=name, profile=profile,
+                 reason="a different operator with this name is installed; retire it first")
+            continue
+        if installed_error:
+            note(proposal_id=proposal_id, spec_hash=spec_hash, status="refused",
+                 operator=name, profile=profile,
+                 reason=f"installed operator state is unreadable: {installed_error}")
+            return attempts
+
+        try:
+            grant = require_matching_grant(
+                "deploy_operator", resource="profile-catalogue/v1",
+                scope="operator-host", path=grants_path, now=now)
+        except (PermissionError, ValueError, OSError) as exc:
+            note(proposal_id=proposal_id, spec_hash=spec_hash, status="refused",
+                 operator=name, profile=profile,
+                 reason=f"deployment grant refused: {exc}")
+            return attempts
+
+        # Record the released grant before mutating the installed set. If the
+        # process dies during install, the deploy ledger still answers why the
+        # action was attempted rather than showing an unexplained operator.
+        # A ledger that cannot be written is a pre-install refusal: without
+        # that durable evidence the executor must not mutate the installed set.
+        released = note(
+            proposal_id=proposal_id, spec_hash=spec_hash, status="granted",
+            operator=name, profile=profile, grant=grant,
+            reason="deployment grant matched; installing fixed profile")
+        if "ledger_error" in released:
+            released["status"] = "refused"
+            released["reason"] = (
+                "deployment ledger unavailable; operator not installed: "
+                + released["ledger_error"])
+            return attempts
+        try:
+            record = install_operator(
+                spec_dir, identity=identity, action_space=ACTION_SPACE,
+                implementation={"binds_to": profile["binds_to"],
+                                "params": profile["params"]},
+                reviewer=profile["reviewer"],
+                validate_params=OPERATOR_VALIDATORS[profile["binds_to"]],
+                installed_dir=installed_dir, ledger=install_ledger)
+        except Exception as exc:  # noqa: BLE001 - one action must not kill the loop
+            note(proposal_id=proposal_id, spec_hash=spec_hash, status="refused",
+                 operator=name, profile=profile, grant=grant,
+                 reason=f"install refused: {type(exc).__name__}: {exc}")
+            return attempts
+        # Installation has already changed the host. A failure to append the
+        # final row must be reported as ledger_error on an installed result,
+        # never rewritten as a refusal: a retry could otherwise try to install
+        # the same operator again.
+        note(proposal_id=proposal_id, spec_hash=spec_hash, status="installed",
+             operator=name, profile=profile, grant=grant,
+             installed_at=record.get("installed_at"),
+             directory=Path(installed_dir).expanduser() / f"{name}.json",
+             reason="installed fixed profile from the authorized catalogue")
+        return attempts
+    return attempts
+
+
 def local_unacted(proposals: list[Proposal], reactions: list[dict],
                   done: set[str], signer: str,
                   knobs: dict | None = None,
@@ -1153,6 +1426,7 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
             getattr(args, "operators_dir", DEFAULT_INSTALLED))
     except OperatorError as exc:
         installed_error = str(exc)
+    deployment_attempts: list[dict] = []
     chosen = next_seed_export(proposals, reactions, done_ids(ledger), signer,
                               knobs)
     # A missing passphrase is a property of this host, not a defect in the
@@ -1353,6 +1627,28 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
             record["refusals"] = staged["refusals"]
             record["directory"] = staged["directory"]
         record_row(record)
+    # Once the spec is staged, the fixed catalogue may deploy it without a
+    # per-proposal human review. The standing grant authorizes the deployment
+    # action, not arbitrary code: the profile, binding and params are compiled
+    # into pando.operator_profiles and the proposal can only name one exactly.
+    try:
+        deployment_attempts = auto_deploy_profiles(
+            proposals, reactions, identity=identity, signer=signer, knobs=knobs,
+            outbox=getattr(args, "operator_outbox", DEFAULT_OPERATOR_OUTBOX),
+            installed_dir=getattr(args, "operators_dir", DEFAULT_INSTALLED),
+            install_ledger=getattr(args, "operator_install_ledger",
+                                   DEFAULT_INSTALL_LEDGER),
+            deploy_ledger=getattr(args, "operator_deploy_ledger",
+                                  DEFAULT_DEPLOY_LEDGER),
+            grants_path=getattr(args, "grants", None),
+            installed_operators=installed_operators,
+            installed_error=installed_error)
+    except Exception as exc:  # noqa: BLE001 - one audit failure must not kill the loop
+        deployment_attempts = [{
+            "action": "deploy_operator",
+            "status": "refused",
+            "reason": f"automatic deployment failed closed: {type(exc).__name__}: {exc}",
+        }]
     # A verb the group installed is staged through the actuator it binds to,
     # last of all and one per round like everything else. The params are the
     # record's, not the proposal's: a proposal names the verb, a reviewer
@@ -1528,6 +1824,7 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                    "foreign_meta_proposes": foreign_meta,
                    "installed_operators": sorted(installed_operators),
                    "installed_operators_error": installed_error,
+                   "operator_deployments": deployment_attempts,
                    "no_actuator": [item[0] for item in unacted]}
         print(json.dumps(payload, ensure_ascii=False), flush=True)
         write_status(ledger.with_name("execute-status.json"), payload)
@@ -1540,7 +1837,8 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                 "read_from": getattr(args, "read_from", ""),
                 "mailbox_tried": list(getattr(args, "mailbox_chain", []) or []),
                 "seed_export_deferred": ("no-passphrase"
-                                         if deferred_export else None)}
+                                         if deferred_export else None),
+                "operator_deployments": deployment_attempts}
         print(json.dumps(done, sort_keys=True), flush=True)
         write_status(ledger.with_name("execute-status.json"), done)
         return 0 if sealed else 1
