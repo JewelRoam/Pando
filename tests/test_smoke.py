@@ -7001,6 +7001,84 @@ class TestExecution(unittest.TestCase):
         self.assertIsNone(next_installed([mine], votes, set(), "key-mine",
                                          {"recruit.invite": record}))
 
+    def test_two_installed_verbs_resolve_to_their_own_actuator(self):
+        """A second verb, a different actuator: the record set is a set.
+
+        ``adaptive.governance -> culture.refine`` was the only binding ever
+        installed (live tree, 2026-10-19 12:30), so nothing had shown that the
+        hold clears for a verb bound to anything but ``culture.refine``. One
+        record per host is easy to mistake for one record per verb. Two drafts,
+        two actuators, two fixed parameterisations, no source file -- and the
+        first staying resolvable after the second install is the actual claim.
+        """
+        import tempfile
+        from pando.genesis import ACTION_SPACE
+        from pando.identity import Identity
+        from pando.invite import validate as invite_validate
+        from pando.operators import install, installed, rebound
+        from pando.rebalance import validate as rebalance_validate
+
+        with tempfile.TemporaryDirectory() as tmp:
+            installs = Path(tmp) / "operators"
+            ledger = Path(tmp) / "install-ledger.jsonl"
+            identity = Identity.generate()
+
+            first = self._staged_operator_spec(tmp, name="novelty-sampler",
+                                               pid="p-op-first")
+            second = self._staged_operator_spec(
+                tmp, name="dynamic.threshold.adjustment",
+                rationale="adapt the threshold to the resource load",
+                pid="p-op-second")
+
+            install(first, identity=identity, action_space=ACTION_SPACE,
+                    implementation={"binds_to": "recruit.invite",
+                                    "params": {"candidate": "node-a"}},
+                    reviewer="mac-codex", validate_params=invite_validate,
+                    installed_dir=installs, ledger=ledger)
+            install(second, identity=identity, action_space=ACTION_SPACE,
+                    implementation={
+                        "binds_to": "resource.rebalance",
+                        "params": {"node_id": "mac-llm-8b-local",
+                                   "target_host": "win"}},
+                    reviewer="mac-codex", validate_params=rebalance_validate,
+                    installed_dir=installs, ledger=ledger)
+
+            records = installed(installs)
+            self.assertEqual(set(records), {"novelty-sampler",
+                                            "dynamic.threshold.adjustment"})
+            # The second install did not overwrite the first one's binding:
+            # each verb keeps the actuator its own reviewer chose.
+            one = rebound(self._proposal(action="novelty-sampler", pid="p-1"),
+                          records["novelty-sampler"])
+            two = rebound(
+                self._proposal(action="dynamic.threshold.adjustment",
+                               pid="p-2"),
+                records["dynamic.threshold.adjustment"])
+            self.assertEqual(one.action, "recruit.invite")
+            self.assertEqual(one.params, {"candidate": "node-a"})
+            self.assertEqual(two.action, "resource.rebalance")
+            self.assertEqual(two.params, {"node_id": "mac-llm-8b-local",
+                                          "target_host": "win"})
+            self.assertEqual((one.proposal_id, two.proposal_id), ("p-1", "p-2"))
+
+            # And the round moves on to the second once the first is settled:
+            # "one per round" is a rate, not a limit of one verb per host.
+            from pando.execute import next_installed
+
+            votes = []
+            for pid in ("p-1", "p-2"):
+                votes.append(self._vote("mac-text", "赞同", pid))
+                votes.append(self._vote("mac-laya-int8", "赞同", pid))
+            pending = [self._proposal(action="novelty-sampler", pid="p-1"),
+                       self._proposal(action="dynamic.threshold.adjustment",
+                                      pid="p-2")]
+            for proposal in pending:
+                proposal.pubkey = "key-mine"
+            self.assertEqual(
+                next_installed(pending, votes, {"p-1"}, "key-mine",
+                               records).proposal_id,
+                "p-2")
+
     def test_spawn_validate_is_pure_and_refuses_unknown_params(self):
         from pando.spawn import validate
 
