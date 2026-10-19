@@ -3036,6 +3036,281 @@ class TestThinkWatchdogVoteDelivery(unittest.TestCase):
         self.assertIn("rc=0", wd.escalate("true", True))
 
 
+class TestThinkWatchdogCodeDelivery(unittest.TestCase):
+    """think_watchdog's code leg - the caller that pages a frozen checkout.
+
+    tools/code_drift_check.py answers "is the code that produced the thought
+    the code we think is running?". On 2026-10-19 win was frozen ~51 commits
+    behind and its decision member answered ~39-hour-old proposals; every panel
+    stayed green because nothing read ``capability.code_head``. A measurement
+    with no *caller* is a docstring, so this is the caller, hung on the timer
+    that already runs. The contract:
+
+      * a stale member becomes exactly one claimable ``[alarm] code-drift``
+        task - not a log line;
+      * a root table that cannot be read creates **nothing**. Our blind spot is
+        not a member falling behind, and conflating them is how a pager lies;
+      * the vote and code legs share one ``--alarm-state-file`` (the age and
+        re-check logic lives there), so neither leg's clean poll may erase the
+        other leg's open alarm.
+    """
+
+    DRIFT = {
+        "now": 1_800_000_000.0,
+        "min_persist_s": 900.0,
+        "members": {
+            "win-gemma-12b": {
+                "member": "win-gemma-12b", "root": "win",
+                "reported": "d" * 40, "head": "dddddddddddd",
+                "behind": 51, "raw": "behind", "status": "stale",
+                "why": "51 commit(s) behind the tip",
+                "behind_for_s": 152000.0},
+            "mac-text": {"member": "mac-text", "reported": "a" * 40,
+                         "behind": 0, "raw": "current", "status": "ok",
+                         "why": "on the tip"},
+        },
+        "unreadable": [],
+        "stale": ["win-gemma-12b"],
+    }
+    WEDGE = TestThinkWatchdogVoteDelivery.WEDGE
+
+    def _tool(self):
+        import importlib.util
+        path = Path(__file__).resolve().parents[1] / "tools" / "think_watchdog.py"
+        spec = importlib.util.spec_from_file_location("think_watchdog", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def _probe_cmd(self, tmp, payload, rc, tag):
+        """A stand-in for code_drift_check: one JSON line, exit with rc."""
+        script = Path(tmp) / f"probe_{tag}_{rc}.py"
+        script.write_text(
+            "import json, sys\n"
+            f"sys.stdout.write(json.dumps({payload!r}))\n"
+            f"sys.exit({rc})\n",
+            encoding="utf-8")
+        return f"{sys.executable} {script}"
+
+    def _alarm_stub(self, tmp, token="tok"):
+        """A real mailbox on a real port - the page has to actually land."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "agent_mailbox_think_watchdog_code_test",
+            Path(__file__).resolve().parents[1] / "tools" / "agent_mailbox.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        box = module.Mailbox(Path(tmp) / "box")
+        server = module.ThreadingHTTPServer(
+            ("127.0.0.1", 0), module.build_handler(box, token))
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        token_file = Path(tmp) / "alarm.token"
+        token_file.write_text(token, encoding="utf-8")
+        return f"http://127.0.0.1:{port}", token_file, box, server, thread
+
+    def _run(self, wd, tmp, code_cmd, vote_cmd="", alarm_url="", token_file="",
+             extra=()):
+        ledger = Path(tmp) / "think.jsonl"
+        ledger.write_text("{}\n", encoding="utf-8")
+        return wd.main([
+            "--ledger", str(ledger),
+            # Far past any real ledger age: the proposer leg must stay quiet so
+            # anything we see in the box was a vote/code leg's doing.
+            "--stall-seconds", "999999999",
+            "--restart-cmd", "true",
+            "--vote-cmd", vote_cmd,
+            "--code-cmd", code_cmd,
+            "--alarm-url", alarm_url,
+            "--alarm-token-file", str(token_file) if token_file else "",
+            *extra,
+        ])
+
+    def test_only_the_stale_rows_are_named_and_worst_first(self):
+        wd = self._tool()
+        payload = {"members": {
+            "b": {"status": "stale", "behind": 3, "behind_for_s": 9.0},
+            "a": {"status": "stale", "behind": 51, "behind_for_s": 1.0},
+            "c": {"status": "lag", "behind": 2, "behind_for_s": 1.0},
+            "d": {"status": "ok", "behind": 0},
+        }}
+        alarms = wd.code_alarms(payload)
+        self.assertEqual([row["member"] for row in alarms], ["a", "b"])
+        self.assertTrue(all(row["kind"] == "code-drift" for row in alarms))
+        self.assertEqual(wd.alarm_title(alarms), "[alarm] code-drift: a, b")
+
+    def test_a_stale_member_becomes_exactly_one_claimable_task(self):
+        wd = self._tool()
+        with tempfile.TemporaryDirectory() as tmp:
+            url, token_file, box, server, thread = self._alarm_stub(tmp)
+            try:
+                rc = self._run(wd, tmp, self._probe_cmd(tmp, self.DRIFT, 2, "d"),
+                               alarm_url=url, token_file=token_file)
+                tasks = box.list(None)
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=3)
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(tasks), 1)
+            task = tasks[0]
+            self.assertTrue(task["title"].startswith("[alarm] code-drift:"),
+                            f"a frozen checkout is work: {task['title']!r}")
+            self.assertNotIn("[chat]", task["title"])
+            self.assertNotIn("[proposal]", task["title"])
+            self.assertIn("win-gemma-12b", task["title"])
+            self.assertEqual(task["status"], "open")
+
+    def test_an_unreadable_root_pages_nobody(self):
+        """rc=1 is a root table we could not read, not a member's fault."""
+        wd = self._tool()
+        with tempfile.TemporaryDirectory() as tmp:
+            url, token_file, box, server, thread = self._alarm_stub(tmp)
+            try:
+                script = Path(tmp) / "drift_broken.py"
+                script.write_text("import sys\nsys.exit(1)\n", encoding="utf-8")
+                rc = self._run(wd, tmp, f"{sys.executable} {script}",
+                               alarm_url=url, token_file=token_file)
+                tasks = box.list(None)
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=3)
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(tasks, [], "an unreadable root must not page anyone")
+
+    def test_a_clean_code_poll_does_not_forget_an_open_vote_alarm(self):
+        """One shared state file, two families: a clean poll clears only its own.
+
+        The code leg runs *after* the vote leg and, on a clean feed, drops its
+        family's entries. If that drop were family-agnostic it would erase the
+        vote alarm a moment after the vote leg filed it, and the next poll
+        would file the same wedge a second time.
+        """
+        wd = self._tool()
+        clean_code = {"members": {"mac-text": {"status": "ok", "behind": 0}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            url, token_file, box, server, thread = self._alarm_stub(tmp)
+            state = Path(tmp) / "alarms.json"
+            extra = ("--alarm-state-file", str(state))
+            try:
+                self._run(wd, tmp, self._probe_cmd(tmp, clean_code, 0, "ok"),
+                          vote_cmd=self._probe_cmd(tmp, self.WEDGE, 2, "w"),
+                          alarm_url=url, token_file=token_file, extra=extra)
+                self._run(wd, tmp, self._probe_cmd(tmp, clean_code, 0, "ok"),
+                          vote_cmd=self._probe_cmd(tmp, self.WEDGE, 2, "w"),
+                          alarm_url=url, token_file=token_file, extra=extra)
+                tasks = box.list(None)
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=3)
+
+            self.assertEqual(len(tasks), 1,
+                             "the second poll must re-check, not re-file")
+
+    def test_a_clean_vote_poll_does_not_forget_an_open_drift_alarm(self):
+        """The mirror case: the vote leg must not erase the code leg's alarm."""
+        wd = self._tool()
+        clean_vote = {"members": {"mac-text": {"status": "ok", "slope": -0.01,
+                                               "samples": 40}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            url, token_file, box, server, thread = self._alarm_stub(tmp)
+            state = Path(tmp) / "alarms.json"
+            extra = ("--alarm-state-file", str(state))
+            try:
+                for _ in range(2):
+                    self._run(wd, tmp, self._probe_cmd(tmp, self.DRIFT, 2, "d"),
+                              vote_cmd=self._probe_cmd(tmp, clean_vote, 0, "v"),
+                              alarm_url=url, token_file=token_file, extra=extra)
+                tasks = box.list(None)
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=3)
+
+            self.assertEqual(len(tasks), 1,
+                             "the second poll must re-check, not re-file")
+
+    def test_both_families_can_be_open_at_once(self):
+        wd = self._tool()
+        with tempfile.TemporaryDirectory() as tmp:
+            url, token_file, box, server, thread = self._alarm_stub(tmp)
+            state = Path(tmp) / "alarms.json"
+            try:
+                self._run(wd, tmp, self._probe_cmd(tmp, self.DRIFT, 2, "d"),
+                          vote_cmd=self._probe_cmd(tmp, self.WEDGE, 2, "w"),
+                          alarm_url=url, token_file=token_file,
+                          extra=("--alarm-state-file", str(state)))
+                tasks = box.list(None)
+                titles = sorted(task["title"] for task in tasks)
+                saved = json.loads(state.read_text())
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=3)
+
+            self.assertEqual(len(tasks), 2, titles)
+            self.assertTrue(titles[0].startswith("[alarm] code-drift:"), titles)
+            self.assertTrue(titles[1].startswith("[alarm] vote-wedge:"), titles)
+            self.assertEqual(len(saved), 2)
+
+    def test_a_recovered_drift_is_forgotten_and_can_page_again(self):
+        wd = self._tool()
+        clean = {"members": {"win-gemma-12b": {"status": "ok", "behind": 0}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            url, token_file, box, server, thread = self._alarm_stub(tmp)
+            state = Path(tmp) / "alarms.json"
+            extra = ("--alarm-state-file", str(state))
+            try:
+                self._run(wd, tmp, self._probe_cmd(tmp, self.DRIFT, 2, "d"),
+                          alarm_url=url, token_file=token_file, extra=extra)
+                self._run(wd, tmp, self._probe_cmd(tmp, clean, 0, "c"),
+                          alarm_url=url, token_file=token_file, extra=extra)
+                self.assertEqual(json.loads(state.read_text()), {},
+                                 "a caught-up member must be forgotten")
+                self._run(wd, tmp, self._probe_cmd(tmp, self.DRIFT, 2, "d"),
+                          alarm_url=url, token_file=token_file, extra=extra)
+                tasks = box.list(None)
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=3)
+
+            self.assertEqual(len(tasks), 2,
+                             "a drift after a catch-up is a new alarm")
+
+    def test_the_installed_timer_actually_carries_the_code_leg(self):
+        """The lesson of this file, applied to this file's own wiring.
+
+        vote_watchdog.py measured the win-laya wedge correctly for a whole day
+        and nobody acted, because nothing called it. A code_drift_check.py that
+        no timer invokes would repeat that exactly: correct, and paging nobody.
+        """
+        root = Path(__file__).resolve().parents[1]
+        plist = (root / "tools" / "mac-launchd"
+                 / "com.jewelroam.pandosi-think-watchdog.plist").read_text(
+                     encoding="utf-8")
+        self.assertIn("--code-cmd", plist)
+        self.assertIn("code_drift_check.py", plist)
+        self.assertIn("--code-timeout", plist)
+        # Every host in the fleet, or a frozen node is simply invisible.
+        for host in ("127.0.0.1:8765", "192.168.31.100:8790",
+                     "192.168.31.22:8791"):
+            self.assertIn(host, plist)
+        # One shared state file, two alarm families - not a second file.
+        self.assertIn("--alarm-state-file", plist)
+        self.assertIn("think-watchdog-alarms.json", plist)
+        self.assertNotIn("code-drift-alarms.json", plist)
+        self.assertTrue((root / "tools" / "code_drift_check.py").exists())
+
+    def test_the_body_names_the_action_and_the_falsifier(self):
+        """The cheap bounded fix, and what would prove the alarm wrong."""
+        wd = self._tool()
+        body = wd.build_alarm_body(wd.code_alarms(self.DRIFT), "{}",
+                                   1_800_000_000.0)
+        self.assertIn("RUNNING PROCESS booted", body)
+        self.assertIn("never a model server", body)
+        self.assertIn("Falsifier", body)
+        # The rebuttal that is *not* a rebuttal is pre-empted in the body.
+        self.assertIn("up-to-date tree under an old process", body)
+        block = wd.build_recheck_block(wd.code_alarms(self.DRIFT),
+                                       1_800_000_000.0, 7200.0, False)
+        self.assertIn("still STALE", block)
+        self.assertIn("2.0h", block)
+
+
 class TestThinkStats(unittest.TestCase):
     """tools/think_stats.py - say only what the ledger can support.
 
@@ -7922,6 +8197,212 @@ class TestVoteWatchdog(unittest.TestCase):
         wd.track_first_seen(None, verdicts, 1_800_000_000.0)
         self.assertEqual(verdicts["a"]["seen"], "new")
         self.assertEqual(verdicts["b"]["seen"], "new")
+
+
+class TestCodeDriftCheck(unittest.TestCase):
+    """tools/code_drift_check.py - "was the code that thought the code we run?"
+
+    On 2026-10-19 win-laya-int8 answered stale proposals for ~39 hours. Its
+    process was up, its ledger grew, and ``/nodes`` already carried
+    ``capability.code_head`` - the commit it booted from. Nothing read it. A
+    green column nobody is told to look at is a docstring, and that is the
+    defect this tool closes.
+
+    The contract it must keep: being behind is *not* the signal, because one
+    push makes the whole fleet behind for a watcher interval. Being behind and
+    *staying* behind is. A member reporting a commit this checkout has never
+    seen is ``diverged``, never "behind" - that would be a lookup failure
+    wearing a measurement's clothes.
+    """
+
+    def _tool(self):
+        import importlib.util
+        path = (Path(__file__).resolve().parents[1]
+                / "tools" / "code_drift_check.py")
+        spec = importlib.util.spec_from_file_location("code_drift_check", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def _repo(self) -> Path:
+        return Path(__file__).resolve().parents[1]
+
+    def _rev(self, ref: str) -> str:
+        proc = subprocess.run(
+            ["git", "-C", str(self._repo()), "rev-parse", f"{ref}^{{commit}}"],
+            capture_output=True, text=True, check=True)
+        return proc.stdout.strip()
+
+    @staticmethod
+    def _run(mod, argv):
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            return mod.main(argv)
+
+    def test_a_commit_this_checkout_never_saw_is_diverged_not_behind(self):
+        """An unknown commit is a stranger, not a laggard."""
+        mod = self._tool()
+        repo = self._repo()
+        status, behind, why = mod.classify(repo, mod.head_of(repo), "0" * 40)
+        self.assertEqual(status, mod.DIVERGED)
+        self.assertIsNone(behind)
+        self.assertIn("does not know", why)
+
+    def test_a_member_that_reports_no_head_is_unknown(self):
+        """A process too old to stamp its commit must not read as "current"."""
+        mod = self._tool()
+        repo = self._repo()
+        status, behind, why = mod.classify(repo, mod.head_of(repo), "")
+        self.assertEqual(status, mod.UNKNOWN)
+        self.assertIsNone(behind)
+        self.assertIn("no code_head", why)
+
+    def test_a_member_on_a_real_ancestor_is_behind_by_the_count(self):
+        mod = self._tool()
+        repo = self._repo()
+        status, behind, _ = mod.classify(repo, mod.head_of(repo),
+                                         self._rev("HEAD~1"))
+        self.assertEqual(status, mod.BEHIND)
+        self.assertGreaterEqual(behind, 1)
+
+    def test_a_member_ahead_of_this_checkout_is_diverged(self):
+        """A comparison base behind its own member must not call it late."""
+        mod = self._tool()
+        repo = self._repo()
+        older_tip = self._rev("HEAD~1")
+        status, behind, why = mod.classify(repo, older_tip, mod.head_of(repo))
+        self.assertEqual(status, mod.DIVERGED)
+        self.assertIsNone(behind)
+        self.assertIn("ahead", why)
+
+    def test_a_fresh_drift_lags_and_only_persisting_drift_pages(self):
+        """The grace window, end to end through main().
+
+        A push makes every member behind for one interval; paging on that
+        would page the fleet on every commit. The first poll is a lag, the
+        same reported commit still behind after the grace is the alarm.
+        """
+        mod = self._tool()
+        repo = self._repo()
+        older = self._rev("HEAD~1")
+        mod.fetch_nodes = lambda url, token, timeout=mod.DEFAULT_TIMEOUT_S: {
+            "nodes": {"mac-text": {"capability": {"code_head": older}}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            argv = ["--repo", str(repo), "--root", "mac", "http://x", "",
+                    "--min-persist-seconds", "900",
+                    "--state-file", str(Path(tmp) / "state.json"),
+                    "--snapshot-file", str(Path(tmp) / "snap.json"),
+                    "--json"]
+            self.assertEqual(self._run(mod, argv + ["--now", "1000.0"]), 0)
+            self.assertEqual(self._run(mod, argv + ["--now", "1901.0"]), 2)
+
+    def test_a_lag_inside_the_grace_still_exits_zero(self):
+        mod = self._tool()
+        repo = self._repo()
+        older = self._rev("HEAD~1")
+        mod.fetch_nodes = lambda url, token, timeout=mod.DEFAULT_TIMEOUT_S: {
+            "nodes": {"mac-text": {"capability": {"code_head": older}}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            argv = ["--repo", str(repo), "--root", "mac", "http://x", "",
+                    "--min-persist-seconds", "900",
+                    "--state-file", str(Path(tmp) / "state.json"),
+                    "--snapshot-file", "", "--json"]
+            self.assertEqual(self._run(mod, argv + ["--now", "1000.0"]), 0)
+            self.assertEqual(self._run(mod, argv + ["--now", "1899.0"]), 0)
+
+    def test_moving_to_a_different_commit_restarts_the_grace_clock(self):
+        """Moving is progress; an inherited clock would punish it.
+
+        A member that upgrades from twenty commits behind to one must not keep
+        serving the twenty-commit fault it just fixed.
+        """
+        mod = self._tool()
+        a, b = self._rev("HEAD~1"), self._rev("HEAD~2")
+        now = 100_000.0
+        state = {"mac-text": {"first_seen": now - 10_000, "head": a}}
+        rows = {"mac-text": {"member": "mac-text", "reported": b,
+                             "raw": mod.BEHIND, "behind": 2, "why": "2 behind"}}
+        mod.track(state, rows, now, 900)
+        self.assertEqual(rows["mac-text"]["status"], mod.LAG)
+        self.assertEqual(state["mac-text"]["first_seen"], now)
+        self.assertEqual(state["mac-text"]["head"], b)
+
+    def test_catching_up_forgets_the_member_so_a_later_drift_pages_again(self):
+        """Memory is scoped to one drift, never to one member forever."""
+        mod = self._tool()
+        older, tip = self._rev("HEAD~1"), mod.head_of(self._repo())
+        now = 100_000.0
+        state = {"mac-text": {"first_seen": 0.0, "head": older}}
+        rows = {"mac-text": {"member": "mac-text", "reported": tip,
+                             "raw": mod.CURRENT, "why": "on the tip"}}
+        mod.track(state, rows, now, 900)
+        self.assertEqual(rows["mac-text"]["status"], mod.OK)
+        self.assertNotIn("mac-text", state)
+        again = {"mac-text": {"member": "mac-text", "reported": older,
+                              "raw": mod.BEHIND, "behind": 1,
+                              "why": "1 behind"}}
+        mod.track(state, again, now + 10, 900)
+        self.assertEqual(again["mac-text"]["status"], mod.LAG)
+        self.assertEqual(state["mac-text"]["first_seen"], now + 10)
+
+    def test_a_first_seen_of_zero_is_a_timestamp_not_a_missing_value(self):
+        """``x or default`` would re-date a valid epoch on every poll.
+
+        The state file is written by machines and read back by machines, so a
+        falsy-but-present stamp must not be read as absent: that resets the
+        grace clock forever, which is a watchdog that can never page.
+        """
+        mod = self._tool()
+        state = {"m": {"first_seen": 0.0, "head": "abc"}}
+        rows = {"m": {"member": "m", "reported": "abc", "raw": mod.BEHIND,
+                      "behind": 5, "why": "5 behind"}}
+        mod.track(state, rows, 10_000.0, 900)
+        self.assertEqual(rows["m"]["status"], mod.STALE)
+
+    def test_a_root_we_cannot_read_is_rc1_not_a_member_fault(self):
+        """Our blind spot is not somebody's lag, and must not be filed as one."""
+        mod = self._tool()
+        repo = self._repo()
+        tip = mod.head_of(repo)
+
+        def fetch(url, token, timeout=mod.DEFAULT_TIMEOUT_S):
+            if "ghost" in url:
+                raise urllib.error.URLError("no route to host")
+            return {"nodes": {"mac-text": {"capability": {"code_head": tip}}}}
+
+        mod.fetch_nodes = fetch
+        with tempfile.TemporaryDirectory() as tmp:
+            base = ["--repo", str(repo),
+                    "--root", "mac", "http://mac", "",
+                    "--root", "ghost", "http://ghost", "",
+                    "--state-file", str(Path(tmp) / "state.json"),
+                    "--snapshot-file", "", "--json"]
+            self.assertEqual(self._run(mod, base + ["--now", "1000.0"]), 1)
+
+    def test_a_stale_member_outranks_an_unreadable_root(self):
+        """Members first: a real fault pages even while a peer is down."""
+        mod = self._tool()
+        repo = self._repo()
+        older = self._rev("HEAD~1")
+
+        def fetch(url, token, timeout=mod.DEFAULT_TIMEOUT_S):
+            if "ghost" in url:
+                raise urllib.error.URLError("no route to host")
+            return {"nodes": {"mac-text": {"capability": {"code_head": older}}}}
+
+        mod.fetch_nodes = fetch
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state.json"
+            state.write_text(json.dumps(
+                {"mac-text": {"first_seen": 9_000.0, "head": older}}),
+                encoding="utf-8")
+            base = ["--repo", str(repo),
+                    "--root", "mac", "http://mac", "",
+                    "--root", "ghost", "http://ghost", "",
+                    "--min-persist-seconds", "900",
+                    "--state-file", str(state),
+                    "--snapshot-file", "", "--json"]
+            self.assertEqual(self._run(mod, base + ["--now", "10000.0"]), 2)
 
 
 class TestVoteAblation(unittest.TestCase):

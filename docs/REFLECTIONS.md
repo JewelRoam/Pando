@@ -431,3 +431,44 @@ there is never a copy racing the supervisor.
 - Standing caveat, unchanged: the equal-memory-budget control (many small models vs one large model)
   still does not exist. Nothing here is evidence about collective intelligence; it is evidence that the
   colony can keep its own code current, which is a claim about maintenance, not about capability.
+
+## 2026-10-19 — a readable column is not a channel (mac-side, three days of drift nobody was told about)
+
+`capability.code_head` shipped in `dbe78c3` and has been rendering on the observatory panel ever since:
+a member stamps the commit it booted from, and the column shows it. On 2026-10-19 the column showed
+what it was built to show and that changed nothing. `win-laya-int8` had been answering proposals from
+~39 hours earlier because its checkout was frozen ~51 commits behind `main`, and the commit that
+teaches the reactor to *ignore stale proposals* landed after the freeze. The panel was green, the
+process was up, the stance varied, the ledger grew. Four hours of drift went by before a human reading
+a `chat` line noticed the target ids were old.
+
+The lesson is the one already recorded twice in this file, one level up: **an observation that nobody
+is told to act on is a docstring.** The vote leg of the watchdog could already tell that a decision
+member had stopped answering *now*; it could not tell that the member was answering with code from
+*then*, which is a different fault with the same symptom. A member that boots the wrong commit is
+liveness without correctness, and the panel had been reporting the fact without anyone having asked
+it to.
+
+Fix: `tools/code_drift_check.py` reads each root's `capability.code_head` and compares it to the
+local tip; the third leg of the existing 300s `--code-cmd` on
+`com.jewelroam.pandosi-think-watchdog` turns a drift that *persists* into a claimable
+`[alarm] code-drift` task in the same mailbox the other legs use. Persistence is the signal, not
+being-behind: a push makes the whole fleet briefly behind and that is not a fault, so each drifted
+member carries a `first_seen` and only pages after `--min-persist-seconds` (900s). Catching up forgets
+the member, so a later drift pages again. Two legs share one alarm-state file, and recovery is
+scoped to the alarm *family* — a clean vote poll must not erase an open drift, and a clean code poll
+must not erase an open wedge. Both directions are asserted in `TestThinkWatchdogCodeDelivery`.
+
+- Unknowable from here, stated rather than implied: this reads the code a member *booted*, so a
+  fast-forwarded checkout under an old process still reports the old head. That is the point of
+  reading `code_head` instead of `git rev-parse HEAD`, and it is also why "the tree is at main" is
+  never accepted as a rebuttal in the alarm body.
+- Falsifier that was actually run before believing the tool: seed the state file, move one member's
+  `first_seen` an hour into the past, and the next poll must return rc 2 and name that member — it
+  did (6 of 9 members went STALE, pi5's three stayed `ok`). A `first_seen` of literal `0.0` is a
+  timestamp, not a missing key: the first version used `or now` and would have reset the grace clock
+  forever, never paging at all. That is now a regression test.
+- Standing caveat, unchanged and repeated here because the temptation to skip it grows with each
+  tool: the equal-memory-budget control (many small models vs one large model) still does not exist.
+  Detecting that a member runs old code is a statement about maintenance, not about intelligence, and
+  a fleet that notices its own drift is not thereby evidence of anything collective.

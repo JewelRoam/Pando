@@ -20,6 +20,15 @@
   in the mailbox rather than one more unread log line. A wedge only pages once;
   the state file remembers first-seen and forgets a member that recovers.
 
+  The third leg asks whether the code that produced the thought is the code the
+  fleet is on. capability.code_head is stamped at boot, so it reads the *running*
+  process, not the checkout: on 2026-10-19 win was frozen ~51 commits back and
+  its decision member answered ~39-hour-old proposals while every panel stayed
+  green. code_drift_check.py measures that drift behind a grace window (a push
+  makes the whole fleet briefly behind, which is not a fault), and this timer
+  turns a drift that persists into a claimable [alarm] code-drift task. It
+  shares the state file with the vote leg, scoped by alarm family.
+
   Install:
     cp tools/mac-launchd/com.jewelroam.pandosi-think-watchdog.plist ~/Library/LaunchAgents/
     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.jewelroam.pandosi-think-watchdog.plist
@@ -45,6 +54,10 @@
     <string>--vote-cmd</string>
     <string>/Users/zhengenrong/Downloads/PandoSI-island/.venv/bin/python /Users/zhengenrong/Downloads/PandoSI-island/tools/vote_watchdog.py --url http://127.0.0.1:8776 --token-file /Users/zhengenrong/.pandosi/mailbox.token --decision mac-text --decision mac-laya-int8 --decision pandosi-pi5-x --decision pandosi-pi5-laya --decision win-laya-int8 --json --state-file /Users/zhengenrong/.pandosi/vote-watchdog-state.json --snapshot-file /Users/zhengenrong/.pandosi/vote-watchdog.json --page-new-only</string>
     <string>--vote-timeout</string>
+    <string>120</string>
+    <string>--code-cmd</string>
+    <string>/Users/zhengenrong/Downloads/PandoSI-island/.venv/bin/python /Users/zhengenrong/Downloads/PandoSI-island/tools/code_drift_check.py --repo /Users/zhengenrong/Downloads/PandoSI-island --root mac http://127.0.0.1:8765 /Users/zhengenrong/.pandosi/pairing.token --root win http://192.168.31.100:8790 /Users/zhengenrong/.pandosi/win-pairing.token --root pi5 http://192.168.31.22:8791 /Users/zhengenrong/.pandosi/pi5-pairing.token --state-file /Users/zhengenrong/.pandosi/code-drift-state.json --snapshot-file /Users/zhengenrong/.pandosi/code-drift-check.json --json</string>
+    <string>--code-timeout</string>
     <string>120</string>
     <string>--alarm-url</string>
     <string>http://127.0.0.1:8776</string>

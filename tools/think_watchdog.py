@@ -27,7 +27,15 @@ Exit code 2 from vote-watchdog means "a member just started falling behind",
 and that becomes a *task in the mailbox* - not another line in a log, because a
 line in a log nobody reads is the same failure one level up.
 
-Both checks are best-effort and neither may fail this process. Every failure
+The third silence is code that no longer matches the fleet's ``main``. A
+member whose process booted an old commit looks perfectly alive: the ledger
+grows, the stances vary, the panel is green - and every thought it contributes
+is written by code the colony already corrected. ``tools/code_drift_check.py``
+measures the drift (``capability.code_head`` against the local tip, with a
+grace window so a fresh push is not a fault); this file is its caller, so the
+same 300s timer that already runs turns it into work.
+
+All three checks are best-effort and none may fail this process. Every failure
 path exits 0 and prints a line: the job's exit code is itself a health signal,
 and turning a parser bug into a red job would trade a silent fault for a noisy
 one.
@@ -78,6 +86,20 @@ DEFAULT_VOTE_TIMEOUT_S = 120.0
 #: feed could not be read. Only 2 is somebody's fault; only 2 pages a human.
 VOTE_ALARM_RC = 2
 VOTE_STATUSES = ("wedge", "silent")
+#: code_drift_check's contract, the same split as the vote leg: 0 = every
+#: member on the tip, 2 = somebody has been behind past the grace window, 1 =
+#: a root table could not be read. Only 2 is a member's fault; only 2 pages.
+CODE_ALARM_RC = 2
+CODE_STATUSES = ("stale",)
+#: Three root tables plus a few git reads. The vote leg's 120s is the same
+#: order and the same reason: a hung peer must not hold the job past launchd's
+#: next interval.
+DEFAULT_CODE_TIMEOUT_S = 120.0
+#: Alarm-state keys are mailbox titles, and the state file is shared by both
+#: legs. Scoping recovery to the family prefix is what stops a clean vote poll
+#: from erasing an open drift (or the reverse).
+VOTE_FAMILY = "[alarm] vote-"
+CODE_FAMILY = "[alarm] code-drift"
 #: How often a still-open alarm gets a fresh re-check appended to the *same*
 #: task instead of a second task. vote_watchdog's ``--page-new-only`` already
 #: stops duplicates; what it cannot do is stop an open task from ageing into a
@@ -163,12 +185,61 @@ def vote_alarms(payload: dict | None) -> list[dict]:
             continue
         row = dict(verdict)
         row["member"] = str(member)
+        # The family is carried on the row so the one delivery path can pick a
+        # body that describes the right fault without a second caller.
+        row["kind"] = ("vote-wedge" if verdict.get("status") == "wedge"
+                       else "vote-silent")
         alarms.append(row)
     # A widening gap first (it gets worse on its own), then the quiet ones.
     alarms.sort(key=lambda row: (row["status"] != "wedge",
                                  -float(row.get("slope") or 0.0),
                                  row["member"]))
     return alarms
+
+
+def code_alarms(payload: dict | None) -> list[dict]:
+    """The stale rows of a code_drift_check payload, worst first.
+
+    "stale" is the tool's own verdict, already past its grace window, so this
+    does no thresholding of its own - the honest threshold lives next to the
+    only data that can set it. Rows the tool could not measure (an unreadable
+    root) never reach here: they carry no member.
+    """
+    members = (payload or {}).get("members")
+    if not isinstance(members, dict):
+        return []
+    alarms: list[dict] = []
+    for member, row in members.items():
+        if not isinstance(row, dict):
+            continue
+        if row.get("status") not in CODE_STATUSES:
+            continue
+        entry = dict(row)
+        entry["member"] = str(member)
+        entry["kind"] = "code-drift"
+        alarms.append(entry)
+    # Most commits behind first (a member deep in the past is farther from
+    # any fix), then the ones that have been stuck longest.
+    alarms.sort(key=lambda row: (-int(row.get("behind") or 0),
+                                 -float(row.get("behind_for_s") or 0.0),
+                                 row["member"]))
+    return alarms
+
+
+def alarm_kind(alarms: list[dict]) -> str:
+    """The family of alarm. It decides the title verb *and* the body.
+
+    Two faults share one delivery path: a voter answering the past, and a
+    member running code from the past. They need different instructions, so
+    the family travels with the rows rather than being re-derived from a
+    status word that happens to mean different things in each tool.
+    """
+    kinds = [str(row.get("kind") or "") for row in alarms]
+    if "code-drift" in kinds:
+        return "code-drift"
+    if "vote-wedge" in kinds or any(r.get("status") == "wedge" for r in alarms):
+        return "vote-wedge"
+    return "vote-silent"
 
 
 def alarm_title(alarms: list[dict]) -> str:
@@ -181,8 +252,7 @@ def alarm_title(alarms: list[dict]) -> str:
     named = ", ".join(row["member"] for row in alarms[:3]) or "unknown member"
     if len(alarms) > 3:
         named += f" +{len(alarms) - 3}"
-    kind = "wedge" if any(row["status"] == "wedge" for row in alarms) else "silent"
-    return f"[alarm] vote-{kind}: {named}"
+    return f"[alarm] {alarm_kind(alarms)}: {named}"
 
 
 def alarm_key(alarms: list[dict]) -> str:
@@ -322,6 +392,82 @@ def alarm_body(alarms: list[dict], raw: str, now: float, *,
     return "\n".join(lines)
 
 
+def code_alarm_body(alarms: list[dict], raw: str, now: float, *,
+                    age_s: float | None = None, overdue: bool = False,
+                    note: str = "", escalated: str = "") -> str:
+    """The numbers behind a drift verdict, and the cheap action that clears it.
+
+    Two differences from the vote body matter. First, the quantity is a
+    ``code_head`` stamped at *boot*, so this measures the code that produced
+    the thought, not the checkout on disk - a fast-forwarded tree under an old
+    process still reports the old head, and saying "the tree is current" is
+    not a rebuttal. Second, the fix is cheap and bounded: fast-forward and
+    restart the *client* processes only. A code change never requires reloading
+    a model, which on this fleet costs minutes.
+    """
+    stamp = time.strftime("%F %T %Z", time.localtime(now))
+    lines = [f"code-drift-check raised this at {stamp}.", ""]
+    for row in alarms:
+        where = (f"on {str(row.get('head') or '')[:12]}"
+                 if row.get("reported") else "reports no code_head")
+        detail = str(row.get("why") or "")
+        if row.get("behind") is not None:
+            detail = f"{row['behind']} commit(s) behind the tip"
+        age = row.get("behind_for_s")
+        lines.append(
+            f"- {row['member']}: STALE {where} - {detail}"
+            + (f", behind for {age_phrase(float(age))}" if isinstance(age, (int, float)) else ""))
+    lines += [
+        "",
+        "What STALE means: this member's RUNNING PROCESS booted a commit that",
+        "is not the tip, and it has stayed there past the grace window. The",
+        "head is stamped at boot, so an up-to-date tree under an old process",
+        "still reports the old commit - that is the point of reading it here.",
+        "The grace window exists because one push makes the whole fleet behind",
+        "for a watcher interval; only a drift that persists past it is a fault.",
+        "",
+        "Expected action: on the host that runs this member, fast-forward the",
+        "checkout and restart the CLIENT processes (stems, reactors, proposers)",
+        "- never a model server. tools/node_code_watch.py does exactly this on",
+        "the node itself and needs no operator: GitHub first, the Mac's",
+        "/code.bundle peer when GitHub cannot be reached. A host with no",
+        "self-update entry in its supervisor needs a human at that host;",
+        "re-polling only re-confirms the drift.",
+    ]
+    if note:
+        lines += ["", f"Issuer note: {note}"]
+    if age_s is not None:
+        lines += ["", f"Re-check: first raised {age_phrase(age_s)} ago; still open."]
+    if overdue:
+        lines += [
+            "",
+            f"Escalation: open for {age_phrase(age_s or 0.0)} with no catch-up.",
+            "Nothing automatic will clear it - a human hand is needed on the",
+            "host that runs this member.",
+            f"Escalation path: {escalated or '(none recorded)'}",
+        ]
+    lines += [
+        "",
+        "Falsifier: if the next poll reports the tip, this alarm retires. A",
+        "member that moved to a different commit restarts its grace clock",
+        "rather than inheriting it - moving is progress, even while still",
+        "behind - so the numbers above are what to check that against.",
+        "",
+        "Raw payload:",
+        raw.strip()[:4000] or "(empty)",
+    ]
+    return "\n".join(lines)
+
+
+def build_alarm_body(alarms: list[dict], raw: str, now: float,
+                     **kw) -> str:
+    """Pick the body that describes *this* fault. One delivery path, no second
+    caller: everything downstream only needs a title, a body and a task id."""
+    if alarm_kind(alarms) == "code-drift":
+        return code_alarm_body(alarms, raw, now, **kw)
+    return alarm_body(alarms, raw, now, **kw)
+
+
 def recheck_block(alarms: list[dict], now: float, age_s: float,
                   overdue: bool, note: str = "",
                   escalated: str = "") -> str:
@@ -358,6 +504,43 @@ def recheck_block(alarms: list[dict], now: float, age_s: float,
     lines += ["", "Falsifier unchanged: a fresh lag under the threshold on the "
                   "next poll retires this alarm."]
     return "\n".join(lines)
+
+
+def code_recheck_block(alarms: list[dict], now: float, age_s: float,
+                       overdue: bool, note: str = "",
+                       escalated: str = "") -> str:
+    """The append for a drift alarm we already paged: short, current, dated."""
+    stamp = time.strftime("%F %T %Z", time.localtime(now))
+    lines = ["", "---", "",
+             f"{stamp} RE-CHECK: first raised {age_phrase(age_s)} ago, still open.",
+             ""]
+    for row in alarms:
+        where = (f"on {str(row.get('head') or '')[:12]}"
+                 if row.get("reported") else "reports no code_head")
+        age = row.get("behind_for_s")
+        lines.append(
+            f"- {row['member']}: still STALE {where}"
+            + (f", behind for {age_phrase(float(age))}" if isinstance(age, (int, float)) else ""))
+    if note:
+        lines += ["", f"Issuer note: {note}"]
+    if overdue:
+        lines += [
+            "",
+            f"Escalation: open {age_phrase(age_s)} with no catch-up. Nothing",
+            "automatic will clear it; a human hand is needed on the host that",
+            "runs this member.",
+            f"Escalation path: {escalated or '(none recorded)'}",
+        ]
+    lines += ["", "Falsifier unchanged: a poll reporting the tip retires this "
+                  "alarm."]
+    return "\n".join(lines)
+
+
+def build_recheck_block(alarms: list[dict], now: float, age_s: float,
+                        overdue: bool, **kw) -> str:
+    if alarm_kind(alarms) == "code-drift":
+        return code_recheck_block(alarms, now, age_s, overdue, **kw)
+    return recheck_block(alarms, now, age_s, overdue, **kw)
 
 
 def post_alarm(url: str, token: str | None, sender: str, title: str,
@@ -427,8 +610,64 @@ def run_vote_check(cmd: str,
     return "ok", text, payload
 
 
+def run_code_check(cmd: str,
+                   timeout: float = DEFAULT_CODE_TIMEOUT_S
+                   ) -> tuple[str, str, dict | None]:
+    """Run the drift command. Returns (verdict, text, payload).
+
+    Same three-way split as the vote leg, and for the same reason: a root
+    table we cannot read is our blind spot, not a member's fault, and dressing
+    a lookup failure up as somebody being wrong is how a pager starts lying.
+    """
+    try:
+        proc = subprocess.run(cmd, shell=True, capture_output=True, text=True,
+                              timeout=timeout)
+    except Exception as exc:  # noqa: BLE001 - the watchdog must never die
+        return "unreadable", f"code check raised: {exc}", None
+    text = (proc.stdout or "").strip() or (proc.stderr or "").strip()
+    payload = payload_from(proc.stdout or "")
+    if proc.returncode == CODE_ALARM_RC:
+        return "alarm", text, payload
+    if proc.returncode != 0:
+        return "unreadable", text or f"code check rc={proc.returncode}", payload
+    return "ok", text, payload
+
+
+def check_code(args, now: float, stamp: str) -> None:
+    """One poll of the fleet's code heads, and one task if it found a drift."""
+    verdict, text, payload = run_code_check(args.code_cmd, args.code_timeout)
+    if verdict == "unreadable":
+        # rc=1 is *our* feed failing. The drift tool already refuses to call
+        # that a member fault; the caller must not undo that by paging.
+        print(f"{stamp} think-watchdog code-check UNREADABLE (not paged): "
+              f"{text[:400]}", flush=True)
+        return
+
+    alarms = code_alarms(payload)
+    if verdict == "ok":
+        detail = ""
+        if payload is not None and isinstance(payload.get("members"), dict):
+            detail = f", {len(payload['members'])} members measured"
+        print(f"{stamp} think-watchdog code-check ok{detail}", flush=True)
+        # An open drift alarm still has to be brought up to date, and with no
+        # alarms the same call clears *its own* family (never the vote leg's -
+        # they share one state file).
+        if args.alarm_state_file:
+            page_open_alarm(args, alarms, text, now, stamp,
+                            family=CODE_FAMILY)
+        return
+
+    if not alarms:
+        alarms = [{"member": "(unparsed)", "status": "stale",
+                   "kind": "code-drift",
+                   "why": "code-drift-check exited 2 without a readable payload"}]
+    print(f"{stamp} think-watchdog code-check ALARM: {alarm_title(alarms)}",
+          flush=True)
+    page_open_alarm(args, alarms, text, now, stamp, family=CODE_FAMILY)
+
+
 def page_open_alarm(args, alarms: list[dict], raw: str, now: float,
-                    stamp: str) -> None:
+                    stamp: str, family: str = "") -> None:
     """Deliver an alarm, or bring the task we already opened up to date.
 
     The state file is what makes "open since 03:00" a fact rather than a guess.
@@ -439,11 +678,17 @@ def page_open_alarm(args, alarms: list[dict], raw: str, now: float,
     state = load_alarm_state(state_path)
     if not alarms:
         # Every member we were watching is bounded again. Forget them, so a
-        # second wedge later is a *new* alarm and pages again.
-        if state:
-            save_alarm_state(state_path, {})
+        # second fault later is a *new* alarm and pages again. The vote leg and
+        # the code leg share one state file, so a clean *vote* poll must not
+        # erase an open *drift* alarm: only keys in this family are dropped.
+        recovered = [key for key in state
+                     if not family or key.startswith(family)]
+        if recovered:
+            for key in recovered:
+                state.pop(key, None)
+            save_alarm_state(state_path, state)
             print(f"{stamp} think-watchdog alarm state cleared "
-                  f"({len(state)} recovered)", flush=True)
+                  f"({len(recovered)} recovered)", flush=True)
         return
 
     key = alarm_key(alarms)
@@ -461,7 +706,7 @@ def page_open_alarm(args, alarms: list[dict], raw: str, now: float,
                   flush=True)
 
     if entry is None:
-        body = alarm_body(alarms, raw, now, note=args.alarm_note)
+        body = build_alarm_body(alarms, raw, now, note=args.alarm_note)
         if not args.alarm_url:
             print(f"{stamp} think-watchdog alarm not delivered: no --alarm-url",
                   flush=True)
@@ -496,8 +741,8 @@ def page_open_alarm(args, alarms: list[dict], raw: str, now: float,
         return
     overdue = age_s >= float(args.alarm_overdue_seconds)
     escalated = escalate(args.escalate_cmd, overdue)
-    body = recheck_block(alarms, now, age_s, overdue, note=args.alarm_note,
-                         escalated=escalated)
+    body = build_recheck_block(alarms, now, age_s, overdue,
+                               note=args.alarm_note, escalated=escalated)
     ok, detail = append_alarm(args.alarm_url, token or None, args.alarm_by,
                               task_id, body)
     if not ok:
@@ -547,17 +792,19 @@ def check_votes(args, now: float, stamp: str) -> None:
         # With no alarms the same call *clears* the state, which is what lets a
         # later wedge be a new alarm instead of a suppressed one.
         if args.alarm_state_file:
-            page_open_alarm(args, alarms, text, now, stamp)
+            page_open_alarm(args, alarms, text, now, stamp,
+                            family=VOTE_FAMILY)
         return
 
     if not alarms:
         # Exit code 2 with no parseable row is still an alarm, but we cannot
         # name a member. Page with what we have rather than swallow it.
         alarms = [{"member": "(unparsed)", "status": "unreadable",
+                   "kind": "vote-silent",
                    "why": "vote-watchdog exited 2 without a readable payload"}]
     print(f"{stamp} think-watchdog vote-check ALARM: {alarm_title(alarms)}",
           flush=True)
-    page_open_alarm(args, alarms, text, now, stamp)
+    page_open_alarm(args, alarms, text, now, stamp, family=VOTE_FAMILY)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -576,6 +823,13 @@ def main(argv: list[str] | None = None) -> int:
                              "--json; exit 2 means a member just started "
                              "falling behind (empty=no vote check)")
     parser.add_argument("--vote-timeout", type=float, default=DEFAULT_VOTE_TIMEOUT_S)
+    parser.add_argument("--code-cmd", default="",
+                        help="shell command running tools/code_drift_check.py "
+                             "with --json; exit 2 means a member's running code "
+                             "has been behind past the grace window "
+                             "(empty=no code check)")
+    parser.add_argument("--code-timeout", type=float,
+                        default=DEFAULT_CODE_TIMEOUT_S)
     parser.add_argument("--alarm-url", default="",
                         help="mailbox base url for the alarm task (empty=log only)")
     parser.add_argument("--alarm-token-file", default="")
@@ -640,6 +894,16 @@ def main(argv: list[str] | None = None) -> int:
             check_votes(args, now, stamp)
         except Exception as exc:  # noqa: BLE001 - the watchdog must never die
             print(f"{stamp} think-watchdog vote-check raised: {exc}", flush=True)
+
+    # And the third question: is the code that produced the thought the code we
+    # think is running? A member can answer *now* and still be answering with a
+    # checkout frozen a week ago - the two faults are independent, so neither
+    # leg may hide the other.
+    if args.code_cmd:
+        try:
+            check_code(args, now, stamp)
+        except Exception as exc:  # noqa: BLE001 - the watchdog must never die
+            print(f"{stamp} think-watchdog code-check raised: {exc}", flush=True)
     return 0
 
 
