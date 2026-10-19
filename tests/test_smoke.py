@@ -7417,6 +7417,28 @@ class TestChat(unittest.TestCase):
         self.assertIsNone(next_opening([], known, {}, 1.0))
 
 
+    def test_talking_is_not_voting_in_the_first_person(self):
+        """Two members refused to discuss a proposal, in their own words.
+
+        2026-10-19 12:49: the first member-to-member exchange this colony
+        ever had was mac-llm-8b-local asking win-gemma-12b what it made of
+        the adaptive.governance proposal. win-gemma-12b answered "我不知道。
+        我不能提案，也不能对提案发表看法。" and mac-llm-8b-local agreed with
+        the refusal. The prompt said "不能提案，不能投票" and never separated
+        that from having an opinion, so the members read a rule about actions
+        as a rule about thoughts, and the conversation died at the first turn.
+        """
+        from pando.chatd import system_prompt
+
+        prompt = system_prompt("win-gemma-12b", "gemma-4-12b-q4km")
+        self.assertIn("不能执行命令", prompt)
+        self.assertIn("说话不等于投票", prompt)
+        self.assertIn("不能自己提案或投票", prompt)
+        for allowed in ("讨论", "提问", "说出你的看法"):
+            self.assertIn(allowed, prompt)
+
+
+
 class TestMailboxReplica(unittest.TestCase):
     def test_accept_keeps_the_further_copy_and_never_rewinds(self):
         import importlib.util

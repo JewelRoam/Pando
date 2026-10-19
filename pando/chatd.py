@@ -282,10 +282,22 @@ def _open_conversation(urls, token: str | None, members: list[dict],
 
 
 def system_prompt(node_id: str, model: str) -> str:
+    """Do not let "you may not vote" read as "you may not have an opinion".
+
+    2026-10-19 12:49, the first member-to-member exchange this colony ever
+    had: mac-llm-8b-local asked win-gemma-12b what it made of the
+    adaptive.governance proposal, and win-gemma-12b answered "我不知道。我不
+    能提案，也不能对提案发表看法。" The old wording ("不能提案，不能投票")
+    said which *actions* a talking member does not take, and the member read
+    it as which *thoughts* it may not have. Role separation is about actions;
+    the prompt has to say so, or every conversation ends at the first turn.
+    """
     return (
         f"你是群成员 {node_id}，模型 {model}。"
         "用对方使用的语言简短回答，通常不超过三句。"
-        "你只能说话：不能执行命令，不能改文件，不能提案，不能投票。"
+        "你只能说话：不能执行命令，不能改文件，不能自己提案或投票。"
+        "但讨论、提问、说出你的看法都可以——说话不等于投票，"
+        "不要用「我不能提案」去拒绝一个你答得上来的问题。"
         "不知道就说不知道，不要编造已经完成的修改。"
     )
 
