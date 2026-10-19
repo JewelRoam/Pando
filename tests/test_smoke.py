@@ -7531,6 +7531,7 @@ class TestChat(unittest.TestCase):
         """An LLM speaks because its record has chat.model, not because of its name."""
         from pando.chat import (next_reply, normalize_chat, should_answer,
                                 title_addressee)
+        from pando import chatd
         from pando.chatd import local_chat_members
 
         self.assertEqual(normalize_chat({"model": "qwen-test", "url": "http://x"}),
@@ -7566,6 +7567,19 @@ class TestChat(unittest.TestCase):
         self.assertEqual([item["node_id"] for item in members], ["mac-llm"])
         self.assertEqual(members[0]["model"], "qwen-test")
         self.assertEqual(known, {"mac-llm", "win-gemma"})
+
+        # Windows registers its stems with --advertise-host 192.168.31.100,
+        # while chatd reaches the local root through 127.0.0.1.  Python on
+        # Windows does not reliably enumerate that advertised address; a lone
+        # loopback root is still authoritative for the members on this host.
+        trusted, trusted_known = local_chat_members(
+            nodes, {"127.0.0.1"}, health_of, trust_local_root=True)
+        self.assertEqual([item["node_id"] for item in trusted],
+                         ["mac-llm", "win-gemma"])
+        self.assertEqual(trusted_known, {"mac-llm", "win-gemma"})
+        self.assertTrue(chatd.root_is_loopback("http://127.0.0.1:8790"))
+        self.assertFalse(chatd.root_is_loopback("http://192.168.31.100:8790"))
+
         choice = next_reply(
             members, known,
             [{"id": "t1", "from": "mac-codex", "title": "[chat] @mac-llm: hi",

@@ -18,11 +18,12 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from .chat import (OPEN_COOLDOWN, message_text, next_opening, next_reply,
                    normalize_chat)
 from .common import PROPOSING_ROLE
-from .net import local_addresses, open_url
+from .net import LOOPBACK, local_addresses, open_url
 from .proposal_mail import delivery_failed, mailbox_chain
 
 
@@ -76,7 +77,8 @@ def fetch_health(url: str, timeout: float) -> dict | None:
 
 
 def local_chat_members(nodes: dict, addresses: set[str],
-                       health_of=None) -> tuple[list[dict], set[str]]:
+                       health_of=None, trust_local_root: bool = False
+                       ) -> tuple[list[dict], set[str]]:
     """Local speakers, plus every node id that carries ``chat.model``.
 
     Only a proposer speaks: a decision model answers proposals and is not
@@ -85,7 +87,10 @@ def local_chat_members(nodes: dict, addresses: set[str],
     predates the field keeps working.
 
     ``health_of(url) -> dict`` is only called for a local stem whose node
-    record does not yet have the field.
+    record does not yet have the field. ``trust_local_root`` is for the
+    single explicit loopback-root case used by Windows and pi5: every member
+    in that root is on this machine even when its advertised host (for
+    example ``192.168.31.100``) is not one of Python's local addresses.
     """
     members = []
     known: set[str] = set()
@@ -98,7 +103,7 @@ def local_chat_members(nodes: dict, addresses: set[str],
         role = str(info.get("role") or (PROPOSING_ROLE if chat else ""))
         if role and role != PROPOSING_ROLE:
             continue
-        local = bool(url) and host in addresses
+        local = bool(url) and (trust_local_root or host in addresses)
         if chat is None and local and health_of is not None:
             try:
                 health = health_of(url) or {}
@@ -118,6 +123,15 @@ def local_chat_members(nodes: dict, addresses: set[str],
             })
     members.sort(key=lambda row: row["node_id"])
     return members, known
+
+
+def root_is_loopback(url: str) -> bool:
+    """Whether an explicit root is the local root, not a remote snapshot."""
+    try:
+        host = urlsplit(str(url)).hostname or ""
+    except ValueError:
+        return False
+    return host in LOOPBACK
 
 
 def load_ledger(path: Path) -> tuple[set[tuple[str, str]], dict[str, list[str]], bool]:
@@ -560,8 +574,13 @@ def main() -> int:
                     print(time.strftime("%H:%M:%S"), f"root {root['name']}: {exc}", flush=True)
                     continue
                 nodes.update(found)
+            # A lone loopback root is the authoritative membership table for
+            # this host. Do not let an advertised LAN address that Python
+            # cannot enumerate hide every local speaker (seen on Windows:
+            # stems and /chat were healthy, chatd reported members=[]).
+            trust_local_root = len(roots) == 1 and root_is_loopback(roots[0]["url"])
             members, known = local_chat_members(
-                nodes, addresses,
+                nodes, addresses, trust_local_root=trust_local_root,
                 health_of=lambda url: fetch_health(url, min(4, args.timeout)))
             report = pass_once(mailboxes, mail_token, members, known,
                                answered, peers, args.timeout, bootstrapped,
