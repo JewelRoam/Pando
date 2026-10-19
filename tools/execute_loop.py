@@ -38,6 +38,14 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    # The service starts this file by path (not ``-m tools.execute_loop``), so
+    # the repository root is not guaranteed to be importable.  The Windows
+    # dispatcher in particular runs it from ``D:\PandoSI\tools``.
+    sys.path.insert(0, str(ROOT))
+
+from pando.grant_delegation import refresh_and_install  # noqa: E402
+from pando.grants import default_path as default_grants_path  # noqa: E402
 
 #: Tried in order when `--hosts` is not given: the Mac's directory first, then
 #: the shorter one the Pi and the Windows node were set up under.
@@ -126,6 +134,10 @@ def build_parser() -> argparse.ArgumentParser:
                              "The default is the Windows node's path and is kept "
                              "so an already-running roster does not silently "
                              "start failing to find its own token")
+    parser.add_argument("--grant-url", action="append", default=[],
+                        help="signed operator delegation shelf to refresh from "
+                             "(repeatable); network failure leaves a local, "
+                             "unexpired grant in place")
     parser.add_argument("--limit", type=int, default=40,
                         help="rows the round may consider (default: 40)")
     parser.add_argument("--timeout", type=float, default=180.0,
@@ -149,19 +161,75 @@ def round_command(args: argparse.Namespace, url: str, hosts: Path) -> list[str]:
     return command + list(args.extra)
 
 
+def grants_path(args: argparse.Namespace) -> Path:
+    """The same grants ledger the child uses for its state directory."""
+    if args.state_dir:
+        return Path(args.state_dir).expanduser() / "grants.toml"
+    return default_grants_path()
+
+
+def _repo_path(repo: Path, value: str) -> Path:
+    candidate = Path(value).expanduser()
+    return candidate if candidate.is_absolute() else repo / candidate
+
+
+def refresh_grants(args: argparse.Namespace) -> dict:
+    """Refresh the local signed grant, never turning transport into a crash."""
+    urls = list(getattr(args, "grant_url", []) or [])
+    if not urls:
+        return {"status": "disabled", "changed": False}
+    repo = Path(args.repo).expanduser()
+    token_file = _repo_path(repo, args.token_file)
+    try:
+        return refresh_and_install(
+            urls, token_file=token_file, grants_path=grants_path(args))
+    except Exception as exc:  # noqa: BLE001 - this loop is the node's clock
+        return {"status": "error", "changed": False,
+                "reason": f"{type(exc).__name__}: {exc}"}
+
+
+def run_round(args: argparse.Namespace, urls: list[str], hosts: Path,
+              *, runner=subprocess.run) -> dict:
+    """Refresh authorization, then run exactly one executor round.
+
+    The grant refresh is deliberately advisory to the child: a sleeping Mac,
+    a dead LAN address, a malformed response, or a local audit error is
+    recorded, while an already-installed unexpired grant remains usable.
+    """
+    try:
+        grant = refresh_grants(args)
+    except Exception as exc:  # noqa: BLE001 - authorization refresh is advisory
+        grant = {"status": "error", "changed": False,
+                 "reason": f"{type(exc).__name__}: {exc}"}
+    result = {
+        "grant_status": grant.get("status"),
+        "grant_changed": bool(grant.get("changed")),
+    }
+    if grant.get("source"):
+        result["grant_source"] = grant["source"]
+    if grant.get("reason"):
+        result["grant_reason"] = str(grant["reason"])[:300]
+    try:
+        completed = runner(
+            round_command(args, urls[0], hosts),
+            cwd=str(Path(args.repo).expanduser()), timeout=args.timeout)
+        result["executed"] = True
+        result["returncode"] = int(getattr(completed, "returncode", 0))
+    except Exception as exc:  # noqa: BLE001 - the loop must never die
+        result["executed"] = False
+        result["error"] = f"{type(exc).__name__}: {exc}"[:300]
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True), flush=True)
+    return result
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     hosts = host_file(args.hosts)
     urls = mailbox_urls(read_hosts(hosts), args.mailbox, args.mailbox_fallback)
-    command = round_command(args, urls[0], hosts)
     print(f"execute-loop: every {args.interval:.0f}s against "
           f"{', '.join(urls)} (hosts {hosts})", flush=True)
     while True:
-        try:
-            subprocess.run(command, cwd=str(Path(args.repo).expanduser()),
-                           timeout=args.timeout)
-        except Exception as exc:  # noqa: BLE001 - the loop must never die
-            print(f"execute-loop: {type(exc).__name__}: {exc}", flush=True)
+        run_round(args, urls, hosts)
         time.sleep(args.interval)
 
 

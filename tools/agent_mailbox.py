@@ -49,6 +49,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from pando.net import open_url  # noqa: E402 - repo root must be importable
+from pando.grant_delegation import (  # noqa: E402 - repo root must be importable
+    DelegationError, issue_envelope, operator_status,
+)
+from pando.grants import (  # noqa: E402 - repo root must be importable
+    default_path as default_grants_path, grant_status,
+)
+from pando.identity import default_path as default_identity_path  # noqa: E402
 from pando.telemetry import (  # noqa: E402 - repo root must be importable
     PI5_PUBKEY, TelemetryError, TelemetryReceiver,
     TelemetrySignatureError,
@@ -215,7 +222,9 @@ class Mailbox:
 
 def build_handler(mailbox: Mailbox, token: str, telemetry=None,
                   code_repo: Path | None = None,
-                  code_cache: Path | None = None):
+                  code_cache: Path | None = None,
+                  grant_file: Path | None = None,
+                  identity_file: Path | None = None):
     class MailboxHandler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
             pass
@@ -253,6 +262,30 @@ def build_handler(mailbox: Mailbox, token: str, telemetry=None,
                                  "open": open_count})
                 return
             if not self._authed():
+                return
+            if path == "/operator-grant":
+                if grant_file is None or identity_file is None:
+                    self._send(404, {"error": "operator delegation not configured"})
+                    return
+                try:
+                    envelope = issue_envelope(grant_file, identity_path=identity_file)
+                except Exception as exc:  # noqa: BLE001 - HTTP must fail closed
+                    try:
+                        local = grant_status("deploy_operator", grant_file)
+                    except Exception:  # noqa: BLE001 - status is best effort
+                        local = {"status": "unreadable"}
+                    code = 404 if local.get("status") in ("missing", "expired") else 409
+                    self._send(code, {"error": "operator grant unavailable",
+                                      "status": local.get("status"),
+                                      "detail": str(exc)[:300]})
+                    return
+                self._send(200, envelope)
+                return
+            if path == "/operator-status":
+                if grant_file is None:
+                    self._send(404, {"error": "operator status not configured"})
+                    return
+                self._send(200, operator_status(grant_file, identity_file))
                 return
             if path == "/code.bundle":
                 # The mailbox can be the only service another host can reach
@@ -447,10 +480,17 @@ def serve(args) -> int:
                  if getattr(args, "code_repo", "") else None)
     code_cache = (Path(args.code_cache).expanduser()
                   if getattr(args, "code_cache", "") else None)
+    grant_file = (Path(args.grant_file).expanduser()
+                  if getattr(args, "grant_file", "") else default_grants_path())
+    identity_file = (Path(args.identity_file).expanduser()
+                     if getattr(args, "identity_file", "")
+                     else default_identity_path())
     server = _MailboxServer((args.host, args.port),
                             build_handler(mailbox, token, telemetry,
                                           code_repo=code_repo,
-                                          code_cache=code_cache))
+                                          code_cache=code_cache,
+                                          grant_file=grant_file,
+                                          identity_file=identity_file))
     print(f"agent mailbox serving on http://{args.host}:{args.port} "
           f"(dir {directory}, {len(mailbox.list(OPEN))} open task(s))",
           flush=True)
@@ -597,6 +637,12 @@ def main() -> int:
         "--telemetry-root", default="",
         help="atomically publish signed Pi5 telemetry at this root-table path; "
              f"the signer is pinned to {PI5_PUBKEY}")
+    server.add_argument(
+        "--grant-file", default="",
+        help="local grants ledger to delegate (default: pando.grants discovery)")
+    server.add_argument(
+        "--identity-file", default="",
+        help="identity that signs delegated grants (default: ~/.pando/identity.json)")
     server.set_defaults(func=serve)
 
     def client_parser(verb: str, help_text: str):

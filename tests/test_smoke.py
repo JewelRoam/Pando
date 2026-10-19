@@ -11047,6 +11047,394 @@ class TestExecuteStateResolution(unittest.TestCase):
         self.assertEqual(args.identity, "~/.pando/identity.json")
 
 
+class TestDelegatedOperatorGrant(unittest.TestCase):
+    """A human approves the deployment action, not every future proposal.
+
+    These tests keep the delegation narrow: one pinned signer, one catalogue
+    resource, one host scope, seven days at most, and no recursive delegation.
+    They generate disposable identities; production private keys are never
+    read by the test suite.
+    """
+
+    @staticmethod
+    def _delegation():
+        from pando import grant_delegation
+        return grant_delegation
+
+    @staticmethod
+    def _envelope(identity, now, **changes):
+        import datetime as dt
+        from pando.grants import format_timestamp
+
+        payload = {
+            "version": 1,
+            "audience": "operator-host",
+            "action": "deploy_operator",
+            "resource": "profile-catalogue/v1",
+            "scope": "operator-host",
+            "approved_by": "test-user",
+            "approved_at": format_timestamp(now - dt.timedelta(minutes=1)),
+            "expires_at": format_timestamp(now + dt.timedelta(days=1)),
+            "evidence": "test authorization",
+        }
+        payload.update(changes)
+        return dict(payload, signature=identity.sign(payload))
+
+    def _fixture(self, root: Path):
+        import datetime as dt
+        from unittest import mock
+        from pando.grants import format_timestamp, save_grant
+        from pando.identity import Identity
+
+        identity = Identity.generate()
+        identity_path = root / "identity.json"
+        identity_path.write_text(json.dumps(identity.to_json()), encoding="utf-8")
+        grants = root / "source-grants.toml"
+        now = dt.datetime.now(dt.timezone.utc)
+        save_grant("deploy_operator", "profile-catalogue/v1", "operator-host",
+                   "test-user", format_timestamp(now + dt.timedelta(days=1)),
+                   evidence="test authorization", path=grants)
+        with mock.patch.object(self._delegation(), "MAC_OPERATOR_PUBKEY",
+                               identity.public_key):
+            envelope = self._delegation().issue_envelope(
+                grants, identity=identity, now=now)
+        return identity, identity_path, grants, now, envelope
+
+    def test_signed_delegation_installs_once_and_is_idempotent(self):
+        from pando.grants import audit_status, grant_status, load_grants
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            identity, _, _, now, envelope = self._fixture(root)
+            target = root / "target-grants.toml"
+            first = self._delegation().install_envelope(
+                envelope, target, expected_pubkey=identity.public_key, now=now)
+            second = self._delegation().install_envelope(
+                envelope, target, expected_pubkey=identity.public_key, now=now)
+
+            self.assertEqual(first["status"], "installed")
+            self.assertTrue(first["changed"])
+            self.assertEqual(second["status"], "unchanged")
+            self.assertFalse(second["changed"])
+            grant = load_grants(target)["deploy_operator"]
+            self.assertEqual(grant["origin"], "mac-delegation/v1")
+            self.assertEqual(grant["resource"], "profile-catalogue/v1")
+            self.assertEqual(grant["scope"], "operator-host")
+            self.assertEqual(grant_status("deploy_operator", target, now=now)
+                             ["status"], "active")
+            audit = audit_status(Path(str(target) + ".audit.jsonl"))
+            self.assertEqual(audit["status"], "valid")
+            self.assertEqual(audit["entries"], 1)
+
+    def test_wrong_action_resource_scope_or_audience_is_refused(self):
+        import datetime as dt
+        from pando.identity import Identity
+
+        now = dt.datetime.now(dt.timezone.utc)
+        identity = Identity.generate()
+        bad_fields = (
+            ("action", "run_anything"),
+            ("resource", "profile-catalogue/v2"),
+            ("scope", "all-hosts"),
+            ("audience", "some-other-host"),
+        )
+        for key, value in bad_fields:
+            with self.subTest(field=key):
+                envelope = self._envelope(identity, now, **{key: value})
+                with self.assertRaises(self._delegation().DelegationError):
+                    self._delegation().verify_envelope(
+                        envelope, expected_pubkey=identity.public_key, now=now)
+
+    def test_expiry_future_ttl_signature_and_tampering_all_fail_closed(self):
+        import datetime as dt
+        from pando.grants import format_timestamp
+        from pando.identity import Identity
+
+        now = dt.datetime.now(dt.timezone.utc)
+        identity = Identity.generate()
+        cases = {
+            "expired": self._envelope(
+                identity, now,
+                approved_at=format_timestamp(now - dt.timedelta(days=2)),
+                expires_at=format_timestamp(now - dt.timedelta(days=1))),
+            "future": self._envelope(
+                identity, now,
+                approved_at=format_timestamp(now + dt.timedelta(minutes=10))),
+            "ttl": self._envelope(
+                identity, now,
+                approved_at=format_timestamp(now - dt.timedelta(minutes=1)),
+                expires_at=format_timestamp(now + dt.timedelta(days=8))),
+            "wrong-signer": self._envelope(Identity.generate(), now),
+        }
+        tampered = self._envelope(identity, now)
+        tampered["evidence"] = "changed after signing"
+        cases["tampered"] = tampered
+        for name, envelope in cases.items():
+            with self.subTest(case=name):
+                with self.assertRaises(self._delegation().DelegationError):
+                    self._delegation().verify_envelope(
+                        envelope, expected_pubkey=identity.public_key, now=now)
+
+    def test_only_the_pinned_identity_can_issue_a_delegation(self):
+        import datetime as dt
+        from unittest import mock
+        from pando.grants import format_timestamp, save_grant
+        from pando.identity import Identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pinned, attacker = Identity.generate(), Identity.generate()
+            grants = root / "grants.toml"
+            now = dt.datetime.now(dt.timezone.utc)
+            save_grant("deploy_operator", "profile-catalogue/v1", "operator-host",
+                       "test-user", format_timestamp(now + dt.timedelta(days=1)),
+                       evidence="test authorization", path=grants)
+            with mock.patch.object(self._delegation(), "MAC_OPERATOR_PUBKEY",
+                                   pinned.public_key):
+                with self.assertRaises(self._delegation().DelegationError):
+                    self._delegation().issue_envelope(
+                        grants, identity=attacker, now=now)
+
+    def test_a_delegated_grant_cannot_mint_another_delegation(self):
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            identity, _, _, now, envelope = self._fixture(root)
+            target = root / "target-grants.toml"
+            self._delegation().install_envelope(
+                envelope, target, expected_pubkey=identity.public_key, now=now)
+            with mock.patch.object(self._delegation(), "MAC_OPERATOR_PUBKEY",
+                                   identity.public_key):
+                with self.assertRaisesRegex(
+                        self._delegation().DelegationError,
+                        "cannot issue another delegation"):
+                    self._delegation().issue_envelope(
+                        target, identity=identity, now=now)
+
+    def test_a_damaged_audit_chain_blocks_install_and_revocation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            identity, _, _, now, envelope = self._fixture(root)
+            target = root / "target-grants.toml"
+            self._delegation().install_envelope(
+                envelope, target, expected_pubkey=identity.public_key, now=now)
+            audit = Path(str(target) + ".audit.jsonl")
+            audit.write_text(audit.read_text(encoding="utf-8") + "broken\n",
+                             encoding="utf-8")
+            before = target.read_bytes()
+            changed = self._envelope(identity, now, evidence="rotated evidence")
+
+            with self.assertRaises(PermissionError):
+                self._delegation().install_envelope(
+                    changed, target, expected_pubkey=identity.public_key, now=now)
+            with self.assertRaises(PermissionError):
+                from pando.grants import remove_grant_if_origin
+                remove_grant_if_origin("deploy_operator", "mac-delegation/v1",
+                                       target)
+            self.assertEqual(target.read_bytes(), before)
+
+    def test_a_manual_grant_is_never_overwritten_or_revoked(self):
+        import datetime as dt
+        from pando.grants import format_timestamp, grant_status, save_grant
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            identity, _, _, now, envelope = self._fixture(root)
+            target = root / "manual-grants.toml"
+            save_grant("deploy_operator", "profile-catalogue/v1", "operator-host",
+                       "human", format_timestamp(now + dt.timedelta(days=2)),
+                       evidence="human grant", path=target)
+            before = target.read_bytes()
+            installed = self._delegation().install_envelope(
+                envelope, target, expected_pubkey=identity.public_key, now=now)
+            from pando.grants import remove_grant_if_origin
+            removed = remove_grant_if_origin(
+                "deploy_operator", "mac-delegation/v1", target)
+
+            self.assertEqual(installed["status"], "manual-preserved")
+            self.assertFalse(installed["changed"])
+            self.assertFalse(removed)
+            self.assertEqual(target.read_bytes(), before)
+            self.assertNotIn("origin", grant_status(
+                "deploy_operator", target, now=now)["grant"])
+
+    def test_network_failure_preserves_and_only_all_404_revokes(self):
+        import socket
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, fmt, *args):
+                pass
+
+            def do_GET(self):  # noqa: N802
+                self.send_response(404)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            identity, _, _, now, envelope = self._fixture(root)
+            target = root / "target-grants.toml"
+            token = root / "mailbox.token"
+            token.write_text("tok\n", encoding="utf-8")
+            self._delegation().install_envelope(
+                envelope, target, expected_pubkey=identity.public_key, now=now)
+            server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            base = f"http://127.0.0.1:{server.server_address[1]}"
+            probe = socket.socket()
+            probe.bind(("127.0.0.1", 0))
+            dead = f"http://127.0.0.1:{probe.getsockname()[1]}/operator-grant"
+            probe.close()
+            try:
+                mixed = self._delegation().refresh_and_install(
+                    [dead, base + "/missing"], token_file=token,
+                    grants_path=target, expected_pubkey=identity.public_key,
+                    timeout=0.5, now=now)
+                self.assertFalse(mixed["changed"])
+                self.assertTrue(target.exists())
+
+                absent = self._delegation().refresh_and_install(
+                    [base + "/missing-a", base + "/missing-b"], token_file=token,
+                    grants_path=target, expected_pubkey=identity.public_key,
+                    timeout=0.5, now=now)
+                self.assertEqual(absent["status"], "revoked")
+                self.assertTrue(absent["changed"])
+                self.assertFalse(target.exists())
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+    def test_bad_http_200_preserves_the_last_verified_grant(self):
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            identity, _, _, now, envelope = self._fixture(root)
+            target = root / "target-grants.toml"
+            token = root / "mailbox.token"
+            token.write_text("tok\n", encoding="utf-8")
+            self._delegation().install_envelope(
+                envelope, target, expected_pubkey=identity.public_key, now=now)
+            before = target.read_bytes()
+            tampered = dict(envelope, approved_by="tampered after signing")
+            bodies = {
+                "/bad-json": b"not a json envelope",
+                "/bad-signature": json.dumps(tampered).encode("utf-8"),
+            }
+
+            class Handler(BaseHTTPRequestHandler):
+                def log_message(self, fmt, *args):
+                    pass
+
+                def do_GET(self):  # noqa: N802
+                    body = bodies.get(self.path, b"{}")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+
+            server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            base = f"http://127.0.0.1:{server.server_address[1]}"
+            try:
+                for path in bodies:
+                    with self.subTest(path=path):
+                        result = self._delegation().refresh_and_install(
+                            [base + path], token_file=token,
+                            grants_path=target,
+                            expected_pubkey=identity.public_key,
+                            timeout=0.5, now=now)
+                        self.assertEqual(result["status"], "error")
+                        self.assertFalse(result["changed"])
+                        self.assertTrue(target.exists())
+                        self.assertEqual(target.read_bytes(), before)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+    def test_mailbox_operator_routes_are_authenticated_and_secret_free(self):
+        import importlib.util
+        from unittest import mock
+
+        path = Path(__file__).resolve().parents[1] / "tools" / "agent_mailbox.py"
+        spec = importlib.util.spec_from_file_location(
+            "agent_mailbox_operator_test", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            identity, identity_path, grants, now, envelope = self._fixture(root)
+            box = module.Mailbox(root / "box")
+            server = module.ThreadingHTTPServer(
+                ("127.0.0.1", 0),
+                module.build_handler(box, "tok", grant_file=grants,
+                                     identity_file=identity_path))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            base = f"http://127.0.0.1:{server.server_address[1]}"
+            try:
+                with self.assertRaises(urllib.error.HTTPError) as denied:
+                    urllib.request.urlopen(base + "/operator-grant", timeout=5)
+                self.assertEqual(denied.exception.code, 403)
+                denied.exception.close()
+
+                request = urllib.request.Request(
+                    base + "/operator-status",
+                    headers={"Authorization": "Bearer tok"})
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    status = json.loads(response.read())
+                self.assertTrue(status["authorized"])
+                self.assertEqual(status["signer_fingerprint"],
+                                 identity.node_fingerprint)
+                self.assertNotIn("secret_key", json.dumps(status))
+
+                with mock.patch.object(self._delegation(), "MAC_OPERATOR_PUBKEY",
+                                       identity.public_key):
+                    request = urllib.request.Request(
+                        base + "/operator-grant",
+                        headers={"Authorization": "Bearer tok"})
+                    with urllib.request.urlopen(request, timeout=5) as response:
+                        served = json.loads(response.read())
+                self._delegation().verify_envelope(
+                    served, expected_pubkey=identity.public_key, now=now)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+    def test_host_templates_use_the_same_signed_grant_paths(self):
+        root = Path(__file__).resolve().parents[1]
+        windows = (root / "tools" / "win_node_supervisor.ps1").read_text(
+            encoding="utf-8")
+        self.assertIn("Join-Path $env:USERPROFILE '.pandosi'", windows)
+        self.assertIn("'--state-dir', \"$stateDir\"", windows)
+        self.assertIn("'--grant-url', 'http://100.92.184.4:8776/operator-grant'",
+                      windows)
+        self.assertIn("'--grant-url', 'http://192.168.31.41:8776/operator-grant'",
+                      windows)
+
+        unit = (root / "tools" / "pi5-systemd" /
+                "pandosi-execute.service").read_text(encoding="utf-8")
+        self.assertIn("--state-dir /home/admin/.pando", unit)
+        self.assertIn("--grant-url http://100.92.184.4:8776/operator-grant", unit)
+        self.assertIn("--grant-url http://192.168.31.41:8776/operator-grant", unit)
+
+        for name in ("com.jewelroam.pandosi-execute.plist",
+                     "com.jewelroam.pandosi-mailbox.plist"):
+            plist = plistlib.loads((root / "tools" / "mac-launchd" / name)
+                                   .read_bytes())
+            arguments = plist["ProgramArguments"]
+            self.assertIn("/Users/zhengenrong/.pandosi/grants.toml", arguments)
+            self.assertIn("/Users/zhengenrong/.pando/identity.json", arguments)
+
+
 class TestExecuteLoop(unittest.TestCase):
     """The loop is the pi5 node's only clock, and it is not a timer unit.
 
@@ -11162,6 +11550,83 @@ class TestExecuteLoop(unittest.TestCase):
         loop = self._load()
         self.assertTrue(hasattr(loop, "time"),
                         "tools/execute_loop.py must import time")
+
+    def test_grant_refresh_is_state_scoped_and_never_reaches_the_child(self):
+        """The loop refreshes <state>/grants.toml; the executor gets no URL.
+
+        A remote URL in the child's argv would be meaningless there and would
+        make the authorization path depend on an implementation detail of the
+        action executor. The loop owns the refresh; the child only consumes the
+        local signed grant.
+        """
+        loop = self._load()
+        args = loop.build_parser().parse_args([
+            "300", "--repo", "/repo", "--state-dir", "/state",
+            "--grant-url", "http://one/operator-grant",
+            "--grant-url", "http://two/operator-grant"])
+        self.assertEqual(args.grant_url,
+                         ["http://one/operator-grant",
+                          "http://two/operator-grant"])
+        self.assertEqual(loop.grants_path(args), Path("/state/grants.toml"))
+        command = loop.round_command(args, "http://mailbox", Path("/hosts"))
+        self.assertNotIn("--grant-url", command)
+
+    def test_grant_refresh_uses_the_repo_relative_token_and_local_ledger(self):
+        from unittest import mock
+        loop = self._load()
+        with tempfile.TemporaryDirectory() as tmp:
+            args = loop.build_parser().parse_args([
+                "300", "--repo", tmp, "--state-dir", str(Path(tmp) / "state"),
+                "--token-file", "token.txt",
+                "--grant-url", "http://mac/operator-grant"])
+            with mock.patch.object(loop, "refresh_and_install",
+                                   return_value={"status": "installed"}) as refresh:
+                result = loop.refresh_grants(args)
+            self.assertEqual(result["status"], "installed")
+            kwargs = refresh.call_args.kwargs
+            self.assertEqual(kwargs["token_file"], Path(tmp) / "token.txt")
+            self.assertEqual(kwargs["grants_path"],
+                             Path(tmp) / "state" / "grants.toml")
+
+    def test_an_unreachable_grant_shelf_does_not_stop_the_round(self):
+        from unittest import mock
+        loop = self._load()
+        args = loop.build_parser().parse_args(["300"])
+        calls = []
+
+        def runner(command, **kwargs):
+            calls.append((command, kwargs))
+            return subprocess.CompletedProcess(command, 0)
+
+        with mock.patch.object(loop, "refresh_grants", return_value={
+                "status": "unreachable", "changed": False,
+                "reason": "connection refused"}):
+            result = loop.run_round(
+                args, ["http://127.0.0.1:8776"], Path("/hosts.json"),
+                runner=runner)
+        self.assertTrue(result["executed"])
+        self.assertEqual(result["returncode"], 0)
+        self.assertEqual(result["grant_status"], "unreachable")
+        self.assertEqual(len(calls), 1)
+
+    def test_an_authorization_refresh_exception_does_not_stop_the_round(self):
+        from unittest import mock
+        loop = self._load()
+        args = loop.build_parser().parse_args(["300"])
+        ran = []
+
+        def runner(command, **kwargs):
+            ran.append(command)
+            return subprocess.CompletedProcess(command, 0)
+
+        with mock.patch.object(loop, "refresh_grants",
+                               side_effect=PermissionError("bad audit")):
+            result = loop.run_round(
+                args, ["http://127.0.0.1:8776"], Path("/hosts.json"),
+                runner=runner)
+        self.assertTrue(result["executed"])
+        self.assertEqual(result["grant_status"], "error")
+        self.assertEqual(len(ran), 1)
 
 
 class TestExecutorShelfFallback(unittest.TestCase):

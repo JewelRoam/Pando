@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import sys
+import tempfile
 import tomllib
 from pathlib import Path
 
@@ -307,20 +308,37 @@ def _toml_string(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Replace a ledger without exposing a half-written grants file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except Exception:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
+
+
 def save_grants(grants: dict[str, dict], path: Path | str | None = None) -> Path:
     grant_path = Path(path) if path else default_path()
-    grant_path.parent.mkdir(parents=True, exist_ok=True)
     lines = ["# PandoSI authorization ledger.",
              "# Each capability must expire; revocation is deletion.", ""]
     for action in sorted(grants):
         lines.append(f"[grants.{action}]")
         fields = grants[action]
         for key in ("resource", "scope", "approved_by", "approved_at",
-                    "expires_at", "evidence"):
+                    "expires_at", "evidence", "origin", "delegation_id"):
             if key in fields:
                 lines.append(f"{key} = {_toml_string(str(fields[key]))}")
         lines.append("")
-    grant_path.write_text("\n".join(lines), encoding="utf-8")
+    _atomic_write_text(grant_path, "\n".join(lines))
     return grant_path
 
 
@@ -379,6 +397,73 @@ def save_grant(action: str, resource: str, scope: str, approved_by: str,
 
     return _mutate_grant_with_audit(
         action, "created", f"approved until {expires_at}", path, write)
+
+
+def install_grant_fields(action: str, fields: dict, path: Path | str | None = None,
+                         *, decision: str = "installed",
+                         reason: str = "installed delegated grant") -> tuple[Path, bool]:
+    """Install already-validated grant fields, idempotently.
+
+    This is the write side of signed delegation.  It does not invent or extend
+    an approval: every field comes from the verified envelope.  An identical
+    grant is returned unchanged and creates no duplicate audit row.
+    """
+    if action not in GRANT_ACTIONS:
+        raise ValueError(f"unknown grant action: {action}")
+    required = ("resource", "scope", "approved_by", "approved_at",
+                "expires_at", "evidence")
+    normalized = {key: str(fields[key]) for key in required if key in fields}
+    missing = [key for key in required if key not in normalized]
+    if missing:
+        raise ValueError("grant fields missing: " + ", ".join(missing))
+    for key in ("origin", "delegation_id"):
+        if key in fields:
+            normalized[key] = str(fields[key])
+    approved = parse_timestamp(normalized["approved_at"])
+    expires = parse_timestamp(normalized["expires_at"])
+    if expires <= approved:
+        raise ValueError("grant expires_at must be after approved_at")
+    _preflight_audit(path)
+    target = Path(path) if path else default_path()
+    grants = load_grants(target)
+    if grants.get(action) == normalized:
+        return target, False
+    grants[action] = normalized
+
+    def write():
+        return save_grants(grants, target)
+
+    output = _mutate_grant_with_audit(action, decision, reason, target, write)
+    return output, True
+
+
+def remove_grant_if_origin(action: str, origin: str,
+                           path: Path | str | None = None) -> bool:
+    """Remove one local grant only when its recorded origin matches.
+
+    A remote revocation of a delegated grant must never erase an independently
+    installed human grant with the same action name.
+    """
+    if action not in GRANT_ACTIONS:
+        raise ValueError(f"unknown grant action: {action}")
+    _preflight_audit(path)
+    grants = load_grants(path)
+    current = grants.get(action)
+    if not isinstance(current, dict) or current.get("origin") != origin:
+        return False
+    del grants[action]
+
+    def write():
+        target = Path(path) if path else default_path()
+        if not grants:
+            target.unlink(missing_ok=True)
+            return target
+        return save_grants(grants, path)
+
+    _mutate_grant_with_audit(action, "delegated-revoked",
+                             f"delegation {origin} no longer authorizes this action",
+                             path, write)
+    return True
 
 
 def revoke_grant(action: str, path: Path | str | None = None) -> bool:

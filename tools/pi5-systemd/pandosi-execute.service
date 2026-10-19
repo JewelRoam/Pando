@@ -12,7 +12,7 @@ Wants=pandosi-root.service
 # cadence from launchd.
 Type=simple
 WorkingDirectory=/home/admin
-ExecStart=/home/admin/pando/bin/python /home/admin/pandosi-src/tools/execute_loop.py 600 --repo /home/admin/pandosi-src --hosts /home/admin/.pando/hosts.json --state-dir /home/admin/.pando --token-file /home/admin/.pando/mailbox.token --mailbox http://192.168.31.41:8776 --mailbox-fallback http://192.168.31.100:8778 --limit 40
+ExecStart=/home/admin/pando/bin/python /home/admin/pandosi-src/tools/execute_loop.py 600 --repo /home/admin/pandosi-src --hosts /home/admin/.pando/hosts.json --state-dir /home/admin/.pando --token-file /home/admin/.pando/mailbox.token --mailbox http://100.92.184.4:8776 --mailbox-fallback http://192.168.31.41:8776 --mailbox-fallback http://192.168.31.100:8778 --grant-url http://100.92.184.4:8776/operator-grant --grant-url http://192.168.31.41:8776/operator-grant --limit 40
 Environment=PYTHONUNBUFFERED=1
 Restart=always
 RestartSec=10

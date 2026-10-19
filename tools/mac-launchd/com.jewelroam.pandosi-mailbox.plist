@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>KeepAlive</key>
+  <true/>
+  <key>Label</key>
+  <string>com.jewelroam.pandosi-mailbox</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/zhengenrong/Downloads/PandoSI-island/.venv/bin/python</string>
+    <string>/Users/zhengenrong/Downloads/PandoSI-island/tools/agent_mailbox.py</string>
+    <string>serve</string>
+    <string>--host</string>
+    <string>0.0.0.0</string>
+    <string>--port</string>
+    <string>8776</string>
+    <string>--dir</string>
+    <string>/Users/zhengenrong/.pandosi/mailbox</string>
+    <string>--token-file</string>
+    <string>/Users/zhengenrong/.pandosi/mailbox.token</string>
+    <string>--telemetry-root</string>
+    <string>/Users/zhengenrong/.pandosi/remote/pi5-root.json</string>
+    <string>--grant-file</string>
+    <string>/Users/zhengenrong/.pandosi/grants.toml</string>
+    <string>--identity-file</string>
+    <string>/Users/zhengenrong/.pando/identity.json</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardErrorPath</key>
+  <string>/Users/zhengenrong/.pandosi/logs/mailbox.launchd.err</string>
+  <key>StandardOutPath</key>
+  <string>/Users/zhengenrong/.pandosi/logs/mailbox.launchd.out</string>
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+  <key>WorkingDirectory</key>
+  <string>/Users/zhengenrong/Downloads/PandoSI-island</string>
+</dict>
+</plist>

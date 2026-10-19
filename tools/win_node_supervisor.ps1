@@ -6,7 +6,9 @@ $ErrorActionPreference = 'Continue'
 $env:HF_HUB_OFFLINE = '1'   # the ONNX member resolves repo files from local cache
 $repo = 'D:\PandoSI'
 $logs = 'D:\pando-models\logs'
+$stateDir = Join-Path $env:USERPROFILE '.pandosi'
 New-Item -ItemType Directory -Force -Path $logs | Out-Null
+New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
 $python = (Get-Command python).Source
 $token = "$repo\artifacts\lan-experiment\root-pairing.token"
 $dummyKey = 'D:\pando-models\llm-dummy.token'
@@ -70,6 +72,7 @@ $workerArgs = @("$repo\tools\win_worker.py")
 $mailboxArgs = @("$repo\tools\agent_mailbox.py", 'serve', '--port', '8778',
   '--dir', 'D:\pando-models\mailbox-win',
   '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
+  '--grant-file', "$stateDir\grants.toml",
   '--code-repo', "$repo",
   '--code-cache', 'D:\pando-models\code.bundle')
 # The resident proposer: the Windows node must initiate on its own, not only
@@ -141,8 +144,13 @@ $rootArgs = @('-m', 'pando.rootd', '--port', '8790',
 # resolves to the Mac's localhost convention, 8776, on a box whose own mailbox
 # is 8778. Same two shelves and the same order as the residents above it.
 $executorArgs = @("$repo\tools\execute_loop.py", '300',
+  '--repo', "$repo",
+  '--state-dir', "$stateDir",
+  '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
   '--mailbox', 'http://100.92.184.4:8776',
-  '--mailbox-fallback', 'http://127.0.0.1:8778')
+  '--mailbox-fallback', 'http://127.0.0.1:8778',
+  '--grant-url', 'http://100.92.184.4:8776/operator-grant',
+  '--grant-url', 'http://192.168.31.41:8776/operator-grant')
 # The receive side of seed.replicate. The Mac executor stages sealed bundles
 # in its outbox; this process pulls and verifies them into a local inbox. It
 # never decrypts a seed, starts a model, or accepts a non-sealed bundle.
