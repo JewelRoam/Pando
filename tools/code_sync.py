@@ -134,9 +134,12 @@ CLIENT_UNITS: dict[str, dict[str, str]] = {
 #: names and a rename would make a guard silently stop guarding.
 SAFE_UNITS = frozenset(handles["linux"] for handles in CLIENT_UNITS.values())
 
-#: What the Windows supervisor respawns. Mirrors the pattern in
-#: ``tools/win_restart_clients.ps1``; the two are the same edge and a test
-#: pins them together so editing one and not the other fails loudly.
+#: What the Windows supervisor respawns, and the only copy of that list.
+#: ``tools/win_restart_clients.ps1`` used to hold a second copy of this
+#: regex, pinned equal by a test. A test that compares copies cannot stop the
+#: drift it exists to catch when the copy that actually runs is the one on the
+#: node, so the script now delegates to ``--restart-clients`` instead and
+#: there is nothing left to compare.
 WINDOWS_CLIENT_PATTERN = (
     r"pando\.stemd|win_worker|agent_mailbox|pando\.thinkd|observatory\.py"
     r"|pando\.chatd|pando\.reactd|execute_loop\.py|pando\.rootd"
@@ -437,6 +440,25 @@ def windows_client_pids(rows, pattern: str = WINDOWS_CLIENT_PATTERN) -> list[int
     return pids
 
 
+def _spawn_detached(command: str) -> dict:
+    """Start a stop command and do not wait for it.
+
+    Used when the list of clients includes the process asking for the
+    restart. Waiting would mean being stopped in the middle of the wait, so
+    the caller never reached the line that writes down why every client on
+    the node just disappeared. Fire, let the caller record, let it exit.
+    """
+    kwargs: dict = {}
+    if os.name == "nt":  # stay alive when the parent tree is stopped
+        kwargs["creationflags"] = (subprocess.DETACHED_PROCESS
+                                   | subprocess.CREATE_NEW_PROCESS_GROUP)
+    try:
+        process = subprocess.Popen(command, shell=True, **kwargs)
+    except OSError as exc:
+        return {"ran": False, "reason": f"spawn-failed: {exc}"}
+    return {"ran": True, "pid": process.pid}
+
+
 def _restart_windows(handles: list[str], run) -> dict:
     """Stop the client processes; the logon supervisor respawns them."""
     try:
@@ -460,6 +482,17 @@ def _restart_windows(handles: list[str], run) -> dict:
         return {"restarted": [], "killed": [], "reason": "nothing-running",
                 "driver": "windows"}
     ids = ",".join(str(pid) for pid in pids)
+    stop = ("powershell -NoProfile -NonInteractive -Command "
+            f"\"Stop-Process -Id {ids} -Force -ErrorAction SilentlyContinue\"")
+    if os.getpid() in pids:
+        # The watcher that fetched the code is on its own client list, so a
+        # waited-for stop would end this interpreter before it could record
+        # the round. The same stop goes to a detached shell instead. This is
+        # the branch that lets Windows use the built-in driver at all rather
+        # than carrying a second roster in a PowerShell script.
+        return {"restarted": [], "killed": pids, "reason": "restarted",
+                "driver": "windows", "units": handles,
+                "detached": _spawn_detached(stop)}
     got = run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
                f"Stop-Process -Id {ids} -Force -ErrorAction SilentlyContinue"],
               capture_output=True, text=True, timeout=60)
@@ -900,7 +933,9 @@ def refresh_self(source: Path, target: Path) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--repo", required=True)
+    parser.add_argument("--repo", default="",
+                        help="checkout to fast-forward; not needed with "
+                             "--restart-clients")
     parser.add_argument("--remote", default="origin")
     parser.add_argument("--peer", default="",
                         help="used only when --remote cannot be fetched")
@@ -913,6 +948,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--platform", default="",
                         choices=("", "linux", "darwin", "windows"),
                         help="service manager to use (default: this host's)")
+    parser.add_argument("--restart-clients", action="store_true",
+                        help="stop every client on this host and exit; no "
+                             "fetch, no model. The Windows logon supervisor "
+                             "respawns what this stops.")
     parser.add_argument("--self-source", default="",
                         help="updater inside the checkout; adopted by --self-target")
     parser.add_argument("--self-target", default="",
@@ -922,6 +961,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--install-units-target", default="",
                         help="where this node's units are deployed")
     args = parser.parse_args(argv)
+    if args.restart_clients:
+        done = restart_units(list(CLIENT_UNITS), platform=args.platform)
+        print(json.dumps(done, ensure_ascii=False, sort_keys=True), flush=True)
+        return 0 if done.get("reason") == "restarted" else 1
+    if not args.repo:
+        parser.error("--repo is required unless --restart-clients is given")
     token = ""
     if args.peer_token_file:
         token = Path(args.peer_token_file).expanduser().read_text(encoding="utf-8").strip()

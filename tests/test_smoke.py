@@ -8517,6 +8517,115 @@ class TestCodeSync(unittest.TestCase):
             self.assertEqual(dirty["action"], "none")
             self.assertEqual(seen, ["stop-clients"])
 
+    def test_a_tree_that_does_not_parse_is_never_restarted_onto(self):
+        """A commit that cannot even be compiled must not reach a node.
+
+        The Windows box has nobody watching it: the logon supervisor would
+        respawn a client that dies on import, every ten seconds, and nothing
+        on that box could read the traceback. Refusing keeps the code that
+        works in place -- and it must not record an ``acted_head`` either, or
+        the watcher would decide it had already converged and stop trying.
+        """
+        watch = self._load_watch()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env, src, bare, client = self._world(root)
+            ledger = root / "code-sync-ledger.jsonl"
+            (src / "broken.py").write_text("def (:  # not python\n")
+            self._run(env, "git", "-C", str(src), "add", "broken.py")
+            self._advance_origin(env, src, bare)
+
+            seen = []
+            watch._spawn = lambda command: seen.append(command) or {
+                "ran": True, "pid": 7}
+            row = watch.watch_round(repo=client, on_update="clients",
+                                    client_cmd="stop-clients", ledger=ledger)
+            self.assertTrue(row["updated"], "the fetch itself still happens")
+            self.assertEqual(row["action"], "refused")
+            self.assertEqual(row["blocked_by"], "does-not-parse")
+            self.assertTrue(row["error"], "the compiler's words are kept")
+            self.assertEqual(seen, [])
+            self.assertNotIn("acted_head", row)
+
+            # No acted_head: the next round tries again rather than deciding
+            # that a refused restart was a completed one.
+            again = watch.watch_round(repo=client, on_update="clients",
+                                      client_cmd="stop-clients", ledger=ledger)
+            self.assertEqual(again["action"], "refused")
+            self.assertEqual(seen, [])
+
+            # A later commit that fixes the file is acted on normally.
+            (src / "broken.py").write_text("ok = 1\n")
+            self._run(env, "git", "-C", str(src), "add", "broken.py")
+            self._run(env, "git", "-C", str(src), "commit", "-m", "fix")
+            self._run(env, "git", "-C", str(src), "push", str(bare), "main")
+            fixed = watch.watch_round(repo=client, on_update="clients",
+                                      client_cmd="stop-clients", ledger=ledger)
+            self.assertEqual(fixed["action"], "client-restart")
+            self.assertEqual(seen, ["stop-clients"])
+
+    def test_the_windows_driver_detaches_when_the_stop_would_hit_itself(self):
+        """The updater is on the Windows client list, so it cannot wait.
+
+        Waiting for the stop means being stopped in the middle of the wait,
+        and the ledger line that explains why every client just vanished is
+        never written. That is why Windows first used a PowerShell script
+        that fired and returned -- the behaviour belonged in the shared
+        driver, not in a script that also carried a copy of the roster.
+        """
+        sync = self._load()
+        spawned = []
+        sync._spawn_detached = lambda command: spawned.append(command) or {
+            "ran": True, "pid": 4242}
+
+        def run(command, **kwargs):
+            self.assertIn("Get-CimInstance", " ".join(command),
+                          "only the listing may be waited for")
+            return subprocess.CompletedProcess(
+                command, 0,
+                json.dumps([{"ProcessId": os.getpid(),
+                             "CommandLine": "python tools/node_code_watch.py"},
+                            {"ProcessId": 11,
+                             "CommandLine": "python -m pando.stemd"}]), "")
+
+        out = sync._restart_windows(["proc"], run=run)
+        self.assertEqual(out["reason"], "restarted")
+        self.assertEqual(out["killed"], [os.getpid(), 11])
+        self.assertTrue(out["detached"]["ran"])
+        self.assertEqual(len(spawned), 1)
+        self.assertIn("Stop-Process -Id", spawned[0])
+        self.assertIn(str(os.getpid()), spawned[0])
+
+    def test_restart_clients_is_a_cli_mode_with_no_fetch_and_no_repo(self):
+        """The Windows shim runs *after* the fetch that decided to act.
+
+        ``tools/win_restart_clients.ps1`` is the one entry point the logon
+        supervisor calls by name, so it has to stay a file with that name.
+        What it does is one delegation to the shared roster; a fetch or a
+        model reload inside it would be a second, silent policy.
+        """
+        sync = self._load()
+        seen = []
+        sync.restart_units = lambda units, platform="": (
+            seen.append((sorted(units), platform))
+            or {"restarted": ["proc"], "reason": "restarted"})
+        code = sync.main(["--restart-clients"])
+        self.assertEqual(code, 0)
+        self.assertEqual(seen, [(sorted(sync.CLIENT_UNITS), "")])
+
+    def test_a_failed_restart_is_not_recorded_as_convergence(self):
+        """``nothing-running`` is not the word "restarted".
+
+        A pattern that matches nothing is how a roster goes wrong quietly.
+        Recording it as "the clients are already on this head" is the same
+        silence that left the Mac stems on ``dbe78c33`` for a day.
+        """
+        watch = self._load_watch()
+        self.assertFalse(watch._restart_happened({"reason": "nothing-running"}))
+        self.assertFalse(watch._restart_happened({"reason": "restart-failed"}))
+        self.assertFalse(watch._restart_happened({}))
+        self.assertTrue(watch._restart_happened({"reason": "restarted"}))
+
     def test_code_bundle_follows_head_not_the_cache_age(self):
         outbox = self._load_outbox()
         with tempfile.TemporaryDirectory() as tmp:
@@ -8870,12 +8979,16 @@ class TestCodeSync(unittest.TestCase):
             self.assertNotEqual(row.get("windows", None), None, name)
             self.assertIn("darwin", row, name)
 
-        # The Windows pattern is the one in the PowerShell the node actually
-        # runs. Two copies of a regex is exactly the drift this test is for.
+        # The Windows client restart delegates instead of carrying a second
+        # roster. Equality between two copies was never the property that
+        # mattered: the copy that actually runs is the one on the node, and
+        # no test in this repo can read it.
         ps1 = (repo / "tools" / "win_restart_clients.ps1").read_text()
-        found = re.search(r"\$pattern = '([^']+)'", ps1)
-        self.assertIsNotNone(found)
-        self.assertEqual(sync.WINDOWS_CLIENT_PATTERN, found.group(1))
+        self.assertIn("code_sync.py", ps1)
+        self.assertIn("--restart-clients", ps1)
+        self.assertNotRegex(ps1, r"\$pattern\s*=")
+        self.assertIn("node_code_watch", sync.WINDOWS_CLIENT_PATTERN)
+        self.assertNotIn("llama", sync.WINDOWS_CLIENT_PATTERN)
 
         # A model is not a client on any of the three, and the refusal is
         # spelled the same way from either dialect.

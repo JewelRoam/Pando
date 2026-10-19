@@ -33,8 +33,12 @@ roster file: a supervisor that is already running cannot learn a new service
 name, so only a restart of the whole stack can add one.
 
 A tree with local edits, a diverged history, or a failed fetch is left exactly
-as it was, and nothing is restarted. No dependency is installed and no model
-is started here.
+as it was, and nothing is restarted. A tree that does not even compile is
+refused for the same reason and in the same way: it is the one failure worth
+catching before a restart on a node nobody is watching, because the
+supervisor would otherwise respawn a client that cannot start, every ten
+seconds, with nothing on the box able to read the failure. No dependency is
+installed and no model is started here.
 """
 from __future__ import annotations
 
@@ -96,6 +100,38 @@ def _acted_head(ledger: Path | None) -> str:
     return ""
 
 
+def _parses(repo: Path, python: str = "", timeout: float = 300.0) -> dict:
+    """Does the tree we just moved to still compile?
+
+    A syntax check, not a proof. It is deliberately the cheapest thing that
+    is still true: it catches the commit that cannot start at all, and it has
+    no side effects, so refusing on it cannot itself damage a node. Import
+    errors and bad arguments still get through, and the honest name for that
+    is a smaller gate, not a stronger claim.
+    """
+    command = [python or sys.executable, "-m", "compileall", "-q", str(repo)]
+    try:
+        got = subprocess.run(command, capture_output=True, text=True,
+                             timeout=timeout)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"ok": False, "reason": f"check-failed: {exc}"[:200]}
+    if got.returncode != 0:
+        detail = (got.stderr or got.stdout or "").strip()
+        return {"ok": False, "reason": "does-not-parse",
+                "error": detail[-600:]}
+    return {"ok": True}
+
+
+def _restart_happened(outcome: dict) -> bool:
+    """Did a driver say, in its own words, that it restarted something?
+
+    ``nothing-running`` is not that word. A pattern that matches nothing is
+    how a roster goes wrong quietly, and recording it as "the clients are
+    already on this head" is exactly the silence this file exists to end.
+    """
+    return str(outcome.get("reason") or "") == "restarted"
+
+
 def _spawn(command: str) -> dict:
     """Start a restart command and do not wait for it.
 
@@ -149,17 +185,29 @@ def watch_round(*, repo, remote="origin", peer="", peer_token="",
     elif clean and on_update != "none" and (result.get("updated") or behind):
         use_node = roster_changed or on_update == "node"
         row["action"] = "node-restart" if use_node else "client-restart"
-        command = node_cmd if use_node else client_cmd
-        if command:
-            row["command"] = _spawn(command)
+        check = _parses(repo)
+        if not check["ok"]:
+            # Refusing leaves the node on the code that works, and it leaves
+            # the round visible: no ``acted_head`` is written, so the next
+            # round tries again instead of deciding it already converged.
+            row["action"] = "refused"
+            row["blocked_by"] = check["reason"]
+            row["error"] = check.get("error", "")
         else:
-            # No shell string: the clients are named, and the platform
-            # underneath this process decides what "restart" means. This is
-            # the branch the Mac uses, and the branch pi5's systemd timer
-            # will use when it is switched off ``--restart``.
-            row["restart"] = restart_units(list(CLIENT_UNITS),
-                                           platform=platform)
-        row["acted_head"] = head
+            command = node_cmd if use_node else client_cmd
+            if command:
+                row["command"] = _spawn(command)
+                acted = bool(row["command"].get("ran"))
+            else:
+                # No shell string: the clients are named, and the platform
+                # underneath this process decides what "restart" means. This
+                # is the branch the Mac uses and the branch Windows uses.
+                row["restart"] = restart_units(list(CLIENT_UNITS),
+                                               platform=platform)
+                acted = _restart_happened(row["restart"])
+            row["acted"] = acted
+            if acted:
+                row["acted_head"] = head
     _append(ledger, row)
     return row
 
