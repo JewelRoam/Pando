@@ -10,11 +10,19 @@ interval. A node whose only watcher is a logon supervisor has no such clock, so
 this process is the clock -- and on purpose not a timer unit, because the
 roster's rule is that no host gains a new scheduled task.
 
-Address resolution is local-only: the host's own `hosts.json` (`mailboxes[0]`),
-then the localhost convention. The file is resolved here and handed to the
+Address resolution is local-only: the host's own `hosts.json` (`mailboxes`),
+then the localhost conventions. The file is resolved here and handed to the
 child with `--hosts`, so the loop and the round can never disagree about which
 table describes this host -- a loop that reads one table and an executor that
 reads another is how a host drains nobody's backlog and looks idle.
+
+The mailbox is a *list*, not an address. `mailbox_urls` reuses the same order
+the round does (command line, then every entry the table names, then
+`--mailbox-fallback`), so a node whose peer moved keeps draining its own
+mailbox instead of polling an address that no longer answers. Each extra
+shelf is handed down as `--mailbox-fallback`, which `pando.execute` grew on
+2026-10-19 for exactly this: before it, a moved Mac address was a silent,
+healthy-looking halt on every node that read its queue.
 
 Usage: python tools/execute_loop.py [interval-seconds] [--repo DIR]
                                    [--hosts FILE] [--state-dir DIR] ...
@@ -68,6 +76,33 @@ def mailbox_url(hosts: dict, fallback: str = "http://127.0.0.1:8776") -> str:
     return fallback
 
 
+#: The localhost conventions, in the order the connectivity doctrine lists
+#: them: the Mac's mailbox port first, the win node's second. Two of them
+#: because a node with no table has to find its own door: 8776 is the Mac's
+#: convention, 8778 the win node's, and neither is a machine address.
+LOCAL_MAILBOXES = ("http://127.0.0.1:8776", "http://127.0.0.1:8778")
+
+
+def mailbox_urls(hosts: dict, mailbox: str = "", fallbacks=()) -> list[str]:
+    """The ordered shelves one round may read, deduplicated.
+
+    Mirrors `pando.execute.executor_mailboxes` -- deliberately, because the
+    loop prints the list the round will walk. Two implementations of one order
+    is a loop that logs one address while the round drains another.
+    """
+    listed = hosts.get("mailboxes") if isinstance(hosts, dict) else None
+    named = [str(url).strip() for url in listed
+             if str(url or "").strip()] if isinstance(listed, list) else []
+    primary = str(mailbox or "").strip() or (named[0] if named else "")
+    seen: set[str] = set()
+    out: list[str] = []
+    for url in [primary] + named + [str(u).strip() for u in (fallbacks or [])]:
+        if url and url not in seen:
+            seen.add(url)
+            out.append(url)
+    return out or list(LOCAL_MAILBOXES)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("interval", nargs="?", type=float, default=300.0,
@@ -81,6 +116,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="passed through as the round's state directory")
     parser.add_argument("--mailbox", default="",
                         help="overrides hosts.json mailboxes[0]")
+    parser.add_argument("--mailbox-fallback", action="append", default=[],
+                        help="extra shelf to try after the table's own "
+                             "(repeatable); passed to the round as "
+                             "--mailbox-fallback")
     parser.add_argument("--token-file",
                         default="metrics/lan-check/mac-mailbox.token",
                         help="mailbox token, relative to --repo unless absolute. "
@@ -105,16 +144,18 @@ def round_command(args: argparse.Namespace, url: str, hosts: Path) -> list[str]:
                "--limit", str(args.limit)]
     if args.state_dir:
         command += ["--state-dir", args.state_dir]
+    for url in getattr(args, "mailbox_fallback", []) or []:
+        command += ["--mailbox-fallback", url]
     return command + list(args.extra)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     hosts = host_file(args.hosts)
-    url = args.mailbox or mailbox_url(read_hosts(hosts))
-    command = round_command(args, url, hosts)
-    print(f"execute-loop: every {args.interval:.0f}s against {url} "
-          f"(hosts {hosts})", flush=True)
+    urls = mailbox_urls(read_hosts(hosts), args.mailbox, args.mailbox_fallback)
+    command = round_command(args, urls[0], hosts)
+    print(f"execute-loop: every {args.interval:.0f}s against "
+          f"{', '.join(urls)} (hosts {hosts})", flush=True)
     while True:
         try:
             subprocess.run(command, cwd=str(Path(args.repo).expanduser()),

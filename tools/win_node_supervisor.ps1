@@ -133,7 +133,14 @@ $rootArgs = @('-m', 'pando.rootd', '--port', '8790',
   '--pairing-token-file', "$repo\artifacts\lan-experiment\root-pairing.token",
   '--lan', '--require-identity', '--quorum-k', '3',
   '--stem-call-timeout', '120', '--initial-stem-timeout', '30')
-$executorArgs = @("$repo\tools\execute_loop.py", '300')
+# The executor reads the bus; unlike its three neighbours above it never
+# posts. As written it had no mailbox argument at all, so what it read
+# depended on a hosts.json this file never names -- and with no such file it
+# resolves to the Mac's localhost convention, 8776, on a box whose own mailbox
+# is 8778. Same two shelves and the same order as the residents above it.
+$executorArgs = @("$repo\tools\execute_loop.py", '300',
+  '--mailbox', 'http://100.92.184.4:8776',
+  '--mailbox-fallback', 'http://127.0.0.1:8778')
 # The receive side of seed.replicate. The Mac executor stages sealed bundles
 # in its outbox; this process pulls and verifies them into a local inbox. It
 # never decrypts a seed, starts a model, or accepts a non-sealed bundle.

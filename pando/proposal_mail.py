@@ -217,6 +217,48 @@ def fetch_proposals_any(urls, token: str | None = None,
 
 
 
+def listing_any(urls, token: str | None = None, status: str = "all",
+                timeout: float = 15):
+    """Read the task listing from the first mailbox in *urls* that answers.
+
+    Returns ``(listing, source_url, last_error)``. Same walk as
+    ``fetch_proposals_any``, and the same rule about emptiness -- a quiet
+    primary must not hide a populated replica -- with one difference: this
+    returns the mailbox it settled on, because a caller that reads *bodies*
+    has to read them from the shelf it counted the rows on. Task ids are
+    per-mailbox row ids; fetching a fallback's ids from the primary is how a
+    reader reports an empty round on a busy colony.
+
+    A listing of ``{}`` and ``source_url`` of None mean nobody answered at
+    all. An answered-but-quiet mailbox is a healthy poll, so it comes back as
+    the source rather than as an error: the round still needs somewhere to
+    say it read from.
+    """
+    if isinstance(urls, str):
+        chain = mailbox_chain(urls)
+    else:
+        urls = list(urls or [])
+        chain = mailbox_chain(urls[0] if urls else "", urls[1:])
+    last_error = None
+    quiet: tuple[dict, str] | None = None
+    for url in chain:
+        listing = _request(url, f"/tasks?status={status}", token, "GET",
+                           timeout=timeout)
+        if not isinstance(listing, dict) or listing.get("error"):
+            last_error = str((listing or {}).get("error") or "no answer")
+            continue
+        last_error = None
+        rows = listing.get("tasks")
+        if isinstance(rows, list) and rows:
+            return listing, url, None
+        if quiet is None:
+            quiet = (listing, url)
+    if quiet is not None:
+        return quiet[0], quiet[1], None
+    return {}, None, last_error
+
+
+
 def publish_proposal(proposal: Proposal, identity, url: str,
                      token: str | None = None, timeout: float = 15) -> dict:
     """Sign *proposal* with *identity* and leave it on the mailbox.

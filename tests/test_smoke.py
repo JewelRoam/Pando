@@ -4136,6 +4136,88 @@ class TestReactions(unittest.TestCase):
         self.assertIsNone(source)
         self.assertIsNone(error)
 
+    def test_a_listing_falls_through_a_dead_primary_and_names_its_source(self):
+        """Task ids are per-mailbox row ids, so the source must travel.
+
+        ``fetch_proposals_any`` already walked the chain, but it threw away
+        *which* shelf answered -- fine for a caller that only counts rows,
+        wrong for the executor, which then fetches bodies by the ids it just
+        read. Counting one shelf's rows and fetching another's bodies reads
+        as an empty round on a busy colony.
+        """
+        from unittest import mock
+        from pando import proposal_mail
+
+        seen = []
+
+        def fake_request(url, path, token, method, payload=None, timeout=15):
+            seen.append((url, path))
+            if url == "http://primary":
+                return {"error": "unreachable: primary"}
+            return {"tasks": [{"id": "t1",
+                               "title": "[proposal] p-1 policy.set by mac"}]}
+
+        with mock.patch.object(proposal_mail, "_request", fake_request):
+            listing, source, error = proposal_mail.listing_any(
+                ["http://primary", "http://fallback"], None, status="all")
+
+        self.assertEqual([url for url, _ in seen],
+                         ["http://primary", "http://fallback"])
+        self.assertEqual(source, "http://fallback")
+        self.assertEqual([row["id"] for row in listing["tasks"]], ["t1"])
+        self.assertIsNone(error)
+
+    def test_a_quiet_primary_does_not_hide_a_populated_replica(self):
+        """Replication lags; an empty shelf is not proof the colony is idle."""
+        from unittest import mock
+        from pando import proposal_mail
+
+        def fake_request(url, path, token, method, payload=None, timeout=15):
+            if url == "http://primary":
+                return {"tasks": []}
+            return {"tasks": [{"id": "t9"}]}
+
+        with mock.patch.object(proposal_mail, "_request", fake_request):
+            listing, source, error = proposal_mail.listing_any(
+                ["http://primary", "http://fallback"], None)
+
+        self.assertEqual(source, "http://fallback")
+        self.assertEqual([row["id"] for row in listing["tasks"]], ["t9"])
+        self.assertIsNone(error)
+
+    def test_a_quiet_shelf_is_a_source_not_an_error(self):
+        """An answered empty feed is idle, and an idle round still needs a
+        shelf to name: "read nobody" and "read nobody" must not look the
+        same."""
+        from unittest import mock
+        from pando import proposal_mail
+
+        with mock.patch.object(proposal_mail, "_request",
+                               return_value={"tasks": []}):
+            listing, source, error = proposal_mail.listing_any(
+                ["http://primary", "http://fallback"], None)
+
+        self.assertEqual(listing, {"tasks": []})
+        self.assertEqual(source, "http://primary")
+        self.assertIsNone(error)
+
+    def test_a_listing_nobody_answered_is_an_error_not_an_idle_round(self):
+        """The whole point of the change: a dead address must not print a
+        healthy idle round for a day while the backlog grows somewhere else.
+        """
+        from unittest import mock
+        from pando import proposal_mail
+
+        with mock.patch.object(proposal_mail, "_request",
+                               return_value={"error": "unreachable: dead"}):
+            listing, source, error = proposal_mail.listing_any(
+                ["http://a", "http://b"], None)
+
+        self.assertEqual(listing, {})
+        self.assertIsNone(source)
+        self.assertEqual(error, "unreachable: dead")
+
+
     def test_a_lost_reaction_is_retried_instead_of_marked_done(self):
         """A failed post leaves the proposal retryable, not silently adopted."""
         from types import SimpleNamespace
@@ -5143,6 +5225,34 @@ class TestExecution(unittest.TestCase):
             {"mac-proposer", "mac-llm-8b-local"})
         self.assertEqual(local_authors({}), set())
         self.assertEqual(local_authors(None), set())
+
+    def test_the_executor_reads_every_shelf_its_table_names(self):
+        """The table goes in whole, not as ``table[1:]``.
+
+        When the command line names a primary, the table's own first entry is
+        still a shelf this host is meant to read. Dropping it is how a node
+        polls a peer's replica while its own queue fills up unread.
+        """
+        from pando.execute import executor_mailboxes, host_mailboxes
+        table = {"mailboxes": ["http://own:8778", "http://peer:8776"]}
+        self.assertEqual(host_mailboxes(table),
+                         ["http://own:8778", "http://peer:8776"])
+        # Command line first, then the whole table, then the extras -- and a
+        # repeat is the same shelf, not a second attempt.
+        self.assertEqual(
+            executor_mailboxes("http://peer:8776", table, ["http://own:8778"]),
+            ["http://peer:8776", "http://own:8778"])
+        # No flag, no table: the two localhost conventions, in the order the
+        # connectivity doctrine lists them.
+        self.assertEqual(executor_mailboxes("", {}, []),
+                         ["http://127.0.0.1:8776", "http://127.0.0.1:8778"])
+        self.assertEqual(executor_mailboxes("  ", None),
+                         ["http://127.0.0.1:8776", "http://127.0.0.1:8778"])
+        # A blank in the table never becomes an address.
+        self.assertEqual(executor_mailboxes("", {"mailboxes": ["", "a"]}, []),
+                         ["a"])
+        self.assertEqual(host_mailboxes({"mailboxes": "nope"}), [])
+        self.assertEqual(host_mailboxes(None), [])
 
     def test_a_proposal_that_keeps_raising_is_settled_after_a_budget(self):
         import tempfile
@@ -8288,6 +8398,30 @@ class TestResidentPullAllPlatforms(unittest.TestCase):
             self.assertNotIn("192.168.31.41", text)
 
 
+    def test_the_executor_reads_a_shelf_list_on_every_platform(self):
+        """Same disease as the code sync, second site: a bare localhost guess.
+
+        The Windows executor was started with no mailbox argument at all, so
+        with no ``hosts.json`` it dialled the Mac's localhost convention
+        (8776) on a box whose own mailbox is 8778. Both platforms now pass
+        the same ordered list, with the local box second so a moved peer
+        costs one timeout, not a silent halt.
+        """
+        root = self._root()
+        supervisor = (root / "tools" /
+                      "win_node_supervisor.ps1").read_text(encoding="utf-8")
+        self.assertIn("$executorArgs", supervisor)
+        executor = supervisor.split("$executorArgs = @(")[1].split("\n#")[0]
+        self.assertIn("execute_loop.py", executor)
+        self.assertIn("'--mailbox'", executor)
+        self.assertIn("'--mailbox-fallback'", executor)
+        self.assertIn("http://127.0.0.1:8778", executor)
+        unit = (root / "tools" / "pi5-systemd" /
+                "pandosi-execute.service").read_text(encoding="utf-8")
+        self.assertIn("tools/execute_loop.py", unit)
+        self.assertIn("--mailbox-fallback ", unit)
+
+
 class TestCodeSync(unittest.TestCase):
     """A checkout may fast-forward. It may not clobber edits or restart a model."""
 
@@ -9982,6 +10116,42 @@ class TestExecuteLoop(unittest.TestCase):
         self.assertNotIn("--state-dir", command)
         self.assertEqual(args.interval, 300.0)
 
+    def test_the_mailbox_list_is_ordered_and_deduplicated(self):
+        """The loop prints the list the round walks.
+
+        Two implementations of one order is a loop that logs one address
+        while the round drains another, so this pins the same order the
+        executor's ``executor_mailboxes`` pins.
+        """
+        loop = self._load()
+        self.assertEqual(
+            loop.mailbox_urls({"mailboxes": ["a", "b"]}, "b", ["c", "a"]),
+            ["b", "a", "c"])
+        self.assertEqual(loop.mailbox_urls({}, "", []),
+                         ["http://127.0.0.1:8776", "http://127.0.0.1:8778"])
+        self.assertEqual(loop.mailbox_urls({"mailboxes": ["", "a"]}), ["a"])
+        # The single-address helper the pre-list units still call keeps the
+        # old answer, so an un-migrated unit does not change behaviour.
+        self.assertEqual(loop.mailbox_url({"mailboxes": ["http://one"]}),
+                         "http://one")
+        self.assertEqual(loop.mailbox_url({}), "http://127.0.0.1:8776")
+
+    def test_a_round_carries_the_extra_shelves_down(self):
+        """An extra shelf is a flag on the child, not a string the loop only
+        printed in its own banner."""
+        loop = self._load()
+        args = loop.build_parser().parse_args([
+            "300", "--mailbox-fallback", "http://one",
+            "--mailbox-fallback", "http://two"])
+        command = loop.round_command(args, "http://primary",
+                                     Path("/x/hosts.json"))
+        self.assertEqual(
+            [command[i + 1] for i, part in enumerate(command)
+             if part == "--mailbox-fallback"], ["http://one", "http://two"])
+        self.assertEqual(command.count("--mailbox-fallback"), 2)
+        self.assertEqual(command[command.index("--mailbox") + 1],
+                         "http://primary")
+
     def test_the_loop_sleeps_with_a_module_it_actually_imported(self):
         """A NameError in the sleep call stops the only clock this node has.
 
@@ -9991,6 +10161,107 @@ class TestExecuteLoop(unittest.TestCase):
         loop = self._load()
         self.assertTrue(hasattr(loop, "time"),
                         "tools/execute_loop.py must import time")
+
+
+class TestExecutorShelfFallback(unittest.TestCase):
+    """One round, one shelf; a dead address must not look like an idle one.
+
+    Measured 2026-10-19: ``pando.execute`` resolved exactly one mailbox
+    (``hosts.json["mailboxes"][0]``), so when the Mac moved networks every
+    executor that named that address polled a dead port and printed a
+    healthy-looking idle round for a day. The repair is the same one the
+    code sync got: an ordered shelf list, and a status file that names the
+    shelf the round actually read.
+    """
+
+    def _root(self) -> Path:
+        return Path(__file__).resolve().parents[1]
+
+    def _mailbox(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "agent_mailbox_under_test_executor_fallback",
+            self._root() / "tools" / "agent_mailbox.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    @staticmethod
+    def _dead_url() -> str:
+        """A URL nothing is listening on: bind, read the port, close."""
+        import socket
+        probe = socket.socket()
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+        probe.close()
+        return f"http://127.0.0.1:{port}"
+
+    def _state(self, root: Path, token: str = "tok") -> Path:
+        state = root / "state"
+        state.mkdir()
+        (state / "mailbox.token").write_text(token, encoding="utf-8")
+        from pando.identity import load_or_create
+        load_or_create(state / "identity.json")
+        return state
+
+    def _run(self, state: Path, *extra: str):
+        env = os.environ.copy()
+        env.pop("GIT_DIR", None)
+        env.pop("GIT_WORK_TREE", None)
+        return subprocess.run(
+            [sys.executable, "-m", "pando.execute", "--once",
+             "--state-dir", str(state), "--hosts", str(state / "hosts.json"),
+             "--identity", str(state / "identity.json"), *extra],
+            cwd=str(self._root()), env=env, capture_output=True, text=True,
+            timeout=120)
+
+    def test_a_round_walks_past_a_dead_shelf_and_names_the_one_it_read(self):
+        module = self._mailbox()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            box = module.Mailbox(root / "box")
+            # A message, not work: this round is *idle*, and the point is
+            # that an idle round on a live shelf is distinguishable from an
+            # idle round on a corpse.
+            box.create("ann", "[chat] hello", "hi")
+            server = module.ThreadingHTTPServer(
+                ("127.0.0.1", 0), module.build_handler(box, "tok"))
+            live = f"http://127.0.0.1:{server.server_address[1]}"
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                dead = self._dead_url()
+                state = self._state(root)
+                proc = self._run(state, "--mailbox", dead,
+                                 "--mailbox-fallback", live)
+                status = json.loads((state / "execute-status.json")
+                                    .read_text(encoding="utf-8"))
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(status["did"], "idle")
+        self.assertEqual(status["read_from"], live)
+        self.assertEqual(status["mailbox_tried"], [dead, live])
+
+    def test_a_round_nobody_answered_says_so_and_fails_loudly(self):
+        """A jesting ``idle`` on a corpse is how a backlog grew unnoticed."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            state = self._state(root)
+            first, second = self._dead_url(), self._dead_url()
+            proc = self._run(state, "--mailbox", first,
+                             "--mailbox-fallback", second)
+            status = json.loads((state / "execute-status.json")
+                                .read_text(encoding="utf-8"))
+
+        self.assertEqual(proc.returncode, 1, proc.stderr)
+        self.assertEqual(status["did"], "unreachable")
+        self.assertEqual(status["mailbox_tried"], [first, second])
+        self.assertTrue(status["error"], "the last error must be kept")
+        self.assertNotIn("read_from", status)
 
 
 class TestVoteWatchdog(unittest.TestCase):

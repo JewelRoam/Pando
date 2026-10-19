@@ -84,7 +84,8 @@ from .policy import DEFAULT_PATH as DEFAULT_POLICY_PATH
 from .policy import PolicyError
 from .policy import apply as apply_policy
 from .policy import load as load_policy
-from .proposal_mail import fetch_proposals, is_reaction_task
+from .proposal_mail import (fetch_proposals, is_reaction_task,
+                            mailbox_chain)
 
 ADOPT = "赞同"
 HOLD = "搁置"
@@ -277,6 +278,41 @@ def _hosts_table(path: str = "~/.pandosi/hosts.json") -> dict:
             Path(path).expanduser().read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
+
+
+#: The localhost conventions, in the order the connectivity doctrine lists
+#: them: the Mac's mailbox port first, the win node's second. They are used
+#: only when neither the command line nor this host's table names a mailbox,
+#: so a node with no config still looks at its own door instead of dialling a
+#: peer's address that this checkout is not allowed to know.
+DEFAULT_MAILBOXES = ("http://127.0.0.1:8776", "http://127.0.0.1:8778")
+
+
+def host_mailboxes(table: dict | None) -> list[str]:
+    """The mailbox URLs a ``hosts.json`` names, in order. Blank -> ``[]``."""
+    urls = table.get("mailboxes") if isinstance(table, dict) else None
+    if not isinstance(urls, list):
+        return []
+    return [str(url).strip() for url in urls if str(url or "").strip()]
+
+
+def executor_mailboxes(mailbox: str, table: dict | None, fallbacks=()) -> list[str]:
+    """The ordered shelf list one round may read.
+
+    Command line first, then *every* mailbox this host's table names, then
+    ``--mailbox-fallback``. The table goes in whole rather than as
+    ``table[1:]``: when the command line names a primary, the table's own
+    first entry is still a shelf this host is meant to read, and dropping it
+    is how a node polls a peer's replica while its own mailbox fills up
+    unread. Duplicates collapse in ``mailbox_chain``, so the caller may pass
+    the same address in all three places -- which is exactly what the pi5 and
+    Windows units do, so that a moved address is reused everywhere a person
+    was already writing it.
+    """
+    named = host_mailboxes(table)
+    primary = str(mailbox or "").strip() or (named[0] if named else "")
+    chain = mailbox_chain(primary, named + list(fallbacks or []))
+    return chain or list(DEFAULT_MAILBOXES)
 
 
 def local_authors(table: dict | None, extra=()) -> set[str]:
@@ -1469,7 +1505,9 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                         "executed": False,
                         "skipped": "no-actuator",
                     }, sort_keys=True) + "\n")
-        payload = {"did": "idle", "foreign_seed_exports": foreign,
+        payload = {"did": "idle", "read_from": getattr(args, "read_from", ""),
+                   "mailbox_tried": list(getattr(args, "mailbox_chain", []) or []),
+                   "foreign_seed_exports": foreign,
                    "seed_export_deferred": ("no-passphrase"
                                             if deferred_export else None),
                    "replication_without_destination": replicates,
@@ -1492,6 +1530,8 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                    if item[1] in (getattr(args, "pull", None) or set())]
         done = {"did": "executed", "proposal_id": chosen.proposal_id,
                 "executed": bool(sealed), "offered": offered,
+                "read_from": getattr(args, "read_from", ""),
+                "mailbox_tried": list(getattr(args, "mailbox_chain", []) or []),
                 "seed_export_deferred": ("no-passphrase"
                                          if deferred_export else None)}
         print(json.dumps(done, sort_keys=True), flush=True)
@@ -1508,7 +1548,13 @@ def build_parser() -> argparse.ArgumentParser:
     """
     parser = argparse.ArgumentParser(
         description="judge proposals; does not execute them")
-    parser.add_argument("--mailbox", default="http://127.0.0.1:8776")
+    parser.add_argument("--mailbox", default=None,
+                        help="the mailbox to read first; default: this host's "
+                             "hosts.json mailboxes[0], then the localhost "
+                             "conventions (127.0.0.1:8776, 127.0.0.1:8778)")
+    parser.add_argument("--mailbox-fallback", action="append", default=[],
+                        help="read this mailbox if the ones before it do not "
+                             "answer (repeatable)")
     parser.add_argument("--hosts", default="~/.pandosi/hosts.json",
                         help="this host's table: proposer_id, mailboxes, roots")
     parser.add_argument("--state-dir", default=DEFAULT_STATE_DIR,
@@ -1554,16 +1600,35 @@ def main() -> int:
         print("pass exactly one of --dry-run or --once", flush=True)
         return 2
     token = Path(args.token_file).expanduser().read_text(encoding="utf-8").strip()
-    from .proposal_mail import _request
-    listing = _request(args.mailbox, "/tasks?status=all", token, "GET")
+    from .proposal_mail import listing_any
     table = _hosts_table(args.hosts)
+    mailboxes = executor_mailboxes(args.mailbox, table, args.mailbox_fallback)
+    listing, source, read_error = listing_any(mailboxes, token, status="all")
     ledger = Path(args.ledger).expanduser()
+    if source is None:
+        # Nobody answered. That is a property of the network, not of any
+        # proposal, so it is recorded where a person looks -- the status file
+        # -- and not as a ledger row keyed by a proposal id that does not
+        # exist. A dead address used to reach this same point through the
+        # empty-listing path and print an idle round, which is how an
+        # unreachable executor looked healthy for a day.
+        payload = {"did": "unreachable", "error": read_error,
+                   "mailbox_tried": list(mailboxes)}
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True), flush=True)
+        write_status(ledger.with_name("execute-status.json"), payload)
+        return 1
+    args.read_from = source
+    args.mailbox_chain = list(mailboxes)
     rows = rows_for_execution(
         listing.get("tasks") or [], args.limit,
         authors=local_authors(table, args.author),
         settled=done_ids(ledger) | left_ids(ledger))
-    proposals = fetch_proposals(args.mailbox, token, status="all", rows=rows)
-    reactions = _load_reactions(args.mailbox, token, args.limit, rows=rows)
+    # One shelf per round: the rows, the bodies those rows point at, and the
+    # reactions all come from the mailbox the listing came from. Mixing them
+    # is not a union -- it is a round that reads one host's row ids and
+    # another host's bodies.
+    proposals = fetch_proposals(source, token, status="all", rows=rows)
+    reactions = _load_reactions(source, token, args.limit, rows=rows)
     if args.once:
         if table:
             args.hosts = known_hosts(table)
