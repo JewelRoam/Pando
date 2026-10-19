@@ -6174,6 +6174,619 @@ class TestExecution(unittest.TestCase):
             self.assertIsNone(checked, raw)
             self.assertTrue(why, raw)
 
+    def _staged_operator_spec(self, tmp, *, name="novelty-sampler",
+                              rationale="propose against the least-seen action",
+                              pid="p-meta-op"):
+        """A real staged spec, written by the real stager.
+
+        Reviewed by hand in production, built by the same code path here so a
+        test cannot pass against an artifact the stager would never emit.
+        """
+        from pando.identity import Identity
+        from pando.operators import stage as stage_operator
+
+        proposal = self._proposal(action="meta.propose", pid=pid)
+        # ``name=None`` is the draft the group actually kept producing: no
+        # params block at all, so the spec names no operator. ``name=""`` is
+        # the different, earlier shape ``validate`` refuses outright.
+        proposal.params = (None if name is None
+                           else {"operator": name, "rationale": rationale})
+        result = stage_operator(proposal, identity=Identity.generate(),
+                                outbox=Path(tmp) / "operator-outbox")
+        return Path(result["directory"])
+
+    def test_installing_a_draft_needs_a_binding_the_draft_cannot_supply(self):
+        """The gate half of Tier 2: a reviewed draft becomes a runnable verb.
+
+        Clearing the hold is the point of ``meta.propose``; a hold with no way
+        to clear it is a wall. The mechanism is written so the *proposal*
+        cannot reach it: the draft names the verb, and every executable fact -
+        the actuator reused, its fixed params, the reviewer - comes from the
+        caller. Nothing here writes a source file or imports a module.
+        """
+        import tempfile
+        from pando.genesis import ACTION_SPACE
+        from pando.identity import Identity
+        from pando.invite import validate as invite_validate
+        from pando.operators import install, installed, merge_action_space
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._staged_operator_spec(tmp)
+            installs = Path(tmp) / "operators"
+            ledger = Path(tmp) / "install-ledger.jsonl"
+            # The binding may only reuse an actuator the executor actually
+            # stages -- the five outbox actuators. ``policy.set`` writes the
+            # live rule store, so a verb bound to it would move the gate's own
+            # rules; it is refused at install time, not discovered later.
+            record = install(root, identity=Identity.generate(),
+                             action_space=ACTION_SPACE,
+                             implementation={
+                                 "binds_to": "recruit.invite",
+                                 "params": {"candidate": "node-a",
+                                            "expires_in_hours": 72}},
+                             reviewer="mac-codex",
+                             validate_params=invite_validate,
+                             installed_dir=installs, ledger=ledger, now=1000)
+
+            self.assertEqual(record["operator"], "novelty-sampler")
+            self.assertEqual(record["binds_to"], "recruit.invite")
+            self.assertEqual(record["params"], {"candidate": "node-a",
+                                                "expires_in_hours": 72})
+            self.assertEqual(record["reviewer"], "mac-codex")
+            self.assertEqual(record["installed_at"], 1000)
+            self.assertEqual(record["status"], "installed")
+            self.assertEqual(record["author"], "mac-proposer")
+            self.assertIn("attestation", record)
+
+            written = installs / "novelty-sampler.json"
+            self.assertEqual(json.loads(written.read_text(encoding="utf-8")),
+                             record)
+            self.assertEqual(written.stat().st_mode & 0o777, 0o600)
+            # The one thing a new verb must never be: a source file.
+            self.assertEqual(list(installs.glob("*.py")), [])
+
+            read_back = installed(installs)
+            self.assertEqual(set(read_back), {"novelty-sampler"})
+            merged = merge_action_space(ACTION_SPACE, read_back)
+            self.assertIn("novelty-sampler", merged)
+            self.assertEqual(len(merged), len(ACTION_SPACE) + 1)
+            # Every built-in keeps the description it had; nothing is shadowed.
+            for name, description in ACTION_SPACE.items():
+                self.assertEqual(merged[name], description)
+
+            rows = [json.loads(line) for line in
+                    ledger.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["operator"], "novelty-sampler")
+            self.assertEqual(rows[0]["installed_at"], 1000)
+            self.assertEqual(rows[0]["status"], "installed")
+
+    def test_install_refuses_a_draft_that_was_tampered_with(self):
+        """A hand-edited spec cannot borrow the signature of the reviewed one.
+
+        The hash is recomputed from ``spec.json`` and the Ed25519 proof checked
+        against the payload that hash covers, so changing the verb after review
+        invalidates the draft rather than silently installing a different one.
+        """
+        import tempfile
+        from pando.genesis import ACTION_SPACE
+        from pando.identity import Identity
+        from pando.operators import OperatorError, install
+        from pando.operators import verify as verify_spec
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._staged_operator_spec(tmp)
+            self.assertTrue(verify_spec(root))
+            spec = json.loads((root / "spec.json").read_text(encoding="utf-8"))
+            spec["requested"]["operator"] = "something-else-entirely"
+            (root / "spec.json").write_text(json.dumps(spec),
+                                            encoding="utf-8")
+            self.assertFalse(verify_spec(root))
+            with self.assertRaises(OperatorError):
+                install(root, identity=Identity.generate(),
+                        action_space=ACTION_SPACE,
+                        implementation={"binds_to": "recruit.invite"},
+                        installed_dir=Path(tmp) / "operators",
+                        ledger=Path(tmp) / "l.jsonl")
+
+    def test_a_draft_cannot_declare_itself_approved_or_installed(self):
+        """The two flags are what the reviewer is for; a draft sets neither."""
+        import tempfile
+        from pando.genesis import ACTION_SPACE
+        from pando.identity import Identity
+        from pando.operators import OperatorError, install
+        from pando.operators import verify as verify_spec
+
+        for field, value in (("approved", True), ("installed", True)):
+            with tempfile.TemporaryDirectory() as tmp:
+                root = self._staged_operator_spec(tmp)
+                spec = json.loads((root / "spec.json").read_text(
+                    encoding="utf-8"))
+                spec[field] = value
+                (root / "spec.json").write_text(json.dumps(spec),
+                                                encoding="utf-8")
+                self.assertFalse(verify_spec(root), field)
+                with self.assertRaises(OperatorError, msg=field):
+                    install(root, identity=Identity.generate(),
+                            action_space=ACTION_SPACE,
+                            implementation={"binds_to": "recruit.invite"},
+                            installed_dir=Path(tmp) / "operators",
+                            ledger=Path(tmp) / "l.jsonl")
+
+    def test_install_refuses_an_implementation_that_carries_code(self):
+        """An implementation is a binding to an actuator, never code.
+
+        Each key that could carry an executable surface is refused *by name*
+        rather than ignored, so a reviewer who pastes a module path sees which
+        key was seen instead of a generic "unknown key".
+        """
+        import tempfile
+        from pando.genesis import ACTION_SPACE
+        from pando.identity import Identity
+        from pando.operators import OperatorError, install
+
+        refusals = (
+            {"code": "import os"},
+            {"source": "import os"},
+            {"module": "os"},
+            {"path": "/tmp/x.py"},
+            {"command": "id"},
+            {"url": "http://example.invalid/x"},
+            {"binds_to": "policy.set", "label": "x"},
+            {},
+            {"binds_to": ""},
+            {"binds_to": "not-an-action"},
+            {"binds_to": "policy.set", "params": "min_adopt=3"},
+            "policy.set",
+            None,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._staged_operator_spec(tmp)
+            identity = Identity.generate()
+            for index, implementation in enumerate(refusals):
+                installs = Path(tmp) / f"operators-{index}"
+                with self.assertRaises(OperatorError, msg=implementation):
+                    install(root, identity=identity, action_space=ACTION_SPACE,
+                            implementation=implementation,
+                            installed_dir=installs,
+                            ledger=Path(tmp) / "l.jsonl")
+                self.assertFalse(installs.exists(), implementation)
+
+    def test_install_refuses_a_name_the_gate_already_runs(self):
+        """A new verb has to be new. Redefining a built-in needs a vote."""
+        import tempfile
+        from pando.genesis import ACTION_SPACE
+        from pando.identity import Identity
+        from pando.operators import OperatorError, install
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._staged_operator_spec(tmp, name="policy.set")
+            with self.assertRaises(OperatorError) as caught:
+                install(root, identity=Identity.generate(),
+                        action_space=ACTION_SPACE,
+                        implementation={"binds_to": "recruit.invite"},
+                        installed_dir=Path(tmp) / "operators",
+                        ledger=Path(tmp) / "l.jsonl")
+            self.assertIn("policy.set", str(caught.exception))
+
+    def test_install_refuses_the_nameless_draft_the_group_kept_producing(self):
+        """33 of 40 rounds asked for an operator without naming one.
+
+        The stager still writes that draft - it is evidence, not a crash - and
+        the installer refuses it with a reason instead of inventing a verb.
+        """
+        import tempfile
+        from pando.genesis import ACTION_SPACE
+        from pando.identity import Identity
+        from pando.operators import OperatorError, install, verify as verify_spec
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._staged_operator_spec(tmp, name=None)
+            self.assertTrue(verify_spec(root))
+            spec = json.loads((root / "spec.json").read_text(encoding="utf-8"))
+            # The stager writes the empty draft rather than crashing: it is
+            # evidence of the 33 rounds, and the refusal list is its content.
+            self.assertEqual(spec["requested"], {"operator": ""})
+            self.assertTrue([r for r in spec["refusals"]
+                             if "no operator named" in r])
+            with self.assertRaises(OperatorError) as caught:
+                install(root, identity=Identity.generate(),
+                        action_space=ACTION_SPACE,
+                        implementation={"binds_to": "recruit.invite"},
+                        installed_dir=Path(tmp) / "operators",
+                        ledger=Path(tmp) / "l.jsonl")
+            self.assertIn("no operator", str(caught.exception))
+
+    def test_install_refuses_a_second_install_of_the_same_verb(self):
+        import tempfile
+        from pando.genesis import ACTION_SPACE
+        from pando.identity import Identity
+        from pando.operators import OperatorError, install
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._staged_operator_spec(tmp)
+            installs = Path(tmp) / "operators"
+            ledger = Path(tmp) / "l.jsonl"
+            identity = Identity.generate()
+            install(root, identity=identity, action_space=ACTION_SPACE,
+                    implementation={"binds_to": "recruit.invite"},
+                    installed_dir=installs, ledger=ledger)
+            with self.assertRaises(OperatorError) as caught:
+                install(root, identity=identity, action_space=ACTION_SPACE,
+                        implementation={"binds_to": "culture.refine"},
+                        installed_dir=installs, ledger=ledger)
+            self.assertIn("already installed", str(caught.exception))
+            # The first binding survives the refused second one.
+            record = json.loads((installs / "novelty-sampler.json").read_text(
+                encoding="utf-8"))
+            self.assertEqual(record["binds_to"], "recruit.invite")
+
+    def test_uninstalling_retires_the_verb_and_keeps_the_trace(self):
+        """Rollback is one of the spec's own REQUIRES, so it is tested.
+
+        The file moves to ``retired/`` and the ledger keeps the reason: an
+        operator that can only be removed by editing the running gate is not
+        reversible, and a removal with no record is not reviewable.
+        """
+        import tempfile
+        from pando.genesis import ACTION_SPACE
+        from pando.identity import Identity
+        from pando.operators import (OperatorError, install, installed,
+                                     uninstall)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._staged_operator_spec(tmp)
+            installs = Path(tmp) / "operators"
+            ledger = Path(tmp) / "install-ledger.jsonl"
+            install(root, identity=Identity.generate(),
+                    action_space=ACTION_SPACE,
+                    implementation={"binds_to": "recruit.invite"},
+                    installed_dir=installs, ledger=ledger)
+            self.assertEqual(set(installed(installs)), {"novelty-sampler"})
+
+            result = uninstall("novelty-sampler",
+                               reason="the group stopped asking for it",
+                               installed_dir=installs, ledger=ledger, now=2000)
+            self.assertEqual(result["operator"], "novelty-sampler")
+            self.assertEqual(result["status"], "retired")
+            self.assertEqual(result["reason"], "the group stopped asking for it")
+            self.assertEqual(result["retired_at"], 2000)
+            # The gate stops loading it, and the record itself is not erased.
+            self.assertEqual(installed(installs), {})
+            retired = list((installs / "retired").glob("novelty-sampler.*.json"))
+            self.assertEqual(len(retired), 1)
+            self.assertTrue(retired[0].is_file())
+            self.assertEqual(json.loads(retired[0].read_text(encoding="utf-8"))
+                             ["operator"], "novelty-sampler")
+
+            rows = [json.loads(line) for line in
+                    ledger.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual([row["status"] for row in rows],
+                             ["installed", "retired"])
+            self.assertEqual(rows[-1]["reason"],
+                             "the group stopped asking for it")
+
+            with self.assertRaises(OperatorError):
+                uninstall("novelty-sampler", installed_dir=installs,
+                          ledger=ledger)
+
+    def test_the_installed_set_is_fail_closed(self):
+        """One unreadable record means the gate does not know its own verbs.
+
+        Skipping the file instead would run a smaller operator set than the
+        ledgers describe, which is the failure this module exists to make
+        impossible. A missing directory is not a failure: that is a host which
+        has installed nothing.
+        """
+        import tempfile
+        from pando.operators import OperatorError, installed
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "operators"
+            self.assertEqual(installed(root), {})
+
+            root.mkdir(parents=True)
+            (root / "a.json").write_text("{not json", encoding="utf-8")
+            with self.assertRaises(OperatorError):
+                installed(root)
+
+            (root / "a.json").write_text(
+                json.dumps({"binds_to": "policy.set"}), encoding="utf-8")
+            with self.assertRaises(OperatorError):
+                installed(root)
+
+            (root / "a.json").write_text(
+                json.dumps({"operator": "twice", "binds_to": "policy.set"}),
+                encoding="utf-8")
+            (root / "b.json").write_text(
+                json.dumps({"operator": "twice", "binds_to": "culture.refine"}),
+                encoding="utf-8")
+            with self.assertRaises(OperatorError):
+                installed(root)
+
+    def test_a_merged_action_space_refuses_to_shadow_a_builtin(self):
+        """``dict.update`` is not a vote; a collision has to be a rename."""
+        from pando.genesis import ACTION_SPACE
+        from pando.operators import OperatorError, merge_action_space
+
+        with self.assertRaises(OperatorError) as caught:
+            merge_action_space(ACTION_SPACE,
+                               {"policy.set": {"binds_to": "policy.set"}})
+        self.assertIn("policy.set", str(caught.exception))
+
+    def test_a_proposal_has_no_path_to_an_implementation(self):
+        """The draft carries a label, prose and a refusal list - nothing else.
+
+        ``validate`` refuses the implementation keys by name, ``stage`` builds
+        ``requested`` from the label alone, and the ledger the reviewer reads
+        is the spec. There is no field a proposal could use to reach
+        ``install`` even if one were added to a later round.
+        """
+        import tempfile
+        from pando.operators import validate as validate_operator
+
+        for raw in ({"operator": "x", "binds_to": "policy.set"},
+                    {"operator": "x", "params": {"binds_to": "policy.set"}},
+                    {"operator": "x", "implementation": {"binds_to": "x"}},
+                    {"operator": "x", "reviewer": "mac-codex"}):
+            checked, why = validate_operator(raw)
+            self.assertIsNone(checked, raw)
+            self.assertTrue(why, raw)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._staged_operator_spec(tmp)
+            spec = json.loads((root / "spec.json").read_text(encoding="utf-8"))
+            manifest = json.loads((root / "manifest.json").read_text(
+                encoding="utf-8"))
+            self.assertEqual(spec["requested"], {"operator": "novelty-sampler"})
+            # No key on either artifact names an executable fact. The prose is
+            # *supposed* to say "implementation" - that is the hold, written
+            # down - so this checks keys, not substrings.
+            for artifact in (spec, manifest, spec["requested"]):
+                for key in ("binds_to", "implementation", "reviewer",
+                            "params", "code", "module", "path"):
+                    self.assertNotIn(key, artifact)
+            self.assertEqual(set(spec["requested"]), {"operator"})
+            # And the refusals still name what a human owes it, in prose.
+            self.assertTrue([r for r in spec["refusals"]
+                             if "no implementation" in r])
+
+    def test_the_executors_stagers_cover_exactly_the_bindable_verbs(self):
+        """Installable and unrunnable at once is the empty shell again.
+
+        ``operators.BINDABLE`` decides what a reviewer may bind a new verb to;
+        ``execute.INSTALLED_STAGERS`` decides what the executor knows how to
+        stage. If the two drift, the gate accepts a verb and then refuses it
+        every round -- a failure that only ever shows up in the ledger, which
+        is exactly what ``meta.propose`` spent 33 rounds doing.
+        """
+        from pando.execute import INSTALLED_STAGERS
+        from pando.operators import BINDABLE
+        from tools import operator_install
+
+        self.assertEqual(set(INSTALLED_STAGERS), set(BINDABLE))
+        # The installer's validators are the other half of the same claim: a
+        # bindable verb must be one whose params can be checked at install
+        # time, or a reviewer can only find out it was wrong in the ledger.
+        self.assertEqual(set(operator_install.VALIDATORS), set(BINDABLE))
+        for action, entry in INSTALLED_STAGERS.items():
+            stager, outbox, arg_name = entry
+            self.assertTrue(callable(stager), action)
+            self.assertTrue(outbox, action)
+            self.assertTrue(arg_name, action)
+
+    def test_the_installer_tool_installs_and_retires_one_verb(self):
+        """The command a person runs to clear the hold, exercised as a CLI.
+
+        ``meta.propose`` stages a draft and stops there; this is the tool that
+        turns a reviewed one into a verb the gate loads. A binding outside the
+        staged set is refused and leaves nothing behind, and a retirement moves
+        the record rather than deleting the trace.
+        """
+        import contextlib
+        import io
+        import tempfile
+        from pando.identity import Identity
+        from tools import operator_install
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._staged_operator_spec(tmp)
+            installs = Path(tmp) / "operators"
+            ledger = Path(tmp) / "install-ledger.jsonl"
+            key = Path(tmp) / "identity.json"
+            key.write_text(json.dumps(Identity.generate().to_json()),
+                           encoding="utf-8")
+
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = operator_install.main([
+                    "install", "--spec", str(root),
+                    "--binds-to", "recruit.invite",
+                    "--param", "candidate=node-a",
+                    "--param", "expires_in_hours=72",
+                    "--reviewer", "mac-codex",
+                    "--identity", str(key),
+                    "--installed-dir", str(installs),
+                    "--ledger", str(ledger)])
+            self.assertEqual(code, 0, out.getvalue())
+            record = json.loads(out.getvalue())
+            self.assertEqual(record["operator"], "novelty-sampler")
+            self.assertEqual(record["binds_to"], "recruit.invite")
+            self.assertEqual(record["reviewer"], "mac-codex")
+            self.assertEqual(record["params"], {"candidate": "node-a",
+                                                "expires_in_hours": 72})
+
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(operator_install.main(
+                    ["list", "--installed-dir", str(installs)]), 0)
+            self.assertIn("novelty-sampler", out.getvalue())
+            self.assertIn("binds_to=recruit.invite", out.getvalue())
+
+            # A binding to something the executor cannot stage is refused, and
+            # the refusal writes no record anywhere.
+            nowhere = Path(tmp) / "never"
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                code = operator_install.main([
+                    "install", "--spec", str(root),
+                    "--binds-to", "policy.set",
+                    "--reviewer", "mac-codex",
+                    "--identity", str(key),
+                    "--installed-dir", str(nowhere),
+                    "--ledger", str(ledger)])
+            self.assertEqual(code, 2)
+            self.assertIn("policy.set", err.getvalue())
+            self.assertFalse(nowhere.exists())
+
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(operator_install.main([
+                    "retire", "novelty-sampler", "--reason", "superseded",
+                    "--installed-dir", str(installs),
+                    "--ledger", str(ledger)]), 0)
+            self.assertEqual(json.loads(out.getvalue())["status"], "retired")
+
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(operator_install.main(
+                    ["list", "--installed-dir", str(installs)]), 0)
+            self.assertIn("no installed operators", out.getvalue())
+            rows = [json.loads(line) for line in
+                    ledger.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual([row["status"] for row in rows],
+                             ["installed", "retired"])
+
+    def test_install_refuses_params_the_bound_actuator_would_not_accept(self):
+        """The actuator has the last word on the params a binding fixes.
+
+        Without the check a reviewer could install a verb whose every round
+        fails inside the stager: installable and unrunnable at once, with the
+        refusal visible only as a ledger failure nobody asked for.
+        """
+        import tempfile
+        from pando.genesis import ACTION_SPACE
+        from pando.identity import Identity
+        from pando.invite import validate as invite_validate
+        from pando.operators import OperatorError, install
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._staged_operator_spec(tmp)
+            installs = Path(tmp) / "operators"
+            with self.assertRaises(OperatorError) as caught:
+                install(root, identity=Identity.generate(),
+                        action_space=ACTION_SPACE,
+                        implementation={"binds_to": "recruit.invite",
+                                        "params": {"token": "not-a-param"}},
+                        validate_params=invite_validate,
+                        installed_dir=installs,
+                        ledger=Path(tmp) / "l.jsonl")
+            self.assertIn("recruit.invite", str(caught.exception))
+            self.assertFalse(installs.exists())
+
+    def test_judge_runs_an_installed_verb_through_the_record(self):
+        """The record decides what runs; the proposal only names the verb.
+
+        A verb nobody wrote code for reaches an actuator only because a
+        reviewer fixed the binding first, so the params the actuator sees are
+        the record's. A proposal carrying its own params cannot redirect the
+        run -- and without the record it is not in the action space at all.
+        """
+        from pando.execute import judge
+
+        record = {"operator": "novelty-sampler",
+                  "binds_to": "recruit.invite",
+                  "params": {"candidate": "node-a", "expires_in_hours": 72}}
+        seen = []
+
+        def actuator(spec):
+            seen.append((spec.action, dict(spec.params)))
+            return True
+
+        proposal = self._proposal(action="novelty-sampler", pid="p-installed")
+        proposal.params = {"candidate": "proposer-choice",
+                           "expires_in_hours": 1}
+        reactions = [self._vote("mac-text", "赞同", "p-installed"),
+                     self._vote("mac-laya-int8", "赞同", "p-installed")]
+
+        result = judge(proposal, reactions, min_adopt=2,
+                       actuators={"recruit.invite": actuator},
+                       installed_operators={"novelty-sampler": record})
+        self.assertTrue(result["adopted"])
+        self.assertTrue(result["executed"])
+        self.assertTrue(result["success"])
+        self.assertEqual(result["binds_to"], "recruit.invite")
+        self.assertEqual(seen, [("recruit.invite",
+                                 {"candidate": "node-a",
+                                  "expires_in_hours": 72})])
+
+        # No record, no verb: the same proposal is held as out-of-space rather
+        # than guessed at, which is the fail-closed direction.
+        held = judge(proposal, reactions, min_adopt=2,
+                     actuators={"recruit.invite": actuator})
+        self.assertFalse(held["adopted"])
+        self.assertIn("action space", held["detail"])
+        self.assertEqual(len(seen), 1)
+
+        # A record with no binding stops the run with a reason, not a traceback.
+        broken = judge(proposal, reactions, min_adopt=2,
+                       actuators={"recruit.invite": actuator},
+                       installed_operators={"novelty-sampler":
+                                            {"operator": "novelty-sampler"}})
+        self.assertFalse(broken["executed"])
+        self.assertIn("binds to nothing", broken["detail"])
+        self.assertEqual(len(seen), 1)
+
+    def test_next_installed_takes_one_per_round_and_skips_other_hosts(self):
+        """Every actuator here stages one artifact per round, this host's own.
+
+        A round that staged every installed verb at once would put several
+        unrelated artifacts in flight on the strength of one vote each, and the
+        ledger would stop describing what happened in order.
+        """
+        from pando.execute import next_installed
+
+        record = {"operator": "novelty-sampler",
+                  "binds_to": "recruit.invite", "params": {}}
+        installed = {"novelty-sampler": record}
+
+        mine = self._proposal(action="novelty-sampler", pid="p-mine")
+        mine.pubkey = "key-mine"
+        older = self._proposal(action="novelty-sampler", pid="p-old")
+        older.pubkey = "key-mine"
+        foreign = self._proposal(action="novelty-sampler", pid="p-other",
+                                 author="win-proposer")
+        foreign.pubkey = "key-other"
+        quiet = self._proposal(action="novelty-sampler", pid="p-quiet")
+        quiet.pubkey = "key-mine"
+
+        votes = []
+        for pid in ("p-old", "p-mine", "p-other"):
+            votes.append(self._vote("mac-text", "赞同", pid))
+            votes.append(self._vote("mac-laya-int8", "赞同", pid))
+
+        # Oldest first among this host's adopted work; the foreign author's
+        # proposal is not this host's to stage.
+        self.assertEqual(
+            next_installed([foreign, older, mine, quiet], votes, set(),
+                           "key-mine", installed).proposal_id,
+            "p-old")
+        # Settled work is not staged twice, so the next round moves on.
+        self.assertEqual(
+            next_installed([foreign, older, mine, quiet], votes, {"p-old"},
+                           "key-mine", installed).proposal_id,
+            "p-mine")
+        # No votes means not adopted, whatever the verb is.
+        self.assertIsNone(next_installed([quiet], votes, set(), "key-mine",
+                                         installed))
+        self.assertIsNone(next_installed([older], [], set(), "key-mine",
+                                         installed))
+        # A verb this host has not installed is not this host's work.
+        self.assertIsNone(next_installed([older], votes, set(), "key-mine", {}))
+        # And a built-in is never picked up here: it has its own actuator.
+        self.assertIsNone(next_installed([mine], votes, set(), "key-mine",
+                                         {"recruit.invite": record}))
+
     def test_spawn_validate_is_pure_and_refuses_unknown_params(self):
         from pando.spawn import validate
 
@@ -8154,6 +8767,13 @@ class TestExecuteStateResolution(unittest.TestCase):
         home = Path("~/.pandosi").expanduser()
         self.assertEqual(args.ledger, str(home / "execute-ledger.jsonl"))
         self.assertEqual(args.out_root, str(home / "executions"))
+        # The gate's own copy of the installed set has to land on the same
+        # directory ``pando.operators`` reads by default, or a host that
+        # installed a verb and a host that runs it would disagree about where
+        # the verb lives.
+        from pando.operators import DEFAULT_INSTALLED
+        self.assertEqual(Path(args.operators_dir),
+                         Path(DEFAULT_INSTALLED).expanduser())
 
     def test_an_explicit_path_beats_the_state_dir(self):
         args = self._resolve(["--state-dir", "/tmp/pi5-state",

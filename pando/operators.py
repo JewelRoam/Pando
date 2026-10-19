@@ -34,12 +34,49 @@ import hashlib
 import json
 import os
 import time
+from dataclasses import replace
 from pathlib import Path
 
 from .identity import Identity, canonical
 from .identity import verify as verify_signature
 
 DEFAULT_OUTBOX = "~/.pandosi/operator-outbox"
+#: Where a reviewed operator lands once the gate has agreed to run it. One file
+#: per verb, mode 0600, *beside* the spec it came from and never inside it: the
+#: outbox is what was asked for, this directory is what the gate will load, and
+#: a draft that is also an install would be executable without a review.
+DEFAULT_INSTALLED = "~/.pandosi/operators"
+
+#: Append-only record of installs and retirements. The rollback requirement in
+#: ``REQUIRES`` is only met if a retirement leaves a trace, so the file moves to
+#: ``retired/`` and this ledger keeps the reason.
+DEFAULT_INSTALL_LEDGER = "~/.pandosi/operator-install-ledger.jsonl"
+
+#: The keys a reviewer may supply as the operator's *implementation*. Both
+#: describe how an existing actuator is reused; neither carries code, and a key
+#: that would is refused by name rather than ignored.
+IMPLEMENTATION_KEYS = {"binds_to", "params"}
+
+#: The actuators an installed verb may bind to: exactly the ones
+#: ``pando/execute.py`` stages into an outbox by name. The three that are absent
+#: are absent for reasons rather than by omission -- ``seed.export`` and
+#: ``seed.replicate`` carry a key and a destination, and ``policy.set`` writes
+#: the live rule store instead of an inbox. A binding outside this set would be
+#: a verb the gate accepts and never carries out, which is the empty shell this
+#: module exists to stop, so it is refused at install time rather than
+#: discovered as a silent no-op later.
+#:
+#: A binding to *any* of these still cannot widen the gate: the reviewer fixed
+#: the params, so the most a proposal can do is ask for a step someone already
+#: reviewed. ``tests/test_smoke.py`` holds this set equal to the executor's
+#: table so the two cannot drift apart.
+BINDABLE = frozenset({
+    "culture.refine",
+    "recruit.invite",
+    "reproduce.spawn",
+    "resource.rebalance",
+    "meta.propose",
+})
 ALLOWED_PARAMS = {"operator", "rationale"}
 MAX_LABEL = 128
 MAX_RATIONALE = 500
@@ -52,10 +89,14 @@ CODE_KEYS = ("code", "source", "module", "import", "path", "command", "cwd",
 #: What a human (or a later supervisor) must supply before this spec can be
 #: installed. Written into every artifact so the hold is legible without code.
 REQUIRES = (
-    "an operator implementation, supplied by the gate - a human writes the "
-    "class; the proposal never carries code",
-    "a gate version that can load operators at all: today pando/genesis.py "
-    "hard-codes its operator set, so Tier 2 needs a loader first",
+    "an operator implementation, supplied by the gate - a reviewer writes the "
+    "*binding*, not the proposal: which actuator the new verb reuses, with "
+    "which fixed params, under whose name. Nothing a proposal carries can "
+    "reach that: a draft supplies a label and prose",
+    "a gate that loads the installed set: ``installed`` reads the records, "
+    "``merge_action_space`` adds them to the built-ins, and ``pando/execute.py`` "
+    "resolves a verb to the actuator it binds to. What is still hard-coded is "
+    "the built-in set in ``pando/genesis.py``",
     "human review of the operator's action space before it may emit anything "
     "- an operator that can propose outside ACTION_SPACE widens the gate "
     "without a vote",
@@ -153,8 +194,8 @@ def stage(proposal, *, identity: Identity,
     if not operator:
         refusal.append("no operator named: the proposal asks for a new "
                        "operator without saying which one")
-    refusal.append("no implementation: the spec names an operator, and a "
-                   "human-supplied class is what would make it real")
+    refusal.append("no implementation: the spec names an operator, and the "
+                   "gate has to bind it to an actuator before it can run")
 
     issued_at = int(time.time() if now is None else now)
     spec = {
@@ -242,3 +283,243 @@ def verify(directory: str | Path) -> bool:
         return False
     return verify_signature(str(proof.get("pubkey") or ""), spec,
                             str(proof.get("sig") or ""))
+# ---------------------------------------------------------------------------
+# The gate's half: turning a reviewed draft into a verb the gate will run.
+#
+# Everything above stops at a signed draft and says so. That hold is the point
+# -- a proposal may not widen the gate -- but a hold with no way to clear it is
+# not caution, it is a wall, and the group spent 33 of 40 rounds asking a wall.
+# The functions below are the clearing mechanism, and they are written to make
+# the *proposal* unable to use them: a spec supplies a name and prose, and
+# every executable fact (which actuator the verb reuses, with what fixed
+# params, under whose review) arrives from the caller.
+# ---------------------------------------------------------------------------
+
+
+def _emit_ledger(ledger: str | Path, entry: dict) -> None:
+    path = Path(ledger).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def installed(directory: str | Path = DEFAULT_INSTALLED) -> dict[str, dict]:
+    """Every operator this gate has agreed to run, keyed by name.
+
+    Fail-closed on a broken file rather than skipping it: one unreadable
+    record means the operator set on this host is not what the ledgers say it
+    is, and a gate that quietly runs the smaller set is the failure this whole
+    module exists to make impossible. A missing directory is not a problem --
+    it is the ordinary state of a host that has installed nothing.
+    """
+    root = Path(directory).expanduser()
+    found: dict[str, dict] = {}
+    if not root.is_dir():
+        return found
+    for path in sorted(root.glob("*.json")):
+        record = _read_json(path)
+        name = str(record.get("operator") or "")
+        binds = str(record.get("binds_to") or "")
+        if not name or not binds:
+            raise OperatorError(
+                f"installed operator {path.name} names no operator or binds "
+                "to nothing; the gate will not guess what it meant")
+        if name in found:
+            raise OperatorError(
+                f"installed operator {name} is defined twice; the gate will "
+                "not pick one")
+        found[name] = record
+    return found
+
+
+def binding(record: dict) -> tuple[str, dict]:
+    """``(actuator, fixed params)`` for one installed record, fail-closed.
+
+    Read by the executor on every round, so a record that lost its binding or
+    grew params that are not an object stops the round with a reason instead of
+    running something the reviewer did not write.
+    """
+    actuator = str(record.get("binds_to") or "")
+    if not actuator:
+        raise OperatorError(
+            f"installed operator {record.get('operator') or '?'} binds to "
+            "nothing; the gate will not guess what it meant")
+    params = record.get("params")
+    params = {} if params is None else params
+    if not isinstance(params, dict):
+        raise OperatorError(
+            f"installed operator {record.get('operator') or '?'} has params "
+            "that are not an object")
+    return actuator, dict(params)
+
+
+def rebound(proposal, record: dict):
+    """The same proposal aimed at the actuator the record binds to.
+
+    An installed verb is a fixed parameterisation of an actuator the gate
+    already runs, so the executor rewrites the proposal rather than growing a
+    second dispatch path. The proposal id, author, goal and signature are
+    untouched -- only ``action`` and ``params`` move, and they move to values a
+    reviewer chose before the proposal was written. What the group voted on is
+    still what the ledger names.
+    """
+    actuator, params = binding(record)
+    return replace(proposal, action=actuator, params=params)
+
+
+def merge_action_space(core: dict, extra: dict) -> dict[str, str]:
+    """The action space the gate actually runs: built-ins plus installed verbs.
+
+    A name that collides with a built-in is refused rather than shadowed.
+    Redefining a verb the gate already has is precisely the move that would
+    need a vote, and ``dict.update`` is not one.
+    """
+    merged = dict(core)
+    for name, record in extra.items():
+        if name in merged:
+            raise OperatorError(
+                f"installed operator {name} collides with an action this gate "
+                "already runs; it must be renamed, not shadowed")
+        merged[name] = str(record.get("rationale")
+                           or f"binds to {record.get('binds_to')}")
+    return merged
+
+
+def install(spec_dir: str | Path, *, identity: Identity, action_space: dict,
+            implementation: dict, reviewer: str = "",
+            validate_params=None,
+            installed_dir: str | Path = DEFAULT_INSTALLED,
+            ledger: str | Path = DEFAULT_INSTALL_LEDGER,
+            now: float | None = None) -> dict:
+    """Turn one reviewed draft into an operator this gate will load.
+
+    Three things must hold, and a proposal can supply none of them: the draft
+    must still verify (same spec, same signature, still inert), a reviewer must
+    supply the *implementation*, and the name must not already mean something.
+    The draft names the verb; it never decides what the verb does.
+
+    The implementation is deliberately not code. It is a binding to an actuator
+    the gate already runs, plus the params that actuator will see -- so a new
+    verb can name a rule the group wants without any path by which a proposal
+    reaches an interpreter. A binding to an action this gate cannot run is
+    refused rather than stored: a verb with no actuator is the empty shell that
+    made ``meta.propose`` unreachable for 33 rounds.
+    """
+    spec_path = Path(spec_dir).expanduser()
+    if not verify(spec_path):
+        raise OperatorError(
+            "spec is not installable: it does not verify (tampered with, or it "
+            "already claims to be approved or installed)")
+    spec = _read_json(spec_path / "spec.json")
+    manifest = _read_json(spec_path / "manifest.json")
+    requested = spec.get("requested")
+    name = str((requested or {}).get("operator") or "").strip() \
+        if isinstance(requested, dict) else ""
+    if not name:
+        raise OperatorError("spec names no operator: there is nothing to install")
+    if name in action_space:
+        raise OperatorError(f"{name} is already an action this gate runs; a new "
+                            "operator has to be a new verb")
+    if not isinstance(implementation, dict):
+        raise OperatorError('implementation must be {"binds_to": "<action>", '
+                            '"params": {...}}')
+    code_keys = sorted(set(implementation) & set(CODE_KEYS))
+    if code_keys:
+        raise OperatorError(
+            "implementation carries executable surface: " + ", ".join(code_keys)
+            + " (an implementation is a binding to an actuator the gate already "
+              "runs, never code)")
+    unknown = sorted(set(implementation) - IMPLEMENTATION_KEYS - set(CODE_KEYS))
+    if unknown:
+        raise OperatorError("unknown implementation keys: " + ", ".join(unknown))
+    binds_to = str(implementation.get("binds_to") or "")
+    if not binds_to:
+        raise OperatorError(
+            "implementation names no binds_to: a new verb with no actuator is "
+            "the empty shell this action exists to stop")
+    if binds_to not in action_space:
+        raise OperatorError(f"implementation binds to {binds_to}, which this "
+                            "gate cannot run")
+    if binds_to not in BINDABLE:
+        raise OperatorError(
+            f"implementation binds to {binds_to}, which this executor stages "
+            "into an outbox nowhere: a new verb may only reuse one of "
+            + ", ".join(sorted(BINDABLE))
+            + " (the other three carry a key, a destination or the live rule "
+              "store, and are not outbox stages)")
+    params = implementation.get("params")
+    params = {} if params is None else params
+    if not isinstance(params, dict):
+        raise OperatorError("implementation.params must be an object")
+    if validate_params is not None and params:
+        # The bound actuator has the last word on its own params. Without this
+        # a reviewer could install a verb the actuator refuses on every round
+        # -- the empty shell with extra steps -- and the refusal would only
+        # show up in the ledger as a failure nobody asked for.
+        checked_params, why = validate_params(params)
+        if checked_params is None:
+            raise OperatorError(
+                f"implementation.params are not ones {binds_to} accepts: {why}")
+
+    target = Path(installed_dir).expanduser()
+    dest = target / f"{_safe_component(name)}.json"
+    if dest.exists():
+        raise OperatorError(f"{name} is already installed; retire it first")
+
+    installed_at = int(time.time() if now is None else now)
+    payload = {
+        "author": str(spec.get("author") or ""),
+        "binds_to": binds_to,
+        "installed_at": installed_at,
+        "operator": name,
+        "params": params,
+        "proposal_id": str(spec.get("proposal_id") or ""),
+        "rationale": str(spec.get("rationale") or ""),
+        "reviewer": str(reviewer or ""),
+        "source_spec_hash": str(manifest.get("spec_hash") or ""),
+        "status": "installed",
+    }
+    record = dict(payload)
+    record["attestation"] = {
+        "algorithm": "ed25519",
+        "proof": identity.proof(payload),
+    }
+    _write_atomic(dest, json.dumps(record, ensure_ascii=False, sort_keys=True,
+                                   indent=2) + "\n", 0o600)
+    _emit_ledger(ledger, payload)
+    return record
+
+
+def uninstall(name: str, *, reason: str = "",
+              installed_dir: str | Path = DEFAULT_INSTALLED,
+              ledger: str | Path = DEFAULT_INSTALL_LEDGER,
+              now: float | None = None) -> dict:
+    """Retire an operator without erasing that it ran.
+
+    Rollback is one of the spec's own requirements, not a nicety: the file
+    moves to ``retired/``, the ledger keeps the reason, and the gate stops
+    loading it on the next read. Nothing else on the host is touched, and the
+    spec that asked for it keeps its own hash.
+    """
+    target = Path(installed_dir).expanduser()
+    source = target / f"{_safe_component(name)}.json"
+    if not source.is_file():
+        raise OperatorError(f"{name} is not installed")
+    record = _read_json(source)
+    retired_at = int(time.time() if now is None else now)
+    retired_dir = target / "retired"
+    retired_dir.mkdir(parents=True, exist_ok=True)
+    dest = retired_dir / f"{name}.{retired_at}.json"
+    os.replace(source, dest)
+    entry = {
+        "operator": name,
+        "reason": str(reason or ""),
+        "retired_at": retired_at,
+        "status": "retired",
+    }
+    _emit_ledger(ledger, entry)
+    return {
+        **entry,
+        "restored_from_proposal": str(record.get("proposal_id") or ""),
+        "retired_to": str(dest),
+    }

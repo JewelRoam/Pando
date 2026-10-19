@@ -67,8 +67,12 @@ from .genesis import ACTION_SPACE, Proposal
 from .invite import DEFAULT_OUTBOX as DEFAULT_INVITE_OUTBOX
 from .invite import InviteError
 from .invite import stage as stage_invite
+from .operators import DEFAULT_INSTALLED
 from .operators import DEFAULT_OUTBOX as DEFAULT_OPERATOR_OUTBOX
 from .operators import OperatorError
+from .operators import binding
+from .operators import installed as load_installed
+from .operators import rebound
 from .operators import stage as stage_operator
 from .rebalance import DEFAULT_OUTBOX as DEFAULT_REBALANCE_OUTBOX
 from .rebalance import RebalanceError
@@ -102,6 +106,35 @@ ACTUATORS: tuple[str, ...] = (
     "meta.propose",
 )
 
+
+
+#: How an installed verb is staged: the actuator it binds to, the outbox that
+#: actuator writes, and the flag that relocates it. A new verb has no stager of
+#: its own -- reusing the one it binds to is the whole point -- so this table is
+#: the only place that knows how to carry out a verb nobody wrote code for.
+#: Kept equal to ``pando.operators.BINDABLE`` by a test, so a verb can never be
+#: installable and unstaged at once.
+INSTALLED_STAGERS: dict[str, tuple] = {
+    "culture.refine": (stage_culture, DEFAULT_CULTURE_OUTBOX, "culture_outbox"),
+    "recruit.invite": (stage_invite, DEFAULT_INVITE_OUTBOX, "invite_outbox"),
+    "reproduce.spawn": (stage_spawn, DEFAULT_SPAWN_OUTBOX, "spawn_outbox"),
+    "resource.rebalance": (stage_rebalance, DEFAULT_REBALANCE_OUTBOX,
+                           "rebalance_outbox"),
+    "meta.propose": (stage_operator, DEFAULT_OPERATOR_OUTBOX,
+                     "operator_outbox"),
+}
+
+
+def stage_bound(proposal, args, identity) -> dict:
+    """Stage an installed verb through the actuator its record binds to."""
+    entry = INSTALLED_STAGERS.get(proposal.action)
+    if entry is None:
+        raise OperatorError(
+            f"no executor stages {proposal.action}; an installed verb may only "
+            "bind to one of " + ", ".join(sorted(INSTALLED_STAGERS)))
+    stager, default_outbox, arg_name = entry
+    return stager(proposal, identity=identity,
+                  outbox=getattr(args, arg_name, default_outbox))
 
 
 def _titled(title: str, prefix: str) -> tuple[str, str] | None:
@@ -145,6 +178,11 @@ STATE_PATHS: dict[str, tuple[str, str]] = {
     "spawn_outbox": ("reproduce-outbox", "drafted reproduce.spawn plans"),
     "rebalance_outbox": ("rebalance-outbox", "drafted resource.rebalance plans"),
     "operator_outbox": ("operator-outbox", "drafted meta.propose specs"),
+    # Not an outbox: this is the set the gate will *load* and run, so it sits
+    # beside the state root rather than inside the draft tree. Defaulting it
+    # here as well as in ``pando.operators`` keeps the two spellings of the
+    # same directory from drifting apart on a host that relocated its state.
+    "operators_dir": ("operators", "installed operator bindings this host runs"),
 }
 
 
@@ -346,11 +384,20 @@ def tally(proposal: Proposal, reactions: list[dict]) -> dict[str, list[str]]:
 
 def judge(proposal: Proposal, reactions: list[dict], *,
           min_adopt: int = 2, veto: bool = True,
-          actuators: dict | None = None) -> dict:
+          actuators: dict | None = None,
+          installed_operators: dict | None = None) -> dict:
     """Return what should happen. Does not perform the action by itself.
 
     ``actuators`` maps an action name to ``(Proposal) -> bool``. Missing
     means the colony may have adopted the proposal and still must not act.
+
+    ``installed_operators`` is what ``pando.operators.installed`` read: the
+    verbs this host has agreed to run, keyed by name. A verb in there is a
+    fixed parameterisation of an actuator the gate already runs, so it is
+    judged like any other action and then resolved to its binding. The map
+    defaults to empty, which is the fail-closed direction: without the records
+    an installed verb is not in the action space, and a proposal naming one is
+    held rather than guessed at.
     """
     votes = tally(proposal, reactions)
     result = {
@@ -365,7 +412,9 @@ def judge(proposal: Proposal, reactions: list[dict], *,
         "success": None,
         "detail": "",
     }
-    if proposal.action not in ACTION_SPACE:
+    record = installed_operators.get(proposal.action) \
+        if installed_operators else None
+    if proposal.action not in ACTION_SPACE and record is None:
         result["detail"] = "held: action is not in the action space"
         return result
     if veto and votes[DECLINE]:
@@ -376,12 +425,26 @@ def judge(proposal: Proposal, reactions: list[dict], *,
                             f"< {min_adopt}")
         return result
     result["adopted"] = True
-    actuator = (actuators or {}).get(proposal.action)
+    target = proposal
+    actor = proposal.action
+    if record is not None:
+        # A verb nobody wrote code for. The record says which actuator it
+        # reuses and with what params; a record that cannot say stops here
+        # rather than reaching for the proposal's own params, which are the
+        # proposer's and not the reviewer's.
+        try:
+            actor, _fixed = binding(record)
+        except OperatorError as exc:
+            result["detail"] = f"adopted, not executed: {exc}"
+            return result
+        result["binds_to"] = actor
+        target = rebound(proposal, record)
+    actuator = (actuators or {}).get(actor)
     if actuator is None:
         result["detail"] = "adopted, not executed: no actuator"
         return result
     try:
-        ok = bool(actuator(proposal))
+        ok = bool(actuator(target))
     except Exception as exc:
         result["detail"] = f"actuator failed before completion: {exc}"
         return result
@@ -394,7 +457,8 @@ def judge(proposal: Proposal, reactions: list[dict], *,
 
 
 def adopted(proposal: Proposal, reactions: list[dict],
-            knobs: dict | None = None) -> bool:
+            knobs: dict | None = None,
+            installed_operators: dict | None = None) -> bool:
     """Does the gate adopt this proposal, under the current policy?
 
     ``knobs`` is what ``pando/policy.py`` loaded. The knob names are the
@@ -404,6 +468,7 @@ def adopted(proposal: Proposal, reactions: list[dict],
     touching the disk.
     """
     return bool(judge(proposal, reactions, actuators={},
+                      installed_operators=installed_operators,
                       **dict(knobs or {}))["adopted"])
 
 
@@ -917,14 +982,40 @@ def addressed_replications(proposals: list[Proposal], reactions: list[dict],
     return found
 
 
+def next_installed(proposals: list[Proposal], reactions: list[dict],
+                   done: set[str], signer: str | None,
+                   installed_operators: dict,
+                   knobs: dict | None = None) -> Proposal | None:
+    """Oldest adopted proposal naming an installed verb this host authored.
+
+    One per round, like every other actuator here: a round that staged every
+    installed verb at once would put several unrelated artifacts in flight on
+    the strength of one vote each, and the ledger would stop being a
+    description of what happened in order.
+    """
+    for proposal in proposals:
+        if proposal.proposal_id in done:
+            continue
+        if signer is not None and proposal.pubkey != signer:
+            continue
+        if proposal.action not in installed_operators:
+            continue
+        if adopted(proposal, reactions, knobs, installed_operators):
+            return proposal
+    return None
+
+
 def local_unacted(proposals: list[Proposal], reactions: list[dict],
                   done: set[str], signer: str,
-                  knobs: dict | None = None) -> list[tuple[str, str]]:
+                  knobs: dict | None = None,
+                  installed_operators: dict | None = None) -> list[tuple[str, str]]:
     """Adopted proposals this host signed that have no actuator.
 
     Anything in ``ACTUATORS`` is left out: those are recorded by their own
     path (seed.export seals, seed.replicate wants a destination), so calling
-    them unactuated here would double-count them as failures.
+    them unactuated here would double-count them as failures. An installed verb
+    is left out for the same reason once its host has the record: it has a
+    stager, and ``next_installed`` is what reports it.
     """
     found = []
     for proposal in proposals:
@@ -932,7 +1023,9 @@ def local_unacted(proposals: list[Proposal], reactions: list[dict],
             continue
         if proposal.action in ACTUATORS:
             continue
-        if adopted(proposal, reactions, knobs):
+        if installed_operators and proposal.action in installed_operators:
+            continue
+        if adopted(proposal, reactions, knobs, installed_operators):
             found.append((proposal.proposal_id, proposal.action))
     return found
 
@@ -1004,6 +1097,19 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
             handle.write(json.dumps(record, sort_keys=True) + "\n")
 
     knobs = load_policy(getattr(args, "policy_path", DEFAULT_POLICY_PATH))
+    # The installed verbs, read once per round for the same reason the policy
+    # store is: every judgment in a round has to use the same set. A record
+    # that will not parse leaves the set empty rather than guessing, so the
+    # built-ins keep running and only the installed verbs stop -- and the
+    # reason travels in the status file, because a gate that quietly runs the
+    # smaller set is the failure this whole module exists to make impossible.
+    installed_operators: dict = {}
+    installed_error = ""
+    try:
+        installed_operators = load_installed(
+            getattr(args, "operators_dir", DEFAULT_INSTALLED))
+    except OperatorError as exc:
+        installed_error = str(exc)
     chosen = next_seed_export(proposals, reactions, done_ids(ledger), signer,
                               knobs)
     # A missing passphrase is a property of this host, not a defect in the
@@ -1204,6 +1310,38 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
             record["refusals"] = staged["refusals"]
             record["directory"] = staged["directory"]
         record_row(record)
+    # A verb the group installed is staged through the actuator it binds to,
+    # last of all and one per round like everything else. The params are the
+    # record's, not the proposal's: a proposal names the verb, a reviewer
+    # decided what it does, and that is the only reason a name nobody wrote
+    # code for is allowed to reach an outbox at all.
+    if installed_operators:
+        bound = next_installed(proposals, reactions, done_ids(ledger), signer,
+                               installed_operators, knobs)
+        if bound is not None:
+            record = {"proposal_id": bound.proposal_id, "action": bound.action}
+            try:
+                record["binds_to"] = binding(
+                    installed_operators[bound.action])[0]
+                staged = stage_bound(
+                    rebound(bound, installed_operators[bound.action]),
+                    args, identity)
+            except OperatorError as exc:
+                # No ``skipped``: a verb that cannot be staged is retried next
+                # round and refused again, so it stays visible.
+                record["executed"] = False
+                record["failed"] = f"OperatorError: {exc}"
+            except Exception as exc:  # noqa: BLE001 - one action must not end the loop
+                record["executed"] = False
+                record["failed"] = f"{type(exc).__name__}: {exc}"
+            else:
+                record["executed"] = True
+                # Whatever the bound stager reported, under the verb's own
+                # name: the ledger says what the group asked for and which
+                # actuator carried it out.
+                for key, value in staged.items():
+                    record[key] = value
+            record_row(record)
     # An export must not crowd out a replicate. Both are recorded.
     if True:
         seen = done_ids(ledger) | left_ids(ledger)
@@ -1228,7 +1366,8 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                                            knobs)
         foreign_meta = foreign_meta_proposes(proposals, reactions, seen, signer,
                                              knobs)
-        unacted = local_unacted(proposals, reactions, seen, signer, knobs)
+        unacted = local_unacted(proposals, reactions, seen, signer, knobs,
+                                installed_operators)
         pulls = getattr(args, "pull", None) or set()
         outbox = getattr(args, "outbox", "~/.pandosi/outbox")
         acks = received_acks(ledger, outbox)
@@ -1342,6 +1481,8 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                    "foreign_reproduce_spawns": foreign_spawns,
                    "foreign_rebalances": foreign_moves,
                    "foreign_meta_proposes": foreign_meta,
+                   "installed_operators": sorted(installed_operators),
+                   "installed_operators_error": installed_error,
                    "no_actuator": [item[0] for item in unacted]}
         print(json.dumps(payload, ensure_ascii=False), flush=True)
         write_status(ledger.with_name("execute-status.json"), payload)
