@@ -8594,13 +8594,25 @@ class TestResidentPullAllPlatforms(unittest.TestCase):
         seed = (units / "pandosi-seed-pull.service").read_text(encoding="utf-8")
         self.assertIn("--peer-file /home/admin/.pando/code-sources.txt", sync)
         self.assertIn("--from-file /home/admin/.pando/seed-sources.txt", seed)
-        # The baked-in bootstrap address is Tailscale, not the LAN address
-        # that died: a unit installed from this file must dial something that
-        # can actually answer today.
-        self.assertIn("--peer http://100.92.184.4:8478/code.bundle", sync)
+        # Pi5's bootstrap goes through the Windows mailbox, which is already
+        # reachable on the home LAN and has a Tailscale fallback.  Both use the
+        # same 8778 service the node already runs, so this adds no port and no
+        # firewall approval.  The Mac bundle remains available through the
+        # peer file; it is no longer the only baked-in first hop.
+        self.assertIn("--peer http://192.168.31.100:8778/code.bundle", sync)
+        self.assertIn("--peer http://100.93.216.90:8778/code.bundle", sync)
         self.assertIn("--from http://100.92.184.4:8478", seed)
         for text in (sync, seed):
             self.assertNotIn("192.168.31.41", text)
+
+    def test_the_windows_mailbox_serves_the_checkout_it_already_updates(self):
+        root = self._root()
+        text = (root / "tools" /
+                "win_node_supervisor.ps1").read_text(encoding="utf-8")
+        mailbox = text.split("$mailboxArgs = @(")[1].split("\n#")[0]
+        self.assertIn("agent_mailbox.py", mailbox)
+        self.assertIn("'--code-repo', \"$repo\"", mailbox)
+        self.assertIn("'--code-cache', 'D:\\pando-models\\code.bundle'", mailbox)
 
 
     def test_the_executor_reads_a_shelf_list_on_every_platform(self):
@@ -8625,6 +8637,170 @@ class TestResidentPullAllPlatforms(unittest.TestCase):
                 "pandosi-execute.service").read_text(encoding="utf-8")
         self.assertIn("tools/execute_loop.py", unit)
         self.assertIn("--mailbox-fallback ", unit)
+
+
+class TestMailboxCodeBundle(unittest.TestCase):
+    """The mailbox is a portable code peer, not only a task queue.
+
+    A node can usually reach the mailbox even when every other port on that
+    host is blocked or moved.  Serving the HEAD-keyed git bundle from the
+    authenticated mailbox therefore removes a second listener and a firewall
+    rule from the bootstrap path.  These are real HTTP and real git bundle
+    checks; a mocked byte response would not prove that the receiving updater
+    can consume the file.
+    """
+
+    def _module(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "agent_mailbox_under_test_code_bundle",
+            Path(__file__).resolve().parents[1] / "tools" / "agent_mailbox.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def _git(self, root: Path):
+        env = os.environ.copy()
+        for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
+                    "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR",
+                    "GIT_ALTERNATE_OBJECT_DIRECTORIES"):
+            env.pop(key, None)
+        env.update({
+            "GIT_AUTHOR_NAME": "bundle-test",
+            "GIT_AUTHOR_EMAIL": "bundle@example.com",
+            "GIT_COMMITTER_NAME": "bundle-test",
+            "GIT_COMMITTER_EMAIL": "bundle@example.com",
+        })
+
+        def run(*args):
+            return subprocess.run(list(args), check=True, capture_output=True,
+                                  text=True, env=env)
+
+        repo = root / "repo"
+        run("git", "init", "-b", "main", str(repo))
+        (repo / "README").write_text("one\n", encoding="utf-8")
+        run("git", "-C", str(repo), "add", "README")
+        run("git", "-C", str(repo), "commit", "-m", "one")
+        return env, repo, run
+
+    @staticmethod
+    def _serve(module, box, **kwargs):
+        server_class = getattr(module, "_MailboxServer",
+                               module.ThreadingHTTPServer)
+        server = server_class(
+            ("127.0.0.1", 0),
+            module.build_handler(box, "tok", **kwargs))
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        return server, thread, f"http://127.0.0.1:{server.server_address[1]}"
+
+    @staticmethod
+    def _fetch(url: str, token: str | None):
+        request = urllib.request.Request(url)
+        if token is not None:
+            request.add_header("Authorization", f"Bearer {token}")
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.read(), response.headers.get("Content-Type")
+
+    def test_the_route_is_authenticated_and_explicitly_optional(self):
+        module = self._module()
+        with tempfile.TemporaryDirectory() as tmp:
+            box = module.Mailbox(Path(tmp) / "box")
+            server, thread, base = self._serve(module, box)
+            try:
+                with self.assertRaises(urllib.error.HTTPError) as denied:
+                    self._fetch(base + "/code.bundle", None)
+                self.assertEqual(denied.exception.code, 403)
+                denied.exception.close()
+                with self.assertRaises(urllib.error.HTTPError) as disabled:
+                    self._fetch(base + "/code.bundle", "tok")
+                self.assertEqual(disabled.exception.code, 404)
+                disabled.exception.close()
+                self.assertEqual(box.list("all"), [])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+    def test_it_follows_head_and_never_creates_a_task(self):
+        module = self._module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env, repo, run = self._git(root)
+            box = module.Mailbox(root / "box")
+            cache = root / "cache" / "code.bundle"
+            server, thread, base = self._serve(
+                module, box, code_repo=repo, code_cache=cache)
+            try:
+                first, content_type = self._fetch(base + "/code.bundle", "tok")
+                self.assertEqual(content_type, "application/octet-stream")
+                first_head = run("git", "-C", str(repo), "rev-parse",
+                                 "HEAD").stdout.strip()
+
+                (repo / "README").write_text("two\n", encoding="utf-8")
+                run("git", "-C", str(repo), "add", "README")
+                run("git", "-C", str(repo), "commit", "-m", "two")
+                second_head = run("git", "-C", str(repo), "rev-parse",
+                                  "HEAD").stdout.strip()
+                second, _ = self._fetch(base + "/code.bundle", "tok")
+
+                self.assertNotEqual(first, second)
+                self.assertNotEqual(first_head, second_head)
+                received = root / "received.bundle"
+                received.write_bytes(second)
+                listed = run("git", "bundle", "list-heads",
+                             str(received)).stdout
+                self.assertIn(second_head, listed)
+                self.assertEqual(cache.with_name("code.bundle.head")
+                                 .read_text(encoding="utf-8").strip(),
+                                 second_head)
+                # A download is a read.  In particular it must not appear as
+                # a [chat] or [proposal] row that an executor could claim.
+                self.assertEqual(box.list("all"), [])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+    def test_concurrent_readers_never_see_a_torn_bundle(self):
+        module = self._module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env, repo, run = self._git(root)
+            box = module.Mailbox(root / "box")
+            cache = root / "cache" / "code.bundle"
+            server, thread, base = self._serve(
+                module, box, code_repo=repo, code_cache=cache)
+            results, errors = [], []
+
+            def fetch_one():
+                try:
+                    results.append(self._fetch(base + "/code.bundle", "tok")[0])
+                except Exception as exc:  # noqa: BLE001 - reported below
+                    errors.append(exc)
+
+            workers = [threading.Thread(target=fetch_one) for _ in range(8)]
+            try:
+                for worker in workers:
+                    worker.start()
+                for worker in workers:
+                    worker.join(timeout=20)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+            self.assertEqual(errors, [])
+            self.assertEqual(len(results), 8)
+            self.assertEqual(len(set(results)), 1)
+            received = root / "concurrent.bundle"
+            received.write_bytes(results[0])
+            head = run("git", "-C", str(repo), "rev-parse",
+                       "HEAD").stdout.strip()
+            self.assertIn(head, run("git", "bundle", "list-heads",
+                                    str(received)).stdout)
+            self.assertEqual(list(cache.parent.glob("*.partial")), [])
+            self.assertEqual(box.list("all"), [])
 
 
 class TestCodeSync(unittest.TestCase):

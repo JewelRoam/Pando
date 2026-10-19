@@ -69,7 +69,9 @@ $layaArgs = @('-m', 'pando.stemd', '--node-id', 'win-laya-int8', '--backend',
 $workerArgs = @("$repo\tools\win_worker.py")
 $mailboxArgs = @("$repo\tools\agent_mailbox.py", 'serve', '--port', '8778',
   '--dir', 'D:\pando-models\mailbox-win',
-  '--token-file', "$repo\metrics\lan-check\mac-mailbox.token")
+  '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
+  '--code-repo', "$repo",
+  '--code-cache', 'D:\pando-models\code.bundle')
 # The resident proposer: the Windows node must initiate on its own, not only
 # answer polled work. Multi-mailbox: publish to both, read the union, so a
 # sleeping Mac-hosted mailbox can no longer silence the colony (2026-10-17).

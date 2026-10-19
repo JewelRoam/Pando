@@ -35,6 +35,7 @@ everything else is closed.
 from __future__ import annotations
 
 import argparse
+import hmac
 import json
 import secrets
 import sys
@@ -52,6 +53,7 @@ from pando.telemetry import (  # noqa: E402 - repo root must be importable
     PI5_PUBKEY, TelemetryError, TelemetryReceiver,
     TelemetrySignatureError,
 )
+from tools.seed_outbox import code_bundle  # noqa: E402
 
 OPEN, CLAIMED, DONE, FAILED, BLOCKED = "open", "claimed", "done", \
     "failed", "blocked"
@@ -211,7 +213,9 @@ class Mailbox:
             return chosen, True
 
 
-def build_handler(mailbox: Mailbox, token: str, telemetry=None):
+def build_handler(mailbox: Mailbox, token: str, telemetry=None,
+                  code_repo: Path | None = None,
+                  code_cache: Path | None = None):
     class MailboxHandler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
             pass
@@ -226,7 +230,7 @@ def build_handler(mailbox: Mailbox, token: str, telemetry=None):
 
         def _authed(self) -> bool:
             header = self.headers.get("Authorization", "")
-            if header == f"Bearer {token}":
+            if hmac.compare_digest(header, f"Bearer {token}"):
                 return True
             self._send(403, {"error": "missing or wrong token"})
             return False
@@ -249,6 +253,39 @@ def build_handler(mailbox: Mailbox, token: str, telemetry=None):
                                  "open": open_count})
                 return
             if not self._authed():
+                return
+            if path == "/code.bundle":
+                # The mailbox can be the only service another host can reach
+                # when it moves networks.  Serving the same HEAD-keyed git
+                # bundle here removes the need for a second port, a firewall
+                # exception, or a separate seed-outbox process on that host.
+                # It is a read-only route and never creates a mailbox task.
+                if code_repo is None:
+                    self._send(404, {"error": "code bundle not configured"})
+                    return
+                cache = (Path(code_cache).expanduser() if code_cache else
+                         Path.home() / ".pandosi" / "code.bundle")
+                try:
+                    built = code_bundle(Path(code_repo).expanduser(), cache)
+                except OSError as exc:
+                    self._send(500, {"error": "code bundle unavailable",
+                                     "detail": str(exc)[:200]})
+                    return
+                if built is None:
+                    self._send(404, {"error": "no code bundle"})
+                    return
+                try:
+                    raw = built.read_bytes()
+                except OSError as exc:
+                    self._send(500, {"error": "code bundle unreadable",
+                                     "detail": str(exc)[:200]})
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(len(raw)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(raw)
                 return
             if path == "/tasks":
                 status = None
@@ -387,6 +424,11 @@ class _MailboxServer(ThreadingHTTPServer):
     # in TIME_WAIT. Without this, a one-second cutover becomes an outage.
     allow_reuse_address = True
     daemon_threads = True
+    # A node may fetch a code bundle while the executor polls tasks and peers
+    # replicate state.  The stdlib default of 5 pending sockets turns a short
+    # burst into connection resets, which a node correctly reports as an
+    # unreachable code peer.
+    request_queue_size = 64
 
 
 def serve(args) -> int:
@@ -401,8 +443,14 @@ def serve(args) -> int:
     mailbox = Mailbox(directory)
     telemetry = (TelemetryReceiver(args.telemetry_root)
                  if getattr(args, "telemetry_root", "") else None)
+    code_repo = (Path(args.code_repo).expanduser()
+                 if getattr(args, "code_repo", "") else None)
+    code_cache = (Path(args.code_cache).expanduser()
+                  if getattr(args, "code_cache", "") else None)
     server = _MailboxServer((args.host, args.port),
-                            build_handler(mailbox, token, telemetry))
+                            build_handler(mailbox, token, telemetry,
+                                          code_repo=code_repo,
+                                          code_cache=code_cache))
     print(f"agent mailbox serving on http://{args.host}:{args.port} "
           f"(dir {directory}, {len(mailbox.list(OPEN))} open task(s))",
           flush=True)
@@ -539,6 +587,12 @@ def main() -> int:
     server.add_argument("--port", type=int, default=8766)
     server.add_argument("--dir", default="~/.pando/mailbox")
     server.add_argument("--token-file", default="~/.pando/mailbox.token")
+    server.add_argument(
+        "--code-repo", default="",
+        help="serve /code.bundle from this git checkout; empty disables it")
+    server.add_argument(
+        "--code-cache", default="~/.pandosi/code.bundle",
+        help="HEAD-keyed cache for /code.bundle")
     server.add_argument(
         "--telemetry-root", default="",
         help="atomically publish signed Pi5 telemetry at this root-table path; "

@@ -14,11 +14,29 @@ import json
 import os
 import subprocess
 import tarfile
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 MAX_OFFER_BYTES = 2 * 1024 * 1024
+
+# One cache path can be requested by several mailbox threads at once.  The
+# unique temporary files below already protect the destination from torn
+# writes; this lock additionally avoids doing the same expensive git bundle
+# build once per concurrent waiter in this process.
+_BUNDLE_LOCKS: dict[str, threading.Lock] = {}
+_BUNDLE_LOCKS_GUARD = threading.Lock()
+
+
+def _bundle_lock(dest: Path) -> threading.Lock:
+    key = str(dest.resolve())
+    with _BUNDLE_LOCKS_GUARD:
+        lock = _BUNDLE_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _BUNDLE_LOCKS[key] = lock
+        return lock
 
 
 def _seed():
@@ -112,38 +130,48 @@ def code_bundle(repo: Path, dest: Path, max_age: float = 600) -> Path | None:
     """
     repo = Path(repo)
     dest = Path(dest)
-    stamp = dest.parent / (dest.name + ".head")
-    env = _git_env()
-    head = _repo_head(repo, env)
-    if dest.is_file() and time.time() - dest.stat().st_mtime < max_age:
-        try:
-            served = stamp.read_text(encoding="utf-8").strip()
-        except OSError:
-            served = ""
-        if head and served == head:
-            return dest
-        if not head and served == "":
-            # git could not answer; fall back to the age window rather than
-            # rebuilding a bundle on every single request.
-            return dest
     dest.parent.mkdir(parents=True, exist_ok=True)
-    partial = dest.with_suffix(".partial")
-    got = subprocess.run(
-        ["git", "-C", str(repo), "bundle", "create", str(partial), "HEAD"],
-        capture_output=True, text=True, env=env, timeout=60)
-    if got.returncode != 0 or not partial.is_file():
-        partial.unlink(missing_ok=True)
-        return None
-    if partial.stat().st_size > 30 * 1024 * 1024:
-        partial.unlink(missing_ok=True)
-        return None
-    partial.replace(dest)
-    if head:
+    with _bundle_lock(dest):
+        stamp = dest.parent / (dest.name + ".head")
+        env = _git_env()
+        head = _repo_head(repo, env)
+        if dest.is_file() and time.time() - dest.stat().st_mtime < max_age:
+            try:
+                served = stamp.read_text(encoding="utf-8").strip()
+            except OSError:
+                served = ""
+            if head and served == head:
+                return dest
+            if not head and served == "":
+                # git could not answer; fall back to the age window rather
+                # than rebuilding a bundle on every single request.
+                return dest
+
+        # A unique temporary file means two independent server processes
+        # cannot overwrite each other's half-written bundle.  os.replace is
+        # atomic on both POSIX and Windows, so a reader sees old or new bytes,
+        # never a truncated file.
+        partial = dest.with_name(
+            f".{dest.name}.{os.getpid()}.{threading.get_ident()}."
+            f"{time.time_ns()}.partial")
         try:
-            stamp.write_text(head + "\n", encoding="utf-8")
-        except OSError:
-            pass
-    return dest
+            got = subprocess.run(
+                ["git", "-C", str(repo), "bundle", "create",
+                 str(partial), "HEAD"],
+                capture_output=True, text=True, env=env, timeout=60)
+            if got.returncode != 0 or not partial.is_file():
+                return None
+            if partial.stat().st_size > 30 * 1024 * 1024:
+                return None
+            partial.replace(dest)
+        finally:
+            partial.unlink(missing_ok=True)
+        if head:
+            try:
+                stamp.write_text(head + "\n", encoding="utf-8")
+            except OSError:
+                pass
+        return dest
 
 
 def make_handler(outbox: Path, token: str, repo: Path | None = None):
