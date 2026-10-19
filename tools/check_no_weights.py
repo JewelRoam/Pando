@@ -21,6 +21,7 @@ tracked-file set to check).
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -65,11 +66,23 @@ DEFAULT_MAX_BYTES = 10 * 1024 * 1024
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess[bytes] | None:
+    """One read-only git probe of ``root``, with the host's repo vars removed.
+
+    ``git -C <dir>`` obeys ``GIT_DIR`` when a hook exports it, answering about
+    the hook's repository instead of ``root``. This gate is run from the
+    pre-push hook, so it must name the repository exactly once.
+    """
+    env = os.environ.copy()
+    for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
+                "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR",
+                "GIT_ALTERNATE_OBJECT_DIRECTORIES"):
+        env.pop(key, None)
     try:
         return subprocess.run(
             ["git", "-C", str(root), *args],
             capture_output=True,
             check=False,
+            env=env,
         )
     except (OSError, ValueError):
         return None

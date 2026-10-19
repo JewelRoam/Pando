@@ -149,8 +149,10 @@ WINDOWS_CLIENT_PATTERN = (
 
 def _env() -> dict[str, str]:
     env = os.environ.copy()
-    env.pop("GIT_DIR", None)
-    env.pop("GIT_WORK_TREE", None)
+    for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
+                "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR",
+                "GIT_ALTERNATE_OBJECT_DIRECTORIES"):
+        env.pop(key, None)
     return env
 
 

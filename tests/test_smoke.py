@@ -10472,6 +10472,30 @@ class TestVoteWatchdog(unittest.TestCase):
         self.assertEqual(verdicts["b"]["seen"], "new")
 
 
+def _git_env() -> dict:
+    """An environment that names no repository of its own.
+
+    ``git`` hands a pre-push hook ``GIT_DIR``, and a ``git -C`` command that
+    inherits it obeys the variable instead of ``-C``. On 2026-10-19 the drift
+    fixture below inherited it and wrote its three README commits into this
+    worktree instead of the temp dir, and the same variable broke the hook's
+    own probe. Test git calls therefore name their repo in argv and inherit
+    nothing that points somewhere else.
+    """
+    env = os.environ.copy()
+    for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
+                "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR",
+                "GIT_ALTERNATE_OBJECT_DIRECTORIES"):
+        env.pop(key, None)
+    return env
+
+
+def _git_in(repo, *args: str) -> None:
+    """One git command in ``repo``, with the host's GIT_* variables removed."""
+    subprocess.run(["git", "-C", str(repo), *args], check=True,
+                   capture_output=True, text=True, env=_git_env())
+
+
 class TestCodeDriftCheck(unittest.TestCase):
     """tools/code_drift_check.py - "was the code that thought the code we run?"
 
@@ -10535,12 +10559,10 @@ class TestCodeDriftCheck(unittest.TestCase):
 
     @classmethod
     def _fixture_git(cls, *args: str) -> None:
-        """One commit chain that owes nothing to the host's git identity."""
-        subprocess.run(
-            ["git", "-C", str(cls._fixture), "-c", "user.name=fixture",
-             "-c", "user.email=fixture@localhost", "-c", "commit.gpgsign=false",
-             *args],
-            check=True, capture_output=True, text=True)
+        """One commit chain that owes nothing to the host's identity or env."""
+        _git_in(cls._fixture, "-c", "user.name=fixture",
+                "-c", "user.email=fixture@localhost",
+                "-c", "commit.gpgsign=false", *args)
 
     def _repo(self) -> Path:
         """The fixture checkout. Never this working tree; see ``_fixture``."""
@@ -10559,10 +10581,45 @@ class TestCodeDriftCheck(unittest.TestCase):
         here = Path(__file__).resolve().parents[1].resolve()
         self.assertNotEqual(self._repo().resolve(), here)
 
+    def test_the_fixture_ignores_a_git_dir_the_environment_leaks(self):
+        """A pre-push hook exports GIT_DIR; ``-C`` must still mean ``-C``.
+
+        On 2026-10-19 this fixture inherited that variable and committed its
+        three revisions into this very worktree, because ``git -C`` obeys
+        ``GIT_DIR`` when it is set. Naming the repo in argv and stripping the
+        environment is the fix, so this poisons ``GIT_DIR`` at the outer
+        checkout and asserts the temp repo is the one that grows.
+        """
+        outer = Path(__file__).resolve().parents[1]
+        probe = ["git", "-C", str(outer), "rev-parse", "HEAD"]
+        before = subprocess.run(probe, capture_output=True, text=True,
+                                env=_git_env()).stdout.strip()
+        with tempfile.TemporaryDirectory() as tmp:
+            other = Path(tmp) / "elsewhere"
+            other.mkdir()
+            saved = os.environ.get("GIT_DIR")
+            os.environ["GIT_DIR"] = str(outer / ".git")
+            try:
+                _git_in(other, "init", "-b", "main")
+                (other / "README").write_text("elsewhere\n", encoding="utf-8")
+                _git_in(other, "add", "README")
+                _git_in(other, "-c", "user.name=t", "-c", "user.email=t@x",
+                        "commit", "-m", "elsewhere")
+            finally:
+                if saved is None:
+                    os.environ.pop("GIT_DIR", None)
+                else:
+                    os.environ["GIT_DIR"] = saved
+            self.assertTrue((other / ".git").exists(),
+                            "the temp repo must be the one that got a repo")
+        after = subprocess.run(probe, capture_output=True, text=True,
+                               env=_git_env()).stdout.strip()
+        self.assertEqual(after, before, "the outer checkout must not move")
+
     def _rev(self, ref: str) -> str:
         proc = subprocess.run(
             ["git", "-C", str(self._repo()), "rev-parse", f"{ref}^{{commit}}"],
-            capture_output=True, text=True, check=True)
+            capture_output=True, text=True, check=True, env=_git_env())
         return proc.stdout.strip()
 
     @staticmethod

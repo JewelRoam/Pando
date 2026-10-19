@@ -182,8 +182,10 @@ def _inside_git_worktree(path: Path) -> bool:
     """
     probe = path if path.exists() else path.parent
     env = os.environ.copy()
-    env.pop("GIT_DIR", None)
-    env.pop("GIT_WORK_TREE", None)
+    for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
+                "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR",
+                "GIT_ALTERNATE_OBJECT_DIRECTORIES"):
+        env.pop(key, None)
     try:
         out = subprocess.run(["git", "-C", str(probe), "rev-parse",
                               "--is-inside-work-tree"],

@@ -82,7 +82,9 @@ def code_head(root: Path | None = None) -> str:
     commit.
     """
     env = dict(os.environ)
-    for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+    for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
+                "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR",
+                "GIT_ALTERNATE_OBJECT_DIRECTORIES"):
         env.pop(key, None)
     try:
         done = subprocess.run(

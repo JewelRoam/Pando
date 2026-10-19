@@ -82,8 +82,10 @@ def write_ack(outbox: Path, proposal_id: str, body: dict) -> bool:
 def _git_env() -> dict[str, str]:
     """Prevent an invoking git hook from redirecting bundle operations."""
     env = os.environ.copy()
-    env.pop("GIT_DIR", None)
-    env.pop("GIT_WORK_TREE", None)
+    for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
+                "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR",
+                "GIT_ALTERNATE_OBJECT_DIRECTORIES"):
+        env.pop(key, None)
     return env
 
 

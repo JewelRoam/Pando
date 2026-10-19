@@ -48,11 +48,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Mapping
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -200,9 +202,28 @@ def _read_source(source, now: float, max_age: float, timeout: float,
     return name, where, payload, None
 
 
+def _clean_git_env(environ: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The environment with every GIT_* variable that names a repository gone.
+
+    ``git`` hands a pre-push hook ``GIT_DIR``, and ``git -C <dir>`` obeys that
+    variable *instead of* ``-C``. On 2026-10-19 this probe ran from the push
+    hook, inherited ``GIT_DIR`` pointing at the real worktree, and answered
+    about that worktree no matter which member it was handed - three drift
+    tests read the wrong repository and failed. Naming the repo in argv is only
+    half a fix; the other half is not handing git a second, contradictory one.
+    """
+    env = dict(os.environ if environ is None else environ)
+    for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
+                "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR",
+                "GIT_ALTERNATE_OBJECT_DIRECTORIES"):
+        env.pop(key, None)
+    return env
+
+
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", "-C", str(repo), *args],
-                          capture_output=True, text=True, timeout=30)
+                          capture_output=True, text=True, timeout=30,
+                          env=_clean_git_env())
 
 
 def head_of(repo: Path) -> str | None:
