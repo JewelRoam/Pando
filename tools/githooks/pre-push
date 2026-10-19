@@ -2,13 +2,45 @@
 # Remote CI is a second copy of tools/local_ci.py. This hook is the first.
 root=$(git rev-parse --show-toplevel) || exit 1
 cd "$root" || exit 1
-if [ -x .venv/bin/python ]; then
-  py=.venv/bin/python
-elif [ -x .venv/Scripts/python.exe ]; then
-  py=.venv/Scripts/python.exe
+
+# An explicit override is authoritative. local_ci.py still verifies that it is
+# the same Python version the workflows use; a bad override must not silently
+# fall through to another interpreter.
+if [ -n "${PANDOSI_CI_PYTHON:-}" ]; then
+  if [ -x "$PANDOSI_CI_PYTHON" ]; then
+    py=$PANDOSI_CI_PYTHON
+  elif command -v "$PANDOSI_CI_PYTHON" >/dev/null 2>&1; then
+    py=$PANDOSI_CI_PYTHON
+  else
+    echo "pre-push: PANDOSI_CI_PYTHON is not executable: $PANDOSI_CI_PYTHON" >&2
+    exit 1
+  fi
 else
-  echo "pre-push: no project venv (.venv). Create it before pushing." >&2
+  # Prefer the disposable interpreter that mirrors the runner. The older
+  # .venv fallbacks keep existing developer machines working, but local_ci.py
+  # refuses either if its version differs from the workflow pin.
+  for candidate in \
+    .venv-ci312/bin/python \
+    .venv-ci312/Scripts/python.exe \
+    .venv/bin/python \
+    .venv/Scripts/python.exe \
+    python3.12 \
+    python3 \
+    python
+  do
+    if [ -x "$candidate" ]; then
+      py=$candidate
+      break
+    elif command -v "$candidate" >/dev/null 2>&1; then
+      py=$candidate
+      break
+    fi
+  done
+fi
+
+if [ -z "${py:-}" ]; then
+  echo "pre-push: no Python found. Install Python 3.12 or set PANDOSI_CI_PYTHON." >&2
   exit 1
 fi
-echo "pre-push: running tools/local_ci.py" >&2
+echo "pre-push: running tools/local_ci.py with $py" >&2
 exec "$py" tools/local_ci.py

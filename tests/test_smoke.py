@@ -7787,7 +7787,76 @@ class TestLocalCi(unittest.TestCase):
         module = self._module()
         self.assertTrue(callable(getattr(module, "shallow_parity", None)))
         source = Path(module.__file__).read_text(encoding="utf-8")
-        self.assertIn("shallow_parity()", source)
+        self.assertIn("shallow_parity(python)", source)
+
+    def test_the_gate_uses_the_ci_interpreter_not_the_shell_default(self):
+        """A green 3.14 run must not stand in for the 3.12 runner.
+
+        The workflows pin 3.12. Before this check the gate launched every
+        child with ``sys.executable``, so a developer shell on 3.14 could pass
+        while 3.12 failed on syntax or a stdlib difference. The configured
+        interpreter must win and every child argv must name it.
+        """
+        from unittest import mock
+
+        module = self._module()
+        with mock.patch.dict(os.environ,
+                             {"PANDOSI_CI_PYTHON": "/ci/python312"}, clear=False), \
+                mock.patch.object(module, "_python_version", return_value="3.12"), \
+                mock.patch.object(module.shutil, "which", return_value=None):
+            self.assertEqual(module._ci_python(), "/ci/python312")
+
+        self.assertEqual(
+            module._argv("unittest", ["-m", "unittest"], "/ci/python312")[0],
+            "/ci/python312")
+        self.assertEqual(
+            module._argv("py_compile", ["-m", "py_compile"], "/ci/python312")[0],
+            "/ci/python312")
+        self.assertEqual(
+            module._argv("import numpy", [], "/ci/python312")[0],
+            "/ci/python312")
+
+    def test_the_gate_refuses_a_non_312_interpreter(self):
+        """A wrong configured interpreter is a setup error, not a fallback.
+
+        Falling back to ``sys.executable`` would recreate the false-green this
+        gate exists to prevent. The failure must name the expected version.
+        """
+        from unittest import mock
+
+        module = self._module()
+        with mock.patch.dict(os.environ,
+                             {"PANDOSI_CI_PYTHON": "/wrong/python"}, clear=False), \
+                mock.patch.object(module, "_python_version", return_value="3.14"), \
+                mock.patch.object(module.shutil, "which", return_value=None):
+            with self.assertRaisesRegex(RuntimeError, "3.12"):
+                module._ci_python()
+
+    def test_depth_one_parity_uses_the_ci_interpreter(self):
+        """The depth-1 suite must run under the same Python as the runner."""
+        from types import SimpleNamespace
+        from unittest import mock
+
+        module = self._module()
+        with mock.patch.object(module, "_shallow_checkout"), \
+                mock.patch.object(module.subprocess, "run",
+                                  return_value=SimpleNamespace(returncode=0)) as run:
+            self.assertEqual(module.shallow_parity("/ci/python312"), 0)
+        command = run.call_args.args[0]
+        self.assertEqual(command[:3],
+                         ["/ci/python312", "-m", "unittest"])
+
+    def test_workflow_python_version_matches_the_gate(self):
+        """The workflow pin and local gate must name one Python version."""
+        module = self._module()
+        workflows = Path(__file__).resolve().parents[1] / ".github" / "workflows"
+        versions = set()
+        for path in workflows.glob("*.yml"):
+            for line in path.read_text(encoding="utf-8").splitlines():
+                match = re.match(r'\s*python-version:\s*"([^"]+)"\s*$', line)
+                if match:
+                    versions.add(match.group(1))
+        self.assertEqual(versions, {module.CI_PYTHON})
 
     def test_the_gate_runs_children_without_an_inherited_repository(self):
         """The gate is a hook, so it inherits GIT_DIR; its children must not.
@@ -7874,6 +7943,14 @@ class TestLocalCi(unittest.TestCase):
         hook = Path(__file__).resolve().parents[1] / "tools" / "githooks" / "pre-push"
         text = hook.read_text(encoding="utf-8")
         self.assertIn("tools/local_ci.py", text)
+        # The hook must prefer the interpreter that mirrors CI. It also has to
+        # work when the checkout has no .venv at all, because a stale or
+        # missing developer venv must not be the thing that blocks a push.
+        self.assertIn(".venv-ci312/bin/python", text)
+        self.assertIn(".venv-ci312/Scripts/python.exe", text)
+        self.assertIn("PANDOSI_CI_PYTHON", text)
+        self.assertIn("python3.12", text)
+        self.assertNotIn("no project venv", text)
         if os.name != "nt":
             # Windows has no POSIX exec bit (stat never reports 0o111 on
             # NTFS); git runs hooks through sh there, so the bit is moot.
