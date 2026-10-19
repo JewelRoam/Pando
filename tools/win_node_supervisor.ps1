@@ -151,7 +151,8 @@ $seedPullArgs = @("$repo\tools\seed_pull.py", '--from',
   '--from-file', 'D:\pando-models\seed-sources.txt',
   '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
   '--inbox', 'D:\pando-models\seed-inbox',
-  '--ledger', 'D:\pando-models\seed-receive-ledger.jsonl')
+  '--ledger', 'D:\pando-models\seed-receive-ledger.jsonl',
+  '--node-id', 'win')
 # The missing local half of "who updates the code". The node has no cloud
 # operator any more, so nothing would fetch a pushed commit. This process
 # fast-forwards the checkout itself -- GitHub first, the Mac's /code.bundle

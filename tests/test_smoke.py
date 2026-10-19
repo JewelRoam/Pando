@@ -8245,9 +8245,11 @@ class TestSeedReceive(unittest.TestCase):
             thread.start()
             try:
                 result = pull_mod.pull_once(
-                    f"http://127.0.0.1:{port}", token, root / "inbox")
+                    f"http://127.0.0.1:{port}", token, root / "inbox",
+                    node_id="mac-test")
                 again = pull_mod.pull_once(
-                    f"http://127.0.0.1:{port}", token, root / "inbox")
+                    f"http://127.0.0.1:{port}", token, root / "inbox",
+                    node_id="mac-test")
             finally:
                 server.shutdown()
             self.assertEqual(result["copied"], ["repl-1"])
@@ -8263,7 +8265,8 @@ class TestSeedReceive(unittest.TestCase):
             self.assertEqual(stored["kind"], "encrypted-identity")
             self.assertNotIn("secret_key", stored)
             self.assertNotIn(live.to_json()["secret_key"], json.dumps(stored))
-            self.assertTrue((outbox / "repl-1.ack.json").is_file())
+            ack = json.loads((outbox / "repl-1.ack.json").read_text())
+            self.assertEqual(ack["by"], "mac-test")
             self.assertFalse((root / "inbox" / "repl-plain").exists())
 
 
@@ -8667,6 +8670,7 @@ class TestResidentPullAllPlatforms(unittest.TestCase):
         # And the two consumers are pointed at them.
         self.assertIn("'--peer-file', 'D:\\pando-models\\code-sources.txt'", text)
         self.assertIn("'--from-file', 'D:\\pando-models\\seed-sources.txt'", text)
+        self.assertIn("'--node-id', 'win'", text)
 
     def test_the_mac_agent_and_the_pi5_units_read_the_same_flag(self):
         root = self._root()
@@ -8681,6 +8685,7 @@ class TestResidentPullAllPlatforms(unittest.TestCase):
         seed = (units / "pandosi-seed-pull.service").read_text(encoding="utf-8")
         self.assertIn("--peer-file /home/admin/.pando/code-sources.txt", sync)
         self.assertIn("--from-file /home/admin/.pando/seed-sources.txt", seed)
+        self.assertIn("--node-id pi5", seed)
         # Pi5's bootstrap goes through the Windows mailbox, which is already
         # reachable on the home LAN and has a Tailscale fallback.  Both use the
         # same 8778 service the node already runs, so this adds no port and no
