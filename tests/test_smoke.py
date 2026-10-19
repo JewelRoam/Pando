@@ -3379,9 +3379,19 @@ class TestThinkWatchdogCodeDelivery(unittest.TestCase):
         self.assertIn("code_drift_check.py", plist)
         self.assertIn("--code-timeout", plist)
         # Every host in the fleet, or a frozen node is simply invisible.
-        for host in ("127.0.0.1:8765", "192.168.31.100:8790",
-                     "192.168.31.22:8791"):
-            self.assertIn(host, plist)
+        self.assertIn("127.0.0.1:8765", plist)
+        self.assertIn("192.168.31.22:8791", plist)
+        # ...but the *address* win is read at matters as much as mentioning it.
+        # A launchd agent whose program is the Homebrew interpreter is refused
+        # on 192.168.31.x - Errno 65 for its own socket, curl rc=7 for a curl it
+        # spawns, because the refusal follows the responsible process into its
+        # children. The tailnet is not "local network" and answers that same
+        # interpreter. Pinning the LAN address here would re-blind the leg that
+        # this file exists to keep honest.
+        win = re.search(r"--root win (\S+)", plist)
+        self.assertIsNotNone(win, "win must still be a measured root")
+        self.assertTrue(win.group(1).startswith("http://100."),
+                        f"win is read at {win.group(1)}, not over the tailnet")
         # One shared state file, two alarm families - not a second file.
         self.assertIn("--alarm-state-file", plist)
         self.assertIn("think-watchdog-alarms.json", plist)
