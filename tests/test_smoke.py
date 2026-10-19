@@ -3289,21 +3289,80 @@ class TestThinkWatchdogCodeDelivery(unittest.TestCase):
             self.assertEqual(task["status"], "open")
 
     def test_an_unreadable_root_pages_nobody(self):
-        """rc=1 is a root table we could not read, not a member's fault."""
+        """rc=1 with no payload is a whole feed we could not read."""
         wd = self._tool()
         with tempfile.TemporaryDirectory() as tmp:
             url, token_file, box, server, thread = self._alarm_stub(tmp)
             try:
                 script = Path(tmp) / "drift_broken.py"
                 script.write_text("import sys\nsys.exit(1)\n", encoding="utf-8")
-                rc = self._run(wd, tmp, f"{sys.executable} {script}",
-                               alarm_url=url, token_file=token_file)
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    rc = self._run(wd, tmp, f"{sys.executable} {script}",
+                                   alarm_url=url, token_file=token_file)
                 tasks = box.list(None)
             finally:
                 server.shutdown(); server.server_close(); thread.join(timeout=3)
 
             self.assertEqual(rc, 0)
             self.assertEqual(tasks, [], "an unreadable root must not page anyone")
+            self.assertIn("UNREADABLE", out.getvalue())
+            self.assertNotIn("PARTIAL COVERAGE", out.getvalue())
+
+    def test_a_clean_partial_report_names_the_blind_root_without_paging(self):
+        """One unreadable root must not turn measured members into a fault.
+
+        This is the 2026-10-19 Pi5-mirror case: six reachable members were
+        clean, but the report said ``UNREADABLE`` because the whole feed was
+        misread. A partial report is a coverage fact, not a member alarm.
+        """
+        wd = self._tool()
+        partial = {
+            "members": {"mac-text": {"status": "ok", "behind": 0}},
+            "unreadable": [{"root": "pi5", "error": "mirror stale"}],
+            "stale": [],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            url, token_file, box, server, thread = self._alarm_stub(tmp)
+            try:
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    rc = self._run(
+                        wd, tmp,
+                        self._probe_cmd(tmp, partial, 1, "partial_clean"),
+                        alarm_url=url, token_file=token_file)
+                tasks = box.list(None)
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=3)
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(tasks, [])
+            text = out.getvalue()
+            self.assertIn("PARTIAL COVERAGE (not paged)", text)
+            self.assertIn("1 members measured, 1 root(s) unreadable: pi5", text)
+            self.assertNotIn("UNREADABLE", text)
+
+    def test_a_partial_report_still_pages_a_stale_member(self):
+        """An unreadable root does not hide a stale row we did measure."""
+        wd = self._tool()
+        partial = dict(self.DRIFT)
+        partial["unreadable"] = [{"root": "pi5", "error": "mirror stale"}]
+        with tempfile.TemporaryDirectory() as tmp:
+            url, token_file, box, server, thread = self._alarm_stub(tmp)
+            try:
+                rc = self._run(
+                    wd, tmp,
+                    self._probe_cmd(tmp, partial, 1, "partial_stale"),
+                    alarm_url=url, token_file=token_file)
+                tasks = box.list(None)
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=3)
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(tasks), 1)
+            task = tasks[0]
+            self.assertTrue(task["title"].startswith("[alarm] code-drift:"))
+            self.assertIn("win-gemma-12b", task["title"])
 
     def test_a_clean_code_poll_does_not_forget_an_open_vote_alarm(self):
         """One shared state file, two families: a clean poll clears only its own.

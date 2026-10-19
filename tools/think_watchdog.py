@@ -168,6 +168,20 @@ def payload_from(stdout: str) -> dict | None:
     return None
 
 
+def code_payload_usable(payload: dict | None) -> bool:
+    """Whether a partial code report has enough shape to trust.
+
+    ``code_drift_check.py`` returns rc=1 when at least one root is unreadable.
+    That is not the same as an unreadable *whole* feed: if the payload still
+    carries measured members and an explicit ``unreadable`` list, the caller
+    can report partial coverage without inventing a member fault. A malformed
+    or absent payload remains a blind feed.
+    """
+    return (isinstance(payload, dict)
+            and isinstance(payload.get("members"), dict)
+            and isinstance(payload.get("unreadable"), list))
+
+
 def vote_alarms(payload: dict | None) -> list[dict]:
     """The wedge/silent rows of a vote-watchdog payload, worst first.
 
@@ -619,9 +633,11 @@ def run_vote_check(cmd: str,
                    ) -> tuple[str, str, dict | None]:
     """Run the vote command. Returns (verdict, text, payload).
 
-    verdict is "ok" | "alarm" | "unreadable". "unreadable" is kept separate
-    from "alarm" on purpose: a feed we cannot read is not a member falling
-    behind, and conflating the two is how a pager starts lying.
+    verdict is "ok" | "alarm" | "partial" | "unreadable". "partial" means
+    some roots were unreadable but a usable payload still measured the rest.
+    "unreadable" is kept separate from "alarm" on purpose: a feed we cannot
+    read is not a member falling behind, and conflating the two is how a pager
+    starts lying.
     """
     try:
         proc = subprocess.run(cmd, shell=True, capture_output=True, text=True,
@@ -656,6 +672,13 @@ def run_code_check(cmd: str,
     if proc.returncode == CODE_ALARM_RC:
         return "alarm", text, payload
     if proc.returncode != 0:
+        if code_payload_usable(payload):
+            # The drift tool uses rc=1 for a blind root even when every other
+            # root was measured. Preserve that evidence: a stale row still
+            # pages, while an otherwise clean partial report stays quiet.
+            if code_alarms(payload):
+                return "alarm", text, payload
+            return "partial", text or f"code check partial rc={proc.returncode}", payload
         return "unreadable", text or f"code check rc={proc.returncode}", payload
     return "ok", text, payload
 
@@ -682,6 +705,21 @@ def check_code(args, now: float, stamp: str) -> None:
         if args.alarm_state_file:
             page_open_alarm(args, alarms, text, now, stamp,
                             family=CODE_FAMILY)
+        return
+
+    if verdict == "partial":
+        # Do not clear an open drift alarm here: the unreadable root could
+        # contain the member that was stale. The absence of evidence from one
+        # root is not evidence that the whole fleet caught up.
+        roots = []
+        for row in payload.get("unreadable", []) if payload else []:
+            if isinstance(row, dict) and row.get("root"):
+                roots.append(str(row["root"]))
+        measured = len(payload.get("members", {})) if payload else 0
+        blind = ", ".join(roots) if roots else "unknown root"
+        print(f"{stamp} think-watchdog code-check PARTIAL COVERAGE "
+              f"(not paged): {measured} members measured, "
+              f"{len(roots) or 1} root(s) unreadable: {blind}", flush=True)
         return
 
     if not alarms:
