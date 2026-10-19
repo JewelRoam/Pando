@@ -2200,8 +2200,15 @@ class TestResidentThinker(unittest.TestCase):
         skeleton = operator_skeleton()
         checked, why = validate_operator(skeleton)
         self.assertEqual(why, "")
-        self.assertEqual(checked["operator"], "vote.weighted")
         self.assertTrue(checked["rationale"])
+        # The example must be recognisable *as an example*. Measured
+        # 2026-10-19: with a plausible label (``vote.weighted``) the first
+        # post-repair rounds echoed it verbatim, and on pi5 the echo
+        # contradicting the rationale ("screening operator" named
+        # ``vote.weighted``) was invisible in ``requested.operator``.
+        name = checked["operator"]
+        self.assertIn("example", name.lower())
+        self.assertNotIn(".vote", name)
 
     def test_a_meta_propose_without_an_operator_is_repaired_once(self):
         """Measured on the pi5 ledger (2026-10-19): 33 of the last 40 rounds
@@ -2226,8 +2233,9 @@ class TestResidentThinker(unittest.TestCase):
             self.assertEqual(round_.proposal.params["operator"], "vote.weighted")
             self.assertEqual(proposer.calls, 2)
             # The retry must carry the shape, not just repeat the prose.
+            from pando.thinkd import operator_skeleton as skeleton_of
             self.assertIn('"operator"', proposer.users[1])
-            self.assertIn("vote.weighted", proposer.users[1])
+            self.assertIn(skeleton_of()["operator"], proposer.users[1])
 
     def test_a_meta_propose_that_never_names_an_operator_is_held_not_signed(self):
         """One repair, not a loop.

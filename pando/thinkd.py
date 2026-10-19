@@ -108,8 +108,9 @@ SYSTEM_PROMPT = f"""你是 PandoSI 殖民地的一名提案者。这个群体是
    这个动作只是把候选签名后放进评审 outbox，不会当场改写规则，
    所以不要指望它在同一轮生效。
    选了 meta.propose 时，params 必须是单独的 JSON 字段，形如
-   {{"operator": "vote.weighted", "rationale": "为什么需要这个新操作"}}。
-   operator 是你要申请的新操作的名字（例子只是形状，写你自己要的那个名字），
+   {{"operator": "example.placeholder", "rationale": "为什么需要这个新操作"}}。
+   example.placeholder 是**占位符，不是名字**：照抄它等于没说出你要申请什么，
+   会被原样记进账本、并被计成一次回声。operator 要写你自己那个新操作的名字，
    rationale 是一句话理由。新操作的实现永远由 gate 那边人工审核后补上，
    你只给名字和理由；params 里出现 code/source/module/path/command 会被拒。
    形状写不对或没写 operator 时，你的回答会被退回一次，
@@ -178,16 +179,21 @@ def operator_skeleton() -> dict:
 
     ``validate_operator`` is called here as well, so the example handed to the
     model cannot drift from what ``pando.operators`` will demand on the way in.
-    The example name is deliberately a real-looking label: a skeleton the model
-    copies faithfully still has to be something the executor takes (the same
-    argument as the culture and policy skeletons). Whether the models echo
-    ``vote.weighted`` instead of naming their own operator is measurable
-    afterwards - it shows up verbatim in ``requested.operator`` - and that rate
-    is the honest follow-up question, not a reason to hand over a shape nobody
-    could sign.
+
+    The name in the example is a *visible placeholder*, not a plausible
+    operator. Measured (2026-10-19, first four rounds after this repair went
+    live): mac r679 named its own operator (``adaptive.governance``) but mac
+    r680 and pi5 r744/r745 all echoed the example verbatim. With a
+    real-looking example (``vote.weighted``) that echo is indistinguishable
+    from a deliberate request in ``requested.operator``, and the two rounds on
+    pi5 show the damage: their rationale asks for a *screening* operator while
+    the name says "weighted vote". A placeholder keeps the useful part - a
+    concrete shape the validator accepts - and makes the echo legible instead
+    of plausible. Both rates (named-own vs echoed) are then countable straight
+    off ``requested.operator``.
     """
     skeleton = {
-        "operator": "vote.weighted",
+        "operator": "example.placeholder",
         "rationale": "一句话说明为什么这个新操作会让群体更可能活下去",
     }
     checked, why = validate_operator(skeleton)
@@ -977,7 +983,8 @@ class Thinker:
             user + "\n\n【上一轮你的回答被拒绝】" + why
             + "。params 必须是 JSON 对象，而且必须写明你想申请的那个新操作：\n"
             + json.dumps(example, ensure_ascii=False)
-            + "\noperator 是名字，要写你自己要申请的那个（例子里的名字只是形状），"
+            + "\noperator 要写你自己要申请的那个名字；例子里的 example.placeholder "
+              "是占位符，照抄它等于没说出你要什么，会被原样记成一次回声。"
               "rationale 是一句话理由。params 里不能出现 code/source/module/"
               "path/command 这类字段——新操作的实现永远由 gate 里人工审核后补上，"
               "提案只带名字和理由，也不会当场装上任何东西。"
