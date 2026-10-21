@@ -628,6 +628,31 @@ def append_alarm(url: str, token: str | None, sender: str, task_id: str,
     return bool(task), str((task or {}).get("id") or "")
 
 
+def close_alarm(url: str, token: str | None, sender: str, task_id: str,
+                body: str, timeout: float = 20.0) -> tuple[bool, str]:
+    """Retire an open alarm task now that every member it named recovered.
+
+    Clearing the state file alone lets a *second* fault page again, but it
+    leaves the old task open forever describing a fault that ended. A watchdog
+    that cries wolf and never retracts teaches its reader to ignore the open
+    list, so this marks the task done with the numbers that cleared it.
+    """
+    data = json.dumps({"id": task_id, "by": sender, "status": "done",
+                       "output": body}).encode("utf-8")
+    request = urllib.request.Request(
+        url.rstrip("/") + "/result", data=data,
+        headers={"Content-Type": "application/json"})
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001 - a pager that dies pages nobody
+        return False, f"{type(exc).__name__}: {exc}"
+    task = payload.get("task") if isinstance(payload, dict) else None
+    return bool(task), str((task or {}).get("id") or "")
+
+
 def run_vote_check(cmd: str,
                    timeout: float = DEFAULT_VOTE_TIMEOUT_S
                    ) -> tuple[str, str, dict | None]:
@@ -741,6 +766,16 @@ def page_open_alarm(args, alarms: list[dict], raw: str, now: float,
     """
     state_path = (Path(args.alarm_state_file) if args.alarm_state_file else None)
     state = load_alarm_state(state_path)
+
+    token = ""
+    if args.alarm_token_file:
+        try:
+            token = Path(args.alarm_token_file).expanduser().read_text(
+                encoding="utf-8").strip()
+        except OSError as exc:
+            print(f"{stamp} think-watchdog alarm token unreadable: {exc}",
+                  flush=True)
+
     if not alarms:
         # Every member we were watching is bounded again. Forget them, so a
         # second fault later is a *new* alarm and pages again. The vote leg and
@@ -750,6 +785,19 @@ def page_open_alarm(args, alarms: list[dict], raw: str, now: float,
                      if not family or key.startswith(family)]
         if recovered:
             for key in recovered:
+                entry = state.get(key)
+                if isinstance(entry, dict):
+                    task_id = str(entry.get("task_id") or "")
+                    if task_id and args.alarm_url:
+                        opened = age_phrase(max(0.0, now - float(
+                            entry.get("issued_at") or now)))
+                        note = (f"recovered: {key} bounded again on "
+                                f"{stamp}; this alarm is retired")
+                        ok, detail = close_alarm(args.alarm_url, token or None,
+                                                 args.alarm_by, task_id, note)
+                        print(f"{stamp} think-watchdog alarm {task_id} "
+                              f"({'closed' if ok else 'NOT closed: ' + detail}"
+                              f", open {opened})", flush=True)
                 state.pop(key, None)
             save_alarm_state(state_path, state)
             print(f"{stamp} think-watchdog alarm state cleared "
@@ -777,15 +825,6 @@ def page_open_alarm(args, alarms: list[dict], raw: str, now: float,
             state[key] = state.pop(newest)
             entry = state[key]
             save_alarm_state(state_path, state)
-
-    token = ""
-    if args.alarm_token_file:
-        try:
-            token = Path(args.alarm_token_file).expanduser().read_text(
-                encoding="utf-8").strip()
-        except OSError as exc:
-            print(f"{stamp} think-watchdog alarm token unreadable: {exc}",
-                  flush=True)
 
     if entry is None:
         body = build_alarm_body(alarms, raw, now, note=args.alarm_note)

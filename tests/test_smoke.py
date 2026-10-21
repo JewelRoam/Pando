@@ -2959,6 +2959,47 @@ class TestThinkWatchdogVoteDelivery(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertEqual(tasks, [])
 
+    def test_a_recovered_member_retires_the_open_alarm_task(self):
+        """Clearing the state file must also close the mailbox task.
+
+        On 2026-10-20 win-laya-int8 wedged, the watchdog paged a claimable
+        ``[alarm]`` task, win-laya recovered, and the watchdog cleared its own
+        state - but the task stayed open forever. An open list holding one
+        stale alarm stops meaning "something is wrong", so recovery has to
+        mark the task done, not just forget it.
+        """
+        wd = self._tool()
+        with tempfile.TemporaryDirectory() as tmp:
+            url, token_file, box, server, thread = self._alarm_stub(tmp)
+            state_file = Path(tmp) / "alarm-state.json"
+            try:
+                # First poll: win-laya wedges -> exactly one open alarm task.
+                rc1 = self._run(wd, tmp, self._vote_cmd(tmp, self.WEDGE, 2),
+                                url, token_file,
+                                extra=("--alarm-state-file", str(state_file)))
+                tasks = box.list(None)
+                # Second poll: bounded again -> the same task is retired.
+                healthy = {"now": 1_800_000_000.0,
+                           "members": {"win-laya-int8": {"status": "ok",
+                                                         "slope": -0.01,
+                                                         "samples": 43}},
+                           "unnamed_silent": []}
+                rc2 = self._run(wd, tmp, self._vote_cmd(tmp, healthy, 0),
+                                url, token_file,
+                                extra=("--alarm-state-file", str(state_file)))
+                tasks_after = box.list(None)
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=3)
+
+            self.assertEqual(rc1, 0)
+            self.assertEqual(rc2, 0)
+            self.assertEqual(len(tasks), 1)
+            self.assertEqual(tasks[0]["status"], "open")
+            self.assertEqual(len(tasks_after), 1,
+                             "recovery retires the task, it does not mint a new one")
+            self.assertEqual(tasks_after[0]["status"], "done")
+            self.assertIn("retired", tasks_after[0].get("output", ""))
+
     def test_a_suppressed_alarm_is_named_not_called_ok(self):
         """rc=0 with --page-new-only means "nothing new", not "all healthy".
 
