@@ -42,6 +42,13 @@ Usage:
       --token-file ~/.pandosi/mailbox.token \\
       --decision mac-text --decision win-laya-int8
 
+A Mac voter that may sleep is named twice: once in ``--decision``
+(it must be voting) and once in ``--sleep-gated-member`` (but only
+while this host was awake during the window). ``--ignore-member``
+remains the unconditional omission for hosts outside the always-on
+set. Judging a sleeping laptop as if it were an always-on voter is
+what this split exists to stop.
+
 Exit codes: 0 = every member bounded, 2 = somebody is falling behind or a
 named decision member has gone quiet, 1 = the feed could not be read.
 """
@@ -51,6 +58,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 import time
 import urllib.error
@@ -99,6 +107,74 @@ def _read_token(path: str | None) -> str | None:
     except OSError:
         return None
     return value or None
+
+
+SYSCTL_SEC_RE = re.compile(r"sec\s*=\s*(\d+)")
+
+
+def _sysctl_epoch(text: str) -> float:
+    """The ``sec`` field of a ``kern.*time`` sysctl value, or 0 when absent.
+
+    ``sysctl -n kern.sleeptime`` prints ``{ sec = 0, usec = 0 } ...``; the
+    number is an absolute epoch, and 0 means the kernel has no such event
+    since boot.
+    """
+    match = SYSCTL_SEC_RE.search(str(text or ""))
+    return float(match.group(1)) if match else 0.0
+
+
+def read_host_sleep() -> tuple[float, float]:
+    """(last sleep epoch, last wake epoch) of this host, from sysctl.
+
+    ``kern.sleeptime`` is when the kernel last entered sleep and
+    ``kern.waketime`` when it last woke; each is 0 if that never happened.
+    This is a subprocess only because the stdlib has no sysctl binding, and it
+    runs at most once per watchdog pass. Any failure (not macOS, a sandbox that
+    cannot fork) reads as "never slept", which keeps a member judged rather
+    than silently dropped.
+    """
+    try:
+        out = subprocess.run(
+            ["sysctl", "-n", "kern.sleeptime", "kern.waketime"],
+            capture_output=True, text=True, timeout=5.0)
+    except (OSError, subprocess.TimeoutExpired):
+        return (0.0, 0.0)
+    if out.returncode != 0:
+        return (0.0, 0.0)
+    lines = [line for line in out.stdout.splitlines() if line.strip()]
+    sleep_start = _sysctl_epoch(lines[0]) if lines else 0.0
+    wake = _sysctl_epoch(lines[1]) if len(lines) > 1 else 0.0
+    return (sleep_start, wake)
+
+
+def sleep_overlaps_window(sleep_start: float, sleep_end: float,
+                          now: float, window_s: float) -> bool:
+    """True when [sleep_start, sleep_end) touches [now - window_s, now].
+
+    ``sleep_end <= sleep_start`` means "still asleep now"; the caller passes
+    that open-ended case as ``sleep_end = now``. A zero ``sleep_start`` means
+    the host has never slept, i.e. awake the whole window.
+    """
+    if sleep_start <= 0:
+        return False
+    end = now if sleep_end <= sleep_start else sleep_end
+    return sleep_start <= now and end >= now - window_s
+
+
+def host_was_asleep(now: float, window_s: float) -> bool:
+    """True when this host spent part of [now-window_s, now] asleep.
+
+    ``kern.sleeptime`` only remembers the *last* sleep. Because sleeps are
+    ordered, the last sleep overlapping the window is exactly "some sleep
+    overlapped the window" - an earlier sleep cannot be the last one and fall
+    outside it. So two sysctls are sufficient; no pmset log parsing.
+    """
+    sleep_start, wake = read_host_sleep()
+    if sleep_start > 0 and wake <= sleep_start:
+        sleep_end = now  # last transition was into sleep (or never woke)
+    else:
+        sleep_end = wake
+    return sleep_overlaps_window(sleep_start, sleep_end, now, window_s)
 
 
 def _http_json(url: str, token: str | None, timeout: float = 20.0):
@@ -199,6 +275,16 @@ def exclude_members(rows: dict[str, list[tuple[float, float]]],
     ignored_names = {name for name in ignored if name}
     return {member: member_rows for member, member_rows in rows.items()
             if member not in ignored_names}
+
+
+def resolve_ignored(ignore_member: list[str], sleep_gated_member: list[str],
+                    host_slept: bool) -> set[str]:
+    """Members to drop: the unconditional set, plus the sleep-gated set only
+    while this host was asleep during the window."""
+    ignored = {name for name in ignore_member if name}
+    if host_slept:
+        ignored.update(name for name in sleep_gated_member if name)
+    return ignored
 
 
 def member_slope(rows: list[tuple[float, float]], now: float,
@@ -369,7 +455,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ignore-member", action="append", default=[],
                         metavar="NAME",
                         help="repeatable: omit a member entirely; use for a "
-                             "host allowed to sleep or outside the always-on set")
+                             "host outside the always-on set")
+    parser.add_argument("--sleep-gated-member", action="append", default=[],
+                        metavar="NAME",
+                        help="repeatable: judge NAME normally, but omit it "
+                             "when this host was asleep during the window "
+                             "(a laptop voter checked only while awake)")
     parser.add_argument("--now", type=float, default=None,
                         help="override clock (testing only)")
     parser.add_argument("--json", action="store_true",
@@ -396,8 +487,13 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     tasks = (payload or {}).get("tasks") or []
 
-    rows = exclude_members(lag_rows(tasks), args.ignore_member)
-    verdicts = survey(rows, args.decision, now,
+    host_slept = bool(args.sleep_gated_member) and host_was_asleep(
+        now, args.window_seconds)
+    ignored = resolve_ignored(args.ignore_member, args.sleep_gated_member,
+                              host_slept)
+    decision = [d for d in args.decision if d and d not in ignored]
+    rows = exclude_members(lag_rows(tasks), sorted(ignored))
+    verdicts = survey(rows, decision, now,
                       window_s=args.window_seconds,
                       min_samples=args.min_samples,
                       min_span_s=args.min_span_seconds,
@@ -405,10 +501,10 @@ def main(argv: list[str] | None = None) -> int:
     state_file = Path(args.state_file) if args.state_file else None
     track_first_seen(state_file, verdicts, now)
     write_snapshot(Path(args.snapshot_file) if args.snapshot_file else None,
-                   verdicts, now, args.decision, args.window_seconds)
+                   verdicts, now, decision, args.window_seconds)
 
     unnamed_silent = [m for m, v in verdicts.items()
-                      if v["status"] == UNKNOWN and m not in args.decision]
+                      if v["status"] == UNKNOWN and m not in decision]
     omitted = set(unnamed_silent)
 
     if args.json:

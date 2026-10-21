@@ -3596,13 +3596,15 @@ class TestThinkWatchdogCodeDelivery(unittest.TestCase):
         self.assertNotIn("code-drift-alarms.json", plist)
         self.assertTrue((root / "tools" / "code_drift_check.py").exists())
 
-    def test_the_installed_voter_only_checks_deployed_members(self):
-        """Mac may sleep, so its stale voters are not a 24h deployment fault.
+    def test_the_installed_voter_judges_sleepable_macs_only_while_awake(self):
+        """Mac may sleep, so its voters are gated on wakefulness, not deleted.
 
-        The voter leg used Mac decision members that necessarily fall behind
-        whenever the laptop wakes. That produced a wedge alarm for a machine
-        the user explicitly excluded from the always-on acceptance set. Only
-        voters hosted on the two always-on deployments may page.
+        A laptop that sleeps looks exactly like a silent voter on a green
+        panel. Deleting the Mac members (--ignore-member) fixed the false
+        alarm by also deleting the real one: a Mac that is awake and wedged is
+        invisible. The split is --decision (must be voting) plus
+        --sleep-gated-member (but only while this host is awake), so the
+        always-on deployments page as before and an awake Mac pages too.
         """
         root = Path(__file__).resolve().parents[1]
         plist = (root / "tools" / "mac-launchd"
@@ -3611,10 +3613,12 @@ class TestThinkWatchdogCodeDelivery(unittest.TestCase):
         args = plistlib.loads(plist.encode("utf-8"))["ProgramArguments"]
         vote_index = args.index("--vote-cmd")
         cmd = args[vote_index + 1]
-        self.assertNotIn("--decision mac-text", cmd)
-        self.assertNotIn("--decision mac-laya-int8", cmd)
-        self.assertIn("--ignore-member mac-text", cmd)
-        self.assertIn("--ignore-member mac-laya-int8", cmd)
+        self.assertIn("--decision mac-text", cmd)
+        self.assertIn("--decision mac-laya-int8", cmd)
+        self.assertIn("--sleep-gated-member mac-text", cmd)
+        self.assertIn("--sleep-gated-member mac-laya-int8", cmd)
+        self.assertNotIn("--ignore-member mac-text", cmd)
+        self.assertNotIn("--ignore-member mac-laya-int8", cmd)
         self.assertIn("--decision pandosi-pi5-x", cmd)
         self.assertIn("--decision pandosi-pi5-laya", cmd)
         self.assertIn("--decision win-laya-int8", cmd)
@@ -11963,6 +11967,42 @@ class TestVoteWatchdog(unittest.TestCase):
         verdicts = wd.survey(visible, ["win-laya-int8"], now)
         self.assertNotIn("mac-text", verdicts)
         self.assertEqual(verdicts["win-laya-int8"]["status"], wd.OK)
+
+    def test_sysctl_epoch_reads_the_sec_field(self):
+        wd = self._tool()
+        self.assertEqual(wd._sysctl_epoch("{ sec = 123, usec = 4 } Tue ..."),
+                         123.0)
+        self.assertEqual(wd._sysctl_epoch(""), 0.0)
+        self.assertEqual(wd._sysctl_epoch("no sec field"), 0.0)
+
+    def test_sleep_overlaps_window_cases(self):
+        """The gate is open only when a sleep actually touched the window."""
+        wd = self._tool()
+        now = 1_800_000_000.0
+        # never slept
+        self.assertFalse(wd.sleep_overlaps_window(0.0, 0.0, now, 5400.0))
+        # slept and woke entirely before the window
+        self.assertFalse(wd.sleep_overlaps_window(now - 20000, now - 19000,
+                                                  now, 5400.0))
+        # slept before the window but woke inside it
+        self.assertTrue(wd.sleep_overlaps_window(now - 7000, now - 2000,
+                                                 now, 5400.0))
+        # slept inside the window and is still asleep (end == now)
+        self.assertTrue(wd.sleep_overlaps_window(now - 1000, now, now, 5400.0))
+        # slept and woke entirely inside the window
+        self.assertTrue(wd.sleep_overlaps_window(now - 3000, now - 1000,
+                                                 now, 5400.0))
+
+    def test_resolve_ignored_keeps_sleep_gated_members_while_awake(self):
+        """Unconditional ignores always drop; sleep-gated ones only while slept."""
+        wd = self._tool()
+        self.assertEqual(wd.resolve_ignored([], [], False), set())
+        self.assertEqual(wd.resolve_ignored(["x"], [], True), {"x"})
+        self.assertEqual(wd.resolve_ignored([], ["mac-text"], False), set())
+        self.assertEqual(wd.resolve_ignored([], ["mac-text"], True),
+                         {"mac-text"})
+        self.assertEqual(wd.resolve_ignored(["x"], ["mac-text"], True),
+                         {"x", "mac-text"})
 
     def test_a_named_decision_member_that_stops_voting_is_silent(self):
         """Having no slope is its own finding when the caller said "must vote"."""
