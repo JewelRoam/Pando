@@ -4656,6 +4656,7 @@ class TestReactions(unittest.TestCase):
                 for i in range(5)]
         ids = {row["id"]: row["title"].split()[1] for row in rows}
         paths = []
+        listings = []
 
         with tempfile.TemporaryDirectory() as td:
             ident = load_or_create(_P(td) / "identity.json")
@@ -4672,6 +4673,7 @@ class TestReactions(unittest.TestCase):
                     return {"tasks": {i: {"id": i, "body": body_for(ids[i])}
                                       for i in payload["ids"]}}
                 if path.startswith("/tasks"):
+                    listings.append(path)
                     return {"tasks": rows}
                 raise AssertionError(f"unbatched body read: {path}")
 
@@ -4681,6 +4683,7 @@ class TestReactions(unittest.TestCase):
 
         # Two rows, two bodies, one request -- and only the newest two.
         self.assertEqual(paths, ["t3", "t4"])
+        self.assertEqual(listings, ["/tasks?status=all&limit=2"])
         self.assertEqual([p.proposal_id for p in found], ["p3", "p4"])
 
     def test_the_sweep_reads_titles_and_retires_the_backlog(self):
@@ -4712,7 +4715,8 @@ class TestReactions(unittest.TestCase):
                             for line in ledger.read_text().splitlines() if line]
 
         self.assertEqual(swept, 1)
-        self.assertEqual(paths, ["/tasks?status=all"])
+        self.assertEqual(paths, [
+            f"/tasks?status=all&limit={reactd.STALE_SWEEP_FEED_LIMIT}"])
         self.assertEqual([r["target_id"] for r in rows_written], [old])
         self.assertTrue(rows_written[0]["stale"])
         self.assertNotIn(new, seen)

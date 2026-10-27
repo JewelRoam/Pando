@@ -96,6 +96,12 @@ def load_seen(path: Path) -> set[str]:
 #: ledger row count; the next pass sweeps whatever is left.
 STALE_SWEEP_LIMIT = 2000
 
+#: The append-only feed has tens of thousands of rows. Both the stale-title
+#: scan and the signed-body read only need a recent tail; fetching the whole
+#: history every 40 seconds made display dominate reaction work.
+STALE_SWEEP_FEED_LIMIT = 2000
+REACT_FEED_LIMIT = 500
+
 #: A proposal older than this is history, not an open question. An hour is
 #: long enough for a proposal to cross three mailboxes and for every host to
 #: poll, and short enough that a vote still lands while the proposal matters.
@@ -124,7 +130,8 @@ def stale_ids(proposal_ids, seen, max_age: float, now: float | None = None):
 
 def sweep_stale(mailboxes, token: str | None, seen: set[str],
                 max_age: float, ledger: Path, timeout: float,
-                now: float | None = None) -> int:
+                now: float | None = None,
+                limit: int | None = STALE_SWEEP_FEED_LIMIT) -> int:
     """Retire every proposal in the chain that is too old to answer.
 
     Reads titles only. Returns how many ids were newly marked skipped.
@@ -133,7 +140,10 @@ def sweep_stale(mailboxes, token: str | None, seen: set[str],
         return 0
     rows = []
     for url in mailboxes:
-        listing = _request(url, "/tasks?status=all", token, "GET",
+        path = "/tasks?status=all"
+        if limit is not None:
+            path += f"&limit={int(limit)}"
+        listing = _request(url, path, token, "GET",
                            timeout=timeout)
         if isinstance(listing, dict) and listing.get("error"):
             continue
@@ -405,7 +415,7 @@ def main() -> int:
                                 args.timeout)
             proposals, _source, read_error = fetch_proposals_any(
                 mailboxes, token, status="all", timeout=args.timeout,
-                skip_ids=seen)
+                max_items=REACT_FEED_LIMIT, skip_ids=seen)
             if read_error and not proposals:
                 raise RuntimeError(read_error)
             report = react_once(proposals, stems, identity, mailboxes,

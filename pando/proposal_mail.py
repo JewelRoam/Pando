@@ -194,7 +194,10 @@ def fetch_proposals_any(urls, token: str | None = None,
     last_error = None
     answered = False
     for url in chain:
-        listing = _request(url, f"/tasks?status={status}", token, "GET",
+        path = f"/tasks?status={status}"
+        if max_items is not None:
+            path += f"&limit={int(max_items)}"
+        listing = _request(url, path, token, "GET",
                            timeout=timeout)
         if isinstance(listing, dict) and listing.get("error"):
             last_error = str(listing.get("error"))
