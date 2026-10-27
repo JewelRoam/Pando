@@ -30,7 +30,7 @@ import urllib.request
 
 from .genesis import (Proposal, proposals_from_log, sign_proposal,
                       sign_reaction)
-from .net import open_url
+from .net import open_url, response_json, response_text
 
 TITLE_PREFIX = "[proposal]"
 PROPOSAL_PREFIX = TITLE_PREFIX
@@ -82,7 +82,11 @@ def is_reaction_task(title: str) -> bool:
 
 def _request(url: str, path: str, token: str | None, method: str,
              payload: dict | None = None, timeout: float = 15) -> dict:
-    headers = {"Content-Type": "application/json"}
+    # Task listings are the largest mailbox responses (tens of thousands of
+    # rows). The server compresses only when asked, so older peers stay
+    # compatible while updated peers transfer the same JSON about 11x smaller.
+    headers = {"Content-Type": "application/json",
+               "Accept-Encoding": "gzip"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
     body = None if payload is None else json.dumps(payload).encode("utf-8")
@@ -90,9 +94,9 @@ def _request(url: str, path: str, token: str | None, method: str,
                                      headers=headers, method=method)
     try:
         with open_url(request, timeout=timeout) as resp:
-            return json.loads(resp.read())
+            return response_json(resp)
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", "replace")
+        detail = response_text(exc)
         return {"error": f"HTTP {exc.code}", "detail": detail}
     except urllib.error.URLError as exc:
         return {"error": f"unreachable: {exc}"}

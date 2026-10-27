@@ -35,6 +35,7 @@ everything else is closed.
 from __future__ import annotations
 
 import argparse
+import gzip
 import hmac
 import json
 import secrets
@@ -49,7 +50,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from pando.net import open_url  # noqa: E402 - repo root must be importable
+from pando.net import (open_url, response_json,  # noqa: E402
+                       response_text)
 from pando.grant_delegation import (  # noqa: E402 - repo root must be importable
     DelegationError, issue_envelope, operator_status,
 )
@@ -267,6 +269,21 @@ def build_handler(mailbox: Mailbox, token: str, telemetry=None,
                   code_cache: Path | None = None,
                   grant_file: Path | None = None,
                   identity_file: Path | None = None):
+    def accepts_gzip(value: str) -> bool:
+        for item in str(value or "").split(","):
+            coding, *params = [part.strip() for part in item.split(";")]
+            if coding.lower() != "gzip":
+                continue
+            for param in params:
+                key, _, raw = param.partition("=")
+                if key.strip().lower() == "q":
+                    try:
+                        return float(raw) > 0
+                    except ValueError:
+                        return False
+            return True
+        return False
+
     class MailboxHandler(BaseHTTPRequestHandler):
         # A peer may keep an idle HTTP/1.1 connection open.  Without a
         # timeout every such client permanently occupies a request thread;
@@ -278,9 +295,16 @@ def build_handler(mailbox: Mailbox, token: str, telemetry=None,
 
         def _send(self, code: int, payload: dict) -> None:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            compressed = (len(body) >= 1024 and
+                          accepts_gzip(self.headers.get("Accept-Encoding", "")))
+            if compressed:
+                body = gzip.compress(body, compresslevel=6, mtime=0)
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
+            if compressed:
+                self.send_header("Content-Encoding", "gzip")
+                self.send_header("Vary", "Accept-Encoding")
             self.end_headers()
             self.wfile.write(body)
 
@@ -552,7 +576,8 @@ def _request(args, method: str, path: str, payload: dict | None = None):
     token = args.token or (Path(token_file).expanduser()
                            .read_text(encoding="utf-8").strip()
                            if token_file else None)
-    headers = {"Content-Type": "application/json"}
+    headers = {"Content-Type": "application/json",
+               "Accept-Encoding": "gzip"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
     body = None if payload is None else json.dumps(payload).encode("utf-8")
@@ -560,10 +585,9 @@ def _request(args, method: str, path: str, payload: dict | None = None):
                                      data=body, headers=headers, method=method)
     try:
         with open_url(request, args.timeout) as response:
-            return json.loads(response.read())
+            return response_json(response)
     except urllib.error.HTTPError as exc:
-        return {"error": f"HTTP {exc.code}", "detail": exc.read().decode(
-            "utf-8", "replace")}
+        return {"error": f"HTTP {exc.code}", "detail": response_text(exc)}
     except urllib.error.URLError as exc:
         return {"error": f"unreachable: {exc}"}
 

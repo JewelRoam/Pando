@@ -24,7 +24,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from pando.net import open_url  # noqa: E402 - repo root must be importable
+from pando.net import (open_url, response_json,  # noqa: E402
+                       response_text)
 
 # Connection info lives in per-machine config, not in the repo (doctrine
 # 2026-10-17). Pass --url or set PANDOSI_MAILBOX_URL; the bare default is the
@@ -38,7 +39,8 @@ def _request(args, method: str, path: str,
     token = args.token or None
     if not token and args.token_file and os.path.exists(args.token_file):
         token = open(args.token_file, encoding="utf-8").read().strip()
-    headers = {"Content-Type": "application/json"}
+    headers = {"Content-Type": "application/json",
+               "Accept-Encoding": "gzip"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
     body = None if payload is None else json.dumps(payload).encode("utf-8")
@@ -47,9 +49,9 @@ def _request(args, method: str, path: str,
                                      method=method)
     try:
         with open_url(request, args.timeout) as resp:
-            return json.loads(resp.read())
+            return response_json(resp)
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", "replace")
+        detail = response_text(exc)
         return {"error": f"HTTP {exc.code}", "detail": detail}
     except urllib.error.URLError as exc:
         return {"error": f"unreachable: {exc}"}

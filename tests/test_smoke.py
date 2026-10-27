@@ -9,6 +9,7 @@ end-to-end vote including node death and checkpoint-diverse quorum picking.
 import argparse
 import base64
 import contextlib
+import gzip
 import hashlib
 import io
 import json
@@ -8414,6 +8415,49 @@ class TestChat(unittest.TestCase):
 
 
 class TestMailboxReplica(unittest.TestCase):
+    def test_large_listing_is_gzipped_and_the_client_decodes_it(self):
+        import importlib.util
+        from pando.proposal_mail import _request
+        spec = importlib.util.spec_from_file_location(
+            "agent_mailbox_under_test_gzip",
+            Path(__file__).resolve().parents[1] / "tools" / "agent_mailbox.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as tmp:
+            box = module.Mailbox(Path(tmp) / "box")
+            for i in range(80):
+                box.create("ann", f"[chat] message-{i}", "x" * 200)
+            server = module.ThreadingHTTPServer(
+                ("127.0.0.1", 0), module.build_handler(box, "tok"))
+            port = server.server_address[1]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            url = f"http://127.0.0.1:{port}"
+            try:
+                request = urllib.request.Request(
+                    f"{url}/tasks?status=all",
+                    headers={"Authorization": "Bearer tok",
+                             "Accept-Encoding": "gzip"})
+                with urllib.request.urlopen(request, timeout=3) as resp:
+                    self.assertEqual(resp.headers.get("Content-Encoding"), "gzip")
+                    compressed = resp.read()
+                disabled = urllib.request.Request(
+                    f"{url}/tasks?status=all",
+                    headers={"Authorization": "Bearer tok",
+                             "Accept-Encoding": "gzip;q=0"})
+                with urllib.request.urlopen(disabled, timeout=3) as resp:
+                    self.assertIsNone(resp.headers.get("Content-Encoding"))
+                decoded = json.loads(gzip.decompress(compressed))
+                self.assertEqual(len(decoded["tasks"]), 80)
+                plain = json.dumps(decoded, ensure_ascii=False).encode("utf-8")
+                self.assertLess(len(compressed), len(plain))
+                client_rows = _request(url, "/tasks?status=all", "tok", "GET")
+                self.assertEqual(len(client_rows["tasks"]), 80)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=3)
+
     def test_listing_uses_cached_metadata_and_newest_limit(self):
         import importlib.util
         from types import SimpleNamespace

@@ -23,7 +23,8 @@ from urllib.parse import urlsplit
 from .chat import (OPEN_COOLDOWN, chat_peer_ids, message_text, next_opening,
                    next_reply, normalize_chat)
 from .common import PROPOSING_ROLE
-from .net import LOOPBACK, local_addresses, open_url
+from .net import (LOOPBACK, local_addresses, open_url, response_json,
+                  response_text)
 from .proposal_mail import delivery_failed, mailbox_chain
 
 
@@ -441,16 +442,17 @@ def system_prompt(node_id: str, model: str) -> str:
 
 def _request(url: str, token: str | None, method: str,
              payload: dict | None, timeout: float) -> dict:
-    headers = {"Content-Type": "application/json"}
+    headers = {"Content-Type": "application/json",
+               "Accept-Encoding": "gzip"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
     body = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(url, data=body, headers=headers, method=method)
     try:
         with open_url(request, timeout) as resp:
-            return json.loads(resp.read())
+            return response_json(resp)
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", "replace")
+        detail = response_text(exc)
         return {"error": f"HTTP {exc.code}", "detail": detail[:500]}
     except urllib.error.URLError as exc:
         return {"error": f"unreachable: {exc}"}

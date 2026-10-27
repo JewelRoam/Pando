@@ -11,7 +11,9 @@ tailnet mailboxes. This module is the single implementation:
 
 from __future__ import annotations
 
+import gzip
 import ipaddress
+import json
 import socket
 import urllib.parse
 import urllib.request
@@ -39,6 +41,32 @@ def open_url(request: urllib.request.Request, timeout: float):
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         return opener.open(request, timeout=timeout)
     return urllib.request.urlopen(request, timeout=timeout)
+
+
+def response_bytes(response) -> bytes:
+    """Read a response body, undoing the one transfer encoding we request.
+
+    ``urllib`` deliberately does not decompress content encodings for callers.
+    Keeping that step next to :func:`open_url` means every mailbox client reads
+    gzip listings the same way and the behavior is independent of which helper
+    happened to open the socket.
+    """
+    raw = response.read()
+    encoding = str(response.headers.get("Content-Encoding", "")).strip().lower()
+    if encoding == "gzip":
+        return gzip.decompress(raw)
+    return raw
+
+
+def response_text(response, encoding: str = "utf-8",
+                  errors: str = "replace") -> str:
+    """Decode a (possibly gzip-compressed) response body as text."""
+    return response_bytes(response).decode(encoding, errors)
+
+
+def response_json(response):
+    """Decode a (possibly gzip-compressed) response body as JSON."""
+    return json.loads(response_bytes(response))
 
 
 def local_addresses() -> set[str]:
