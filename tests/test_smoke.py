@@ -5637,6 +5637,118 @@ class TestExecution(unittest.TestCase):
             {"t-seed", "t-seed-vote", "t-local-policy",
              "t-local-vote", "t-live"})
 
+    def test_indexed_selection_matches_the_unindexed_algorithm(self):
+        """The incremental indexes are an optimisation, not a new query rule."""
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "agent_mailbox_under_test_selection_index",
+            Path(__file__).resolve().parents[1] / "tools" / "agent_mailbox.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        def unindexed(box, status=None, limit=None, selectors=None,
+                      exclude_proposal_ids=(), include_reactions=True):
+            filters = []
+            for selector in selectors or ():
+                actions = {str(value) for value in selector.get("actions", ())
+                           if value}
+                authors = {str(value) for value in selector.get("authors", ())
+                           if value}
+                if actions or authors:
+                    filters.append((actions, authors))
+            excluded = {str(value) for value in exclude_proposal_ids if value}
+            with box._lock:
+                rows = [dict(row) for row in box._summaries.values()
+                        if status is None or status == "all"
+                        or row.get("status") == status]
+            rows.sort(key=lambda row: (row.get("created_at", ""),
+                                       row.get("id", "")))
+            base = rows[-limit:] if limit is not None and limit else []
+            keep = {row.get("id") for row in base}
+            proposal_ids = set()
+            for row in base:
+                parsed = module._proposal_parts(row.get("title"))
+                if parsed:
+                    proposal_ids.add(parsed[0])
+            for row in rows:
+                parsed = module._proposal_parts(row.get("title"))
+                if not parsed:
+                    continue
+                proposal_id, action, author = parsed
+                if proposal_id in excluded:
+                    continue
+                if any((not actions or action in actions)
+                       and (not authors or author in authors)
+                       for actions, authors in filters):
+                    keep.add(row.get("id"))
+                    proposal_ids.add(proposal_id)
+            if include_reactions:
+                for row in rows:
+                    if module._reaction_target(row.get("title")) in proposal_ids:
+                        keep.add(row.get("id"))
+            return [row for row in rows if row.get("id") in keep]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            box = module.Mailbox(Path(tmp) / "box")
+            rows = [
+                {"id": "t-a", "title": "[proposal] p-a seed.export by peer",
+                 "status": "claimed", "created_at": "2026-10-27T10:00:00"},
+                {"id": "t-b", "title": "[proposal] p-b policy.set by mac-proposer",
+                 "status": "done", "created_at": "2026-10-27T10:01:00"},
+                {"id": "t-c", "title": "[proposal] p-c policy.set by peer",
+                 "status": "open", "created_at": "2026-10-27T10:02:00"},
+                {"id": "t-d", "title": "[proposal] p-d culture.refine by mac-proposer",
+                 "status": "claimed", "created_at": "2026-10-27T10:03:00"},
+                {"id": "t-e", "title": "[proposal] p-e seed.replicate by peer",
+                 "status": "done", "created_at": "2026-10-27T10:04:00"},
+                {"id": "t-ra", "title": "[reaction] p-a adopt by voter",
+                 "status": "done", "created_at": "2026-10-27T10:05:00"},
+                {"id": "t-rb", "title": "[reaction] p-b adopt by voter",
+                 "status": "claimed", "created_at": "2026-10-27T10:06:00"},
+                {"id": "t-rd", "title": "[reaction] p-d adopt by voter",
+                 "status": "open", "created_at": "2026-10-27T10:07:00"},
+                {"id": "t-re", "title": "[reaction] p-e adopt by voter",
+                 "status": "done", "created_at": "2026-10-27T10:08:00"},
+                {"id": "t-chat", "title": "[chat] newest",
+                 "status": "open", "created_at": "2026-10-27T10:09:00"},
+            ]
+            # Save out of creation order so insertion, rather than scan order,
+            # is what puts the summaries in mailbox order.
+            for row in reversed(rows):
+                box.save({**row, "from": "ann", "body": "x", "history": []})
+
+            # Updating a task must move both its status order and its reaction
+            # closure. This is the failure mode a one-time startup index misses.
+            changed = {**rows[0], "title": "[reaction] p-c adopt by voter",
+                       "status": "open", "from": "ann", "body": "x",
+                       "history": []}
+            box.save(changed)
+
+            selector_sets = [
+                [],
+                [{"actions": ["seed.export", "seed.replicate"]}],
+                [{"actions": ["policy.set"], "authors": ["mac-proposer"]}],
+                [{"actions": ["policy.set"]},
+                 {"actions": ["culture.refine"], "authors": ["peer"]}],
+            ]
+            for status in (None, "all", "open", "claimed", "done", "failed"):
+                for limit in (None, 0, 1, 3, 20):
+                    for selectors in selector_sets:
+                        for include_reactions in (False, True):
+                            args = dict(
+                                status=status, limit=limit,
+                                selectors=selectors,
+                                exclude_proposal_ids={"p-b"},
+                                include_reactions=include_reactions)
+                            self.assertEqual(box.select(**args),
+                                             unindexed(box, **args))
+
+            # A reopen/restart rebuilds the indexes from the same disk rows.
+            reopened = module.Mailbox(box.tasks_dir.parent)
+            self.assertEqual(reopened.summaries("all"),
+                             box.summaries("all"))
+
     def test_layer_three_drains_this_hosts_backlog_oldest_first(self):
         from pando.execute import rows_for_execution
         rows_in = [{"id": f"t-c{i}",

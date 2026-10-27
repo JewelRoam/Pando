@@ -35,6 +35,7 @@ everything else is closed.
 from __future__ import annotations
 
 import argparse
+import bisect
 import gzip
 import hmac
 import json
@@ -139,6 +140,11 @@ def _reaction_target(title) -> str:
     return parts[1]
 
 
+def _summary_order(row: dict) -> tuple[str, str]:
+    """Stable mailbox order: creation time, then id as the tie-breaker."""
+    return str(row.get("created_at", "")), str(row.get("id", ""))
+
+
 def replication_ids(source_rows: list, dest_rows: list) -> dict:
     """Ids to send. Listings only carry status, so "behind" means status rank.
 
@@ -179,6 +185,13 @@ class Mailbox:
         # metadata copy in memory and refresh it on our own writes; full
         # bodies are still read on demand by load()/list().
         self._summaries: dict[str, dict] = {}
+        # Derived, incrementally maintained indexes behind the summaries. A
+        # focused executor poll used to copy and sort every summary on every
+        # round, even though the mailbox itself changes one task at a time.
+        self._ordered: list[dict] = []
+        self._by_status: dict[str, list[dict]] = {}
+        self._proposal_by_task: dict[str, tuple[str, str, str]] = {}
+        self._reactions_by_target: dict[str, list[str]] = {}
         for path in sorted(self.tasks_dir.glob("*.json")):
             try:
                 task = json.loads(path.read_text(encoding="utf-8"))
@@ -186,6 +199,65 @@ class Mailbox:
                 continue
             if isinstance(task, dict) and task.get("id"):
                 self._summaries[task["id"]] = self._summary(task)
+        self._build_indexes()
+
+    @staticmethod
+    def _insert_ordered(rows: list[dict], row: dict) -> None:
+        bisect.insort(rows, row, key=_summary_order)
+
+    @staticmethod
+    def _remove_ordered(rows: list[dict], row: dict) -> None:
+        key = _summary_order(row)
+        index = bisect.bisect_left(rows, key, key=_summary_order)
+        while index < len(rows) and _summary_order(rows[index]) == key:
+            if rows[index].get("id") == row.get("id"):
+                rows.pop(index)
+                return
+            index += 1
+
+    @staticmethod
+    def _status_rows(by_status: dict[str, list[dict]],
+                     row: dict) -> list[dict]:
+        return by_status.setdefault(str(row.get("status", "")), [])
+
+    def _index_summary(self, row: dict) -> None:
+        self._insert_ordered(self._ordered, row)
+        self._insert_ordered(self._status_rows(self._by_status, row), row)
+        task_id = str(row.get("id", ""))
+        parsed = _proposal_parts(row.get("title"))
+        if parsed:
+            self._proposal_by_task[task_id] = parsed
+        target = _reaction_target(row.get("title"))
+        if target:
+            self._reactions_by_target.setdefault(target, []).append(task_id)
+
+    def _unindex_summary(self, row: dict) -> None:
+        self._remove_ordered(self._ordered, row)
+        self._remove_ordered(self._status_rows(self._by_status, row), row)
+        task_id = str(row.get("id", ""))
+        self._proposal_by_task.pop(task_id, None)
+        target = _reaction_target(row.get("title"))
+        if target:
+            task_ids = self._reactions_by_target.get(target)
+            if task_ids is not None and task_id in task_ids:
+                task_ids.remove(task_id)
+                if not task_ids:
+                    self._reactions_by_target.pop(target, None)
+
+    def _build_indexes(self) -> None:
+        self._ordered = sorted(self._summaries.values(), key=_summary_order)
+        self._by_status = {}
+        self._proposal_by_task = {}
+        self._reactions_by_target = {}
+        for row in self._ordered:
+            self._status_rows(self._by_status, row).append(row)
+            task_id = str(row.get("id", ""))
+            parsed = _proposal_parts(row.get("title"))
+            if parsed:
+                self._proposal_by_task[task_id] = parsed
+            target = _reaction_target(row.get("title"))
+            if target:
+                self._reactions_by_target.setdefault(target, []).append(task_id)
 
     @staticmethod
     def _summary(task: dict) -> dict:
@@ -209,19 +281,24 @@ class Mailbox:
     def save(self, task: dict) -> None:
         self._path(task["id"]).write_text(
             json.dumps(task, indent=2, ensure_ascii=False), encoding="utf-8")
-        self._summaries[task["id"]] = self._summary(task)
+        previous = self._summaries.get(task["id"])
+        if previous is not None:
+            self._unindex_summary(previous)
+        summary = self._summary(task)
+        self._summaries[task["id"]] = summary
+        self._index_summary(summary)
 
     def summaries(self, status: str | None = None,
                   limit: int | None = None) -> list[dict]:
         """Return cached listing rows, optionally bounded to the newest N."""
         with self._lock:
-            rows = [dict(row) for row in self._summaries.values()
-                    if status is None or status == "all"
-                    or row.get("status") == status]
-        rows.sort(key=lambda row: (row.get("created_at", ""), row.get("id", "")))
-        if limit is not None:
-            rows = rows[-limit:] if limit else []
-        return rows
+            if status is None or status == "all":
+                rows = self._ordered
+            else:
+                rows = self._by_status.get(status, [])
+            if limit is not None:
+                rows = rows[-limit:] if limit else []
+            return [dict(row) for row in rows]
 
     def select(self, status: str | None = None, limit: int | None = None,
                selectors=None, exclude_proposal_ids=(),
@@ -250,37 +327,45 @@ class Mailbox:
                 filters.append((actions, authors))
         excluded = {str(value) for value in exclude_proposal_ids or () if value}
         with self._lock:
-            rows = [dict(row) for row in self._summaries.values()
-                    if status is None or status == "all"
-                    or row.get("status") == status]
-        rows.sort(key=lambda row: (row.get("created_at", ""), row.get("id", "")))
+            rows = (self._ordered if status is None or status == "all"
+                    else self._by_status.get(status, []))
 
-        base = rows[-limit:] if limit is not None and limit else []
-        keep = {row.get("id") for row in base}
-        proposal_ids = set()
-        for row in base:
-            parsed = _proposal_parts(row.get("title"))
-            if parsed:
-                proposal_ids.add(parsed[0])
+            base = rows[-limit:] if limit is not None and limit else []
+            keep = {row.get("id") for row in base}
+            proposal_ids = set()
+            for row in base:
+                parsed = _proposal_parts(row.get("title"))
+                if parsed:
+                    proposal_ids.add(parsed[0])
 
-        for row in rows:
-            parsed = _proposal_parts(row.get("title"))
-            if not parsed:
-                continue
-            proposal_id, action, author = parsed
-            if proposal_id in excluded:
-                continue
-            if any((not actions or action in actions)
-                   and (not authors or author in authors)
-                   for actions, authors in filters):
-                keep.add(row.get("id"))
-                proposal_ids.add(proposal_id)
+            if filters:
+                for task_id, (proposal_id, action, author) in \
+                        self._proposal_by_task.items():
+                    row = self._summaries[task_id]
+                    if not (status is None or status == "all"
+                            or row.get("status") == status):
+                        continue
+                    if proposal_id in excluded:
+                        continue
+                    if any((not actions or action in actions)
+                           and (not authors or author in authors)
+                           for actions, authors in filters):
+                        keep.add(task_id)
+                        proposal_ids.add(proposal_id)
 
-        if include_reactions:
-            for row in rows:
-                if _reaction_target(row.get("title")) in proposal_ids:
-                    keep.add(row.get("id"))
-        return [row for row in rows if row.get("id") in keep]
+            if include_reactions:
+                for proposal_id in proposal_ids:
+                    for task_id in self._reactions_by_target.get(
+                            proposal_id, ()):
+                        row = self._summaries[task_id]
+                        if status is None or status == "all" \
+                                or row.get("status") == status:
+                            keep.add(task_id)
+
+            selected = [self._summaries[task_id] for task_id in keep
+                        if task_id in self._summaries]
+            selected.sort(key=_summary_order)
+            return [dict(row) for row in selected]
 
     def count(self, status: str | None = None) -> int:
         with self._lock:
