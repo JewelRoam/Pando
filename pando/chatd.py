@@ -24,7 +24,7 @@ from .chat import (OPEN_COOLDOWN, chat_peer_ids, message_text, next_opening,
                    next_reply, normalize_chat)
 from .common import PROPOSING_ROLE
 from .net import (LOOPBACK, local_addresses, open_url, response_json,
-                  response_text)
+                  response_text, should_request_gzip)
 from .proposal_mail import delivery_failed, mailbox_chain
 
 
@@ -442,8 +442,9 @@ def system_prompt(node_id: str, model: str) -> str:
 
 def _request(url: str, token: str | None, method: str,
              payload: dict | None, timeout: float) -> dict:
-    headers = {"Content-Type": "application/json",
-               "Accept-Encoding": "gzip"}
+    headers = {"Content-Type": "application/json"}
+    if should_request_gzip(url):
+        headers["Accept-Encoding"] = "gzip"
     if token:
         headers["Authorization"] = f"Bearer {token}"
     body = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")

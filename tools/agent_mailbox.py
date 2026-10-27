@@ -51,7 +51,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from pando.net import (open_url, response_json,  # noqa: E402
-                       response_text)
+                       response_text, should_request_gzip)
 from pando.grant_delegation import (  # noqa: E402 - repo root must be importable
     DelegationError, issue_envelope, operator_status,
 )
@@ -576,12 +576,14 @@ def _request(args, method: str, path: str, payload: dict | None = None):
     token = args.token or (Path(token_file).expanduser()
                            .read_text(encoding="utf-8").strip()
                            if token_file else None)
-    headers = {"Content-Type": "application/json",
-               "Accept-Encoding": "gzip"}
+    request_url = f"{args.url.rstrip('/')}{path}"
+    headers = {"Content-Type": "application/json"}
+    if should_request_gzip(request_url):
+        headers["Accept-Encoding"] = "gzip"
     if token:
         headers["Authorization"] = f"Bearer {token}"
     body = None if payload is None else json.dumps(payload).encode("utf-8")
-    request = urllib.request.Request(f"{args.url.rstrip('/')}{path}",
+    request = urllib.request.Request(request_url,
                                      data=body, headers=headers, method=method)
     try:
         with open_url(request, args.timeout) as response:

@@ -30,7 +30,7 @@ import urllib.request
 
 from .genesis import (Proposal, proposals_from_log, sign_proposal,
                       sign_reaction)
-from .net import open_url, response_json, response_text
+from .net import open_url, response_json, response_text, should_request_gzip
 
 TITLE_PREFIX = "[proposal]"
 PROPOSAL_PREFIX = TITLE_PREFIX
@@ -82,11 +82,11 @@ def is_reaction_task(title: str) -> bool:
 
 def _request(url: str, path: str, token: str | None, method: str,
              payload: dict | None = None, timeout: float = 15) -> dict:
-    # Task listings are the largest mailbox responses (tens of thousands of
-    # rows). The server compresses only when asked, so older peers stay
-    # compatible while updated peers transfer the same JSON about 11x smaller.
-    headers = {"Content-Type": "application/json",
-               "Accept-Encoding": "gzip"}
+    # Task listings are the largest mailbox responses. Ask for compression only
+    # across a network; loopback decompression costs more than it saves.
+    headers = {"Content-Type": "application/json"}
+    if should_request_gzip(url):
+        headers["Accept-Encoding"] = "gzip"
     if token:
         headers["Authorization"] = f"Bearer {token}"
     body = None if payload is None else json.dumps(payload).encode("utf-8")

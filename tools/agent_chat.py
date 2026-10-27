@@ -25,7 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from pando.net import (open_url, response_json,  # noqa: E402
-                       response_text)
+                       response_text, should_request_gzip)
 
 # Connection info lives in per-machine config, not in the repo (doctrine
 # 2026-10-17). Pass --url or set PANDOSI_MAILBOX_URL; the bare default is the
@@ -39,12 +39,14 @@ def _request(args, method: str, path: str,
     token = args.token or None
     if not token and args.token_file and os.path.exists(args.token_file):
         token = open(args.token_file, encoding="utf-8").read().strip()
-    headers = {"Content-Type": "application/json",
-               "Accept-Encoding": "gzip"}
+    request_url = f"{args.url.rstrip('/')}{path}"
+    headers = {"Content-Type": "application/json"}
+    if should_request_gzip(request_url):
+        headers["Accept-Encoding"] = "gzip"
     if token:
         headers["Authorization"] = f"Bearer {token}"
     body = None if payload is None else json.dumps(payload).encode("utf-8")
-    request = urllib.request.Request(f"{args.url.rstrip('/')}{path}",
+    request = urllib.request.Request(request_url,
                                      data=body, headers=headers,
                                      method=method)
     try:

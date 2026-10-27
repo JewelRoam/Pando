@@ -89,3 +89,32 @@ def local_addresses() -> set[str]:
         pass
     return found
 
+
+def _host_key(host: str) -> str:
+    """Normalize a URL hostname or address for local-machine comparison."""
+    value = str(host or "").strip().lower().rstrip(".")
+    try:
+        return str(ipaddress.ip_address(value))
+    except ValueError:
+        return value
+
+
+def should_request_gzip(url: str) -> bool:
+    """Ask for compression only when the endpoint is not this machine.
+
+    On loopback, decompression costs more than the tiny transfer it saves (the
+    2026-10-27 production A/B measured +51 ms per request). LAN and tailnet
+    endpoints still benefit from sending large JSON listings compressed.
+    """
+    host = urllib.parse.urlsplit(str(url)).hostname or ""
+    if not host:
+        return False
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        address = None
+    if address is not None and (address.is_loopback or address.is_unspecified):
+        return False
+    local = {_host_key(item) for item in local_addresses()}
+    return _host_key(host) not in local
+

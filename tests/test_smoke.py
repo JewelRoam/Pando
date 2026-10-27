@@ -8415,6 +8415,29 @@ class TestChat(unittest.TestCase):
 
 
 class TestMailboxReplica(unittest.TestCase):
+    def test_gzip_is_requested_only_for_non_local_endpoints(self):
+        from unittest import mock
+        from pando import net
+
+        with mock.patch.object(
+                net, "local_addresses",
+                return_value={"127.0.0.1", "::1", "localhost",
+                              "172.24.19.146", "MacBook.local"}):
+            for url in (
+                    "http://127.0.0.1:8776/tasks",
+                    "http://127.2.3.4:8776/tasks",
+                    "http://localhost:8776/tasks",
+                    "http://[::1]:8776/tasks",
+                    "http://0.0.0.0:8776/tasks",
+                    "http://172.24.19.146:8776/tasks",
+                    "http://macbook.local:8776/tasks"):
+                self.assertFalse(net.should_request_gzip(url), url)
+            for url in (
+                    "http://172.24.19.147:8776/tasks",
+                    "http://100.93.216.90:8778/tasks",
+                    "https://example.com/tasks"):
+                self.assertTrue(net.should_request_gzip(url), url)
+
     def test_large_listing_is_gzipped_and_the_client_decodes_it(self):
         import importlib.util
         from pando.proposal_mail import _request
