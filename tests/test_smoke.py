@@ -12371,6 +12371,47 @@ class TestCodeDriftCheck(unittest.TestCase):
             self.assertNotEqual(mod.head_of(seed), published)
             self.assertEqual(mod.deploy_tip(seed), published)
 
+    def test_a_peer_bundle_head_can_be_the_deployable_tip(self):
+        """Peer deployment is a real path, not an unpublished private commit.
+
+        The 2026-10-21 alarm stayed open for days because the Mac fleet ran a
+        local commit already served as ``/code.bundle`` while GitHub's
+        ``origin/main`` was two commits behind. Every Mac member was then
+        classified as permanently *ahead*. A tip file makes the served bundle
+        part of the comparison base, while the upstream-only test above keeps
+        a genuinely private commit from starting the grace clock.
+        """
+        mod = self._tool()
+        with tempfile.TemporaryDirectory(prefix="code-drift-tip-file-") as tmp:
+            root = Path(tmp)
+            bare, seed = root / "origin.git", root / "seed"
+            bare.mkdir()
+            seed.mkdir()
+            _git_in(bare, "init", "--bare")
+            _git_in(seed, "init", "-b", "main")
+            (seed / "README").write_text("published\n", encoding="utf-8")
+            _git_in(seed, "-c", "user.name=fixture",
+                    "-c", "user.email=fixture@localhost",
+                    "-c", "commit.gpgsign=false", "add", "README")
+            _git_in(seed, "-c", "user.name=fixture",
+                    "-c", "user.email=fixture@localhost",
+                    "-c", "commit.gpgsign=false", "commit", "-m", "published")
+            _git_in(seed, "remote", "add", "origin", str(bare))
+            _git_in(seed, "push", "-u", "origin", "main")
+
+            (seed / "README").write_text("served locally\n", encoding="utf-8")
+            _git_in(seed, "-c", "user.name=fixture",
+                    "-c", "user.email=fixture@localhost",
+                    "-c", "commit.gpgsign=false", "add", "README")
+            _git_in(seed, "-c", "user.name=fixture",
+                    "-c", "user.email=fixture@localhost",
+                    "-c", "commit.gpgsign=false", "commit", "-m", "served")
+            served = mod.head_of(seed)
+            tip_file = root / "code.bundle.head"
+            tip_file.write_text(served + "\n", encoding="utf-8")
+
+            self.assertEqual(mod.deploy_tip(seed, [tip_file]), served)
+
     def test_a_fresh_drift_lags_and_only_persisting_drift_pages(self):
         """The grace window, end to end through main().
 

@@ -77,7 +77,7 @@
     <string>--vote-timeout</string>
     <string>120</string>
     <string>--code-cmd</string>
-    <string>/Users/zhengenrong/Downloads/PandoSI-island/.venv/bin/python /Users/zhengenrong/Downloads/PandoSI-island/tools/code_drift_check.py --repo /Users/zhengenrong/Downloads/PandoSI-island --root mac http://127.0.0.1:8765 /Users/zhengenrong/.pandosi/pairing.token --root win http://100.93.216.90:8790 /Users/zhengenrong/.pandosi/win-pairing.token --root-json pi5 /Users/zhengenrong/.pandosi/remote/pi5-root.json --state-file /Users/zhengenrong/.pandosi/code-drift-state.json --snapshot-file /Users/zhengenrong/.pandosi/code-drift-check.json --json</string>
+    <string>/Users/zhengenrong/Downloads/PandoSI-island/.venv/bin/python /Users/zhengenrong/Downloads/PandoSI-island/tools/code_drift_check.py --repo /Users/zhengenrong/Downloads/PandoSI-island --root mac http://127.0.0.1:8765 /Users/zhengenrong/.pandosi/pairing.token --root win http://100.93.216.90:8790 /Users/zhengenrong/.pandosi/win-pairing.token --root-json pi5 /Users/zhengenrong/.pandosi/remote/pi5-root.json --state-file /Users/zhengenrong/.pandosi/code-drift-state.json --snapshot-file /Users/zhengenrong/.pandosi/code-drift-check.json --tip-file /Users/zhengenrong/.pandosi/code.bundle.head --json</string>
     <string>--code-timeout</string>
     <string>120</string>
     <string>--alarm-url</string>
