@@ -5055,11 +5055,30 @@ class TestChatMailboxPartition(unittest.TestCase):
             rows, source, error = chatd.fetch_tasks_any(
                 ["http://primary", "http://fallback"], None, 5)
 
-        self.assertEqual(seen, ["http://primary/tasks?status=all",
-                                "http://fallback/tasks?status=all"])
+        self.assertEqual(seen, [
+            f"http://primary/tasks?status=all&limit={chatd.CHAT_FEED_LIMIT}",
+            f"http://fallback/tasks?status=all&limit={chatd.CHAT_FEED_LIMIT}",
+        ])
         self.assertEqual([row["id"] for row in rows], ["t1"])
         self.assertEqual(source, "http://fallback")
         self.assertIsNone(error)
+
+    def test_a_caller_can_bound_the_chat_feed(self):
+        from unittest import mock
+        from pando import chatd
+
+        seen = []
+
+        def fake_request(url, token, method, payload, timeout):
+            seen.append(url)
+            return {"tasks": [{"id": "t1", "title": "[chat] @mac-llm: hi"}]}
+
+        with mock.patch.object(chatd, "_request", fake_request):
+            rows, _, _ = chatd.fetch_tasks_any(
+                ["http://mailbox"], None, 5, limit=37)
+
+        self.assertEqual(seen, ["http://mailbox/tasks?status=all&limit=37"])
+        self.assertEqual([row["id"] for row in rows], ["t1"])
 
     def test_an_empty_fallback_is_healthy_even_if_primary_is_down(self):
         """This machine having nothing to say is idle, not a failed poll."""
@@ -5101,7 +5120,10 @@ class TestChatMailboxPartition(unittest.TestCase):
         from unittest import mock
         from pando import chatd
 
+        seen = []
+
         def fake_request(url, token, method, payload, timeout):
+            seen.append(url)
             return {"tasks": []}
 
         with mock.patch.object(chatd, "_request", fake_request):
@@ -5109,6 +5131,8 @@ class TestChatMailboxPartition(unittest.TestCase):
                                      {}, 5, True)
 
         self.assertEqual(report["did"], "idle")
+        self.assertEqual(
+            seen, [f"http://mailbox/tasks?status=all&limit={chatd.CHAT_FEED_LIMIT}"])
 
     def test_every_mailbox_down_is_an_error_not_a_silent_idle(self):
         """A partition must not look like a colony with nothing to say."""

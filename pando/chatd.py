@@ -27,6 +27,12 @@ from .net import LOOPBACK, local_addresses, open_url
 from .proposal_mail import delivery_failed, mailbox_chain
 
 
+# chatd polls every few seconds while the mailbox retains the whole colony
+# history. Only the newest slice can participate in a conversation; fetching
+# 35k summary rows on every pass makes a healthy chat loop pay for all memory.
+CHAT_FEED_LIMIT = 500
+
+
 def _read(path: str | None) -> str | None:
     if not path:
         return None
@@ -380,16 +386,20 @@ def _mailboxes(urls) -> list[str]:
     return mailbox_chain(urls[0] if urls else "", urls[1:])
 
 
-def list_tasks(mailbox: str, token: str | None, timeout: float) -> list[dict]:
-    listed = _request(mailbox.rstrip("/") + "/tasks?status=all", token,
-                      "GET", None, timeout)
+def list_tasks(mailbox: str, token: str | None, timeout: float,
+               limit: int | None = CHAT_FEED_LIMIT) -> list[dict]:
+    path = "/tasks?status=all"
+    if limit is not None:
+        path += f"&limit={int(limit)}"
+    listed = _request(mailbox.rstrip("/") + path, token, "GET", None, timeout)
     tasks = listed.get("tasks") if isinstance(listed, dict) else None
     if not isinstance(tasks, list):
         raise RuntimeError(listed.get("error", "bad task list") if isinstance(listed, dict) else "bad task list")
     return tasks
 
 
-def fetch_tasks_any(urls, token: str | None, timeout: float):
+def fetch_tasks_any(urls, token: str | None, timeout: float,
+                    limit: int | None = CHAT_FEED_LIMIT):
     """Read the first non-empty chat feed in *urls*.
 
     Returns ``(tasks, source_url, last_error)``. An empty feed is not a
@@ -401,8 +411,10 @@ def fetch_tasks_any(urls, token: str | None, timeout: float):
     last_error = None
     answered = False
     for url in _mailboxes(urls):
-        listing = _request(url.rstrip("/") + "/tasks?status=all", token,
-                           "GET", None, timeout)
+        path = "/tasks?status=all"
+        if limit is not None:
+            path += f"&limit={int(limit)}"
+        listing = _request(url.rstrip("/") + path, token, "GET", None, timeout)
         if isinstance(listing, dict) and listing.get("error"):
             last_error = str(listing.get("error"))
             continue
@@ -474,8 +486,10 @@ def pass_once(urls, token: str | None, members: list[dict],
               bootstrapped: bool,
               opened: dict[tuple[str, str], float] | None = None,
               now: float | None = None,
-              open_cooldown: float | None = OPEN_COOLDOWN) -> dict:
-    tasks, read_from, read_error = fetch_tasks_any(urls, token, timeout)
+              open_cooldown: float | None = OPEN_COOLDOWN,
+              feed_limit: int | None = CHAT_FEED_LIMIT) -> dict:
+    tasks, read_from, read_error = fetch_tasks_any(
+        urls, token, timeout, limit=feed_limit)
     if read_error and not tasks:
         raise RuntimeError(read_error)
     if not bootstrapped:
