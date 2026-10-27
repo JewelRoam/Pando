@@ -1349,12 +1349,22 @@ def collect_state(cfg: dict) -> dict:
         })
         if nerr:
             state["collector"]["errors"].append(f"{label} /nodes: {nerr}")
-        else:
-            for node_id, info in ((nodes or {}).get("nodes") or {}).items():
-                if isinstance(info, dict):
-                    state["participants"].append(
-                        participant_from_node(str(node_id), info, label))
-            summary["members"] = len((nodes or {}).get("nodes") or {})
+            skipped = "skipped: /nodes unreachable"
+            state["services"].append({
+                "group": label,
+                "name": "root /status", "url": root_url + "/status",
+                "alive": False, "detail": skipped,
+                "latency_ms": None, "status": None,
+            })
+            summary["playbook_error"] = skipped
+            state["roots"].append(summary)
+            continue
+
+        for node_id, info in ((nodes or {}).get("nodes") or {}).items():
+            if isinstance(info, dict):
+                state["participants"].append(
+                    participant_from_node(str(node_id), info, label))
+        summary["members"] = len((nodes or {}).get("nodes") or {})
 
         root_status, serr, sms, sstatus = http_json(
             f"{root_url}/status", token=pairing, header="X-Pairing-Token")

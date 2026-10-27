@@ -5553,6 +5553,48 @@ class TestObservatoryFeed(unittest.TestCase):
             self.assertIsNone(read_root_snapshot(str(path))[0])
 
 
+    def test_an_unreachable_root_is_probed_once(self):
+        """A dead root must not pay the same timeout for every sibling path."""
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import observatory
+
+        calls = []
+        original_json = observatory.http_json
+        original_units = observatory.local_units
+
+        def fake_json(url, *args, **kwargs):
+            calls.append(url)
+            if url.endswith("/health"):
+                return {}, None, 1.0, 200
+            if "/tasks?status=all" in url:
+                return {"tasks": []}, None, 1.0, 200
+            if url.endswith("/nodes"):
+                return None, "unreachable: timeout", 4000.0, 0
+            raise AssertionError(f"unexpected probe after node failure: {url}")
+
+        observatory.http_json = fake_json
+        observatory.local_units = lambda: {"host": "test", "services": []}
+        try:
+            state = observatory.collect_state({
+                "mailbox_url": "http://mailbox",
+                "mailbox_token": "token",
+                "roots": [{"name": "win", "url": "http://win:8790",
+                           "token": "pairing"}],
+            })
+        finally:
+            observatory.http_json = original_json
+            observatory.local_units = original_units
+
+        self.assertEqual([url for url in calls if url.startswith("http://win:8790")],
+                         ["http://win:8790/nodes"])
+        status = next(row for row in state["services"]
+                      if row["name"] == "root /status")
+        self.assertFalse(status["alive"])
+        self.assertEqual(status["detail"], "skipped: /nodes unreachable")
+        self.assertEqual(state["roots"][0]["playbook_error"],
+                         "skipped: /nodes unreachable")
+
+
     def test_an_execution_ledger_row_is_shown_unchanged(self):
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
         from observatory import (attach_executions, execution_text,
