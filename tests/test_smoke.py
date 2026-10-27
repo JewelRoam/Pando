@@ -4855,6 +4855,54 @@ class TestBatchedBodyFetch(unittest.TestCase):
         self.assertEqual(source, "http://mailbox")
         self.assertIsNone(error)
 
+    def test_old_mailbox_fallback_keeps_seeds_and_late_votes(self):
+        """The full-listing fallback must preserve execution's two old rows.
+
+        A focused query without seed expansion or reaction closure would look
+        correct against a new mailbox and silently change an old peer's round.
+        This crosses both boundaries: the query route is absent, and the only
+        seed and vote are older than the newest-window limit.
+        """
+        from unittest import mock
+        from pando import execute, proposal_mail
+
+        rows = [
+            {"id": "t-old-seed",
+             "title": "[proposal] p-old seed.export by peer",
+             "created_at": "2026-10-27T10:00:00"},
+            {"id": "t-late-vote",
+             "title": "[reaction] p-old 赞同 by mac-text",
+             "created_at": "2026-10-27T10:01:00"},
+            {"id": "t-chat-1", "title": "[chat] window filler 1",
+             "created_at": "2026-10-27T10:02:00"},
+            {"id": "t-chat-2", "title": "[chat] window filler 2",
+             "created_at": "2026-10-27T10:03:00"},
+        ]
+        paths = []
+
+        def fake_request(url, path, token, method, payload=None, timeout=15):
+            paths.append((path, method))
+            if path == "/tasks/query":
+                return {"error": "HTTP 404", "detail": "not found"}
+            return {"tasks": rows}
+
+        with mock.patch.object(proposal_mail, "_request", fake_request):
+            listing, source, error = proposal_mail.query_tasks_any(
+                ["http://old-mailbox"], "tok",
+                selectors=execute.execution_selectors({"mac-proposer"}),
+                limit=2, exclude_proposal_ids={"p-settled"})
+
+        selected = execute.rows_for_execution(
+            listing["tasks"], limit=2, authors={"mac-proposer"})
+
+        self.assertEqual(paths, [("/tasks/query", "POST"),
+                                 ("/tasks?status=all", "GET")])
+        self.assertEqual(source, "http://old-mailbox")
+        self.assertIsNone(error)
+        self.assertEqual([row["id"] for row in selected],
+                         ["t-old-seed", "t-late-vote",
+                          "t-chat-1", "t-chat-2"])
+
     def test_a_mailbox_without_the_route_falls_back_to_one_get_per_id(self):
         """An older peer mid-upgrade answers 404; that must not be fatal."""
         from unittest import mock
