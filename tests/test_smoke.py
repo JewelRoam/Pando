@@ -4830,6 +4830,31 @@ class TestBatchedBodyFetch(unittest.TestCase):
         self.assertEqual(sorted(got), sorted(ids))
         self.assertEqual([len(chunk) for chunk in seen], [500, 500, 200])
 
+    def test_the_executor_falls_back_to_a_full_listing_on_an_old_mailbox(self):
+        """A focused query is an optimisation; old peers must still work."""
+        from unittest import mock
+        from pando import proposal_mail
+
+        paths = []
+
+        def fake_request(url, path, token, method, payload=None, timeout=15):
+            paths.append((path, method))
+            if path == "/tasks/query":
+                return {"error": "HTTP 404", "detail": "not found"}
+            return {"tasks": [{"id": "old-seed"}]}
+
+        with mock.patch.object(proposal_mail, "_request", fake_request):
+            listing, source, error = proposal_mail.query_tasks_any(
+                ["http://mailbox"], None,
+                selectors=[{"actions": ["seed.export"]}], limit=40,
+                exclude_proposal_ids={"settled"})
+
+        self.assertEqual(paths, [("/tasks/query", "POST"),
+                                 ("/tasks?status=all", "GET")])
+        self.assertEqual(listing["tasks"], [{"id": "old-seed"}])
+        self.assertEqual(source, "http://mailbox")
+        self.assertIsNone(error)
+
     def test_a_mailbox_without_the_route_falls_back_to_one_get_per_id(self):
         """An older peer mid-upgrade answers 404; that must not be fatal."""
         from unittest import mock
@@ -5546,6 +5571,71 @@ class TestExecution(unittest.TestCase):
 
         self.assertEqual([row["id"] for row in rows],
                          ["t-live", "t-live-vote"])
+
+    def test_execution_selectors_keep_peer_seeds_and_only_local_actuators(self):
+        from pando.execute import execution_selectors
+
+        self.assertEqual(
+            execution_selectors({"mac-proposer"}),
+            [{"actions": ["seed.export", "seed.replicate"]},
+             {"actions": ["culture.refine", "meta.propose", "policy.set",
+                          "recruit.invite", "reproduce.spawn",
+                          "resource.rebalance"],
+              "authors": ["mac-proposer"]}])
+
+    def test_server_query_is_reaction_closed_and_honours_settlement(self):
+        """A late vote survives selection even when its proposal is old."""
+        import importlib.util
+        from pando import proposal_mail
+
+        spec = importlib.util.spec_from_file_location(
+            "agent_mailbox_under_test_execution_query",
+            Path(__file__).resolve().parents[1] / "tools" / "agent_mailbox.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as tmp:
+            box = module.Mailbox(Path(tmp) / "box")
+            rows = [
+                {"id": "t-seed", "title": "[proposal] p-seed seed.export by peer",
+                 "created_at": "2026-10-27T10:00:00"},
+                {"id": "t-peer-policy", "title": "[proposal] p-peer policy.set by peer",
+                 "created_at": "2026-10-27T10:01:00"},
+                {"id": "t-local-policy", "title": "[proposal] p-local policy.set by mac-proposer",
+                 "created_at": "2026-10-27T10:02:00"},
+                {"id": "t-done-seed", "title": "[proposal] p-done seed.replicate by peer",
+                 "created_at": "2026-10-27T10:03:00"},
+                {"id": "t-seed-vote", "title": "[reaction] p-seed 赞同 by voter",
+                 "created_at": "2026-10-27T10:05:00"},
+                {"id": "t-local-vote", "title": "[reaction] p-local 赞同 by voter",
+                 "created_at": "2026-10-27T10:06:00"},
+                {"id": "t-live", "title": "[chat] newest", "created_at": "2026-10-27T10:07:00"},
+                {"id": "t-done-vote", "title": "[reaction] p-done 赞同 by voter",
+                 "created_at": "2026-10-27T10:04:00"},
+            ]
+            for row in rows:
+                box.save({**row, "from": "ann", "body": "x", "status": "claimed",
+                          "history": []})
+            server = module.ThreadingHTTPServer(
+                ("127.0.0.1", 0), module.build_handler(box, "tok"))
+            port = server.server_address[1]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                listing = proposal_mail.query_tasks(
+                    f"http://127.0.0.1:{port}", "tok",
+                    selectors=[
+                        {"actions": ["seed.export", "seed.replicate"]},
+                        {"actions": ["policy.set"], "authors": ["mac-proposer"]},
+                    ], limit=1, exclude_proposal_ids={"p-done"})
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=3)
+
+        self.assertEqual(
+            {row["id"] for row in listing["tasks"]},
+            {"t-seed", "t-seed-vote", "t-local-policy",
+             "t-local-vote", "t-live"})
 
     def test_layer_three_drains_this_hosts_backlog_oldest_first(self):
         from pando.execute import rows_for_execution

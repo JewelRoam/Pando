@@ -117,6 +117,28 @@ def mailbox_brief(payload) -> dict:
     return {"type": type(payload).__name__}
 
 
+def _proposal_parts(title) -> tuple[str, str, str] | None:
+    """``(proposal_id, action, author)`` from an executor title.
+
+    The mailbox has stored these titles since the first proposal.  This is a
+    read-side convention only: no task is rewritten and older rows remain
+    valid.  A malformed title is simply not selectable.
+    """
+    parts = str(title or "").split()
+    if (len(parts) < 5 or parts[0] != "[proposal]"
+            or parts[3] != "by"):
+        return None
+    return parts[1], parts[2], parts[4]
+
+
+def _reaction_target(title) -> str:
+    parts = str(title or "").split()
+    if (len(parts) < 5 or parts[0] != "[reaction]"
+            or parts[3] != "by"):
+        return ""
+    return parts[1]
+
+
 def replication_ids(source_rows: list, dest_rows: list) -> dict:
     """Ids to send. Listings only carry status, so "behind" means status rank.
 
@@ -200,6 +222,65 @@ class Mailbox:
         if limit is not None:
             rows = rows[-limit:] if limit else []
         return rows
+
+    def select(self, status: str | None = None, limit: int | None = None,
+               selectors=None, exclude_proposal_ids=(),
+               include_reactions: bool = True) -> list[dict]:
+        """The latest window plus matching proposals and their reactions.
+
+        ``selectors`` is an OR-list of ``{"actions": [...], "authors": [...]}``
+        filters.  Within one selector the two fields are ANDed; an omitted or
+        empty field matches any value.  Excluded proposal ids are skipped in
+        the focused selection but never removed from the latest window: the
+        caller still decides what the current window means.
+
+        Reaction closure is the important part.  A late vote is a new task
+        whose creation order says nothing about the old proposal it names, so
+        filtering rows only by their own timestamp would silently drop it.
+        """
+        filters = []
+        for selector in selectors or ():
+            if not isinstance(selector, dict):
+                continue
+            actions = {str(value) for value in selector.get("actions", ())
+                       if value}
+            authors = {str(value) for value in selector.get("authors", ())
+                       if value}
+            if actions or authors:
+                filters.append((actions, authors))
+        excluded = {str(value) for value in exclude_proposal_ids or () if value}
+        with self._lock:
+            rows = [dict(row) for row in self._summaries.values()
+                    if status is None or status == "all"
+                    or row.get("status") == status]
+        rows.sort(key=lambda row: (row.get("created_at", ""), row.get("id", "")))
+
+        base = rows[-limit:] if limit is not None and limit else []
+        keep = {row.get("id") for row in base}
+        proposal_ids = set()
+        for row in base:
+            parsed = _proposal_parts(row.get("title"))
+            if parsed:
+                proposal_ids.add(parsed[0])
+
+        for row in rows:
+            parsed = _proposal_parts(row.get("title"))
+            if not parsed:
+                continue
+            proposal_id, action, author = parsed
+            if proposal_id in excluded:
+                continue
+            if any((not actions or action in actions)
+                   and (not authors or author in authors)
+                   for actions, authors in filters):
+                keep.add(row.get("id"))
+                proposal_ids.add(proposal_id)
+
+        if include_reactions:
+            for row in rows:
+                if _reaction_target(row.get("title")) in proposal_ids:
+                    keep.add(row.get("id"))
+        return [row for row in rows if row.get("id") in keep]
 
     def count(self, status: str | None = None) -> int:
         with self._lock:
@@ -451,6 +532,30 @@ def build_handler(mailbox: Mailbox, token: str, telemetry=None,
                     if task is not None:
                         found[str(task_id)] = task
                 self._send(200, {"tasks": found})
+                return
+            if path == "/tasks/query":
+                selectors = payload.get("selectors", []) if isinstance(payload, dict) else []
+                excluded = payload.get("exclude_proposal_ids", []) if isinstance(payload, dict) else []
+                if not isinstance(selectors, list) or not isinstance(excluded, list):
+                    self._send(400, {"error": "selectors and exclude_proposal_ids must be lists"})
+                    return
+                if len(selectors) > 16:
+                    self._send(400, {"error": "at most 16 selectors are allowed"})
+                    return
+                raw_limit = payload.get("limit") if isinstance(payload, dict) else None
+                try:
+                    limit = None if raw_limit is None else int(raw_limit)
+                    if limit is not None and limit < 0:
+                        raise ValueError
+                except (TypeError, ValueError):
+                    self._send(400, {"error": "limit must be a non-negative integer"})
+                    return
+                tasks = mailbox.select(
+                    status=str(payload.get("status") or "all"),
+                    limit=limit, selectors=selectors,
+                    exclude_proposal_ids=excluded,
+                    include_reactions=bool(payload.get("include_reactions", True)))
+                self._send(200, {"tasks": tasks})
                 return
             if path == "/task":
                 task = mailbox.create(str(payload.get("from", "?")),
