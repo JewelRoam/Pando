@@ -114,6 +114,27 @@ def next_reply(members: list[dict], chat_ids: set[str], tasks: list[dict],
 OPEN_COOLDOWN = 3600.0
 
 
+def chat_peer_ids(members: list[dict], known: set[str],
+                  opened: dict[tuple[str, str], float] | None = None) -> set[str]:
+    """Remote chat peers currently discovered or previously addressed.
+
+    A root can be dark while the mailbox still carries a usable replica. An
+    ``open`` ledger row is evidence that a local chat member previously chose
+    this peer from a live chat-member record, so forgetting that peer just
+    because ``/nodes`` timed out would turn a partition into permanent silence.
+    """
+    local = {str(item.get("node_id") or "") for item in members}
+    local.discard("")
+    peers = {str(node) for node in (known or set()) if node}
+    for sender, peer in (opened or {}):
+        sender = str(sender or "")
+        peer = str(peer or "")
+        if sender in local and peer:
+            peers.add(peer)
+    peers.difference_update(local)
+    return peers
+
+
 def next_opening(members: list[dict], known: set[str],
                  opened: dict[tuple[str, str], float], now: float,
                  cooldown: float = OPEN_COOLDOWN) -> dict | None:
@@ -141,9 +162,7 @@ def next_opening(members: list[dict], known: set[str],
     local = [node_id for node_id in local if node_id]
     if not local:
         return None
-    here = set(local)
-    peers = sorted(str(node) for node in (known or set())
-                   if node and str(node) not in here)
+    peers = sorted(chat_peer_ids(members, known, opened))
     if not peers:
         return None
     if opened and now - max(opened.values()) < cooldown:

@@ -8187,6 +8187,30 @@ class TestChat(unittest.TestCase):
         # A decision model has no chat.model, so it is not in known at all.
         self.assertIsNone(next_opening([], known, {}, 1.0))
 
+    def test_a_previously_opened_peer_survives_a_root_outage(self):
+        """A dark root must not erase the roster the ledger already proved.
+
+        On 2026-10-27 the win root timed out on every chatd pass. The mailbox
+        and the local model were healthy, but known contained only the local
+        member, so the only participant who could initiate saw no peer. The
+        opening ledger is evidence that this exact local member previously
+        picked a real remote chat member from that root.
+        """
+        from pando.chat import next_opening
+
+        members = [{"node_id": "mac-llm-8b-local", "url": "http://127.0.0.1:9",
+                    "model": "qwen-test"}]
+        opened = {
+            ("mac-llm-8b-local", "win-gemma-12b"): 1000.0,
+            ("mac-llm-8b-local", "pandosi-pi5-llm"): 2000.0,
+            ("another-member", "win-yi-9b"): 2000.0,
+        }
+
+        pick = next_opening(members, {"mac-llm-8b-local"}, opened, 5601.0)
+
+        self.assertIsNotNone(pick)
+        self.assertEqual(pick["to"], "win-gemma-12b")
+
 
     def test_talking_is_not_voting_in_the_first_person(self):
         """Two members refused to discuss a proposal, in their own words.

@@ -20,8 +20,8 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .chat import (OPEN_COOLDOWN, message_text, next_opening, next_reply,
-                   normalize_chat)
+from .chat import (OPEN_COOLDOWN, chat_peer_ids, message_text, next_opening,
+                   next_reply, normalize_chat)
 from .common import PROPOSING_ROLE
 from .net import LOOPBACK, local_addresses, open_url
 from .proposal_mail import delivery_failed, mailbox_chain
@@ -517,7 +517,11 @@ def pass_once(urls, token: str | None, members: list[dict],
                 time.time() if now is None else now, open_cooldown, timeout)
             if opened_report is not None:
                 return opened_report
-        return {"did": "idle", "members": [item["node_id"] for item in members]}
+        return {
+            "did": "idle",
+            "members": [item["node_id"] for item in members],
+            "peers": sorted(chat_peer_ids(members, chat_ids, opened)),
+        }
     member = choice["member"]
     task = choice["task"]
     sender = str(task.get("from") or "")
