@@ -32,6 +32,37 @@ from .proposal_mail import delivery_failed, mailbox_chain
 # 35k summary rows on every pass makes a healthy chat loop pay for all memory.
 CHAT_FEED_LIMIT = 500
 
+# A root that times out on every pass must not tax every healthy pass. Wait
+# briefly after the first miss, then grow to a bounded probe interval so a
+# recovered root is seen without another process or timer.
+ROOT_RETRY_BASE_S = 30.0
+ROOT_RETRY_MAX_S = 300.0
+
+
+class RootProbeBackoff:
+    """Per-root retry state for repeated root probe failures."""
+
+    def __init__(self, base: float = ROOT_RETRY_BASE_S,
+                 cap: float = ROOT_RETRY_MAX_S):
+        self.base = max(0.0, float(base))
+        self.cap = max(self.base, float(cap))
+        self._pending: dict[str, tuple[int, float]] = {}
+
+    def due(self, key: str, now: float) -> bool:
+        return now >= self._pending.get(key, (0, 0.0))[1]
+
+    def retry_in(self, key: str, now: float) -> float:
+        return max(0.0, self._pending.get(key, (0, 0.0))[1] - now)
+
+    def failed(self, key: str, now: float) -> float:
+        failures = self._pending.get(key, (0, 0.0))[0] + 1
+        delay = min(self.cap, self.base * (2 ** min(failures - 1, 16)))
+        self._pending[key] = (failures, now + delay)
+        return delay
+
+    def succeeded(self, key: str) -> None:
+        self._pending.pop(key, None)
+
 
 def _read(path: str | None) -> str | None:
     if not path:
@@ -80,6 +111,42 @@ def fetch_health(url: str, timeout: float) -> dict | None:
     with open_url(request, timeout) as resp:
         payload = json.loads(resp.read())
     return payload if isinstance(payload, dict) else None
+
+
+def probe_roots(roots: list[dict], timeout: float,
+                backoff: RootProbeBackoff,
+                now: float | None = None) -> tuple[dict, list[dict]]:
+    """Read every root that is due, returning nodes and observable outcomes.
+
+    A timeout costs the whole pass when a dark root is probed every time. The
+    backoff is only a deferral: it caps, resets on success, and still returns
+    the healthy roots on this pass.
+    """
+    nodes: dict = {}
+    events: list[dict] = []
+    current = time.monotonic() if now is None else now
+    for root in roots:
+        url = str(root.get("url") or "").rstrip("/")
+        if not url:
+            continue
+        name = str(root.get("name") or url)
+        if not backoff.due(url, current):
+            events.append({"name": name, "url": url, "deferred": True,
+                           "retry_in": backoff.retry_in(url, current)})
+            continue
+        try:
+            found = fetch_nodes(url, root.get("token"), min(8, timeout))
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError,
+                OSError) as exc:
+            retry_in = backoff.failed(url, current)
+            events.append({"name": name, "url": url, "error": str(exc),
+                           "retry_in": retry_in})
+            continue
+        backoff.succeeded(url)
+        nodes.update(found)
+        events.append({"name": name, "url": url, "ok": True,
+                       "nodes": len(found)})
+    return nodes, events
 
 
 def local_chat_members(nodes: dict, addresses: set[str],
@@ -632,17 +699,20 @@ def main() -> int:
     opened = load_openings(ledger)
     peer_evidence = load_peer_evidence(ledger)
     open_cooldown = None if args.no_open else args.open_cooldown
+    root_backoff = RootProbeBackoff()
 
     while True:
         try:
-            nodes: dict = {}
-            for root in roots:
-                try:
-                    found = fetch_nodes(root["url"], root.get("token"), min(8, args.timeout))
-                except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
-                    print(time.strftime("%H:%M:%S"), f"root {root['name']}: {exc}", flush=True)
-                    continue
-                nodes.update(found)
+            nodes, root_events = probe_roots(roots, args.timeout, root_backoff)
+            for event in root_events:
+                if event.get("deferred"):
+                    print(time.strftime("%H:%M:%S"),
+                          f"root {event['name']}: deferred "
+                          f"{event['retry_in']:.1f}s", flush=True)
+                elif event.get("error"):
+                    print(time.strftime("%H:%M:%S"),
+                          f"root {event['name']}: {event['error']} "
+                          f"(retry in {event['retry_in']:.1f}s)", flush=True)
             # A lone loopback root is the authoritative membership table for
             # this host. Do not let an advertised LAN address that Python
             # cannot enumerate hide every local speaker (seen on Windows:

@@ -8259,6 +8259,58 @@ class TestChat(unittest.TestCase):
         self.assertIsNotNone(pick)
         self.assertEqual(pick["to"], "win-gemma-12b")
 
+    def test_a_dark_root_is_skipped_then_retried_with_bounded_backoff(self):
+        """One timed-out root must not consume every healthy chatd pass."""
+        from unittest import mock
+        from pando import chatd
+
+        local = "http://127.0.0.1:8765"
+        remote = "http://100.93.216.90:8790"
+        roots = [{"name": "mac", "url": local, "token": None},
+                 {"name": "win", "url": remote, "token": None}]
+        calls = []
+        state = {"down": True}
+
+        def fetch(url, token, timeout):
+            calls.append((url, timeout))
+            if url == remote and state["down"]:
+                raise TimeoutError("timed out")
+            return {url: {"host": "test"}}
+
+        backoff = chatd.RootProbeBackoff(base=30, cap=45)
+        with mock.patch.object(chatd, "fetch_nodes", fetch):
+            nodes, events = chatd.probe_roots(roots, 180, backoff, now=100)
+            self.assertEqual({url for url, _ in calls}, {local, remote})
+            self.assertEqual(calls, [(local, 8), (remote, 8)])
+            self.assertEqual(nodes, {local: {"host": "test"}})
+            self.assertEqual(next(row for row in events
+                                  if row["url"] == remote)["retry_in"], 30)
+
+            calls.clear()
+            chatd.probe_roots(roots, 180, backoff, now=110)
+            self.assertEqual(calls, [(local, 8)])
+
+            calls.clear()
+            _, events = chatd.probe_roots(roots, 180, backoff, now=130)
+            self.assertEqual(calls, [(local, 8), (remote, 8)])
+            self.assertEqual(next(row for row in events
+                                  if row["url"] == remote)["retry_in"], 45)
+
+            calls.clear()
+            chatd.probe_roots(roots, 180, backoff, now=174.9)
+            self.assertEqual(calls, [(local, 8)])
+
+            calls.clear()
+            state["down"] = False
+            nodes, _ = chatd.probe_roots(roots, 180, backoff, now=175)
+            self.assertEqual(calls, [(local, 8), (remote, 8)])
+            self.assertEqual(set(nodes), {local, remote})
+
+            # Success clears the deferred state: the next pass probes again.
+            calls.clear()
+            chatd.probe_roots(roots, 180, backoff, now=176)
+            self.assertEqual(calls, [(local, 8), (remote, 8)])
+
     def test_a_remembered_peer_expires_after_repeated_silence(self):
         """A dark root must not turn one stale address into forever-noise."""
         from pando.chat import OPENED_PEER_TTL, next_opening
