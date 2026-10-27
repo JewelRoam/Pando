@@ -59,7 +59,36 @@ DEFAULT_MAILBOX = os.environ.get("PANDOSI_MAILBOX_URL", "http://127.0.0.1:8776")
 _BODY_CACHE: dict[str, str] = {}
 _STATE_CACHE: dict = {"at": 0.0, "value": None}
 _STATE_LOCK = threading.Lock()
+_ROOT_FAILURE_TTL = 30.0
+_ROOT_FAILURE_CACHE: dict[str, dict] = {}
+_ROOT_FAILURE_LOCK = threading.Lock()
 CHAT_VIEW_LIMIT = 120
+
+
+def _cached_root_failure(root_url: str) -> tuple[str, float] | None:
+    """Return a recent /nodes failure without pretending it is a live read."""
+    now = time.monotonic()
+    with _ROOT_FAILURE_LOCK:
+        row = _ROOT_FAILURE_CACHE.get(root_url)
+        if not row:
+            return None
+        age = now - row["at"]
+        if age < _ROOT_FAILURE_TTL:
+            return str(row["error"]), age
+        _ROOT_FAILURE_CACHE.pop(root_url, None)
+    return None
+
+
+def _remember_root_failure(root_url: str, error: str) -> None:
+    with _ROOT_FAILURE_LOCK:
+        _ROOT_FAILURE_CACHE[root_url] = {
+            "at": time.monotonic(), "error": str(error),
+        }
+
+
+def _clear_root_failure(root_url: str) -> None:
+    with _ROOT_FAILURE_LOCK:
+        _ROOT_FAILURE_CACHE.pop(root_url, None)
 
 
 def cached_state(cfg: dict, ttl: float = 5.0) -> dict:
@@ -1255,6 +1284,32 @@ def _probe_root(source: dict, fallback_token: str | None) -> dict:
     summary = {"name": label, "url": root_url, "reachable": False,
                "members": 0, "error": None, "quorum": None,
                "playbook": None, "playbook_error": None}
+    cached_failure = _cached_root_failure(root_url)
+    if cached_failure:
+        failure, age = cached_failure
+        detail = f"cached {age:.1f}s ago: {failure}"
+        summary["error"] = detail
+        summary["cached"] = True
+        summary["cache_age_s"] = round(age, 1)
+        result["services"].append({
+            "group": label,
+            "name": "root /nodes", "url": root_url + "/nodes",
+            "alive": False, "detail": detail,
+            "latency_ms": None, "status": None,
+            "cached": True, "cache_age_s": round(age, 1),
+        })
+        result["errors"].append(f"{label} /nodes: {detail}")
+        skipped = "skipped: /nodes unreachable"
+        result["services"].append({
+            "group": label,
+            "name": "root /status", "url": root_url + "/status",
+            "alive": False, "detail": skipped,
+            "latency_ms": None, "status": None,
+        })
+        summary["playbook_error"] = skipped
+        result["summary"] = summary
+        return result
+
     nodes, nerr, nms, nstatus = http_json(
         f"{root_url}/nodes", token=pairing, header="X-Pairing-Token")
     summary["reachable"] = nerr is None
@@ -1267,6 +1322,7 @@ def _probe_root(source: dict, fallback_token: str | None) -> dict:
         "latency_ms": nms, "status": nstatus,
     })
     if nerr:
+        _remember_root_failure(root_url, nerr)
         result["errors"].append(f"{label} /nodes: {nerr}")
         skipped = "skipped: /nodes unreachable"
         result["services"].append({
@@ -1278,6 +1334,8 @@ def _probe_root(source: dict, fallback_token: str | None) -> dict:
         summary["playbook_error"] = skipped
         result["summary"] = summary
         return result
+
+    _clear_root_failure(root_url)
 
     participants = []
     for node_id, info in ((nodes or {}).get("nodes") or {}).items():

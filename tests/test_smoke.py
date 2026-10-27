@@ -5574,6 +5574,8 @@ class TestObservatoryFeed(unittest.TestCase):
 
         observatory.http_json = fake_json
         observatory.local_units = lambda: {"host": "test", "services": []}
+        with observatory._ROOT_FAILURE_LOCK:
+            observatory._ROOT_FAILURE_CACHE.clear()
         try:
             state = observatory.collect_state({
                 "mailbox_url": "http://mailbox",
@@ -5584,6 +5586,8 @@ class TestObservatoryFeed(unittest.TestCase):
         finally:
             observatory.http_json = original_json
             observatory.local_units = original_units
+            with observatory._ROOT_FAILURE_LOCK:
+                observatory._ROOT_FAILURE_CACHE.clear()
 
         self.assertEqual([url for url in calls if url.startswith("http://win:8790")],
                          ["http://win:8790/nodes"])
@@ -5632,6 +5636,8 @@ class TestObservatoryFeed(unittest.TestCase):
 
         observatory.http_json = fake_json
         observatory.local_units = lambda: {"host": "test", "services": []}
+        with observatory._ROOT_FAILURE_LOCK:
+            observatory._ROOT_FAILURE_CACHE.clear()
         try:
             state = observatory.collect_state({
                 "mailbox_url": "http://mailbox",
@@ -5646,11 +5652,70 @@ class TestObservatoryFeed(unittest.TestCase):
         finally:
             observatory.http_json = original_json
             observatory.local_units = original_units
+            with observatory._ROOT_FAILURE_LOCK:
+                observatory._ROOT_FAILURE_CACHE.clear()
 
         self.assertEqual(len(synced), 2)
         member = next(row for row in state["participants"]
                       if row["node_id"] == "member")
         self.assertEqual(member["chat"]["model"], "test-model")
+
+
+    def test_a_dead_root_failure_is_cached_with_explicit_age(self):
+        """A brief negative cache must remain visibly different from a probe."""
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import observatory
+
+        node_calls = []
+        original_json = observatory.http_json
+        original_units = observatory.local_units
+        original_ttl = observatory._ROOT_FAILURE_TTL
+
+        def fake_json(url, *args, **kwargs):
+            if url == "http://mailbox/health":
+                return {}, None, 1.0, 200
+            if "/tasks?status=all" in url:
+                return {"tasks": []}, None, 1.0, 200
+            if url == "http://dead:8790/nodes":
+                node_calls.append(url)
+                return None, "unreachable: timeout", 4000.0, 0
+            raise AssertionError(f"unexpected probe: {url}")
+
+        cfg = {
+            "mailbox_url": "http://mailbox",
+            "mailbox_token": "token",
+            "roots": [{"name": "dead", "url": "http://dead:8790",
+                       "token": "pairing"}],
+        }
+        observatory.http_json = fake_json
+        observatory.local_units = lambda: {"host": "test", "services": []}
+        with observatory._ROOT_FAILURE_LOCK:
+            observatory._ROOT_FAILURE_CACHE.clear()
+        try:
+            first = observatory.collect_state(cfg)
+            second = observatory.collect_state(cfg)
+            self.assertEqual(len(node_calls), 1)
+            self.assertTrue(second["roots"][0]["cached"])
+            self.assertGreaterEqual(second["roots"][0]["cache_age_s"], 0)
+            self.assertIn("cached ", second["roots"][0]["error"])
+            cached_service = next(
+                row for row in second["services"]
+                if row["name"] == "root /nodes")
+            self.assertTrue(cached_service["cached"])
+            self.assertIn("cached ", cached_service["detail"])
+            self.assertIsNone(cached_service["latency_ms"])
+            self.assertNotIn("cached", first["roots"][0])
+
+            observatory._ROOT_FAILURE_TTL = -1.0
+            third = observatory.collect_state(cfg)
+            self.assertEqual(len(node_calls), 2)
+            self.assertNotIn("cached", third["roots"][0])
+        finally:
+            observatory.http_json = original_json
+            observatory.local_units = original_units
+            observatory._ROOT_FAILURE_TTL = original_ttl
+            with observatory._ROOT_FAILURE_LOCK:
+                observatory._ROOT_FAILURE_CACHE.clear()
 
 
     def test_an_execution_ledger_row_is_shown_unchanged(self):
