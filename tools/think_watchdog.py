@@ -91,6 +91,10 @@ VOTE_STATUSES = ("wedge", "silent")
 #: a root table could not be read. Only 2 is a member's fault; only 2 pages.
 CODE_ALARM_RC = 2
 CODE_STATUSES = ("stale",)
+#: A persistent unreadable root is not a member drift, but it is still a
+#: blind spot. Keep the distinction in the task title and body: "win is
+#: stale" and "we cannot see win at all" call for different actions.
+CODE_COVERAGE_STATUSES = ("blind",)
 #: Three root tables plus a few git reads. The vote leg's 120s is the same
 #: order and the same reason: a hung peer must not hold the job past launchd's
 #: next interval.
@@ -101,6 +105,14 @@ DEFAULT_CODE_TIMEOUT_S = 120.0
 #: churns from minting a task per generation (see ``alarm_key``).
 VOTE_FAMILY = "[alarm] vote-"
 CODE_FAMILY = "[alarm] code-drift"
+CODE_COVERAGE_FAMILY = "[alarm] code-coverage"
+#: Coverage tracking lives beside the alarm task ids in the shared state file.
+#: It is deliberately not keyed by the alarm family: a root that is blind in
+#: one poll and healthy in the next must not inherit the old grace clock.
+COVERAGE_TRACKING_KEY = "@code-coverage-first-seen"
+#: A root table can miss one poll during a LAN blip. Three 300s polls is the
+#: same evidence horizon code_drift_check uses before calling a member stale.
+DEFAULT_CODE_COVERAGE_GRACE_S = 900.0
 #: How often a still-open alarm gets a fresh re-check appended to the *same*
 #: task instead of a second task. vote_watchdog's ``--page-new-only`` already
 #: stops duplicates; what it cannot do is stop an open task from ageing into a
@@ -241,6 +253,84 @@ def code_alarms(payload: dict | None) -> list[dict]:
     return alarms
 
 
+def blind_roots(payload: dict | None) -> dict[str, str]:
+    """Roots the code check could not measure, keyed by stable root name.
+
+    ``code_drift_check.py`` puts these in ``unreadable`` instead of inventing
+    member rows. Preserve that separation here: an unreadable root means the
+    pager is blind, not that any member on that root drifted.
+    """
+    rows = (payload or {}).get("unreadable")
+    if not isinstance(rows, list):
+        return {}
+    blind: dict[str, str] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        root = str(row.get("root") or "").strip()
+        if not root:
+            continue
+        blind[root] = str(row.get("error") or "no reason reported")[:300]
+    return blind
+
+
+def code_coverage_alarms(payload: dict | None, now: float,
+                         state: dict | None = None,
+                         grace_seconds: float = DEFAULT_CODE_COVERAGE_GRACE_S,
+                         ) -> list[dict]:
+    """Blind roots that have stayed unreadable past the coverage grace window.
+
+    The tracking entry is kept alongside alarm-task ids so the existing
+    ``--alarm-state-file`` supplies persistence without a second timer or file.
+    A root seen for the first time starts its own clock; a recovered root is
+    removed immediately. No state means no honest grace duration, so the
+    caller must keep this as a log-only blind spot rather than paging a guess.
+    """
+    blind = blind_roots(payload)
+    if state is None:
+        return []
+
+    previous = state.get(COVERAGE_TRACKING_KEY)
+    if not isinstance(previous, dict):
+        previous = {}
+    current: dict[str, dict] = {}
+    for root, error in sorted(blind.items()):
+        old = previous.get(root)
+        first_seen = now
+        if isinstance(old, dict):
+            value = old.get("first_seen")
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                first_seen = float(value)
+        current[root] = {"first_seen": first_seen, "last_seen": now,
+                         "error": error}
+    if current:
+        state[COVERAGE_TRACKING_KEY] = current
+    else:
+        state.pop(COVERAGE_TRACKING_KEY, None)
+
+    if not current:
+        return []
+    grace = max(0.0, float(grace_seconds))
+    ages = {root: max(0.0, now - float(entry["first_seen"]))
+            for root, entry in current.items()}
+    if not any(age >= grace for age in ages.values()):
+        return []
+
+    alarms: list[dict] = []
+    for root, entry in sorted(current.items(),
+                              key=lambda item: (-ages[item[0]], item[0])):
+        alarms.append({
+            "member": root,
+            "root": root,
+            "status": "blind",
+            "kind": "code-coverage",
+            "what": "root table unreadable",
+            "why": entry["error"],
+            "blind_for_s": ages[root],
+        })
+    return alarms
+
+
 def alarm_kind(alarms: list[dict]) -> str:
     """The family of alarm. It decides the title verb *and* the body.
 
@@ -250,6 +340,8 @@ def alarm_kind(alarms: list[dict]) -> str:
     status word that happens to mean different things in each tool.
     """
     kinds = [str(row.get("kind") or "") for row in alarms]
+    if "code-coverage" in kinds:
+        return "code-coverage"
     if "code-drift" in kinds:
         return "code-drift"
     if "vote-wedge" in kinds or any(r.get("status") == "wedge" for r in alarms):
@@ -284,7 +376,12 @@ def alarm_family(alarms: list[dict]) -> str:
     final word is worse than a title that lags, so identity is the family and
     the member list is carried by the body, which every re-check refreshes.
     """
-    return CODE_FAMILY if alarm_kind(alarms) == "code-drift" else VOTE_FAMILY
+    kind = alarm_kind(alarms)
+    if kind == "code-coverage":
+        return CODE_COVERAGE_FAMILY
+    if kind == "code-drift":
+        return CODE_FAMILY
+    return VOTE_FAMILY
 
 
 def alarm_key(alarms: list[dict]) -> str:
@@ -491,11 +588,71 @@ def code_alarm_body(alarms: list[dict], raw: str, now: float, *,
     return "\n".join(lines)
 
 
+def code_coverage_body(alarms: list[dict], raw: str, now: float, *,
+                       age_s: float | None = None, overdue: bool = False,
+                       note: str = "", escalated: str = "") -> str:
+    """The numbers behind a persistent blind spot, without inventing a fault.
+
+    A root table that cannot be read says nothing about the members behind it.
+    Saying "win is stale" here would repeat the pager bug this watchdog was
+    built to avoid. The actionable fault is the observation path itself:
+    restore the root or its fresh mirror, then prove recovery with a poll that
+    actually measures the members again.
+    """
+    stamp = time.strftime("%F %T %Z", time.localtime(now))
+    lines = [f"code-drift-check has been unable to measure roots since {stamp}.", ""]
+    for row in alarms:
+        lines.append(
+            f"- {row['member']}: root table UNREADABLE for "
+            f"{age_phrase(float(row.get('blind_for_s') or 0.0))} - "
+            f"{row.get('why', 'no reason reported')}")
+    lines += [
+        "",
+        "What this does NOT mean: these roots are not accused of running old",
+        "code. No member behind an unreadable root was measured, so a drift",
+        "verdict would be fabricated. The fault is that the code watchdog is",
+        "blind to part of the fleet and cannot clear or raise a drift there.",
+        "",
+        "Expected action: restore the root endpoint or refresh its mirror from",
+        "the host that copied it. Check network/Tailscale reachability, pairing",
+        "token readability, and mirror freshness. Do not restart a model server",
+        "for this; the missing evidence is the root table, not an inference.",
+        "",
+        "Acceptance: a later code poll must measure the root again (or carry a",
+        "fresh mirror), and this task then closes automatically.",
+    ]
+    if note:
+        lines += ["", f"Issuer note: {note}"]
+    if age_s is not None:
+        lines += ["", f"Re-check: first raised {age_phrase(age_s)} ago; still open."]
+    if overdue:
+        lines += [
+            "",
+            f"Escalation: blind for {age_phrase(age_s or 0.0)} with no coverage.",
+            "Nothing automatic will clear it - a human hand is needed on the",
+            "network or mirror path that should expose these roots.",
+            f"Escalation path: {escalated or '(none recorded)'}",
+        ]
+    lines += [
+        "",
+        "Falsifier: a poll that lists the root as measured and removes it from",
+        "the unreadable set retires this alarm. A member-level drift alarm is a",
+        "different fault and is not evidence against this coverage claim.",
+        "",
+        "Raw payload:",
+        raw.strip()[:4000] or "(empty)",
+    ]
+    return "\n".join(lines)
+
+
 def build_alarm_body(alarms: list[dict], raw: str, now: float,
                      **kw) -> str:
     """Pick the body that describes *this* fault. One delivery path, no second
     caller: everything downstream only needs a title, a body and a task id."""
-    if alarm_kind(alarms) == "code-drift":
+    kind = alarm_kind(alarms)
+    if kind == "code-coverage":
+        return code_coverage_body(alarms, raw, now, **kw)
+    if kind == "code-drift":
         return code_alarm_body(alarms, raw, now, **kw)
     return alarm_body(alarms, raw, now, **kw)
 
@@ -577,9 +734,41 @@ def code_recheck_block(alarms: list[dict], now: float, age_s: float,
     return "\n".join(lines)
 
 
+def coverage_recheck_block(alarms: list[dict], now: float, age_s: float,
+                           overdue: bool, note: str = "",
+                           escalated: str = "") -> str:
+    """The append for a coverage alarm that is still blind."""
+    stamp = time.strftime("%F %T %Z", time.localtime(now))
+    lines = ["", "---", "",
+             f"{stamp} RE-CHECK: first raised {age_phrase(age_s)} ago, still open.",
+             CURRENT_SET_NOTE,
+             ""]
+    for row in alarms:
+        lines.append(
+            f"- {row['member']}: still UNREADABLE for "
+            f"{age_phrase(float(row.get('blind_for_s') or 0.0))} - "
+            f"{row.get('why', 'no reason reported')}")
+    if note:
+        lines += ["", f"Issuer note: {note}"]
+    if overdue:
+        lines += [
+            "",
+            f"Escalation: open {age_phrase(age_s)} with no coverage. Nothing",
+            "automatic will clear it; a human hand is needed on the network or",
+            "mirror path that should expose these roots.",
+            f"Escalation path: {escalated or '(none recorded)'}",
+        ]
+    lines += ["", "Falsifier unchanged: a poll that measures these roots again "
+                  "retires this alarm."]
+    return "\n".join(lines)
+
+
 def build_recheck_block(alarms: list[dict], now: float, age_s: float,
                         overdue: bool, **kw) -> str:
-    if alarm_kind(alarms) == "code-drift":
+    kind = alarm_kind(alarms)
+    if kind == "code-coverage":
+        return coverage_recheck_block(alarms, now, age_s, overdue, **kw)
+    if kind == "code-drift":
         return code_recheck_block(alarms, now, age_s, overdue, **kw)
     return recheck_block(alarms, now, age_s, overdue, **kw)
 
@@ -708,6 +897,60 @@ def run_code_check(cmd: str,
     return "ok", text, payload
 
 
+def check_code_coverage(args, payload: dict | None, raw: str,
+                        now: float, stamp: str) -> None:
+    """Raise one honest alarm when a root stays unreadable past the grace.
+
+    Coverage is tracked in the same state file as member alarms but under its
+    own family. A full, clean poll retires the coverage task; a partial poll
+    starts or refreshes its grace clock. Without a state file there is no
+    honest way to distinguish a blip from a sustained blind spot, so this
+    remains a log line rather than paging an unverifiable claim.
+    """
+    blind = blind_roots(payload)
+    if not blind:
+        if args.alarm_state_file:
+            state = load_alarm_state(Path(args.alarm_state_file))
+            if state.pop(COVERAGE_TRACKING_KEY, None) is not None:
+                save_alarm_state(Path(args.alarm_state_file), state)
+            page_open_alarm(args, [], raw, now, stamp,
+                            family=CODE_COVERAGE_FAMILY)
+        return
+
+    roots = ", ".join(blind)
+    if not args.alarm_state_file:
+        measured = len(payload.get("members", {})) if payload else 0
+        print(f"{stamp} think-watchdog code-check PARTIAL COVERAGE "
+              f"(not paged): {measured} members measured, "
+              f"{len(blind)} root(s) unreadable: {roots}; "
+              "coverage grace needs --alarm-state-file", flush=True)
+        return
+
+    state_path = Path(args.alarm_state_file)
+    state = load_alarm_state(state_path)
+    alarms = code_coverage_alarms(
+        payload, now, state, args.code_coverage_grace_seconds)
+    save_alarm_state(state_path, state)
+    if not alarms:
+        tracking = state.get(COVERAGE_TRACKING_KEY)
+        ages = []
+        if isinstance(tracking, dict):
+            for root, entry in tracking.items():
+                if isinstance(entry, dict):
+                    first = entry.get("first_seen")
+                    if isinstance(first, (int, float)) and not isinstance(first, bool):
+                        ages.append(f"{root} {age_phrase(max(0.0, now - float(first)))}")
+        print(f"{stamp} think-watchdog code-check PARTIAL COVERAGE "
+              f"(tracking, not paged): {len(blind)} root(s) unreadable: "
+              f"{roots}; blind {', '.join(ages) or 'not yet timed'}", flush=True)
+        return
+
+    print(f"{stamp} think-watchdog code-check COVERAGE ALARM: "
+          f"{alarm_title(alarms)}", flush=True)
+    page_open_alarm(args, alarms, raw, now, stamp,
+                    family=CODE_COVERAGE_FAMILY)
+
+
 def check_code(args, now: float, stamp: str) -> None:
     """One poll of the fleet's code heads, and one task if it found a drift."""
     verdict, text, payload = run_code_check(args.code_cmd, args.code_timeout)
@@ -717,6 +960,8 @@ def check_code(args, now: float, stamp: str) -> None:
         print(f"{stamp} think-watchdog code-check UNREADABLE (not paged): "
               f"{text[:400]}", flush=True)
         return
+
+    check_code_coverage(args, payload, text, now, stamp)
 
     alarms = code_alarms(payload)
     if verdict == "ok":
@@ -736,15 +981,10 @@ def check_code(args, now: float, stamp: str) -> None:
         # Do not clear an open drift alarm here: the unreadable root could
         # contain the member that was stale. The absence of evidence from one
         # root is not evidence that the whole fleet caught up.
-        roots = []
-        for row in payload.get("unreadable", []) if payload else []:
-            if isinstance(row, dict) and row.get("root"):
-                roots.append(str(row["root"]))
         measured = len(payload.get("members", {})) if payload else 0
-        blind = ", ".join(roots) if roots else "unknown root"
-        print(f"{stamp} think-watchdog code-check PARTIAL COVERAGE "
-              f"(not paged): {measured} members measured, "
-              f"{len(roots) or 1} root(s) unreadable: {blind}", flush=True)
+        print(f"{stamp} think-watchdog code-check drift check: "
+              f"{measured} members measured; no measured member is stale",
+              flush=True)
         return
 
     if not alarms:
@@ -951,6 +1191,11 @@ def main(argv: list[str] | None = None) -> int:
                              "(empty=no code check)")
     parser.add_argument("--code-timeout", type=float,
                         default=DEFAULT_CODE_TIMEOUT_S)
+    parser.add_argument("--code-coverage-grace-seconds", type=float,
+                        default=DEFAULT_CODE_COVERAGE_GRACE_S,
+                        help="how long a root table may stay unreadable before "
+                             "the code check raises a coverage alarm "
+                             "(requires --alarm-state-file)")
     parser.add_argument("--alarm-url", default="",
                         help="mailbox base url for the alarm task (empty=log only)")
     parser.add_argument("--alarm-token-file", default="")

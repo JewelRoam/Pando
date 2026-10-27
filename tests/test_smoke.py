@@ -3216,8 +3216,9 @@ class TestThinkWatchdogCodeDelivery(unittest.TestCase):
 
       * a stale member becomes exactly one claimable ``[alarm] code-drift``
         task - not a log line;
-      * a root table that cannot be read creates **nothing**. Our blind spot is
-        not a member falling behind, and conflating them is how a pager lies;
+      * a transient unreadable root creates nothing, while a root that stays
+        unreadable past the grace window becomes one ``[alarm] code-coverage``
+        task - never a fabricated member-drift accusation;
       * the vote and code legs share one ``--alarm-state-file`` (the age and
         re-check logic lives there), so neither leg's clean poll may erase the
         other leg's open alarm.
@@ -3382,6 +3383,83 @@ class TestThinkWatchdogCodeDelivery(unittest.TestCase):
             self.assertIn("PARTIAL COVERAGE (not paged)", text)
             self.assertIn("1 members measured, 1 root(s) unreadable: pi5", text)
             self.assertNotIn("UNREADABLE", text)
+
+    def test_a_persistent_blind_root_becomes_a_coverage_task(self):
+        """Blindness is actionable after three polls, without blaming members."""
+        wd = self._tool()
+        partial = {
+            "members": {"mac-text": {"status": "ok", "behind": 0}},
+            "unreadable": [
+                {"root": "win", "error": "urlopen timed out"},
+                {"root": "pi5", "error": "mirror stale"},
+            ],
+            "stale": [],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            url, token_file, box, server, thread = self._alarm_stub(tmp)
+            state = Path(tmp) / "alarms.json"
+            cmd = self._probe_cmd(tmp, partial, 1, "partial_persistent")
+            extra = ("--alarm-state-file", str(state),
+                     "--code-coverage-grace-seconds", "900")
+            try:
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    self._run(wd, tmp, cmd, alarm_url=url,
+                              token_file=token_file,
+                              extra=extra + ("--now", "1000"))
+                self.assertEqual(box.list(None), [],
+                                 "one blind poll is not yet coverage proof")
+                self.assertIn("tracking, not paged", out.getvalue())
+
+                self._run(wd, tmp, cmd, alarm_url=url,
+                          token_file=token_file,
+                          extra=extra + ("--now", "1900"))
+                tasks = box.list(None)
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=3)
+
+            self.assertEqual(len(tasks), 1)
+            task = tasks[0]
+            self.assertTrue(task["title"].startswith(
+                "[alarm] code-coverage:"), task["title"])
+            self.assertIn("win", task["title"])
+            self.assertIn("pi5", task["title"])
+            self.assertNotIn("code-drift:", task["title"])
+            self.assertIn("does NOT mean", task["body"])
+            self.assertIn("not accused of running old", task["body"])
+
+    def test_measured_coverage_closes_the_coverage_task(self):
+        """A fresh measurement is the only accepted recovery evidence."""
+        wd = self._tool()
+        partial = {
+            "members": {"mac-text": {"status": "ok", "behind": 0}},
+            "unreadable": [{"root": "win", "error": "offline"}],
+            "stale": [],
+        }
+        clean = {"members": {
+            "mac-text": {"status": "ok", "behind": 0},
+            "win-gemma-12b": {"status": "ok", "behind": 0},
+        }, "unreadable": [], "stale": []}
+        with tempfile.TemporaryDirectory() as tmp:
+            url, token_file, box, server, thread = self._alarm_stub(tmp)
+            state = Path(tmp) / "alarms.json"
+            extra = ("--alarm-state-file", str(state),
+                     "--code-coverage-grace-seconds", "0")
+            try:
+                self._run(wd, tmp, self._probe_cmd(tmp, partial, 1, "blind"),
+                          alarm_url=url, token_file=token_file,
+                          extra=extra + ("--now", "1000"))
+                self._run(wd, tmp, self._probe_cmd(tmp, clean, 0, "covered"),
+                          alarm_url=url, token_file=token_file,
+                          extra=extra + ("--now", "1001"))
+                tasks = box.list(None)
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=3)
+
+            self.assertEqual(len(tasks), 1)
+            self.assertEqual(tasks[0]["status"], "done")
+            self.assertNotIn(wd.COVERAGE_TRACKING_KEY,
+                             json.loads(state.read_text()))
 
     def test_a_partial_report_still_pages_a_stale_member(self):
         """An unreadable root does not hide a stale row we did measure."""
