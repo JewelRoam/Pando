@@ -1175,6 +1175,154 @@ def read_root_snapshot(path: str) -> tuple[dict | None, str | None]:
     return payload, None
 
 
+def _enrich_member_chat(participants: list[dict]) -> list[dict]:
+    """Fill missing member chat metadata without serialising health probes."""
+    missing = [part for part in participants
+               if not part.get("chat")
+               and str(part.get("endpoint") or "").startswith("http")]
+    if not missing:
+        return participants
+
+    def _health_chat(part: dict) -> tuple[str, dict | None]:
+        health, err, _, _ = http_json(
+            str(part["endpoint"]).rstrip("/") + "/health", timeout=1.5)
+        if err or not isinstance(health, dict):
+            return part["node_id"], None
+        return part["node_id"], normalize_chat(health.get("chat"))
+
+    with ThreadPoolExecutor(max_workers=min(8, len(missing))) as pool:
+        chats = dict(pool.map(_health_chat, missing))
+    for part in participants:
+        chat = chats.get(part["node_id"])
+        if chat:
+            part["chat"] = chat
+    return participants
+
+
+def _probe_root(source: dict, fallback_token: str | None) -> dict:
+    """Read one independent root into rows the collector can merge in order.
+
+    This function owns every network call for a root, including member health.
+    Root workers run concurrently so one unreachable root does not serialise a
+    healthy root or its member probes into the same timeout budget.
+    """
+    root_url = str(source.get("url") or "").rstrip("/")
+    snapshot_file = str(source.get("file") or "").strip()
+    if not root_url and not snapshot_file:
+        return {}
+    label = str(source.get("name") or root_url or snapshot_file)
+    result = {"summary": None, "participants": [], "services": [], "errors": [],
+              "quorum": None}
+
+    if snapshot_file and not root_url:
+        payload, snap_err = read_root_snapshot(snapshot_file)
+        age = None
+        if payload and isinstance(payload.get("mirrored_at"), (int, float)):
+            age = max(0.0, time.time() - float(payload["mirrored_at"]))
+        stale = age is not None and age > 180
+        summary = {"name": label, "url": snapshot_file,
+                   "reachable": payload is not None, "members": 0,
+                   "error": snap_err, "quorum": None, "playbook": None,
+                   "playbook_error": None}
+        if stale:
+            summary["error"] = f"snapshot {int(age)}s old"
+        detail = snap_err or (f"snapshot {int(age)}s old"
+                              if age is not None else "snapshot")
+        if payload and not snap_err:
+            nodes = payload["nodes"]
+            participants = []
+            for node_id, info in nodes.items():
+                if isinstance(info, dict):
+                    participants.append(participant_from_node(
+                        str(node_id), info, label))
+            result["participants"] = _enrich_member_chat(participants)
+            summary["members"] = len(nodes)
+            detail = f"{len(nodes)} members, snapshot {int(age or 0)}s old"
+            if isinstance(payload.get("status"), dict):
+                summary["quorum"] = payload["status"]
+                result["quorum"] = payload["status"]
+        result["services"].append({
+            "group": label, "name": "root snapshot", "url": snapshot_file,
+            "alive": payload is not None and not stale,
+            "detail": detail, "latency_ms": None, "status": None,
+        })
+        if summary["error"]:
+            result["errors"].append(f"{label} snapshot: {summary['error']}")
+        result["summary"] = summary
+        return result
+
+    pairing = source.get("token") or fallback_token
+    summary = {"name": label, "url": root_url, "reachable": False,
+               "members": 0, "error": None, "quorum": None,
+               "playbook": None, "playbook_error": None}
+    nodes, nerr, nms, nstatus = http_json(
+        f"{root_url}/nodes", token=pairing, header="X-Pairing-Token")
+    summary["reachable"] = nerr is None
+    summary["error"] = nerr
+    result["services"].append({
+        "group": label,
+        "name": "root /nodes", "url": root_url + "/nodes",
+        "alive": nerr is None,
+        "detail": nerr or f"{len((nodes or {}).get('nodes', {}))} members",
+        "latency_ms": nms, "status": nstatus,
+    })
+    if nerr:
+        result["errors"].append(f"{label} /nodes: {nerr}")
+        skipped = "skipped: /nodes unreachable"
+        result["services"].append({
+            "group": label,
+            "name": "root /status", "url": root_url + "/status",
+            "alive": False, "detail": skipped,
+            "latency_ms": None, "status": None,
+        })
+        summary["playbook_error"] = skipped
+        result["summary"] = summary
+        return result
+
+    participants = []
+    for node_id, info in ((nodes or {}).get("nodes") or {}).items():
+        if isinstance(info, dict):
+            participants.append(participant_from_node(str(node_id), info, label))
+    summary["members"] = len((nodes or {}).get("nodes") or {})
+
+    # Member health, root status, and playbook are independent once /nodes
+    # answers. Running them together bounds this root by its slowest probe.
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        status_future = pool.submit(
+            http_json, f"{root_url}/status", token=pairing,
+            header="X-Pairing-Token")
+        playbook_future = pool.submit(
+            http_json, f"{root_url}/playbook", token=pairing,
+            header="X-Pairing-Token")
+        members_future = pool.submit(_enrich_member_chat, participants)
+        root_status, serr, sms, sstatus = status_future.result()
+        playbook, perr, pms, pstatus = playbook_future.result()
+        result["participants"] = members_future.result()
+
+    result["services"].append({
+        "group": label,
+        "name": "root /status", "url": root_url + "/status",
+        "alive": serr is None, "detail": serr or "quorum snapshot",
+        "latency_ms": sms, "status": sstatus,
+    })
+    if serr:
+        result["errors"].append(f"{label} /status: {serr}")
+    else:
+        summary["quorum"] = root_status
+        result["quorum"] = root_status
+    if perr is None and playbook:
+        summary["playbook"] = {
+            "name": playbook.get("name"), "version": playbook.get("version"),
+            "hash": _short(playbook.get("hash"), 16),
+            "questions": len(playbook.get("questions") or []),
+            "gating": playbook.get("gating"),
+        }
+    else:
+        summary["playbook_error"] = perr or "empty"
+    result["summary"] = summary
+    return result
+
+
 def collect_state(cfg: dict) -> dict:
     started = time.monotonic()
     state: dict = {
@@ -1292,107 +1440,34 @@ def collect_state(cfg: dict) -> dict:
     # Roots are independent membership tables. Read every configured root and
     # merge by node_id; the UI keeps the root names so it is obvious where a
     # participant was seen.
-    for source in (cfg.get("roots") or []):
-        root_url = str(source.get("url") or "").rstrip("/")
-        snapshot_file = str(source.get("file") or "").strip()
-        if not root_url and not snapshot_file:
+    root_sources = list(cfg.get("roots") or [])
+    extra_rows = list(cfg.get("extra_services") or cfg.get("services") or [])
+
+    def _probe_extra(row: dict) -> tuple[dict, tuple]:
+        url = str((row or {}).get("url") or "")
+        return row, http_probe(url, timeout=3.0) if url else (False, "", None, None)
+
+    root_results = []
+    extra_results = []
+    workers = min(8, max(1, len(root_sources) + len(extra_rows)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        root_futures = [pool.submit(_probe_root, source,
+                                    cfg.get("pairing_token"))
+                        for source in root_sources]
+        extra_futures = [pool.submit(_probe_extra, row) for row in extra_rows]
+        root_results = [future.result() for future in root_futures]
+        extra_results = [future.result() for future in extra_futures]
+
+    for result in root_results:
+        summary = result.get("summary")
+        if not summary:
             continue
-        label = str(source.get("name") or root_url or snapshot_file)
-        if snapshot_file and not root_url:
-            payload, snap_err = read_root_snapshot(snapshot_file)
-            age = None
-            if payload and isinstance(payload.get("mirrored_at"), (int, float)):
-                age = max(0.0, time.time() - float(payload["mirrored_at"]))
-            stale = age is not None and age > 180
-            summary = {"name": label, "url": snapshot_file, "reachable": payload is not None,
-                       "members": 0, "error": snap_err, "quorum": None,
-                       "playbook": None, "playbook_error": None}
-            if stale:
-                summary["error"] = f"snapshot {int(age)}s old"
-            detail = snap_err or (f"snapshot {int(age)}s old" if age is not None else "snapshot")
-            if payload and not snap_err:
-                nodes = payload["nodes"]
-                for node_id, info in nodes.items():
-                    if isinstance(info, dict):
-                        state["participants"].append(
-                            participant_from_node(str(node_id), info, label))
-                summary["members"] = len(nodes)
-                detail = f"{len(nodes)} members, snapshot {int(age or 0)}s old"
-                if isinstance(payload.get("status"), dict):
-                    summary["quorum"] = payload["status"]
-                    if state.get("quorum") is None:
-                        state["quorum"] = payload["status"]
-            state["services"].append({
-                "group": label, "name": "root snapshot", "url": snapshot_file,
-                "alive": payload is not None and not stale,
-                "detail": detail, "latency_ms": None, "status": None,
-            })
-            if summary["error"]:
-                state["collector"]["errors"].append(f"{label} snapshot: {summary['error']}")
-            state["roots"].append(summary)
-            continue
-        pairing = source.get("token") or cfg.get("pairing_token")
-        summary = {"name": label, "url": root_url, "reachable": False,
-                   "members": 0, "error": None, "quorum": None,
-                   "playbook": None, "playbook_error": None}
-
-        nodes, nerr, nms, nstatus = http_json(
-            f"{root_url}/nodes", token=pairing, header="X-Pairing-Token")
-        summary["reachable"] = nerr is None
-        summary["error"] = nerr
-        state["services"].append({
-            "group": label,
-            "name": "root /nodes", "url": root_url + "/nodes",
-            "alive": nerr is None,
-            "detail": nerr or f"{len((nodes or {}).get('nodes', {}))} members",
-            "latency_ms": nms, "status": nstatus,
-        })
-        if nerr:
-            state["collector"]["errors"].append(f"{label} /nodes: {nerr}")
-            skipped = "skipped: /nodes unreachable"
-            state["services"].append({
-                "group": label,
-                "name": "root /status", "url": root_url + "/status",
-                "alive": False, "detail": skipped,
-                "latency_ms": None, "status": None,
-            })
-            summary["playbook_error"] = skipped
-            state["roots"].append(summary)
-            continue
-
-        for node_id, info in ((nodes or {}).get("nodes") or {}).items():
-            if isinstance(info, dict):
-                state["participants"].append(
-                    participant_from_node(str(node_id), info, label))
-        summary["members"] = len((nodes or {}).get("nodes") or {})
-
-        root_status, serr, sms, sstatus = http_json(
-            f"{root_url}/status", token=pairing, header="X-Pairing-Token")
-        state["services"].append({
-            "group": label,
-            "name": "root /status", "url": root_url + "/status",
-            "alive": serr is None, "detail": serr or "quorum snapshot",
-            "latency_ms": sms, "status": sstatus,
-        })
-        if serr:
-            state["collector"]["errors"].append(f"{label} /status: {serr}")
-        else:
-            summary["quorum"] = root_status
-            if state.get("quorum") is None:
-                state["quorum"] = root_status
-
-        playbook, perr, pms, pstatus = http_json(
-            f"{root_url}/playbook", token=pairing, header="X-Pairing-Token")
-        if perr is None and playbook:
-            summary["playbook"] = {
-                "name": playbook.get("name"), "version": playbook.get("version"),
-                "hash": _short(playbook.get("hash"), 16),
-                "questions": len(playbook.get("questions") or []),
-                "gating": playbook.get("gating"),
-            }
-        else:
-            summary["playbook_error"] = perr or "empty"
+        state["participants"].extend(result["participants"])
+        state["services"].extend(result["services"])
+        state["collector"]["errors"].extend(result["errors"])
         state["roots"].append(summary)
+        if state.get("quorum") is None and result.get("quorum") is not None:
+            state["quorum"] = result["quorum"]
 
     merged: dict[str, dict] = {}
     for part in state["participants"]:
@@ -1405,19 +1480,6 @@ def collect_state(cfg: dict) -> dict:
         part["roots"] = [root_name]
         merged[node_id] = part
     state["participants"] = sorted(merged.values(), key=lambda p: p["node_id"])
-    missing = [part for part in state["participants"]
-               if not part.get("chat") and str(part.get("endpoint") or "").startswith("http")]
-    if missing:
-        def _health_chat(part: dict) -> tuple[str, dict | None]:
-            health, err, _, _ = http_json(
-                str(part["endpoint"]).rstrip("/") + "/health", timeout=1.5)
-            if err or not isinstance(health, dict):
-                return part["node_id"], None
-            return part["node_id"], normalize_chat(health.get("chat"))
-        with ThreadPoolExecutor(max_workers=min(8, len(missing))) as pool:
-            for node_id, chat in pool.map(_health_chat, missing):
-                if chat and node_id in merged:
-                    merged[node_id]["chat"] = chat
 
     # --- resident proposers: ledger tails ------------------------------
     # Default: this host. hosts.json may add {"host","path"[,"ssh"]}
@@ -1466,12 +1528,11 @@ def collect_state(cfg: dict) -> dict:
         state["reactions"])
 
     # --- optional extra service probes (addresses stay in hosts.json) ---
-    for row in (cfg.get("extra_services") or cfg.get("services") or []):
+    for row, (ok, detail, pms, pstatus) in extra_results:
         url = str((row or {}).get("url") or "")
         if not url:
             continue
         name = str(row.get("name") or url)
-        ok, detail, pms, pstatus = http_probe(url, timeout=3.0)
         state["services"].append({
             "group": str(row.get("group") or _service_group(url)),
             "name": name, "url": url, "alive": ok, "detail": detail,

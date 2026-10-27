@@ -5595,6 +5595,64 @@ class TestObservatoryFeed(unittest.TestCase):
                          "skipped: /nodes unreachable")
 
 
+    def test_root_and_member_probes_overlap(self):
+        """A dead root must not block member health from a healthy root."""
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import observatory
+
+        barrier = threading.Barrier(2)
+        synced = []
+        original_json = observatory.http_json
+        original_units = observatory.local_units
+
+        def synchronise():
+            try:
+                barrier.wait(timeout=2)
+                synced.append(True)
+            except threading.BrokenBarrierError:
+                pass
+
+        def fake_json(url, *args, **kwargs):
+            if url == "http://mailbox/health":
+                return {}, None, 1.0, 200
+            if "/tasks?status=all" in url:
+                return {"tasks": []}, None, 1.0, 200
+            if url == "http://win:8790/nodes":
+                synchronise()
+                return None, "unreachable: timeout", 4000.0, 0
+            if url == "http://mac:8765/nodes":
+                return {"nodes": {"member": {
+                    "url": "http://member:1", "host": "member-host"}}}, None, 1.0, 200
+            if url == "http://member:1/health":
+                synchronise()
+                return {"chat": {"model": "test-model"}}, None, 1.0, 200
+            if url.endswith("/status") or url.endswith("/playbook"):
+                return {}, None, 1.0, 200
+            raise AssertionError(f"unexpected probe: {url}")
+
+        observatory.http_json = fake_json
+        observatory.local_units = lambda: {"host": "test", "services": []}
+        try:
+            state = observatory.collect_state({
+                "mailbox_url": "http://mailbox",
+                "mailbox_token": "token",
+                "roots": [
+                    {"name": "win", "url": "http://win:8790",
+                     "token": "pairing"},
+                    {"name": "mac", "url": "http://mac:8765",
+                     "token": "pairing"},
+                ],
+            })
+        finally:
+            observatory.http_json = original_json
+            observatory.local_units = original_units
+
+        self.assertEqual(len(synced), 2)
+        member = next(row for row in state["participants"]
+                      if row["node_id"] == "member")
+        self.assertEqual(member["chat"]["model"], "test-model")
+
+
     def test_an_execution_ledger_row_is_shown_unchanged(self):
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
         from observatory import (attach_executions, execution_text,
