@@ -140,6 +140,26 @@ def _reaction_target(title) -> str:
     return parts[1]
 
 
+def _task_kind(title) -> str:
+    """The leading ``[kind]`` marker, lower-cased, or an empty string."""
+    token = str(title or "").strip().split(None, 1)[0]
+    if len(token) < 3 or not token.startswith("[") or not token.endswith("]"):
+        return ""
+    return token[1:-1].strip().lower()
+
+
+def _clean_kinds(kinds) -> list[str]:
+    """Normalise a caller's kind filter without changing its order."""
+    if isinstance(kinds, str):
+        kinds = [kinds]
+    clean = []
+    for value in kinds or ():
+        kind = str(value).strip().strip("[]").lower()
+        if kind and kind not in clean:
+            clean.append(kind)
+    return clean
+
+
 def _summary_order(row: dict) -> tuple[str, str]:
     """Stable mailbox order: creation time, then id as the tie-breaker."""
     return str(row.get("created_at", "")), str(row.get("id", ""))
@@ -190,6 +210,8 @@ class Mailbox:
         # round, even though the mailbox itself changes one task at a time.
         self._ordered: list[dict] = []
         self._by_status: dict[str, list[dict]] = {}
+        self._by_kind: dict[str, list[dict]] = {}
+        self._by_status_kind: dict[tuple[str, str], list[dict]] = {}
         self._proposal_by_task: dict[str, tuple[str, str, str]] = {}
         self._reactions_by_target: dict[str, list[str]] = {}
         for path in sorted(self.tasks_dir.glob("*.json")):
@@ -223,6 +245,13 @@ class Mailbox:
     def _index_summary(self, row: dict) -> None:
         self._insert_ordered(self._ordered, row)
         self._insert_ordered(self._status_rows(self._by_status, row), row)
+        kind = _task_kind(row.get("title"))
+        if kind:
+            self._insert_ordered(
+                self._by_kind.setdefault(kind, []), row)
+            status_kind = (str(row.get("status", "")), kind)
+            self._insert_ordered(
+                self._by_status_kind.setdefault(status_kind, []), row)
         task_id = str(row.get("id", ""))
         parsed = _proposal_parts(row.get("title"))
         if parsed:
@@ -234,6 +263,19 @@ class Mailbox:
     def _unindex_summary(self, row: dict) -> None:
         self._remove_ordered(self._ordered, row)
         self._remove_ordered(self._status_rows(self._by_status, row), row)
+        kind = _task_kind(row.get("title"))
+        if kind:
+            rows = self._by_kind.get(kind)
+            if rows is not None:
+                self._remove_ordered(rows, row)
+                if not rows:
+                    self._by_kind.pop(kind, None)
+            status_kind = (str(row.get("status", "")), kind)
+            rows = self._by_status_kind.get(status_kind)
+            if rows is not None:
+                self._remove_ordered(rows, row)
+                if not rows:
+                    self._by_status_kind.pop(status_kind, None)
         task_id = str(row.get("id", ""))
         self._proposal_by_task.pop(task_id, None)
         target = _reaction_target(row.get("title"))
@@ -247,10 +289,17 @@ class Mailbox:
     def _build_indexes(self) -> None:
         self._ordered = sorted(self._summaries.values(), key=_summary_order)
         self._by_status = {}
+        self._by_kind = {}
+        self._by_status_kind = {}
         self._proposal_by_task = {}
         self._reactions_by_target = {}
         for row in self._ordered:
             self._status_rows(self._by_status, row).append(row)
+            kind = _task_kind(row.get("title"))
+            if kind:
+                self._by_kind.setdefault(kind, []).append(row)
+                self._by_status_kind.setdefault(
+                    (str(row.get("status", "")), kind), []).append(row)
             task_id = str(row.get("id", ""))
             parsed = _proposal_parts(row.get("title"))
             if parsed:
@@ -289,16 +338,42 @@ class Mailbox:
         self._index_summary(summary)
 
     def summaries(self, status: str | None = None,
-                  limit: int | None = None) -> list[dict]:
-        """Return cached listing rows, optionally bounded to the newest N."""
+                  limit: int | None = None,
+                  kinds=None) -> list[dict]:
+        """Return cached listing rows, filtered by kind before limiting.
+
+        Filtering after ``limit`` lets a noisy kind displace the rows a
+        consumer actually needs. ``kinds`` uses the leading title marker, so
+        ``["chat", "proposal"]`` selects those two classes without walking
+        the entire history.
+        """
+        kinds = _clean_kinds(kinds)
         with self._lock:
-            if status is None or status == "all":
-                rows = self._ordered
-            else:
-                rows = self._by_status.get(status, [])
+            if not kinds:
+                if status is None or status == "all":
+                    rows = self._ordered
+                else:
+                    rows = self._by_status.get(status, [])
+                if limit is not None:
+                    rows = rows[-limit:] if limit else []
+                return [dict(row) for row in rows]
+
+            selected = []
+            for kind in kinds:
+                if status is None or status == "all":
+                    rows = self._by_kind.get(kind, [])
+                else:
+                    rows = self._by_status_kind.get((status, kind), [])
+                # Each list is already in mailbox order. Taking its tail is
+                # enough to find the newest N across the union.
+                if limit is None:
+                    selected.extend(rows)
+                else:
+                    selected.extend(rows[-limit:] if limit else [])
+            selected.sort(key=_summary_order)
             if limit is not None:
-                rows = rows[-limit:] if limit else []
-            return [dict(row) for row in rows]
+                selected = selected[-limit:] if limit else []
+            return [dict(row) for row in selected]
 
     def select(self, status: str | None = None, limit: int | None = None,
                selectors=None, exclude_proposal_ids=(),
@@ -567,7 +642,21 @@ def build_handler(mailbox: Mailbox, token: str, telemetry=None,
                 except ValueError:
                     self._send(400, {"error": "limit must be a non-negative integer"})
                     return
-                self._send(200, {"tasks": mailbox.summaries(status, limit)})
+                raw_kinds = (params.get("kind") or []) + \
+                    (params.get("kinds") or [])
+                kinds = []
+                for raw in raw_kinds:
+                    for value in str(raw).split(","):
+                        kind = value.strip().strip("[]").lower()
+                        if kind and kind not in kinds:
+                            kinds.append(kind)
+                if len(kinds) > 16:
+                    self._send(400, {"error": "at most 16 kinds are allowed"})
+                    return
+                answer = {"tasks": mailbox.summaries(status, limit, kinds)}
+                if kinds:
+                    answer["kinds"] = kinds
+                self._send(200, answer)
                 return
             if path.startswith("/task/"):
                 task = mailbox.load(path.split("/", 2)[2])

@@ -5177,8 +5177,10 @@ class TestChatMailboxPartition(unittest.TestCase):
                 ["http://primary", "http://fallback"], None, 5)
 
         self.assertEqual(seen, [
-            f"http://primary/tasks?status=all&limit={chatd.CHAT_FEED_LIMIT}",
-            f"http://fallback/tasks?status=all&limit={chatd.CHAT_FEED_LIMIT}",
+            "http://primary/tasks?status=all&limit="
+            f"{chatd.CHAT_FEED_LIMIT}&kind=chat&kind=proposal",
+            "http://fallback/tasks?status=all&limit="
+            f"{chatd.CHAT_FEED_LIMIT}&kind=chat&kind=proposal",
         ])
         self.assertEqual([row["id"] for row in rows], ["t1"])
         self.assertEqual(source, "http://fallback")
@@ -5198,7 +5200,10 @@ class TestChatMailboxPartition(unittest.TestCase):
             rows, _, _ = chatd.fetch_tasks_any(
                 ["http://mailbox"], None, 5, limit=37)
 
-        self.assertEqual(seen, ["http://mailbox/tasks?status=all&limit=37"])
+        self.assertEqual(
+            seen,
+            ["http://mailbox/tasks?status=all&limit=37"
+             "&kind=chat&kind=proposal"])
         self.assertEqual([row["id"] for row in rows], ["t1"])
 
     def test_an_empty_fallback_is_healthy_even_if_primary_is_down(self):
@@ -5253,7 +5258,9 @@ class TestChatMailboxPartition(unittest.TestCase):
 
         self.assertEqual(report["did"], "idle")
         self.assertEqual(
-            seen, [f"http://mailbox/tasks?status=all&limit={chatd.CHAT_FEED_LIMIT}"])
+            seen,
+            ["http://mailbox/tasks?status=all&limit="
+             f"{chatd.CHAT_FEED_LIMIT}&kind=chat&kind=proposal"])
 
     def test_every_mailbox_down_is_an_error_not_a_silent_idle(self):
         """A partition must not look like a colony with nothing to say."""
@@ -5684,6 +5691,63 @@ class TestExecution(unittest.TestCase):
             {row["id"] for row in listing["tasks"]},
             {"t-seed", "t-seed-vote", "t-local-policy",
              "t-local-vote", "t-live"})
+
+    def test_kind_filter_is_applied_before_the_feed_limit(self):
+        """Reaction noise must not push chat or a grounding proposal out."""
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "agent_mailbox_under_test_kind_window",
+            Path(__file__).resolve().parents[1] / "tools" / "agent_mailbox.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as tmp:
+            box = module.Mailbox(Path(tmp) / "box")
+            rows = [
+                {"id": "t-p1", "title": "[proposal] p1 seed.export by peer",
+                 "created_at": "2026-10-27T10:00:00"},
+                {"id": "t-r1", "title": "[reaction] p1 赞同 by voter",
+                 "created_at": "2026-10-27T10:01:00"},
+                {"id": "t-c1", "title": "[chat] @peer hello",
+                 "created_at": "2026-10-27T10:02:00"},
+                {"id": "t-r2", "title": "[reaction] p2 赞同 by voter",
+                 "created_at": "2026-10-27T10:03:00"},
+                {"id": "t-p2", "title": "[proposal] p2 recruit.invite by peer",
+                 "created_at": "2026-10-27T10:04:00"},
+                {"id": "t-r3", "title": "[reaction] p3 赞同 by voter",
+                 "created_at": "2026-10-27T10:05:00"},
+            ]
+            for row in rows:
+                box.save({**row, "from": "ann", "body": "x", "status": "open",
+                          "history": []})
+            server = module.ThreadingHTTPServer(
+                ("127.0.0.1", 0), module.build_handler(box, "tok"))
+            port = server.server_address[1]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                def query():
+                    request = urllib.request.Request(
+                        f"http://127.0.0.1:{port}/tasks?status=all&limit=2"
+                        "&kind=chat&kind=proposal",
+                        headers={"Authorization": "Bearer tok"})
+                    with urllib.request.urlopen(request, timeout=3) as resp:
+                        return json.loads(resp.read())
+
+                first = query()
+                box.update("t-c1", "edited", "ann",
+                           title="[reaction] p2 edited by ann")
+                second = query()
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=3)
+
+        self.assertEqual([row["id"] for row in first["tasks"]],
+                         ["t-c1", "t-p2"])
+        self.assertEqual(first["kinds"], ["chat", "proposal"])
+        self.assertEqual([row["id"] for row in second["tasks"]],
+                         ["t-p1", "t-p2"])
 
     def test_indexed_selection_matches_the_unindexed_algorithm(self):
         """The incremental indexes are an optimisation, not a new query rule."""

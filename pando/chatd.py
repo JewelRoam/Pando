@@ -18,7 +18,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 from .chat import (OPEN_COOLDOWN, chat_peer_ids, message_text, next_opening,
                    next_reply, normalize_chat)
@@ -32,6 +32,10 @@ from .proposal_mail import delivery_failed, mailbox_chain
 # history. Only the newest slice can participate in a conversation; fetching
 # 35k summary rows on every pass makes a healthy chat loop pay for all memory.
 CHAT_FEED_LIMIT = 500
+# The feed is dominated by proposal/reaction traffic. Ask the mailbox to
+# filter before applying the bound, otherwise reactions can push unread chat
+# messages and the proposal needed to ground an opening out of the window.
+CHAT_FEED_KINDS = ("chat", "proposal")
 
 # A root that times out on every pass must not tax every healthy pass. Wait
 # briefly after the first miss, then grow to a bounded probe interval so a
@@ -508,14 +512,21 @@ def _mailboxes(urls) -> list[str]:
 
 def list_tasks(mailbox: str, token: str | None, timeout: float,
                limit: int | None = CHAT_FEED_LIMIT) -> list[dict]:
-    path = "/tasks?status=all"
-    if limit is not None:
-        path += f"&limit={int(limit)}"
+    path = chat_feed_path(limit)
     listed = _request(mailbox.rstrip("/") + path, token, "GET", None, timeout)
     tasks = listed.get("tasks") if isinstance(listed, dict) else None
     if not isinstance(tasks, list):
         raise RuntimeError(listed.get("error", "bad task list") if isinstance(listed, dict) else "bad task list")
     return tasks
+
+
+def chat_feed_path(limit: int | None = CHAT_FEED_LIMIT) -> str:
+    """The bounded mailbox query chatd needs, filter-first."""
+    params = [("status", "all")]
+    if limit is not None:
+        params.append(("limit", str(int(limit))))
+    params.extend(("kind", kind) for kind in CHAT_FEED_KINDS)
+    return "/tasks?" + urlencode(params)
 
 
 def fetch_tasks_any(urls, token: str | None, timeout: float,
@@ -530,10 +541,8 @@ def fetch_tasks_any(urls, token: str | None, timeout: float,
     """
     last_error = None
     answered = False
+    path = chat_feed_path(limit)
     for url in _mailboxes(urls):
-        path = "/tasks?status=all"
-        if limit is not None:
-            path += f"&limit={int(limit)}"
         listing = _request(url.rstrip("/") + path, token, "GET", None, timeout)
         if isinstance(listing, dict) and listing.get("error"):
             last_error = str(listing.get("error"))
