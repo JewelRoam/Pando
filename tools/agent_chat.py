@@ -75,8 +75,12 @@ def render(task: dict, mentions: str | None = None) -> str | None:
     return f"{created}  {sender:>10} [{task.get('status', '?')}] {title}"
 
 
-def fetch_tasks(args, status: str = "all") -> list[dict]:
-    result = _request(args, "GET", f"/tasks?status={status}")
+def fetch_tasks(args, status: str = "all",
+                limit: int | None = None) -> list[dict]:
+    path = f"/tasks?status={status}"
+    if limit is not None:
+        path += f"&limit={limit}"
+    result = _request(args, "GET", path)
     if "tasks" not in result:
         raise RuntimeError(result.get("error", "bad response"))
     return result["tasks"]
@@ -110,7 +114,10 @@ def cmd_send(args) -> int:
 
 
 def cmd_history(args) -> int:
-    tasks = fetch_tasks(args)
+    # The mailbox can contain tens of thousands of activity records.  A full
+    # listing is several megabytes and was regularly outliving the client's
+    # ten-second timeout; only the newest N rows can affect this output.
+    tasks = fetch_tasks(args, limit=args.limit)
     lines = [line for line in
              (render(task, args.mentions) for task in tasks) if line]
     for line in lines[-args.limit:]:

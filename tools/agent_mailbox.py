@@ -44,6 +44,7 @@ import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -148,6 +149,27 @@ class Mailbox:
         self.tasks_dir = directory / "tasks"
         self.tasks_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
+        # Listings ask for a small amount of metadata from every task.  At
+        # tens of thousands of files, re-reading every JSON body for /health
+        # and every tail poll makes the mailbox look offline.  Keep one
+        # metadata copy in memory and refresh it on our own writes; full
+        # bodies are still read on demand by load()/list().
+        self._summaries: dict[str, dict] = {}
+        for path in sorted(self.tasks_dir.glob("*.json")):
+            try:
+                task = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(task, dict) and task.get("id"):
+                self._summaries[task["id"]] = self._summary(task)
+
+    @staticmethod
+    def _summary(task: dict) -> dict:
+        return {"id": task.get("id"), "from": task.get("from"),
+                "title": task.get("title"), "status": task.get("status"),
+                "created_at": task.get("created_at", ""),
+                "claimed_by": task.get("claimed_by"),
+                "finished_at": task.get("finished_at")}
 
     def _path(self, task_id: str) -> Path:
         safe = "".join(ch for ch in task_id
@@ -163,6 +185,26 @@ class Mailbox:
     def save(self, task: dict) -> None:
         self._path(task["id"]).write_text(
             json.dumps(task, indent=2, ensure_ascii=False), encoding="utf-8")
+        self._summaries[task["id"]] = self._summary(task)
+
+    def summaries(self, status: str | None = None,
+                  limit: int | None = None) -> list[dict]:
+        """Return cached listing rows, optionally bounded to the newest N."""
+        with self._lock:
+            rows = [dict(row) for row in self._summaries.values()
+                    if status is None or status == "all"
+                    or row.get("status") == status]
+        rows.sort(key=lambda row: (row.get("created_at", ""), row.get("id", "")))
+        if limit is not None:
+            rows = rows[-limit:] if limit else []
+        return rows
+
+    def count(self, status: str | None = None) -> int:
+        with self._lock:
+            if status is None or status == "all":
+                return len(self._summaries)
+            return sum(row.get("status") == status
+                       for row in self._summaries.values())
 
     def create(self, sender: str, title: str, body: str) -> dict:
         task_id = ("t-" + time.strftime("%Y%m%d-%H%M%S") + "-"
@@ -226,6 +268,11 @@ def build_handler(mailbox: Mailbox, token: str, telemetry=None,
                   grant_file: Path | None = None,
                   identity_file: Path | None = None):
     class MailboxHandler(BaseHTTPRequestHandler):
+        # A peer may keep an idle HTTP/1.1 connection open.  Without a
+        # timeout every such client permanently occupies a request thread;
+        # repeated polling then exhausts the service after a few days.
+        timeout = 30
+
         def log_message(self, fmt, *args):
             pass
 
@@ -257,9 +304,8 @@ def build_handler(mailbox: Mailbox, token: str, telemetry=None,
             path = self.path.split("?", 1)[0]
             query = self.path.split("?", 1)[1] if "?" in self.path else ""
             if path == "/health":
-                open_count = len(mailbox.list(OPEN))
                 self._send(200, {"ok": True, "service": "agent-mailbox",
-                                 "open": open_count})
+                                 "open": mailbox.count(OPEN)})
                 return
             if not self._authed():
                 return
@@ -321,17 +367,17 @@ def build_handler(mailbox: Mailbox, token: str, telemetry=None,
                 self.wfile.write(raw)
                 return
             if path == "/tasks":
-                status = None
-                for part in query.split("&"):
-                    if part.startswith("status="):
-                        status = part.split("=", 1)[1]
-                summaries = [{"id": t["id"], "from": t["from"],
-                              "title": t["title"], "status": t["status"],
-                              "created_at": t["created_at"],
-                              "claimed_by": t.get("claimed_by"),
-                              "finished_at": t.get("finished_at")}
-                             for t in mailbox.list(status)]
-                self._send(200, {"tasks": summaries})
+                params = parse_qs(query, keep_blank_values=True)
+                status = (params.get("status") or [None])[0]
+                raw_limit = (params.get("limit") or [None])[0]
+                try:
+                    limit = int(raw_limit) if raw_limit is not None else None
+                    if limit is not None and limit < 0:
+                        raise ValueError
+                except ValueError:
+                    self._send(400, {"error": "limit must be a non-negative integer"})
+                    return
+                self._send(200, {"tasks": mailbox.summaries(status, limit)})
                 return
             if path.startswith("/task/"):
                 task = mailbox.load(path.split("/", 2)[2])
@@ -492,7 +538,7 @@ def serve(args) -> int:
                                           grant_file=grant_file,
                                           identity_file=identity_file))
     print(f"agent mailbox serving on http://{args.host}:{args.port} "
-          f"(dir {directory}, {len(mailbox.list(OPEN))} open task(s))",
+          f"(dir {directory}, {mailbox.count(OPEN)} open task(s))",
           flush=True)
     try:
         server.serve_forever()

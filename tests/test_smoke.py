@@ -4970,6 +4970,26 @@ class TestBatchedBodyFetch(unittest.TestCase):
 
 
 class TestChatMailboxPartition(unittest.TestCase):
+    def test_history_requests_a_bounded_tail(self):
+        from types import SimpleNamespace
+        from unittest import mock
+        from tools import agent_chat
+
+        calls = []
+
+        def fake_request(args, method, path, payload=None):
+            calls.append((method, path, payload))
+            return {"tasks": [{"id": "t1", "from": "ann",
+                               "title": "[chat] @all: hi",
+                               "body": "hi", "created_at": "2026-10-27T16:00:00",
+                               "status": "claimed"}]}
+
+        args = SimpleNamespace(limit=10, mentions=None)
+        with mock.patch.object(agent_chat, "_request", fake_request), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(agent_chat.cmd_history(args), 0)
+        self.assertEqual(calls, [("GET", "/tasks?status=all&limit=10", None)])
+
     """A chat reply posted nowhere is not queued; it is gone.
 
     chatd was the last writer in the colony with a single mailbox and no
@@ -8167,6 +8187,54 @@ class TestChat(unittest.TestCase):
 
 
 class TestMailboxReplica(unittest.TestCase):
+    def test_listing_uses_cached_metadata_and_newest_limit(self):
+        import importlib.util
+        from types import SimpleNamespace
+        from unittest import mock
+        spec = importlib.util.spec_from_file_location(
+            "agent_mailbox_under_test_listing",
+            Path(__file__).resolve().parents[1] / "tools" / "agent_mailbox.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as tmp:
+            box = module.Mailbox(Path(tmp) / "box")
+            for task_id, created_at, status in (
+                    ("t-a", "2026-10-27T10:00:00", "open"),
+                    ("t-b", "2026-10-27T10:01:00", "done")):
+                box.save({"id": task_id, "from": "ann", "title": task_id,
+                          "body": "body", "status": status,
+                          "created_at": created_at, "history": []})
+            # A fresh process must build its listing index once, then serve
+            # health and bounded feeds without touching 35k task files again.
+            reopened = module.Mailbox(Path(tmp) / "box")
+            with mock.patch.object(reopened, "list",
+                                   side_effect=AssertionError("disk scan")):
+                handler = module.build_handler(reopened, "tok")
+                self.assertEqual(handler.timeout, 30)
+                server = module.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever,
+                                          daemon=True)
+                thread.start()
+                try:
+                    with urllib.request.urlopen(
+                            f"http://127.0.0.1:{port}/health", timeout=3) as resp:
+                        health = json.loads(resp.read())
+                    req = urllib.request.Request(
+                        f"http://127.0.0.1:{port}/tasks?status=all&limit=1",
+                        headers={"Authorization": "Bearer tok"})
+                    with urllib.request.urlopen(req, timeout=3) as resp:
+                        rows = json.loads(resp.read())["tasks"]
+                finally:
+                    server.shutdown()
+                    server.server_close()
+                    thread.join(timeout=3)
+            self.assertEqual(health["open"], 1)
+            self.assertEqual([row["id"] for row in rows], ["t-b"])
+            reopened.update("t-a", "claimed", "ann", status="claimed")
+            self.assertEqual(reopened.count("open"), 0)
+            self.assertEqual(reopened.count("claimed"), 1)
+
     def test_accept_keeps_the_further_copy_and_never_rewinds(self):
         import importlib.util
         spec = importlib.util.spec_from_file_location(
