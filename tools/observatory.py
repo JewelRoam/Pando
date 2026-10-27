@@ -63,6 +63,7 @@ _ROOT_FAILURE_TTL = 30.0
 _ROOT_FAILURE_CACHE: dict[str, dict] = {}
 _ROOT_FAILURE_LOCK = threading.Lock()
 CHAT_VIEW_LIMIT = 120
+WORK_VIEW_LIMIT = 14
 
 
 def _cached_root_failure(root_url: str) -> tuple[str, float] | None:
@@ -1091,14 +1092,21 @@ def present(state: dict) -> dict:
             "value": "运行中" + (f" · {unit['pid']}" if unit.get("pid") else "") if unit.get("alive") else "未运行",
         })
     work = []
-    for item in reversed((state.get("work") or [])[-14:]):
+    for item in reversed((state.get("work") or [])[-WORK_VIEW_LIMIT:]):
         work.append({
             "status": str(item.get("status") or ""),
             "id": str(item.get("id") or ""),
             "title": str(item.get("title") or ""),
             "who": str(item.get("claimed_by") or item.get("from") or ""),
         })
-    open_work = sum(1 for item in (state.get("work") or []) if item.get("status") == "open")
+    work_counts = state.get("work_counts") or {}
+    open_work = work_counts.get("open")
+    if open_work is None:
+        open_work = sum(1 for item in (state.get("work") or [])
+                        if item.get("status") == "open")
+    work_total = work_counts.get("total")
+    if work_total is None:
+        work_total = len(state.get("work") or [])
     return {
         "headline": f"{root_up}/{len(roots)} root · {len(people)} 人 · {service_up}/{len(services)} 服务",
         "service_count": f"{service_up}/{len(services)}" if services else "",
@@ -1117,7 +1125,7 @@ def present(state: dict) -> dict:
         "units": units,
         "unit_count": f"{sum(1 for unit in units if unit['alive'])}/{len(units)}" if units else "",
         "work": work,
-        "work_count": f"{open_work} open / {len(state.get('work') or [])}",
+        "work_count": f"{open_work} open / {work_total}",
     }
 
 
@@ -1398,6 +1406,7 @@ def collect_state(cfg: dict) -> dict:
         "chat": [],
         "reactions": [],
         "work": [],
+        "work_counts": {"total": None, "open": None},
         "thinkd": [],
     }
 
@@ -1414,19 +1423,67 @@ def collect_state(cfg: dict) -> dict:
     if err:
         state["collector"]["errors"].append(f"mailbox health: {err}")
 
-    tasks, terr, tms, _ = http_json(f"{base}/tasks?status=all", token=cfg["mailbox_token"])
+    feed_path = (f"/tasks/window?chat_limit={CHAT_VIEW_LIMIT}"
+                 f"&work_limit={WORK_VIEW_LIMIT}")
+    tasks, terr, tms, feed_status = http_json(
+        base + feed_path, token=cfg["mailbox_token"])
+    # A mailbox that predates the purpose-built route still gets a working
+    # dashboard. Fall back only on 404: retrying a timeout or auth failure
+    # with the 9MB legacy feed would make the fault worse.
+    if feed_status == 404:
+        feed_path = "/tasks?status=all"
+        tasks, terr, tms, _ = http_json(
+            base + feed_path, token=cfg["mailbox_token"])
+
+    windowed = feed_path.startswith("/tasks/window")
+    if windowed:
+        valid_window = (isinstance(tasks, dict)
+                        and isinstance(tasks.get("chat"), list)
+                        and isinstance(tasks.get("work"), list)
+                        and isinstance(tasks.get("counts"), dict))
+        if terr is None and not valid_window:
+            terr = "malformed /tasks/window payload"
+        chat_items = list(tasks.get("chat") or []) if valid_window else []
+        work_items = list(tasks.get("work") or []) if valid_window else []
+        counts = tasks.get("counts") or {} if valid_window else {}
+        try:
+            chat_total = int(counts["chat"])
+            state["work_counts"] = {
+                "total": int(counts["work"]),
+                "open": int(counts["work_open"]),
+            }
+        except (KeyError, TypeError, ValueError):
+            chat_total = 0
+            state["work_counts"] = {"total": None, "open": None}
+        if terr is None and any(value is None for value in
+                                state["work_counts"].values()):
+            terr = "malformed /tasks/window counts"
+        detail = (f"{chat_total} kinded / "
+                  f"{state['work_counts']['total']} work; window "
+                  f"{len(chat_items) + len(work_items)}")
+    else:
+        items = list((tasks or {}).get("tasks") or [])
+        chat_items = []
+        work_items = []
+        for item in items:
+            title = str(item.get("title", ""))
+            (chat_items if split_title(title)[0] else work_items).append(item)
+        detail = (terr or (f"{len(chat_items) + len(work_items)} items"
+                           if tasks else "empty payload"))
+
     state["services"].append({
         "group": "mailbox",
-        "name": "task feed (/tasks)", "url": base + "/tasks",
+        "name": ("task feed (/tasks/window)" if windowed
+                 else "task feed (/tasks)"),
+        "url": base + feed_path.split("?", 1)[0],
         "alive": terr is None,
-        "detail": terr or (f"{len(tasks.get('tasks') or [])} items"
-                           if tasks else "empty payload"),
+        "detail": terr or detail,
         "latency_ms": tms, "status": 200 if terr is None else 0,
     })
     if terr:
-        state["collector"]["errors"].append(f"mailbox /tasks: {terr}")
-    items = list((tasks or {}).get("tasks") or [])
-    for item in items:
+        state["collector"]["errors"].append(f"mailbox {feed_path}: {terr}")
+
+    for item in chat_items + work_items:
         title = str(item.get("title", ""))
         record = {
             "id": item.get("id"), "from": item.get("from"),
@@ -1442,6 +1499,13 @@ def collect_state(cfg: dict) -> dict:
             state["chat"].append(record)
         else:
             state["work"].append(record)
+
+    if not windowed:
+        state["work_counts"] = {
+            "total": len(state["work"]),
+            "open": sum(item.get("status") == "open"
+                        for item in state["work"]),
+        }
 
     # The /tasks listing carries titles only. Fetch every chat/proposal
     # record in full so the feed never hides the back half of a message.

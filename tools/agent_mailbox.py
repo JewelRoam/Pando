@@ -73,6 +73,9 @@ STATUSES = {OPEN, CLAIMED, DONE, FAILED, BLOCKED}
 #: How many task records one ``/tasks/bodies`` call may return. A caller that
 #: names more gets the first ``MAX_BODIES`` back and asks again for the rest.
 MAX_BODIES = 2000
+#: The observatory only renders a recent chat tail and a compact work queue.
+#: Keep its purpose-built read bounded even if a caller sends huge limits.
+MAX_FEED_WINDOW = 2000
 # Finished states share a rank so "done" is not newer than "blocked".
 _RANK = {OPEN: 0, CLAIMED: 1, DONE: 2, FAILED: 2, BLOCKED: 2}
 _ID_OK = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
@@ -212,6 +215,8 @@ class Mailbox:
         self._by_status: dict[str, list[dict]] = {}
         self._by_kind: dict[str, list[dict]] = {}
         self._by_status_kind: dict[tuple[str, str], list[dict]] = {}
+        self._kinded: list[dict] = []
+        self._work: list[dict] = []
         self._proposal_by_task: dict[str, tuple[str, str, str]] = {}
         self._reactions_by_target: dict[str, list[str]] = {}
         for path in sorted(self.tasks_dir.glob("*.json")):
@@ -247,11 +252,14 @@ class Mailbox:
         self._insert_ordered(self._status_rows(self._by_status, row), row)
         kind = _task_kind(row.get("title"))
         if kind:
+            self._insert_ordered(self._kinded, row)
             self._insert_ordered(
                 self._by_kind.setdefault(kind, []), row)
             status_kind = (str(row.get("status", "")), kind)
             self._insert_ordered(
                 self._by_status_kind.setdefault(status_kind, []), row)
+        else:
+            self._insert_ordered(self._work, row)
         task_id = str(row.get("id", ""))
         parsed = _proposal_parts(row.get("title"))
         if parsed:
@@ -265,6 +273,7 @@ class Mailbox:
         self._remove_ordered(self._status_rows(self._by_status, row), row)
         kind = _task_kind(row.get("title"))
         if kind:
+            self._remove_ordered(self._kinded, row)
             rows = self._by_kind.get(kind)
             if rows is not None:
                 self._remove_ordered(rows, row)
@@ -276,6 +285,8 @@ class Mailbox:
                 self._remove_ordered(rows, row)
                 if not rows:
                     self._by_status_kind.pop(status_kind, None)
+        else:
+            self._remove_ordered(self._work, row)
         task_id = str(row.get("id", ""))
         self._proposal_by_task.pop(task_id, None)
         target = _reaction_target(row.get("title"))
@@ -291,15 +302,20 @@ class Mailbox:
         self._by_status = {}
         self._by_kind = {}
         self._by_status_kind = {}
+        self._kinded = []
+        self._work = []
         self._proposal_by_task = {}
         self._reactions_by_target = {}
         for row in self._ordered:
             self._status_rows(self._by_status, row).append(row)
             kind = _task_kind(row.get("title"))
             if kind:
+                self._kinded.append(row)
                 self._by_kind.setdefault(kind, []).append(row)
                 self._by_status_kind.setdefault(
                     (str(row.get("status", "")), kind), []).append(row)
+            else:
+                self._work.append(row)
             task_id = str(row.get("id", ""))
             parsed = _proposal_parts(row.get("title"))
             if parsed:
@@ -374,6 +390,31 @@ class Mailbox:
             if limit is not None:
                 selected = selected[-limit:] if limit else []
             return [dict(row) for row in selected]
+
+    def feed_window(self, chat_limit: int = 120,
+                    work_limit: int = 14) -> dict:
+        """Return only the dashboard's latest chat and work rows.
+
+        ``/tasks?status=all`` now serialises tens of thousands of summaries
+        every five seconds. The observatory never renders that whole history:
+        it keeps a recent kinded feed (chat/proposal/reaction/etc.) and a short
+        unkinded work queue. Split here, where rows are already indexed, so the
+        wire response stays bounded without letting reaction noise displace
+        work. Counts remain whole-mailbox facts rather than window facts.
+        """
+        with self._lock:
+            chat = self._kinded[-chat_limit:] if chat_limit else []
+            work = self._work[-work_limit:] if work_limit else []
+            return {
+                "chat": [dict(row) for row in chat],
+                "work": [dict(row) for row in work],
+                "counts": {
+                    "chat": len(self._kinded),
+                    "work": len(self._work),
+                    "work_open": sum(row.get("status") == OPEN
+                                     for row in self._work),
+                },
+            }
 
     def select(self, status: str | None = None, limit: int | None = None,
                selectors=None, exclude_proposal_ids=(),
@@ -657,6 +698,24 @@ def build_handler(mailbox: Mailbox, token: str, telemetry=None,
                 if kinds:
                     answer["kinds"] = kinds
                 self._send(200, answer)
+                return
+            if path == "/tasks/window":
+                params = parse_qs(query, keep_blank_values=True)
+                limits = {}
+                for name, default in (("chat_limit", 120),
+                                      ("work_limit", 14)):
+                    raw = (params.get(name) or [str(default)])[0]
+                    try:
+                        value = int(raw)
+                        if value < 0 or value > MAX_FEED_WINDOW:
+                            raise ValueError
+                    except (TypeError, ValueError):
+                        self._send(400, {
+                            "error": f"{name} must be an integer from 0 to "
+                                     f"{MAX_FEED_WINDOW}"})
+                        return
+                    limits[name] = value
+                self._send(200, mailbox.feed_window(**limits))
                 return
             if path.startswith("/task/"):
                 task = mailbox.load(path.split("/", 2)[2])

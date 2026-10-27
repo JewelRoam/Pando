@@ -5437,6 +5437,132 @@ class TestChatMailboxPartition(unittest.TestCase):
 
 
 class TestObservatoryFeed(unittest.TestCase):
+    def test_the_dashboard_window_is_bounded_and_counts_the_whole_mailbox(self):
+        """A short wire response must not turn work counts into window counts."""
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "agent_mailbox_under_test_dashboard_window",
+            Path(__file__).resolve().parents[1] / "tools" / "agent_mailbox.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as tmp:
+            box = module.Mailbox(Path(tmp) / "box")
+            rows = [
+                ("k1", "[proposal] p1 seed.export by peer", "open", "10:00:00"),
+                ("w1", "repair root", "open", "10:01:00"),
+                ("k2", "[alarm] mailbox slow", "open", "10:02:00"),
+                ("w2", "rotate archive", "blocked", "10:03:00"),
+                ("k3", "[reaction] p1 赞同 by voter", "open", "10:04:00"),
+                ("w3", "review report", "open", "10:05:00"),
+                ("k4", "[measure] latency probe", "open", "10:06:00"),
+            ]
+            for task_id, title, status, clock in rows:
+                box.save({
+                    "id": task_id, "from": "ann", "title": title, "body": "x",
+                    "status": status, "created_at": f"2026-10-27T{clock}",
+                    "claimed_by": None, "finished_at": None, "history": [],
+                })
+            server = module.ThreadingHTTPServer(
+                ("127.0.0.1", 0), module.build_handler(box, "tok"))
+            port = server.server_address[1]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{port}/tasks/window"
+                    "?chat_limit=2&work_limit=1",
+                    headers={"Authorization": "Bearer tok"})
+                with urllib.request.urlopen(request, timeout=3) as resp:
+                    answer = json.loads(resp.read())
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=3)
+
+        self.assertEqual([row["id"] for row in answer["chat"]], ["k3", "k4"])
+        self.assertEqual([row["id"] for row in answer["work"]], ["w3"])
+        self.assertEqual(answer["counts"],
+                         {"chat": 4, "work": 3, "work_open": 2})
+
+    def test_the_observatory_uses_the_bounded_window_and_keeps_global_counts(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import observatory
+
+        calls = []
+        original_json = observatory.http_json
+        original_units = observatory.local_units
+
+        def fake_json(url, *args, **kwargs):
+            calls.append(url)
+            if url == "http://mailbox/health":
+                return {"open": 4}, None, 1.0, 200
+            if "/tasks/window" in url:
+                return {
+                    "chat": [],
+                    "work": [{"id": "w16", "from": "ann",
+                              "title": "latest work", "status": "open",
+                              "created_at": "2026-10-27T10:16:00",
+                              "claimed_by": None}],
+                    "counts": {"chat": 36000, "work": 16, "work_open": 4},
+                }, None, 2.0, 200
+            raise AssertionError(f"full or unexpected feed request: {url}")
+
+        observatory.http_json = fake_json
+        observatory.local_units = lambda: {"host": "test", "services": []}
+        try:
+            state = observatory.collect_state({
+                "mailbox_url": "http://mailbox", "mailbox_token": "token",
+                "roots": [],
+            })
+        finally:
+            observatory.http_json = original_json
+            observatory.local_units = original_units
+
+        self.assertEqual(calls, [
+            "http://mailbox/health",
+            "http://mailbox/tasks/window?chat_limit=120&work_limit=14",
+        ])
+        self.assertEqual(state["work_counts"], {"total": 16, "open": 4})
+        self.assertEqual(state["view"]["work_count"], "4 open / 16")
+        feed = next(row for row in state["services"]
+                    if row["name"] == "task feed (/tasks/window)")
+        self.assertEqual(feed["detail"], "36000 kinded / 16 work; window 1")
+
+    def test_an_old_mailbox_still_serves_the_unbounded_feed_on_404(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import observatory
+
+        calls = []
+        original_json = observatory.http_json
+        original_units = observatory.local_units
+
+        def fake_json(url, *args, **kwargs):
+            calls.append(url)
+            if url == "http://mailbox/health":
+                return {"open": 1}, None, 1.0, 200
+            if "/tasks/window" in url:
+                return None, "HTTP 404", 1.0, 404
+            if "/tasks?status=all" in url:
+                return {"tasks": [{"id": "w1", "from": "ann",
+                                   "title": "old mailbox work",
+                                   "status": "open"}]}, None, 2.0, 200
+            raise AssertionError(f"unexpected request: {url}")
+
+        observatory.http_json = fake_json
+        observatory.local_units = lambda: {"host": "test", "services": []}
+        try:
+            state = observatory.collect_state({
+                "mailbox_url": "http://mailbox", "mailbox_token": "token",
+                "roots": [],
+            })
+        finally:
+            observatory.http_json = original_json
+            observatory.local_units = original_units
+
+        self.assertIn("http://mailbox/tasks?status=all", calls)
+        self.assertEqual(state["work_counts"], {"total": 1, "open": 1})
+
     def test_an_address_is_stored_once(self):
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
         from observatory import addressee, split_title
@@ -5566,8 +5692,9 @@ class TestObservatoryFeed(unittest.TestCase):
             calls.append(url)
             if url.endswith("/health"):
                 return {}, None, 1.0, 200
-            if "/tasks?status=all" in url:
-                return {"tasks": []}, None, 1.0, 200
+            if "/tasks/window" in url:
+                return {"chat": [], "work": [],
+                        "counts": {"chat": 0, "work": 0, "work_open": 0}}, None, 1.0, 200
             if url.endswith("/nodes"):
                 return None, "unreachable: timeout", 4000.0, 0
             raise AssertionError(f"unexpected probe after node failure: {url}")
@@ -5619,8 +5746,9 @@ class TestObservatoryFeed(unittest.TestCase):
         def fake_json(url, *args, **kwargs):
             if url == "http://mailbox/health":
                 return {}, None, 1.0, 200
-            if "/tasks?status=all" in url:
-                return {"tasks": []}, None, 1.0, 200
+            if "/tasks/window" in url:
+                return {"chat": [], "work": [],
+                        "counts": {"chat": 0, "work": 0, "work_open": 0}}, None, 1.0, 200
             if url == "http://win:8790/nodes":
                 synchronise()
                 return None, "unreachable: timeout", 4000.0, 0
@@ -5674,8 +5802,9 @@ class TestObservatoryFeed(unittest.TestCase):
         def fake_json(url, *args, **kwargs):
             if url == "http://mailbox/health":
                 return {}, None, 1.0, 200
-            if "/tasks?status=all" in url:
-                return {"tasks": []}, None, 1.0, 200
+            if "/tasks/window" in url:
+                return {"chat": [], "work": [],
+                        "counts": {"chat": 0, "work": 0, "work_open": 0}}, None, 1.0, 200
             if url == "http://dead:8790/nodes":
                 node_calls.append(url)
                 return None, "unreachable: timeout", 4000.0, 0
