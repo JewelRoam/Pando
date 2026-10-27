@@ -2581,6 +2581,49 @@ class TestResidentThinker(unittest.TestCase):
             self.assertEqual(len(thinker.rounds), 8)
             self.assertEqual(len(calls), 2)  # 8 rounds, stride 4
 
+    def test_thinkd_reads_bounded_final_outcomes_not_the_full_message_feed(self):
+        """Reaction traffic must not turn a trend read into a 9 MB poll."""
+        from unittest import mock
+        from pando import thinkd
+
+        with tempfile.TemporaryDirectory() as tmp:
+            thinker, _, _ = self._thinker(
+                [], Path(tmp) / "think.jsonl", history_window=2)
+            calls = []
+            by_status = {
+                "done": [
+                    {"id": "t1", "status": "done", "created_at": "2026-10-27T10:00:00",
+                     "title": "carried a seed"},
+                    {"id": "t2", "status": "done", "created_at": "2026-10-27T12:00:00",
+                     "title": "[proposal] p2 seed.export by mac-proposer"},
+                ],
+                "failed": [
+                    {"id": "t3", "status": "failed", "created_at": "2026-10-27T11:00:00",
+                     "title": "attempt that failed"},
+                ],
+                "blocked": [
+                    {"id": "t4", "status": "blocked", "created_at": "2026-10-27T13:00:00",
+                     "title": "[reaction] p3 赞同 by mac-text"},
+                    {"id": "t5", "status": "blocked", "created_at": "2026-10-27T14:00:00",
+                     "title": "[alarm] root offline"},
+                ],
+            }
+
+            def fake_get(path):
+                calls.append(path)
+                status = path.split("status=", 1)[1].split("&", 1)[0]
+                return {"tasks": by_status[status]}
+
+            with mock.patch.object(thinker, "_mailbox_get", fake_get):
+                activity = thinker._fetch_group_activity()
+
+        self.assertEqual(calls, [
+            f"/tasks?status={status}&limit={thinkd.ACTIVITY_FEED_LIMIT}"
+            for status in thinkd.ACTIVITY_STATUSES])
+        self.assertNotIn("/tasks?status=all", calls)
+        self.assertEqual([row["title"] for row in activity],
+                         ["attempt that failed", "[alarm] root offline"])
+
     def test_thinkd_never_publishes_an_unreachable_mailbox(self):
         """Transport failure is held, recorded, and survived - not raised."""
         def publish(proposal, identity, url, token):
