@@ -313,12 +313,14 @@ def code_coverage_alarms(payload: dict | None, now: float,
     grace = max(0.0, float(grace_seconds))
     ages = {root: max(0.0, now - float(entry["first_seen"]))
             for root, entry in current.items()}
-    if not any(age >= grace for age in ages.values()):
-        return []
 
     alarms: list[dict] = []
     for root, entry in sorted(current.items(),
                               key=lambda item: (-ages[item[0]], item[0])):
+        # Each root has its own outage clock. A long-blind win must not make a
+        # pi5 that disappeared for the first time this poll look persistent.
+        if ages[root] < grace:
+            continue
         alarms.append({
             "member": root,
             "root": root,

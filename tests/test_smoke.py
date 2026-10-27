@@ -3461,6 +3461,47 @@ class TestThinkWatchdogCodeDelivery(unittest.TestCase):
             self.assertNotIn(wd.COVERAGE_TRACKING_KEY,
                              json.loads(state.read_text()))
 
+    def test_each_blind_root_waits_for_its_own_grace_window(self):
+        """A long outage cannot drag a newly blind root into its alarm."""
+        wd = self._tool()
+        win_blind = {
+            "members": {"mac-text": {"status": "ok", "behind": 0}},
+            "unreadable": [{"root": "win", "error": "offline"}],
+            "stale": [],
+        }
+        both_blind = {
+            "members": {"mac-text": {"status": "ok", "behind": 0}},
+            "unreadable": [
+                {"root": "win", "error": "offline"},
+                {"root": "pi5", "error": "mirror stale"},
+            ],
+            "stale": [],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            url, token_file, box, server, thread = self._alarm_stub(tmp)
+            state = Path(tmp) / "alarms.json"
+            extra = ("--alarm-state-file", str(state),
+                     "--code-coverage-grace-seconds", "900")
+            try:
+                self._run(wd, tmp, self._probe_cmd(tmp, win_blind, 1, "win"),
+                          alarm_url=url, token_file=token_file,
+                          extra=extra + ("--now", "1000"))
+                self._run(wd, tmp, self._probe_cmd(tmp, both_blind, 1, "both"),
+                          alarm_url=url, token_file=token_file,
+                          extra=extra + ("--now", "1900"))
+                tasks = box.list(None)
+                tracking = json.loads(state.read_text())[
+                    wd.COVERAGE_TRACKING_KEY]
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=3)
+
+            self.assertEqual(len(tasks), 1)
+            self.assertTrue(tasks[0]["title"].startswith(
+                "[alarm] code-coverage: win"), tasks[0]["title"])
+            self.assertNotIn("pi5", tasks[0]["title"])
+            self.assertEqual(tracking["win"]["first_seen"], 1000.0)
+            self.assertEqual(tracking["pi5"]["first_seen"], 1900.0)
+
     def test_a_partial_report_still_pages_a_stale_member(self):
         """An unreadable root does not hide a stale row we did measure."""
         wd = self._tool()
