@@ -138,7 +138,10 @@ def probe_roots(roots: list[dict], timeout: float,
             found = fetch_nodes(url, root.get("token"), min(8, timeout))
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError,
                 OSError) as exc:
-            retry_in = backoff.failed(url, current)
+            # Start the cooling-off window when the failure lands. Using the
+            # pass start made a timeout consume most of its own retry delay.
+            failed_at = time.monotonic() if now is None else current
+            retry_in = backoff.failed(url, failed_at)
             events.append({"name": name, "url": url, "error": str(exc),
                            "retry_in": retry_in})
             continue

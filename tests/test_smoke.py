@@ -8311,6 +8311,27 @@ class TestChat(unittest.TestCase):
             chatd.probe_roots(roots, 180, backoff, now=176)
             self.assertEqual(calls, [(local, 8), (remote, 8)])
 
+    def test_root_backoff_starts_when_the_failed_probe_ends(self):
+        """A timeout must not consume the cooling-off window it just earned."""
+        from unittest import mock
+        from pando import chatd
+
+        remote = "http://100.93.216.90:8790"
+        roots = [{"name": "win", "url": remote, "token": None}]
+        backoff = chatd.RootProbeBackoff(base=30, cap=30)
+        times = iter([100.0, 108.0])
+
+        def fetch(url, token, timeout):
+            raise TimeoutError("timed out")
+
+        with mock.patch.object(chatd, "fetch_nodes", fetch), \
+                mock.patch.object(chatd.time, "monotonic", side_effect=lambda: next(times)):
+            _, events = chatd.probe_roots(roots, 180, backoff)
+
+        self.assertEqual(events[0]["retry_in"], 30)
+        self.assertFalse(backoff.due(remote, 137.9))
+        self.assertTrue(backoff.due(remote, 138.0))
+
     def test_a_remembered_peer_expires_after_repeated_silence(self):
         """A dark root must not turn one stale address into forever-noise."""
         from pando.chat import OPENED_PEER_TTL, next_opening
