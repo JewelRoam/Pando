@@ -42,6 +42,7 @@ import urllib.parse
 import urllib.request
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -428,12 +429,8 @@ def addressee(rest: str) -> str | None:
     return name or None
 
 
-def signed_fields(body: str) -> dict | None:
-    """Payload of a signed envelope, or None if it is not one.
-
-    The signature is checked. A body that merely looks like JSON is not
-    treated as fields.
-    """
+@lru_cache(maxsize=512)
+def _signed_fields_cached(body: str) -> dict | None:
     try:
         record = json.loads(body)
     except (json.JSONDecodeError, TypeError, ValueError):
@@ -447,7 +444,23 @@ def signed_fields(body: str) -> dict | None:
     sig = str(record.get("sig") or "")
     if not pubkey or not sig or not verify_signature(pubkey, payload, sig):
         return None
-    return dict(payload)
+    return payload
+
+
+def signed_fields(body: str) -> dict | None:
+    """Payload of a signed envelope, or None if it is not one.
+
+    The signature is checked. A body that merely looks like JSON is not
+    treated as fields. Verification is cached by the exact body string: the
+    dashboard verifies the same 100+ signed messages every five seconds, and
+    Ed25519 verification was measured as its largest avoidable CPU cost. The
+    cache is bounded, and each caller gets a fresh top-level mapping so one
+    render cannot mutate the verified value seen by the next.
+    """
+    if not isinstance(body, str):
+        return None
+    fields = _signed_fields_cached(body)
+    return dict(fields) if fields is not None else None
 
 
 def is_annotation(fields: dict | None) -> bool:

@@ -5437,6 +5437,34 @@ class TestChatMailboxPartition(unittest.TestCase):
 
 
 class TestObservatoryFeed(unittest.TestCase):
+    def test_signed_bodies_are_verified_once_per_exact_message(self):
+        """Re-rendering the same signed envelope must not redo Ed25519."""
+        from unittest import mock
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import observatory
+
+        body = json.dumps({
+            "payload": {"goal": "one"},
+            "pubkey": "pk",
+            "sig": "sig",
+        })
+        observatory._signed_fields_cached.cache_clear()
+        try:
+            with mock.patch.object(observatory, "verify_signature",
+                                   return_value=True) as verify:
+                first = observatory.signed_fields(body)
+                first["goal"] = "mutated by a renderer"
+                second = observatory.signed_fields(body)
+                changed = observatory.signed_fields(body + " ")
+        finally:
+            observatory._signed_fields_cached.cache_clear()
+
+        self.assertEqual(second, {"goal": "one"})
+        self.assertEqual(changed, {"goal": "one"})
+        # Same exact bytes use the cached result; changed bytes are checked
+        # again rather than inheriting trust from a different message.
+        self.assertEqual(verify.call_count, 2)
+
     def test_the_dashboard_window_is_bounded_and_counts_the_whole_mailbox(self):
         """A short wire response must not turn work counts into window counts."""
         import importlib.util
