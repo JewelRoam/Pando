@@ -230,10 +230,12 @@ def rows_for_execution(tasks: list, limit: int,
 
     1. the last ``limit`` rows -- the live window the dry run and the ledger
        describe;
-    2. every ``seed.export`` and ``seed.replicate``. Those two are the only
-       actions with a second host on the other end, so the send/receive
+    2. every unsettled ``seed.export`` and ``seed.replicate``. Those two are
+       the only actions with a second host on the other end, so the send/receive
        bookkeeping has to see a peer's offer as well as this host's: an
-       addressed replication pushed out of the window would be offered twice;
+       addressed replication pushed out of the window would be offered twice.
+       A proposal already named by ``settled`` needs neither its own body nor
+       its votes again;
     3. with ``authors`` set, the oldest ``per_action`` proposals of each
        actuator action that this host signs under and that no ledger row has
        settled yet (``settled``).
@@ -266,6 +268,8 @@ def rows_for_execution(tasks: list, limit: int,
             continue
         proposal_id, action = parsed
         if action in ("seed.export", "seed.replicate"):
+            if proposal_id in settled:
+                continue
             seed_ids.add(proposal_id)
             keep.add(row.get("id"))
             continue

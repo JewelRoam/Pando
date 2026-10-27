@@ -5523,6 +5523,29 @@ class TestExecution(unittest.TestCase):
             [row["id"] for row in rows],
             ["t-old", "t-vote", "t-copy", "t-copy-vote", "t-new"])
 
+    def test_settled_seeds_do_not_return_through_the_unbounded_layer(self):
+        """An old seed is not re-read just because its action crosses hosts."""
+        from pando.execute import rows_for_execution
+        done = {"id": "t-done",
+                "title": "[proposal] p-done seed.export by mac-proposer"}
+        done_vote = {"id": "t-done-vote",
+                     "title": "[reaction] p-done 赞同 by mac-text"}
+        left = {"id": "t-left",
+                "title": "[proposal] p-left seed.replicate by mac-proposer"}
+        left_vote = {"id": "t-left-vote",
+                     "title": "[reaction] p-left 赞同 by mac-text"}
+        live = {"id": "t-live",
+                "title": "[proposal] p-live seed.export by win-gpu-proposer"}
+        live_vote = {"id": "t-live-vote",
+                     "title": "[reaction] p-live 赞同 by mac-text"}
+
+        rows = rows_for_execution(
+            [done, done_vote, left, left_vote, live, live_vote], 0,
+            settled={"p-done", "p-left"})
+
+        self.assertEqual([row["id"] for row in rows],
+                         ["t-live", "t-live-vote"])
+
     def test_layer_three_drains_this_hosts_backlog_oldest_first(self):
         from pando.execute import rows_for_execution
         rows_in = [{"id": f"t-c{i}",
