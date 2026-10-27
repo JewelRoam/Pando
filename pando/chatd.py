@@ -207,6 +207,51 @@ def load_openings(path: Path) -> dict[tuple[str, str], float]:
     return opened
 
 
+def load_peer_evidence(path: Path) -> dict[tuple[str, str], float]:
+    """When a remembered peer was last actually seen or first unanswered.
+
+    A successful inbound chat refreshes evidence. The first opening after that
+    reply does too, because it was chosen from live membership. Later openings
+    into a dark root must not keep extending the same evidence forever.
+    """
+    last_reply: dict[tuple[str, str], float] = {}
+    unanswered: dict[tuple[str, str], float] = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {}
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(row, dict):
+            continue
+        node_id = str(row.get("node_id") or "")
+        if row.get("open"):
+            peer = str(row.get("to") or "")
+            key = (node_id, peer)
+            try:
+                at = float(row.get("at") or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if node_id and peer and key not in unanswered:
+                unanswered[key] = at
+            continue
+        sender = str(row.get("sender") or "")
+        if node_id and sender and row.get("id"):
+            key = (node_id, sender)
+            try:
+                at = float(row.get("at") or 0.0)
+            except (TypeError, ValueError):
+                continue
+            last_reply[key] = at
+            unanswered.pop(key, None)
+    evidence = dict(last_reply)
+    evidence.update(unanswered)
+    return evidence
+
+
 def newest_proposal(tasks: list[dict]) -> dict | None:
     """The most recent ``[proposal]`` row, as the topic of an opening.
 
@@ -265,7 +310,9 @@ def fallback_opening(sender: str, peer: str, topic: dict | None) -> str:
 def _open_conversation(urls, token: str | None, members: list[dict],
                        known: set[str], tasks: list[dict],
                        opened: dict[tuple[str, str], float], now: float,
-                       cooldown: float, timeout: float) -> dict | None:
+                       cooldown: float, timeout: float,
+                       peer_evidence: dict[tuple[str, str], float] | None = None
+                       ) -> dict | None:
     """Start one member-to-member conversation, or None when none is due.
 
     The row this writes is the thing the colony never had: ``from`` a chat
@@ -273,7 +320,7 @@ def _open_conversation(urls, token: str | None, members: list[dict],
     downstream already works -- the peer's chatd sees a chat member naming it
     and answers, and PEER_CAP stops the exchange after two replies each way.
     """
-    pick = next_opening(members, known, opened, now, cooldown)
+    pick = next_opening(members, known, opened, now, cooldown, peer_evidence)
     if pick is None:
         return None
     member = pick["member"]
@@ -487,7 +534,8 @@ def pass_once(urls, token: str | None, members: list[dict],
               opened: dict[tuple[str, str], float] | None = None,
               now: float | None = None,
               open_cooldown: float | None = OPEN_COOLDOWN,
-              feed_limit: int | None = CHAT_FEED_LIMIT) -> dict:
+              feed_limit: int | None = CHAT_FEED_LIMIT,
+              peer_evidence: dict[tuple[str, str], float] | None = None) -> dict:
     tasks, read_from, read_error = fetch_tasks_any(
         urls, token, timeout, limit=feed_limit)
     if read_error and not tasks:
@@ -511,16 +559,18 @@ def pass_once(urls, token: str | None, members: list[dict],
         visible.append(full_task_any(urls, token, task, timeout))
     choice = next_reply(members, chat_ids, visible, answered, peers)
     if choice is None:
+        at = time.time() if now is None else now
         if open_cooldown is not None:
             opened_report = _open_conversation(
                 urls, token, members, chat_ids, tasks, opened or {},
-                time.time() if now is None else now, open_cooldown, timeout)
+                at, open_cooldown, timeout, peer_evidence)
             if opened_report is not None:
                 return opened_report
         return {
             "did": "idle",
             "members": [item["node_id"] for item in members],
-            "peers": sorted(chat_peer_ids(members, chat_ids, opened)),
+            "peers": sorted(chat_peer_ids(
+                members, chat_ids, peer_evidence, at)),
         }
     member = choice["member"]
     task = choice["task"]
@@ -580,6 +630,7 @@ def main() -> int:
     addresses = local_addresses()
     answered, peers, bootstrapped = load_ledger(ledger)
     opened = load_openings(ledger)
+    peer_evidence = load_peer_evidence(ledger)
     open_cooldown = None if args.no_open else args.open_cooldown
 
     while True:
@@ -602,7 +653,8 @@ def main() -> int:
                 health_of=lambda url: fetch_health(url, min(4, args.timeout)))
             report = pass_once(mailboxes, mail_token, members, known,
                                answered, peers, args.timeout, bootstrapped,
-                               opened, None, open_cooldown)
+                               opened, None, open_cooldown,
+                               peer_evidence=peer_evidence)
             if report.get("did") == "bootstrap":
                 append_ledger(ledger, {"bootstrap": True, "at": time.time(),
                                        "ids": report.get("ids") or []})
@@ -614,6 +666,7 @@ def main() -> int:
                 })
                 answered.add((report["member"], str(report["source"])))
                 peers.setdefault(report["member"], []).append(str(report["sender"]))
+                peer_evidence[(str(report["member"]), str(report["sender"]))] = time.time()
             elif report.get("did") in ("opened", "open-failed"):
                 # A failed attempt is recorded too: a wedged stem must not turn
                 # the initiator into a loop that calls a model every interval.
@@ -625,6 +678,10 @@ def main() -> int:
                 opened[(str(report.get("member") or ""),
                         str(report.get("to") or ""))] = float(
                             report.get("at") or time.time())
+                if report.get("to") in chat_ids:
+                    peer_evidence[(str(report.get("member") or ""),
+                                  str(report.get("to") or ""))] = float(
+                                      report.get("at") or time.time())
             elif report.get("did") == "error" and report.get("source"):
                 append_ledger(ledger, {
                     "node_id": report.get("member"), "source_id": report["source"],

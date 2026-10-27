@@ -8253,10 +8253,46 @@ class TestChat(unittest.TestCase):
             ("another-member", "win-yi-9b"): 2000.0,
         }
 
-        pick = next_opening(members, {"mac-llm-8b-local"}, opened, 5601.0)
+        pick = next_opening(members, {"mac-llm-8b-local"}, opened, 5601.0,
+                            evidence=opened)
 
         self.assertIsNotNone(pick)
         self.assertEqual(pick["to"], "win-gemma-12b")
+
+    def test_a_remembered_peer_expires_after_repeated_silence(self):
+        """A dark root must not turn one stale address into forever-noise."""
+        from pando.chat import OPENED_PEER_TTL, next_opening
+
+        members = [{"node_id": "mac-llm-8b-local", "url": "http://127.0.0.1:9",
+                    "model": "qwen-test"}]
+        evidence = {("mac-llm-8b-local", "win-yi-9b"): 1000.0}
+
+        self.assertIsNotNone(next_opening(
+            members, {"mac-llm-8b-local"}, evidence,
+            1000.0 + OPENED_PEER_TTL, evidence=evidence))
+        self.assertIsNone(next_opening(
+            members, {"mac-llm-8b-local"}, evidence,
+            1000.0 + OPENED_PEER_TTL + 1, evidence=evidence))
+
+    def test_only_a_reply_or_live_membership_refreshes_peer_evidence(self):
+        """Retrying a dark address must not refresh the stale-peer deadline."""
+        from pando.chatd import load_peer_evidence
+
+        key = ("mac-llm-8b-local", "win-yi-9b")
+        rows = [
+            {"open": True, "node_id": key[0], "to": key[1], "at": 100.0},
+            {"open": True, "node_id": key[0], "to": key[1], "at": 200.0},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "chat-ledger.jsonl"
+            path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+            self.assertEqual(load_peer_evidence(path)[key], 100.0)
+
+            rows.append({"node_id": key[0], "sender": key[1], "id": "reply",
+                         "at": 300.0})
+            rows.append({"open": True, "node_id": key[0], "to": key[1], "at": 400.0})
+            path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+            self.assertEqual(load_peer_evidence(path)[key], 400.0)
 
 
     def test_talking_is_not_voting_in_the_first_person(self):
