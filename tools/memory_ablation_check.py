@@ -3,16 +3,20 @@
 
 The colony can count action shares and repeated proposals, but those numbers do
 not answer whether the proposer's own history changes what it proposes. This
-tool runs the smallest missing control: the same local model, system prompt,
-round number, host list, and paired random seed, with and without the proposer's
-own history/counts/last-action feedback.
+tool runs four same-seed arms against one local model:
 
-It deliberately fixes group proposals and outcome activity to an empty snapshot
-for both arms. That removes mailbox drift from the comparison; the controlled
-factor is the proposer's own memory only.
+* ``memory``: history rows, action counts, and the last action;
+* ``last_action``: only the last action and its anti-repetition instruction;
+* ``counts``: only the aggregate action counts;
+* ``control``: none of those memory-derived sections.
 
-This is a check, not a claim that the swarm evolves. It prints effect sizes,
-per-arm sampling uncertainty, and a paired label-permutation p-value.
+Group proposals and outcome activity are fixed empty in every arm. This turns
+the original all-or-nothing comparison into one-factor comparisons and keeps
+the request order balanced across arms.
+
+This is a check, not a claim that the swarm evolves. It reports action-share
+uncertainty, paired label-permutation p-values, and Holm-adjusted p-values over
+the six planned pairwise contrasts.
 """
 
 from __future__ import annotations
@@ -31,6 +35,21 @@ from pando.thinkd import (Ledger, OpenAIProposer, SYSTEM_PROMPT, extract_json,
                           host_names_from, replicate_streak)
 
 INVALID = "(invalid)"
+ARMS = ("memory", "last_action", "counts", "control")
+ARM_ORDERS = (
+    ("memory", "last_action", "counts", "control"),
+    ("control", "counts", "last_action", "memory"),
+    ("counts", "memory", "control", "last_action"),
+    ("last_action", "control", "memory", "counts"),
+)
+PAIRWISE = (
+    ("memory", "control", "full_memory_vs_none"),
+    ("last_action", "control", "last_action_vs_none"),
+    ("counts", "control", "counts_vs_none"),
+    ("memory", "last_action", "full_memory_vs_last_action"),
+    ("memory", "counts", "full_memory_vs_counts"),
+    ("last_action", "counts", "last_action_vs_counts"),
+)
 
 
 def _history_lines(rows: list[dict]) -> list[str]:
@@ -46,45 +65,46 @@ def _history_lines(rows: list[dict]) -> list[str]:
 
 
 def build_prompts(ledger: Ledger, round_no: int, history_window: int,
-                  host_names: list[str], action_space) -> dict[str, str]:
-    """Build matched prompts with memory present vs ablated.
+                  host_names: list[str], action_space) -> dict:
+    """Build four prompts that differ only in memory-derived sections.
 
-    Group proposals and outcome activity are fixed empty in both arms. The
-    control keeps the same round number and all common instructions, so it does
-    not introduce the contradictory "round 3520 / this is your first round"
-    wording that an empty production ledger would produce.
+    All arms retain the same round number, fixed empty group/outcome context,
+    action-space destination hint, and final output instruction. The ablated
+    arms keep an empty-history placeholder so the section structure remains
+    recognizable; only the supplied memory content changes.
     """
     own = ledger.tail(history_window)
     counts = ledger.summary()
     last_action = str(own[-1].get("action") or "") if own else ""
 
-    def prompt(include_memory: bool) -> str:
+    def prompt(include_history: bool, include_counts: bool,
+               include_last_action: bool) -> str:
         lines = [f"这是你的第 {round_no} 轮思考。", "", "【你自己的历史】"]
-        if include_memory:
+        if include_history:
             history = _history_lines(own)
             lines.extend(history or ["（还没有。这是你的第一轮。）"])
         else:
-            lines.append("（记忆对照：本轮不提供你自己的历史、动作计数或上一动作。）")
+            lines.append("（记忆对照：本轮不提供你自己的历史明细。）")
         lines.extend([
             "",
             "【群体里其他人的提案】",
-            "（固定为空：实验控制，两臂均不提供。）",
+            "（固定为空：实验控制，各臂均不提供。）",
             "",
             "【群体最近实际做的事（真实发生过的，不是提案）】",
-            "（固定为空：实验控制，两臂均不提供。）",
+            "（固定为空：实验控制，各臂均不提供。）",
         ])
-        if include_memory and counts:
+        if include_counts and counts:
             lines.extend(["", "【你已经提过的动作次数】"])
             for action, stats in counts.items():
                 lines.append(f"- {action}: {stats['proposed']} 次")
-        if include_memory and last_action:
+        if include_last_action and last_action:
             lines.extend([
                 "",
                 f"【上一轮你提的是 {last_action}】",
                 "如果这轮还是同一个动作，你必须在 goal 或 "
                 "expected_effect 里写出这次和上次的差别；写不出来就换一个动作。",
             ])
-        if include_memory and replicate_streak(own):
+        if include_history and replicate_streak(own):
             lines.extend([
                 "",
                 "最近的提案里 seed.replicate 已经太多。这一轮不要再选它。",
@@ -99,12 +119,12 @@ def build_prompts(ledger: Ledger, round_no: int, history_window: int,
         lines.extend(["", "请提出下一步。只输出一行 JSON。"])
         return "\n".join(lines)
 
-    memory_prompt = prompt(True)
-    control_prompt = prompt(False)
     return {
-        "memory": memory_prompt,
-        "control": control_prompt,
-        "last_action": last_action,
+        "memory": prompt(True, True, True),
+        "last_action": prompt(False, False, True),
+        "counts": prompt(False, True, False),
+        "control": prompt(False, False, False),
+        "last_action_value": last_action,
         "action_space": sorted(action_space),
     }
 
@@ -128,14 +148,14 @@ def total_variation(left: Counter, right: Counter) -> float:
 
 
 def _swapped_counts(pairs, mask: int):
-    memory = Counter()
-    control = Counter()
-    for i, (m, c) in enumerate(pairs):
+    left = Counter()
+    right = Counter()
+    for i, (original_left, original_right) in enumerate(pairs):
         if (mask >> i) & 1:
-            m, c = c, m
-        memory[m] += 1
-        control[c] += 1
-    return memory, control
+            original_left, original_right = original_right, original_left
+        left[original_left] += 1
+        right[original_right] += 1
+    return left, right
 
 
 def paired_permutation(pairs, observed: float, trials: int = 20000,
@@ -163,44 +183,87 @@ def wilson_interval(successes: int, n: int, z: float = 1.959963984540054):
     return max(0.0, centre - half), min(1.0, centre + half)
 
 
+def holm_adjust(raw_p_values: list[float]) -> list[float]:
+    """Holm step-down adjustment, returned in the original input order."""
+    count = len(raw_p_values)
+    order = sorted(range(count), key=lambda i: raw_p_values[i])
+    adjusted = [1.0] * count
+    running = 0.0
+    for rank, index in enumerate(order):
+        candidate = min(1.0, raw_p_values[index] * (count - rank))
+        running = max(running, candidate)
+        adjusted[index] = running
+    return adjusted
+
+
+def _normalise_pairs(pairs) -> list[dict[str, str]]:
+    if not pairs:
+        return []
+    if isinstance(pairs[0], dict):
+        return pairs
+    # Backward-compatible form for the original two-arm experiment/tests.
+    return [{"memory": left, "control": right} for left, right in pairs]
+
+
 def summarise(pairs, actions: list[str], last_action: str, trials: int) -> dict:
-    memory = Counter(m for m, _c in pairs)
-    control = Counter(c for _m, c in pairs)
-    n = len(pairs)
-    tvd = total_variation(memory, control)
-    p_value = paired_permutation(pairs, tvd, trials=trials)
-    action_rows = []
-    for action in sorted(set(memory) | set(control)):
-        mc = memory[action]
-        cc = control[action]
-        action_rows.append({
-            "action": action,
-            "memory": mc,
-            "control": cc,
-            "memory_share": mc / n if n else 0.0,
-            "control_share": cc / n if n else 0.0,
-            "memory_wilson95": wilson_interval(mc, n),
-            "control_wilson95": wilson_interval(cc, n),
+    rows = _normalise_pairs(pairs)
+    n = len(rows)
+    observed_actions = sorted(set(actions) | {
+        action for row in rows for action in row.values()
+    })
+    arm_stats = {}
+    for arm in ARMS:
+        counter = Counter(row.get(arm, INVALID) for row in rows)
+        same = sum(row.get(arm) == last_action for row in rows) if last_action else 0
+        arm_stats[arm] = {
+            "actions": [{
+                "action": action,
+                "count": counter[action],
+                "share": counter[action] / n if n else 0.0,
+                "wilson95": wilson_interval(counter[action], n),
+            } for action in observed_actions],
+            "same_as_last": {
+                "count": same,
+                "share": same / n if n else 0.0,
+                "wilson95": wilson_interval(same, n),
+            },
+        }
+
+    comparisons = []
+    for index, (left_arm, right_arm, label) in enumerate(PAIRWISE):
+        paired = [(row.get(left_arm, INVALID), row.get(right_arm, INVALID))
+                  for row in rows]
+        left = Counter(a for a, _b in paired)
+        right = Counter(b for _a, b in paired)
+        tvd = total_variation(left, right)
+        comparisons.append({
+            "label": label,
+            "left": left_arm,
+            "right": right_arm,
+            "metric": "total_variation_distance",
+            "observed": tvd,
+            "paired_permutation_p": paired_permutation(
+                paired, tvd, trials=trials, seed=1000 + index),
         })
-    same_memory = sum(m == last_action for m, _c in pairs) if last_action else 0
-    same_control = sum(c == last_action for _m, c in pairs) if last_action else 0
+    adjusted = holm_adjust([
+        row["paired_permutation_p"] for row in comparisons
+    ])
+    for row, adjusted_p in zip(comparisons, adjusted):
+        row["holm_adjusted_p"] = adjusted_p
+
     return {
         "n_pairs": n,
         "primary": {
-            "metric": "total_variation_distance",
-            "observed": tvd,
-            "paired_permutation_p": p_value,
+            "comparisons": comparisons,
             "permutations": trials,
+            "multiplicity": "holm",
+            "family_size": len(comparisons),
+            "family_wise_alpha": 0.05,
         },
         "secondary": {
             "last_action": last_action,
-            "same_as_last": {
-                "memory": same_memory,
-                "control": same_control,
-                "difference": (same_memory - same_control) / n if n else 0.0,
-            },
         },
-        "actions": action_rows,
+        "arms": arm_stats,
         "valid_actions": actions,
     }
 
@@ -254,16 +317,16 @@ def run(args) -> dict:
     )
     pairs = []
     rows = []
-    # Warm both prompt shapes once and discard the samples. This avoids making
+    # Warm every prompt shape once and discard the samples. This avoids making
     # the first scored call also pay for connection/model warm-up.
-    for arm in ("memory", "control"):
+    for arm in ARMS:
         sample_once(proposer, SYSTEM_PROMPT, prompts[arm], args.seed_base - 1,
                     args.temperature, args.max_tokens)
     for i in range(args.pairs):
         seed = args.seed_base + i
-        order = ("memory", "control") if i % 2 == 0 else ("control", "memory")
+        order = ARM_ORDERS[i % len(ARM_ORDERS)]
         got = {}
-        for arm in order:
+        for position, arm in enumerate(order):
             text, usage, latency = sample_once(
                 proposer, SYSTEM_PROMPT, prompts[arm], seed,
                 args.temperature, args.max_tokens)
@@ -272,15 +335,16 @@ def run(args) -> dict:
             rows.append({
                 "pair": i,
                 "arm": arm,
+                "position": position,
                 "seed": seed,
                 "action": action,
                 "latency_ms": latency,
                 "usage": usage,
                 "raw": text,
             })
-        pairs.append((got["memory"], got["control"]))
-    summary = summarise(pairs, sorted(action_space), prompts["last_action"],
-                        args.permutations)
+        pairs.append(got)
+    summary = summarise(pairs, sorted(action_space),
+                        prompts["last_action_value"], args.permutations)
     return {
         "created_at": datetime.now().astimezone().isoformat(),
         "config": {
@@ -292,10 +356,14 @@ def run(args) -> dict:
             "seed_base": args.seed_base,
             "history_window": args.history_window,
             "ledger": str(ledger_path),
+            "arms": list(ARMS),
+            "arm_orders": [list(order) for order in ARM_ORDERS],
             "fixed_group_context": "empty",
             "fixed_activity_context": "empty",
         },
         "prompts": {
+            "sha256": {arm: _sha256(prompts[arm]) for arm in ARMS},
+            "chars": {arm: len(prompts[arm]) for arm in ARMS},
             "memory_sha256": _sha256(prompts["memory"]),
             "control_sha256": _sha256(prompts["control"]),
             "memory_chars": len(prompts["memory"]),
@@ -306,30 +374,41 @@ def run(args) -> dict:
     }
 
 
+def _format_p(value: float) -> str:
+    return f"{value:.4g}" if value >= 0.0001 else f"{value:.2e}"
+
+
 def print_report(result: dict) -> None:
     cfg = result["config"]
     summary = result["summary"]
+    n = summary["n_pairs"]
     print(f"model={cfg['model']} endpoint={cfg['base_url']} "
-          f"n_pairs={summary['n_pairs']} seed_base={cfg['seed_base']}")
-    print(f"prompt_sha256 memory={result['prompts']['memory_sha256']} "
-          f"control={result['prompts']['control_sha256']}")
+          f"n_pairs={n} seed_base={cfg['seed_base']}")
+    print("prompt chars: " + ", ".join(
+        f"{arm}={result['prompts']['chars'][arm]}" for arm in ARMS))
     print("fixed context: group proposals=empty, outcome activity=empty")
-    print("\naction                    memory       control      delta")
-    for row in summary["actions"]:
-        delta = row["memory_share"] - row["control_share"]
-        print(f"{row['action']:<25} {row['memory']:>3}/{summary['n_pairs']:<3} "
-              f"({row['memory_share']:6.1%}) {row['control']:>3}/{summary['n_pairs']:<3} "
-              f"({row['control_share']:6.1%}) {delta:+7.1%}")
-    primary = summary["primary"]
-    print(f"\nprimary TVD={primary['observed']:.3f} "
-          f"paired-permutation p={primary['paired_permutation_p']:.4f} "
-          f"({primary['permutations']} shuffles)")
-    same = summary["secondary"]["same_as_last"]
-    print(f"same as last action: memory={same['memory']}/{summary['n_pairs']} "
-          f"control={same['control']}/{summary['n_pairs']} "
-          f"delta={same['difference']:+.1%}")
-    print("caveat: this tests one model on one fixed no-group/no-outcome context; "
-          "it is not a group-intelligence result.")
+    for arm in ARMS:
+        parts = []
+        for row in summary["arms"][arm]["actions"]:
+            if row["count"]:
+                parts.append(f"{row['action']}={row['count']}")
+        print(f"{arm:<12} " + ", ".join(parts))
+
+    print("\nplanned paired contrasts (TVD; raw p; Holm p)")
+    for row in summary["primary"]["comparisons"]:
+        print(f"{row['left']:<12} vs {row['right']:<12} "
+              f"TVD={row['observed']:.3f}  p={_format_p(row['paired_permutation_p'])}  "
+              f"Holm={_format_p(row['holm_adjusted_p'])}")
+
+    last = summary["secondary"]["last_action"]
+    print(f"\nsame as last action {last!r}")
+    for arm in ARMS:
+        same = summary["arms"][arm]["same_as_last"]
+        low, high = same["wilson95"]
+        print(f"{arm:<12} {same['count']}/{n} ({same['share']:.1%}; "
+              f"Wilson95 {low:.1%}-{high:.1%})")
+    print("caveat: one model, one fixed no-group/no-outcome context; these are "
+          "single-factor output-distribution checks, not a group-intelligence result.")
 
 
 def main(argv=None) -> int:

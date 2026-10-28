@@ -3922,10 +3922,10 @@ class TestThinkStats(unittest.TestCase):
 class TestMemoryAblationCheck(unittest.TestCase):
     """tools/memory_ablation_check.py - the missing memory control.
 
-    The experiment must change only the proposer's own history/feedback. Group
-    proposals and outcome activity are frozen empty in both arms, and the
-    control keeps the same round number instead of claiming "first round" at
-    round 3500.
+    The experiment must separate full history, last-action feedback, and action
+    counts. Group proposals and outcome activity are frozen empty in every arm,
+    and all arms keep the same round number instead of claiming "first round"
+    at round 3500.
     """
 
     def _tool(self):
@@ -3936,7 +3936,7 @@ class TestMemoryAblationCheck(unittest.TestCase):
         spec.loader.exec_module(mod)
         return mod
 
-    def test_the_control_ablates_history_counts_and_last_action_only(self):
+    def test_single_factor_arms_isolate_history_counts_and_last_action(self):
         from pando.thinkd import Ledger
         tool = self._tool()
         with tempfile.TemporaryDirectory() as tmp:
@@ -3951,16 +3951,29 @@ class TestMemoryAblationCheck(unittest.TestCase):
                 ledger, 3, 8, ["pi5"], {"adaptive.governance",
                                          "dynamic.threshold.adjustment"})
         memory = prompts["memory"]
+        last_action = prompts["last_action"]
+        counts = prompts["counts"]
         control = prompts["control"]
         self.assertIn("dynamic.threshold.adjustment", memory)
         self.assertIn("你已经提过的动作次数", memory)
         self.assertIn("上一轮你提的是 dynamic.threshold.adjustment", memory)
+        self.assertIn("上一轮你提的是 dynamic.threshold.adjustment", last_action)
+        self.assertNotIn("你已经提过的动作次数", last_action)
+        self.assertNotIn("目标「goal」", last_action)
+        self.assertIn("你已经提过的动作次数", counts)
+        self.assertNotIn("上一轮你提的是", counts)
+        self.assertNotIn("目标「goal」", counts)
         self.assertNotIn("dynamic.threshold.adjustment", control)
         self.assertNotIn("你已经提过的动作次数", control)
         self.assertNotIn("上一轮你提的是", control)
         self.assertIn("这是你的第 3 轮思考", control)
         self.assertIn("固定为空：实验控制", control)
         self.assertIn("pi5", control)
+
+    def test_holm_adjustment_is_monotone_in_rank_order(self):
+        tool = self._tool()
+        self.assertEqual(tool.holm_adjust([0.01, 0.04, 0.03]),
+                         [0.03, 0.06, 0.06])
 
     def test_tvd_and_invalid_actions_are_counted(self):
         from collections import Counter
@@ -3977,12 +3990,17 @@ class TestMemoryAblationCheck(unittest.TestCase):
 
     def test_identical_arms_do_not_manufacture_a_permutation_signal(self):
         tool = self._tool()
-        pairs = [("seed.export", "seed.export")] * 20
+        pairs = [{arm: "seed.export" for arm in tool.ARMS}] * 20
         summary = tool.summarise(
             pairs, ["seed.export"], "seed.export", trials=199)
-        self.assertEqual(summary["primary"]["observed"], 0.0)
-        self.assertGreater(summary["primary"]["paired_permutation_p"], 0.9)
-        self.assertEqual(summary["secondary"]["same_as_last"]["difference"], 0.0)
+        self.assertTrue(all(
+            row["observed"] == 0.0
+            and row["paired_permutation_p"] > 0.9
+            and row["holm_adjusted_p"] > 0.9
+            for row in summary["primary"]["comparisons"]))
+        self.assertTrue(all(
+            summary["arms"][arm]["same_as_last"]["count"] == 20
+            for arm in tool.ARMS))
 
 
 class TestProposerSpool(unittest.TestCase):
