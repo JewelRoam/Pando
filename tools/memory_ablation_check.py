@@ -309,6 +309,38 @@ def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _file_identity(path: Path) -> dict:
+    data = path.read_bytes()
+    stat = path.stat()
+    return {
+        "path": str(path),
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "bytes": len(data),
+        "lines": data.count(b"\n"),
+        "mtime_ns": stat.st_mtime_ns,
+    }
+
+
+def prompt_artifact(prompts: dict) -> dict:
+    """Return replayable prompt text plus derived metadata."""
+    return {
+        "system": SYSTEM_PROMPT,
+        "system_sha256": _sha256(SYSTEM_PROMPT),
+        "text": {arm: prompts[arm] for arm in ARMS},
+        "sha256": {arm: _sha256(prompts[arm]) for arm in ARMS},
+        "chars": {arm: len(prompts[arm]) for arm in ARMS},
+        "memory_sha256": _sha256(prompts["memory"]),
+        "control_sha256": _sha256(prompts["control"]),
+        "neutral_sha256": _sha256(prompts["neutral"]),
+        "memory_chars": len(prompts["memory"]),
+        "control_chars": len(prompts["control"]),
+        "neutral_chars": len(prompts["neutral"]),
+        "neutral_char_matched_to_memory": (
+            len(prompts["neutral"]) == len(prompts["memory"])
+        ),
+    }
+
+
 def _read_secret(path: str | None) -> str:
     if not path:
         return ""
@@ -339,6 +371,7 @@ def sample_once(proposer: OpenAIProposer, system: str, user: str,
 
 def run(args) -> dict:
     ledger_path = Path(args.ledger).expanduser()
+    ledger_before = _file_identity(ledger_path)
     ledger = Ledger(ledger_path)
     round_no = len(ledger.tail(100_000)) + 1
     host_names = host_names_from(Path(args.hosts).expanduser())
@@ -346,6 +379,12 @@ def run(args) -> dict:
     action_space = effective_action_space()
     prompts = build_prompts(ledger, round_no, args.history_window,
                             host_names, action_space)
+    ledger_after = _file_identity(ledger_path)
+    if ledger_before != ledger_after:
+        raise RuntimeError(
+            "ledger changed while prompts were being built; pass a frozen "
+            "snapshot via --ledger"
+        )
     proposer = OpenAIProposer(
         base_url=args.base_url, model=args.model,
         api_key=_read_secret(args.api_key_file),
@@ -393,24 +432,15 @@ def run(args) -> dict:
             "seed_base": args.seed_base,
             "history_window": args.history_window,
             "ledger": str(ledger_path),
+            "round_no": round_no,
+            "host_names": host_names,
             "arms": list(ARMS),
             "arm_orders": [list(order) for order in ARM_ORDERS],
             "fixed_group_context": "empty",
             "fixed_activity_context": "empty",
         },
-        "prompts": {
-            "sha256": {arm: _sha256(prompts[arm]) for arm in ARMS},
-            "chars": {arm: len(prompts[arm]) for arm in ARMS},
-            "memory_sha256": _sha256(prompts["memory"]),
-            "control_sha256": _sha256(prompts["control"]),
-            "neutral_sha256": _sha256(prompts["neutral"]),
-            "memory_chars": len(prompts["memory"]),
-            "control_chars": len(prompts["control"]),
-            "neutral_chars": len(prompts["neutral"]),
-            "neutral_char_matched_to_memory": (
-                len(prompts["neutral"]) == len(prompts["memory"])
-            ),
-        },
+        "ledger_snapshot": ledger_before,
+        "prompts": prompt_artifact(prompts),
         "summary": summary,
         "rows": rows,
     }

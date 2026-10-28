@@ -3983,6 +3983,30 @@ class TestMemoryAblationCheck(unittest.TestCase):
         self.assertEqual(tool.holm_adjust([0.01, 0.04, 0.03]),
                          [0.03, 0.06, 0.06])
 
+    def test_prompt_artifact_contains_replayable_system_and_arm_text(self):
+        from pando.thinkd import Ledger, Proposal, Round
+        tool = self._tool()
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Ledger(Path(tmp) / "think.jsonl")
+            for number in (1, 2):
+                ledger.append(Round(
+                    number, number,
+                    proposal=Proposal(
+                        f"p{number}", "mac", "goal", "seed.export"),
+                    published=True))
+            prompts = tool.build_prompts(
+                ledger, 3, 8, [], {"seed.export", "seed.replicate"})
+        artifact = tool.prompt_artifact(prompts)
+        self.assertEqual(artifact["system"], tool.SYSTEM_PROMPT)
+        self.assertEqual(artifact["text"], {
+            arm: prompts[arm] for arm in tool.ARMS
+        })
+        self.assertEqual(
+            set(artifact["sha256"]), set(tool.ARMS))
+        self.assertEqual(
+            artifact["system_sha256"],
+            hashlib.sha256(tool.SYSTEM_PROMPT.encode("utf-8")).hexdigest())
+
     def test_tvd_and_invalid_actions_are_counted(self):
         from collections import Counter
         tool = self._tool()
