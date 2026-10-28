@@ -3954,6 +3954,7 @@ class TestMemoryAblationCheck(unittest.TestCase):
         last_action = prompts["last_action"]
         counts = prompts["counts"]
         neutral = prompts["neutral"]
+        pseudo_history = prompts["pseudo_history"]
         control = prompts["control"]
         self.assertIn("dynamic.threshold.adjustment", memory)
         self.assertIn("你已经提过的动作次数", memory)
@@ -3977,6 +3978,16 @@ class TestMemoryAblationCheck(unittest.TestCase):
         self.assertNotIn("dynamic.threshold.adjustment", neutral)
         self.assertNotIn("你已经提过的动作次数", neutral)
         self.assertNotIn("上一轮你提的是", neutral)
+        self.assertEqual(len(pseudo_history), len(memory))
+        self.assertNotIn("r1:", pseudo_history)
+        self.assertNotIn("r2:", pseudo_history)
+        self.assertNotIn("目标「goal」", pseudo_history)
+        self.assertNotIn("已发布", pseudo_history)
+        self.assertIn("未发布", pseudo_history)
+        self.assertIn("adaptive.governance", pseudo_history)
+        self.assertIn("dynamic.threshold.adjustment", pseudo_history)
+        self.assertIn("【你已经提过的动作次数】", pseudo_history)
+        self.assertIn("上一轮你提的是 dynamic.threshold.adjustment", pseudo_history)
 
     def test_holm_adjustment_is_monotone_in_rank_order(self):
         tool = self._tool()
