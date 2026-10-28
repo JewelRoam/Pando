@@ -49,6 +49,8 @@ import os
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -62,6 +64,8 @@ from tools.code_sync import (  # noqa: E402
     source_file,
     sync_repo,
 )
+
+RECEIPT_TIMEOUT_S = 5.0
 
 
 def _sha256(path: Path) -> str:
@@ -158,9 +162,51 @@ def _spawn(command: str) -> dict:
     return {"ran": True, "pid": process.pid}
 
 
+def send_code_receipt(row: dict, *, url: str, token_file: str,
+                      identity_file: str, node: str, member: str = "",
+                      platform: str = "", timeout: float = RECEIPT_TIMEOUT_S) -> dict:
+    """Push one signed round observation to a peer. Never raises.
+
+    The receipt proves that this watcher ran and what it observed. It is not a
+    claim that every supervised client survived the following restart; the
+    next idle receipt is what shows the watcher came back on the same head.
+    """
+    try:
+        from pando.code_receipt import build_envelope
+        from pando.identity import Identity
+
+        token = Path(token_file).expanduser().read_text(
+            encoding="utf-8").strip()
+        if not token:
+            raise ValueError("receipt token file is empty")
+        identity_doc = json.loads(Path(identity_file).expanduser().read_text(
+            encoding="utf-8"))
+        identity = Identity.from_json(identity_doc)
+        envelope = build_envelope(
+            identity, node=node, member=member or node,
+            head=str(row.get("head") or ""),
+            action=str(row.get("action") or "none"),
+            platform=platform or sys.platform,
+            acted=bool(row.get("acted", False)),
+            reason=str(row.get("reason") or ""))
+        request = urllib.request.Request(
+            url,
+            data=json.dumps(envelope, ensure_ascii=False).encode("utf-8"),
+            headers={"Authorization": f"Bearer {token}",
+                     "Content-Type": "application/json",
+                     "Accept": "application/json"},
+            method="POST")
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            answer = json.loads(response.read().decode("utf-8"))
+        return {"sent": True, "answer": answer}
+    except (OSError, ValueError, KeyError, urllib.error.URLError) as exc:
+        return {"sent": False, "reason": "receipt-failed",
+                "error": str(exc)[:240]}
+
+
 def watch_round(*, repo, remote="origin", peer="", peers=None, peer_token="",
                 on_update="none", client_cmd="", node_cmd="",
-                supervisor="", ledger=None, platform="") -> dict:
+                supervisor="", ledger=None, platform="", receipt=None) -> dict:
     """One sync. Restart whenever the running clients are not on HEAD.
 
     Acting on ``updated`` alone is not enough -- it misses the head that
@@ -215,6 +261,12 @@ def watch_round(*, repo, remote="origin", peer="", peers=None, peer_token="",
             row["acted"] = acted
             if acted:
                 row["acted_head"] = head
+    if receipt is not None:
+        try:
+            row["receipt"] = receipt(row)
+        except Exception as exc:  # noqa: BLE001 - observation must not stop sync
+            row["receipt"] = {"sent": False, "reason": "receipt-failed",
+                              "error": str(exc)[:240]}
     _append(ledger, row)
     return row
 
@@ -244,9 +296,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--supervisor", default="",
                         help="roster file; a change in it forces a node restart")
     parser.add_argument("--ledger", default="")
+    parser.add_argument("--receipt-url", default="",
+                        help="authenticated endpoint for signed round receipts")
+    parser.add_argument("--receipt-token-file", default="")
+    parser.add_argument("--receipt-identity", default="")
+    parser.add_argument("--receipt-node", default="")
+    parser.add_argument("--receipt-member", default="")
     parser.add_argument("--interval", type=float, default=300.0)
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args(argv)
+
+    if args.receipt_url:
+        required_receipts = {
+            "--receipt-token-file": args.receipt_token_file,
+            "--receipt-identity": args.receipt_identity,
+            "--receipt-node": args.receipt_node,
+        }
+        absent = [flag for flag, value in required_receipts.items() if not value]
+        if absent:
+            parser.error("missing " + ", ".join(absent))
 
     token = ""
     if args.peer_token_file:
@@ -258,12 +326,22 @@ def main(argv: list[str] | None = None) -> int:
     peers = peer_sources("", args.peer, source_file(args.peer_file))
     ledger = Path(args.ledger).expanduser() if args.ledger else None
 
+    def receipt(row: dict) -> dict:
+        return send_code_receipt(
+            row, url=args.receipt_url,
+            token_file=args.receipt_token_file,
+            identity_file=args.receipt_identity,
+            node=args.receipt_node,
+            member=args.receipt_member,
+            platform=args.platform)
+
     def run(announce: bool) -> int:
         row = watch_round(repo=args.repo, remote=args.remote, peers=peers,
                           peer_token=token, on_update=args.on_update,
                           client_cmd=args.client_cmd, node_cmd=args.node_cmd,
                           supervisor=args.supervisor, ledger=ledger,
-                          platform=args.platform)
+                          platform=args.platform,
+                          receipt=receipt if args.receipt_url else None)
         # An idle round is the normal case; only say something when it was not.
         if announce or row.get("updated") or row.get("reason") != "already":
             print(json.dumps(row, ensure_ascii=False, sort_keys=True), flush=True)

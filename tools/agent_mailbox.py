@@ -59,6 +59,9 @@ from pando.grant_delegation import (  # noqa: E402 - repo root must be importabl
 from pando.grants import (  # noqa: E402 - repo root must be importable
     default_path as default_grants_path, grant_status,
 )
+from pando.code_receipt import (  # noqa: E402 - repo root must be importable
+    CodeReceiptError, CodeReceiptReceiver, CodeReceiptSignatureError,
+)
 from pando.identity import default_path as default_identity_path  # noqa: E402
 from pando.telemetry import (  # noqa: E402 - repo root must be importable
     PI5_PUBKEY, TelemetryError, TelemetryReceiver,
@@ -547,6 +550,7 @@ class Mailbox:
 
 
 def build_handler(mailbox: Mailbox, token: str, telemetry=None,
+                  code_receipts=None,
                   code_repo: Path | None = None,
                   code_cache: Path | None = None,
                   grant_file: Path | None = None,
@@ -638,6 +642,22 @@ def build_handler(mailbox: Mailbox, token: str, telemetry=None,
                     self._send(404, {"error": "operator status not configured"})
                     return
                 self._send(200, operator_status(grant_file, identity_file))
+                return
+            receipt_prefix = "/receipts/code/"
+            if path.startswith(receipt_prefix):
+                if code_receipts is None:
+                    self._send(404, {"error": "code receipts not configured"})
+                    return
+                node = path[len(receipt_prefix):]
+                try:
+                    document = code_receipts.load(node)
+                except CodeReceiptError as exc:
+                    self._send(400, {"error": str(exc)[:200]})
+                    return
+                if document is None:
+                    self._send(404, {"error": "no receipt for node"})
+                else:
+                    self._send(200, {"receipt": document})
                 return
             if path == "/code.bundle":
                 # The mailbox can be the only service another host can reach
@@ -731,6 +751,26 @@ def build_handler(mailbox: Mailbox, token: str, telemetry=None,
                 return
             path = self.path.split("?", 1)[0]
             payload = self._body()
+            receipt_prefix = "/receipts/code/"
+            if path.startswith(receipt_prefix):
+                if code_receipts is None:
+                    self._send(404, {"error": "code receipts not configured"})
+                    return
+                node = path[len(receipt_prefix):]
+                try:
+                    answer = code_receipts.receive(payload, expected_node=node)
+                except CodeReceiptSignatureError as exc:
+                    self._send(403, {"error": str(exc)[:200]})
+                    return
+                except CodeReceiptError as exc:
+                    self._send(400, {"error": str(exc)[:200]})
+                    return
+                except OSError as exc:
+                    self._send(500, {"error": "code receipt write failed",
+                                     "detail": str(exc)[:200]})
+                    return
+                self._send(200, answer)
+                return
             if path == "/telemetry/pi5":
                 if telemetry is None:
                     self._send(404, {"error": "not found"})
@@ -884,6 +924,8 @@ def serve(args) -> int:
     mailbox = Mailbox(directory)
     telemetry = (TelemetryReceiver(args.telemetry_root)
                  if getattr(args, "telemetry_root", "") else None)
+    code_receipts = (CodeReceiptReceiver(args.code_receipts_root)
+                     if getattr(args, "code_receipts_root", "") else None)
     code_repo = (Path(args.code_repo).expanduser()
                  if getattr(args, "code_repo", "") else None)
     code_cache = (Path(args.code_cache).expanduser()
@@ -895,6 +937,7 @@ def serve(args) -> int:
                      else default_identity_path())
     server = _MailboxServer((args.host, args.port),
                             build_handler(mailbox, token, telemetry,
+                                          code_receipts=code_receipts,
                                           code_repo=code_repo,
                                           code_cache=code_cache,
                                           grant_file=grant_file,
@@ -1047,6 +1090,10 @@ def main() -> int:
         "--telemetry-root", default="",
         help="atomically publish signed Pi5 telemetry at this root-table path; "
              f"the signer is pinned to {PI5_PUBKEY}")
+    server.add_argument(
+        "--code-receipts-root", default="",
+        help="atomically store signed code-watch receipts per node in this "
+             "directory; empty disables /receipts/code/<node>")
     server.add_argument(
         "--grant-file", default="",
         help="local grants ledger to delegate (default: pando.grants discovery)")

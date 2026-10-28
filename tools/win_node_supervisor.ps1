@@ -181,6 +181,13 @@ $codeWatchArgs = @("$repo\tools\node_code_watch.py", '--repo', "$repo",
   '--node-cmd', "`"powershell -NoProfile -ExecutionPolicy Bypass -File $repo\tools\win_stack_restart.ps1`"",
   '--supervisor', "$repo\tools\win_node_supervisor.ps1",
   '--ledger', 'D:\pando-models\code-sync-ledger.jsonl',
+  # Push evidence that this node, rather than only the Mac's copy of a bundle,
+  # observed a HEAD. The first valid key is pinned by the receiver; the path
+  # is the same token-protected mailbox route the other residents use.
+  '--receipt-url', 'http://100.92.184.4:8776/receipts/code/win',
+  '--receipt-token-file', "$repo\metrics\lan-check\mac-mailbox.token",
+  '--receipt-identity', "$env:USERPROFILE\.pando\identity.json",
+  '--receipt-node', 'win',
   '--interval', '300')
 
 # Liveness is not progress. The loop below answers "did the child exit?"; it

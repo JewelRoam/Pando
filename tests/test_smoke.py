@@ -11678,6 +11678,116 @@ class TestCodeSync(unittest.TestCase):
             self.assertEqual(len(seen), 1)
 
 
+class TestCodeReceipts(unittest.TestCase):
+    """A remote updater must be able to prove what it observed.
+
+    A bundle cached on the Mac and a local ledger on Windows are two copies of
+    the same claim. This contract makes the remote watcher push a signed
+    observation over the authenticated mailbox route, so the receiver has
+    evidence minted on the other side of the network.
+    """
+
+    @staticmethod
+    def _identity():
+        from pando.identity import Identity
+        return Identity.generate()
+
+    def test_round_trip_pins_the_first_key_and_refuses_tampering(self):
+        from pando import code_receipt
+        identity = self._identity()
+        envelope = code_receipt.build_envelope(
+            identity, node="win", member="win-root", head="a" * 40,
+            action="client-restart", platform="windows", acted=True,
+            reason="fast-forward", sent_at=10.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            receiver = code_receipt.CodeReceiptReceiver(tmp)
+            answer = receiver.receive(envelope, expected_node="win", now=20.0)
+            document = receiver.load("win")
+            self.assertTrue(answer["ok"])
+            self.assertEqual(document["received_at"], 20.0)
+            self.assertEqual(document["sent_at"], 10.0)
+            self.assertEqual(document["head"], "a" * 40)
+            self.assertEqual(document["pubkey"], identity.public_key)
+
+            changed = json.loads(json.dumps(envelope))
+            changed["payload"]["head"] = "b" * 40
+            with self.assertRaises(code_receipt.CodeReceiptSignatureError):
+                receiver.receive(changed, expected_node="win")
+            self.assertEqual(receiver.load("win")["head"], "a" * 40)
+
+            replacement = code_receipt.build_envelope(
+                self._identity(), node="win", member="win-root",
+                head="c" * 40, action="none")
+            with self.assertRaises(code_receipt.CodeReceiptSignatureError):
+                receiver.receive(replacement, expected_node="win")
+            with self.assertRaises(code_receipt.CodeReceiptError):
+                receiver.receive(envelope, expected_node="pi5")
+
+    def test_http_receipt_is_authenticated_and_is_not_a_mailbox_task(self):
+        from pando import code_receipt
+        from tools import agent_mailbox, node_code_watch
+
+        identity = self._identity()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            identity_file = root / "identity.json"
+            token_file = root / "mailbox.token"
+            identity_file.write_text(json.dumps(identity.to_json()),
+                                     encoding="utf-8")
+            token_file.write_text("mail-token", encoding="utf-8")
+            box = agent_mailbox.Mailbox(root / "mailbox")
+            receiver = code_receipt.CodeReceiptReceiver(root / "receipts")
+            server = agent_mailbox.ThreadingHTTPServer(
+                ("127.0.0.1", 0),
+                agent_mailbox.build_handler(
+                    box, "mail-token", code_receipts=receiver))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            base = f"http://127.0.0.1:{server.server_address[1]}"
+            endpoint = base + "/receipts/code/win"
+            try:
+                unauthorized = urllib.request.Request(
+                    endpoint, data=b"{}",
+                    headers={"Authorization": "Bearer wrong",
+                             "Content-Type": "application/json"}, method="POST")
+                with self.assertRaises(urllib.error.HTTPError) as caught:
+                    urllib.request.urlopen(unauthorized, timeout=3)
+                self.assertEqual(caught.exception.code, 403)
+                caught.exception.close()
+
+                sent = node_code_watch.send_code_receipt(
+                    {"head": "d" * 40, "action": "client-restart",
+                     "acted": True, "reason": "fast-forward"},
+                    url=endpoint, token_file=str(token_file),
+                    identity_file=str(identity_file), node="win",
+                    member="win-root", platform="windows", timeout=3)
+                self.assertTrue(sent["sent"], sent)
+
+                read = urllib.request.Request(
+                    endpoint, headers={"Authorization": "Bearer mail-token"})
+                with urllib.request.urlopen(read, timeout=3) as response:
+                    document = json.loads(response.read())["receipt"]
+                self.assertEqual(document["head"], "d" * 40)
+                self.assertEqual(document["action"], "client-restart")
+                self.assertEqual(document["platform"], "windows")
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+            self.assertEqual(box.list("open"), [],
+                             "a receipt is observation, not work")
+
+    def test_an_unreachable_receiver_never_raises_into_the_updater(self):
+        from tools import node_code_watch
+        result = node_code_watch.send_code_receipt(
+            {"head": "e" * 40, "action": "none"},
+            url="http://127.0.0.1:1/receipts/code/win",
+            token_file="/definitely/missing/token", identity_file="missing",
+            node="win", timeout=0.1)
+        self.assertFalse(result["sent"])
+        self.assertEqual(result["reason"], "receipt-failed")
+
+
 class TestPi5Telemetry(unittest.TestCase):
     """Pi5 must be observable over the same direction it already talks.
 
