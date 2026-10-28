@@ -4104,6 +4104,98 @@ class TestMemoryAblationCheck(unittest.TestCase):
             summary["arms"][arm]["same_as_last"]["count"] == 20
             for arm in tool.ARMS))
 
+    def test_response_text_summary_keeps_action_and_goal_effects_distinct(self):
+        tool = self._tool()
+        rows = []
+        for pair in range(2):
+            for arm in tool.ARMS:
+                action = "adaptive.governance"
+                goal = "在pi5部署治理以减少人工干预"
+                effect = "same-effect"
+                if arm == "goal_counterfactual":
+                    action = "adaptive.governance" if pair == 0 else "seed.export"
+                    goal = ("在pi5部署治理以增加人工干预" if pair == 0
+                            else "在pi5部署治理以增强一致性")
+                    effect = "same-effect" if pair == 0 else "other-effect"
+                elif arm == "control":
+                    action = "seed.export"
+                    goal = "复制成员"
+                rows.append({
+                    "pair": pair,
+                    "arm": arm,
+                    "action": action,
+                    "raw": json.dumps({
+                        "action": action,
+                        "goal": goal,
+                        "expected_effect": effect,
+                    }, ensure_ascii=False),
+                })
+        summary = tool.response_text_summary(rows)
+        comparison = summary["comparisons"][1]
+        self.assertEqual(comparison["label"],
+                         "full_memory_vs_goal_counterfactual")
+        agreement = comparison["field_agreement"]
+        self.assertEqual(agreement["action"]["equal"], 1)
+        self.assertEqual(agreement["goal"]["equal"], 0)
+        self.assertEqual(agreement["expected_effect"]["equal"], 1)
+        self.assertEqual(agreement["reason"]["total"], 0)
+        self.assertEqual(agreement["reason"]["both_missing"], 2)
+        polarity = summary["goal_polarity"]
+        self.assertEqual(polarity["memory"]["source_any"], 2)
+        self.assertEqual(polarity["memory"]["target_any"], 0)
+        self.assertEqual(polarity["goal_counterfactual"]["source_any"], 0)
+        self.assertEqual(polarity["goal_counterfactual"]["target_any"], 1)
+        self.assertEqual(polarity["goal_counterfactual"]["neither_any"], 1)
+
+    def test_artifact_audit_recomputes_summary_and_rejects_tampered_prompt(self):
+        tool = self._tool()
+        n_pairs = 2
+        rows = []
+        pairs = []
+        for pair in range(n_pairs):
+            got = {}
+            for position, arm in enumerate(tool.ARM_ORDERS[pair]):
+                action = "seed.export"
+                got[arm] = action
+                rows.append({
+                    "pair": pair,
+                    "arm": arm,
+                    "position": position,
+                    "seed": 100 + pair,
+                    "action": action,
+                    "raw": json.dumps({"action": action, "goal": arm}),
+                })
+            pairs.append(got)
+        summary = tool.summarise(
+            pairs, ["seed.export"], "seed.export", trials=19)
+        prompt_texts = {arm: f"prompt-{arm}" for arm in tool.ARMS}
+        artifact = {
+            "config": {
+                "n_pairs": n_pairs,
+                "arm_orders": [list(order) for order in tool.ARM_ORDERS],
+            },
+            "prompts": tool.prompt_artifact(
+                prompt_texts,
+                {arm: 10 for arm in tool.ARMS}),
+            "summary": summary,
+            "rows": rows,
+        }
+        audit = tool.audit_artifact(artifact)
+        self.assertTrue(audit["ok"], audit["checks"])
+        tokenizer = artifact["prompts"].pop("tokenizer")
+        audit = tool.audit_artifact(artifact)
+        self.assertFalse(audit["checks"]["tokenizer_exact"])
+        artifact["prompts"]["tokenizer"] = tokenizer
+        original_raw = rows[0]["raw"]
+        rows[0]["raw"] = json.dumps({"action": "wrong", "goal": "tampered"})
+        audit = tool.audit_artifact(artifact)
+        self.assertFalse(audit["checks"]["raw_actions_match_stored_actions"])
+        rows[0]["raw"] = original_raw
+        artifact["prompts"]["text"]["memory"] += "tampered"
+        audit = tool.audit_artifact(artifact)
+        self.assertFalse(audit["checks"]["prompt_hashes_exact"])
+        self.assertFalse(audit["ok"])
+
 
 class TestProposerSpool(unittest.TestCase):
     """pando.thinkd.Spool - thought that survives a partition.

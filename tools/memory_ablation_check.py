@@ -27,7 +27,9 @@ the request order balanced across arms.
 
 This is a check, not a claim that the swarm evolves. It reports action-share
 uncertainty, paired label-permutation p-values, and Holm-adjusted p-values over
-the planned pairwise contrasts.
+the planned pairwise contrasts. It also audits the generated ``goal`` text:
+equal action labels can hide a response to the goal, and a ``goal`` echo can
+hide that the model repaired a harmful counterfactual back to its prior.
 """
 
 from __future__ import annotations
@@ -39,7 +41,7 @@ import math
 import random
 import time
 import urllib.request
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
@@ -418,6 +420,140 @@ def _normalise_pairs(pairs) -> list[dict[str, str]]:
     return [{"memory": left, "control": right} for left, right in pairs]
 
 
+def _output_object(row: dict) -> dict | None:
+    """Parse one stored raw completion, returning only object-shaped output."""
+    try:
+        output = extract_json(str(row.get("raw") or ""))
+    except Exception:
+        return None
+    return output if isinstance(output, dict) else None
+
+
+def _has_output_value(value) -> bool:
+    return value not in (None, "", [], {})
+
+
+def response_text_summary(rows: list[dict]) -> dict:
+    """Audit generated text fields without making another model call.
+
+    Action-share statistics can say that two arms chose the same action while
+    their generated goals differ. These measurements keep that distinction
+    visible: exact paired field agreement, parse coverage, and presence of the
+    source/target phrases used by the goal-polarity counterfactual.
+    """
+    grouped = defaultdict(dict)
+    duplicates = []
+    for row in rows:
+        pair = row.get("pair")
+        arm = str(row.get("arm") or "")
+        if arm in grouped[pair]:
+            duplicates.append({"pair": pair, "arm": arm})
+        grouped[pair][arm] = row
+
+    pair_ids = sorted(grouped)
+    parsed = {
+        pair: {
+            arm: _output_object(grouped[pair][arm])
+            for arm in ARMS if arm in grouped[pair]
+        }
+        for pair in pair_ids
+    }
+    comparisons = []
+    for left_arm, right_arm, label in (
+            ("memory", "control", "full_memory_vs_none"),
+            ("memory", "goal_counterfactual",
+             "full_memory_vs_goal_counterfactual"),
+            ("memory", "coherent_fiction",
+             "full_memory_vs_coherent_fiction")):
+        comparable = [
+            pair for pair in pair_ids
+            if parsed[pair].get(left_arm) is not None
+            and parsed[pair].get(right_arm) is not None
+        ]
+        fields = ("action", "goal", "expected_effect", "reason", "evidence")
+        agreement = {}
+        for field in fields:
+            field_pairs = [
+                pair for pair in comparable
+                if _has_output_value(parsed[pair][left_arm].get(field))
+                or _has_output_value(parsed[pair][right_arm].get(field))
+            ]
+            equal = sum(
+                parsed[pair][left_arm].get(field)
+                == parsed[pair][right_arm].get(field)
+                for pair in field_pairs
+            )
+            agreement[field] = {
+                "equal": equal,
+                "total": len(field_pairs),
+                "both_missing": len(comparable) - len(field_pairs),
+                "share": equal / len(field_pairs) if field_pairs else None,
+            }
+        comparisons.append({
+            "label": label,
+            "left": left_arm,
+            "right": right_arm,
+            "parseable_pairs": len(comparable),
+            "field_agreement": agreement,
+        })
+
+    source_phrases = [source for source, _target
+                      in GOAL_COUNTERFACTUAL_REPLACEMENTS]
+    target_phrases = [target for _source, target
+                      in GOAL_COUNTERFACTUAL_REPLACEMENTS]
+    polarity = {}
+    for arm in ("memory", "goal_counterfactual"):
+        goals = [
+            str(parsed[pair][arm].get("goal") or "")
+            for pair in pair_ids if parsed[pair].get(arm) is not None
+        ]
+
+        def phrase_counts(phrases):
+            return [{
+                "phrase": phrase,
+                "pairs": sum(phrase in goal for goal in goals),
+            } for phrase in phrases]
+
+        source_counts = phrase_counts(source_phrases)
+        target_counts = phrase_counts(target_phrases)
+        polarity[arm] = {
+            "parseable_pairs": len(goals),
+            "source_phrases": source_counts,
+            "target_phrases": target_counts,
+            "source_any": sum(
+                any(phrase in goal for phrase in source_phrases)
+                for goal in goals),
+            "target_any": sum(
+                any(phrase in goal for phrase in target_phrases)
+                for goal in goals),
+            "neither_any": sum(
+                not any(phrase in goal for phrase in source_phrases)
+                and not any(phrase in goal for phrase in target_phrases)
+                for goal in goals),
+        }
+    raw_action_matches = {}
+    for arm in ARMS:
+        arm_rows = [row for row in rows if str(row.get("arm") or "") == arm]
+        parsed_arm = [parsed[pair].get(arm) for pair in pair_ids]
+        raw_action_matches[arm] = {
+            "matched": sum(
+                output is not None and output.get("action") == row.get("action")
+                for output, row in zip(parsed_arm, arm_rows)),
+            "parseable": sum(output is not None for output in parsed_arm),
+            "rows": len(arm_rows),
+        }
+    return {
+        "duplicate_pair_arms": duplicates,
+        "comparisons": comparisons,
+        "goal_polarity": polarity,
+        "parseable_outputs": {
+            arm: sum(parsed[pair].get(arm) is not None for pair in pair_ids)
+            for arm in ARMS
+        },
+        "raw_action_matches": raw_action_matches,
+    }
+
+
 def summarise(pairs, actions: list[str], last_action: str, trials: int) -> dict:
     rows = _normalise_pairs(pairs)
     n = len(rows)
@@ -682,6 +818,7 @@ def run(args) -> dict:
         pairs.append(got)
     summary = summarise(pairs, sorted(action_space),
                         prompts["last_action_value"], args.permutations)
+    summary["text_response"] = response_text_summary(rows)
     return {
         "created_at": datetime.now().astimezone().isoformat(),
         "config": {
@@ -741,8 +878,139 @@ def print_report(result: dict) -> None:
         low, high = same["wilson95"]
         print(f"{arm:<12} {same['count']}/{n} ({same['share']:.1%}; "
               f"Wilson95 {low:.1%}-{high:.1%})")
+    text = summary.get("text_response")
+    if text:
+        print("\nraw text paired agreement (equal/total)")
+        for comparison in text["comparisons"]:
+            fields = comparison["field_agreement"]
+            print(f"{comparison['label']}: " + "  ".join(
+                f"{field}={stats['equal']}/{stats['total']}"
+                for field, stats in fields.items()))
+        print("goal counterfactual phrase presence in generated goal")
+        for arm in ("memory", "goal_counterfactual"):
+            stats = text["goal_polarity"][arm]
+            parsed_count = stats["parseable_pairs"]
+            print(f"{arm:<20} source_any={stats['source_any']}/{parsed_count} "
+                  f"target_any={stats['target_any']}/{parsed_count} "
+                  f"neither_any={stats['neither_any']}/{parsed_count}")
     print("caveat: one model, one fixed no-group/no-outcome context; these are "
           "single-factor output-distribution checks, not a group-intelligence result.")
+
+
+def _json_normalise(value):
+    return json.loads(json.dumps(value, ensure_ascii=False))
+
+
+def audit_artifact(data: dict, trials: int | None = None) -> dict:
+    """Recompute an artifact's core summary and verify its replay metadata."""
+    config = data["config"]
+    rows = data["rows"]
+    summary = data["summary"]
+    n_pairs = int(config["n_pairs"])
+    grouped = defaultdict(dict)
+    duplicate_pair_arms = []
+    for row in rows:
+        pair = int(row["pair"])
+        arm = str(row["arm"])
+        if arm in grouped[pair]:
+            duplicate_pair_arms.append({"pair": pair, "arm": arm})
+        grouped[pair][arm] = row
+
+    expected_pairs = list(range(n_pairs))
+    pair_complete = all(set(grouped[pair]) == set(ARMS)
+                        for pair in expected_pairs)
+    seed_consistent = all(
+        len({row.get("seed") for row in grouped[pair].values()}) == 1
+        for pair in expected_pairs
+    )
+    positions_consistent = all(
+        [grouped[pair][arm].get("position") for arm in ARM_ORDERS[pair % len(ARM_ORDERS)]]
+        == list(range(len(ARMS)))
+        for pair in expected_pairs
+    )
+    pairs = [
+        {arm: grouped[pair][arm].get("action") for arm in ARMS}
+        for pair in expected_pairs
+    ]
+    recomputed = summarise(
+        pairs,
+        list(summary["valid_actions"]),
+        str(summary["secondary"]["last_action"]),
+        int(trials or summary["primary"]["permutations"]),
+    )
+    stored_core = {
+        key: value for key, value in summary.items() if key != "text_response"
+    }
+    summary_exact = _json_normalise(recomputed) == _json_normalise(stored_core)
+
+    prompts = data["prompts"]
+    prompt_hashes_exact = (
+        set(prompts.get("text") or {}) == set(ARMS)
+        and set(prompts.get("sha256") or {}) == set(ARMS)
+        and all(_sha256(prompts["text"][arm]) == prompts["sha256"][arm]
+                for arm in ARMS)
+        and prompts.get("system_sha256") == _sha256(prompts.get("system", ""))
+    )
+    prompt_chars_exact = (
+        set(prompts.get("chars") or {}) == set(ARMS)
+        and all(len(prompts["text"][arm]) == prompts["chars"][arm]
+                for arm in ARMS)
+    )
+    tokenizer = prompts.get("tokenizer") or {}
+    token_counts = tokenizer.get("counts") or {}
+    tokenizer_exact = bool(
+        set(token_counts) == set(ARMS)
+        and all(isinstance(token_counts[arm], int) for arm in ARMS)
+        and token_counts.get("memory") == token_counts.get("coherent_fiction")
+        and token_counts.get("memory") == token_counts.get("goal_counterfactual")
+    )
+    text_response = response_text_summary(rows)
+    raw_action_match_exact = all(
+        stats["matched"] == stats["parseable"] == stats["rows"]
+        for stats in text_response["raw_action_matches"].values()
+    )
+    checks = {
+        "row_count_exact": len(rows) == n_pairs * len(ARMS),
+        "pair_complete": pair_complete,
+        "no_duplicate_pair_arms": not duplicate_pair_arms,
+        "seed_consistent_within_pair": seed_consistent,
+        "positions_consistent_with_arm_order": positions_consistent,
+        "summary_exact": summary_exact,
+        "prompt_hashes_exact": prompt_hashes_exact,
+        "prompt_chars_exact": prompt_chars_exact,
+        "tokenizer_exact": tokenizer_exact,
+        "raw_actions_match_stored_actions": raw_action_match_exact,
+        "text_outputs_have_no_duplicate_pair_arms": not text_response[
+            "duplicate_pair_arms"],
+    }
+    return {
+        "ok": all(checks.values()),
+        "checks": checks,
+        "n_pairs": n_pairs,
+        "n_rows": len(rows),
+        "text_response": text_response,
+    }
+
+
+def print_audit(audit: dict, artifact_path: Path) -> None:
+    print(f"artifact={artifact_path} ok={audit['ok']} "
+          f"n_pairs={audit['n_pairs']} rows={audit['n_rows']}")
+    for name, passed in audit["checks"].items():
+        print(f"{'PASS' if passed else 'FAIL'} {name}")
+    text = audit["text_response"]
+    print("\nraw text paired agreement (equal/total)")
+    for comparison in text["comparisons"]:
+        fields = comparison["field_agreement"]
+        print(f"{comparison['label']}: " + "  ".join(
+            f"{field}={stats['equal']}/{stats['total']}"
+            for field, stats in fields.items()))
+    print("\ngoal counterfactual phrase presence in generated goal")
+    for arm in ("memory", "goal_counterfactual"):
+        stats = text["goal_polarity"][arm]
+        parsed_count = stats["parseable_pairs"]
+        print(f"{arm:<20} source_any={stats['source_any']}/{parsed_count} "
+              f"target_any={stats['target_any']}/{parsed_count} "
+              f"neither_any={stats['neither_any']}/{parsed_count}")
 
 
 def main(argv=None) -> int:
@@ -761,7 +1029,21 @@ def main(argv=None) -> int:
     parser.add_argument("--timeout", type=float, default=180.0)
     parser.add_argument("--permutations", type=int, default=20000)
     parser.add_argument("--output", default="")
+    parser.add_argument("--audit-artifact", default="")
     args = parser.parse_args(argv)
+    if args.audit_artifact:
+        artifact_path = Path(args.audit_artifact).expanduser()
+        data = json.loads(artifact_path.read_text(encoding="utf-8"))
+        audit = audit_artifact(data, trials=args.permutations)
+        print_audit(audit, artifact_path)
+        if args.output:
+            out = Path(args.output).expanduser()
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(
+                json.dumps(audit, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8")
+            print(f"\nwrote {out}")
+        return 0 if audit["ok"] else 1
     result = run(args)
     print_report(result)
     if args.output:
