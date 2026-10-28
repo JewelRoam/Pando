@@ -11,9 +11,10 @@ tool runs seven same-seed arms against one local model:
 * ``neutral``: a length-matched, colony-neutral filler prompt;
 * ``pseudo_history``: history-shaped text with the same actions, counts, and
   last action, but false round numbers, goals, and publication states;
-* ``coherent_fiction``: the same actions, counts, last action, and real
-  publication states, but monotonic fake round numbers and plausible fictional
-  goals. Unlike ``pseudo_history``, this arm is not visibly marked as damaged;
+* ``coherent_fiction``: the same actions, counts, rounds, last action, and real
+  publication states, with only the host fact in each goal changed to a
+  plausible host where that action did not happen. The rewrite preserves both
+  character count and, for the frozen replay ledger, tokenizer count;
 * ``control``: none of those memory-derived sections.
 
 Group proposals and outcome activity are fixed empty in every arm. This turns
@@ -33,9 +34,11 @@ import json
 import math
 import random
 import time
+import urllib.request
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from pando.thinkd import (Ledger, OpenAIProposer, SYSTEM_PROMPT, extract_json,
                           host_names_from, replicate_streak)
@@ -122,7 +125,7 @@ COHERENT_GOAL_FALLBACK = (
     "核对当前运行状态，执行一项范围明确且可回滚的维护操作，把结果和验证"
     "证据写入交接记录。"
 )
-COHERENT_ERROR_FALLBACK = "调用暂时失败，已记录错误并等待下一轮重试。"
+COHERENT_HOST_REPLACEMENTS = (("pi5", "nuc"), ("mac", "win"))
 
 
 def _false_digits(value) -> str:
@@ -151,21 +154,15 @@ def _fit_text(value, unit: str) -> str:
 
 
 def _coherent_text(value, action: str = "") -> str:
-    """Return plausible fictional goal prose with the requested length."""
+    """Change a host fact while preserving the goal skeleton and length."""
+    text = str(value or "")
+    changed = text
+    for source, target in COHERENT_HOST_REPLACEMENTS:
+        changed = changed.replace(source, target)
+    if changed != text:
+        return changed
     unit = COHERENT_GOAL_UNITS.get(action, COHERENT_GOAL_FALLBACK)
-    return _fit_text(value, unit)
-
-
-def _coherent_round(row: dict, index: int) -> str:
-    """Use a monotonic fake round number while preserving digit width."""
-    width = len(str(row.get("round") or ""))
-    if width <= 0:
-        return ""
-    first = 1 if width == 1 else 10 ** (width - 1)
-    value = first + index
-    if value >= 10 ** width:
-        value = first + (index % (9 * first))
-    return f"{value:0{width}d}"
+    return _fit_text(changed, unit)
 
 
 def _history_lines(rows: list[dict], pseudo: bool = False,
@@ -174,8 +171,6 @@ def _history_lines(rows: list[dict], pseudo: bool = False,
     for index, row in enumerate(rows):
         if pseudo:
             round_no = _false_digits(row.get("round"))
-        elif coherent_fiction:
-            round_no = _coherent_round(row, index)
         else:
             round_no = row.get("round")
         goal_unit = PSEUDO_GOAL_UNITS[index % len(PSEUDO_GOAL_UNITS)]
@@ -192,8 +187,6 @@ def _history_lines(rows: list[dict], pseudo: bool = False,
         if row.get("error"):
             if pseudo:
                 error = _false_text(row["error"], goal_unit)
-            elif coherent_fiction:
-                error = _fit_text(row["error"], COHERENT_ERROR_FALLBACK)
             else:
                 error = row["error"]
             status += f"，失败原因：{error}"
@@ -237,10 +230,10 @@ def build_prompts(ledger: Ledger, round_no: int, history_window: int,
     the same character count as the memory prompt. The pseudo-history arm keeps
     the exact action sequence, aggregate counts, and last action, but replaces
     round numbers, goals, and publication states with false values of equal
-    length. The coherent-fiction arm also keeps the action sequence, counts, and
-    last action, but swaps in monotonic fake round numbers and plausible
-    fictional goals while preserving the real publication states. It isolates
-    "visibly damaged history" from "coherent but factually false history".
+    length. The coherent-fiction arm also keeps the action sequence, counts,
+    rounds, last action, and real publication states, but changes only the host
+    fact in each goal. For this frozen ledger that rewrite is tokenizer-exact.
+    It isolates token scale and visible damage from coherent but false facts.
     """
     own = ledger.tail(history_window)
     counts = ledger.summary()
@@ -467,9 +460,10 @@ def _file_identity(path: Path) -> dict:
     }
 
 
-def prompt_artifact(prompts: dict) -> dict:
+def prompt_artifact(prompts: dict,
+                    token_counts: dict[str, int] | None = None) -> dict:
     """Return replayable prompt text plus derived metadata."""
-    return {
+    artifact = {
         "system": SYSTEM_PROMPT,
         "system_sha256": _sha256(SYSTEM_PROMPT),
         "text": {arm: prompts[arm] for arm in ARMS},
@@ -495,12 +489,54 @@ def prompt_artifact(prompts: dict) -> dict:
             len(prompts["coherent_fiction"]) == len(prompts["memory"])
         ),
     }
+    if token_counts is not None:
+        artifact["tokenizer"] = {
+            "counts": token_counts,
+            "memory_vs_coherent_fiction_delta": (
+                token_counts["coherent_fiction"] - token_counts["memory"]
+            ),
+            "memory_vs_coherent_fiction_exact": (
+                token_counts["coherent_fiction"] == token_counts["memory"]
+            ),
+        }
+    return artifact
 
 
 def _read_secret(path: str | None) -> str:
     if not path:
         return ""
     return Path(path).expanduser().read_text(encoding="utf-8").strip()
+
+
+def _default_tokenize_url(base_url: str) -> str:
+    parsed = urlsplit(base_url)
+    path = parsed.path.rstrip("/")
+    if path.endswith("/v1"):
+        path = path[:-3]
+    return urlunsplit((parsed.scheme, parsed.netloc, path + "/tokenize", "", ""))
+
+
+def tokenize_text(text: str, url: str, api_key: str = "") -> int:
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    request = urllib.request.Request(
+        url,
+        data=json.dumps({"content": text}).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    tokens = payload.get("tokens")
+    if not isinstance(tokens, list):
+        raise RuntimeError(f"tokenizer returned no token list from {url}")
+    return len(tokens)
+
+
+def tokenize_prompts(prompts: dict, url: str,
+                     api_key: str = "") -> dict[str, int]:
+    return {arm: tokenize_text(prompts[arm], url, api_key) for arm in ARMS}
 
 
 def sample_once(proposer: OpenAIProposer, system: str, user: str,
@@ -541,9 +577,18 @@ def run(args) -> dict:
             "ledger changed while prompts were being built; pass a frozen "
             "snapshot via --ledger"
         )
+    api_key = _read_secret(args.api_key_file)
+    tokenize_url = args.tokenize_url or _default_tokenize_url(args.base_url)
+    token_counts = tokenize_prompts(prompts, tokenize_url, api_key)
+    if token_counts["memory"] != token_counts["coherent_fiction"]:
+        raise RuntimeError(
+            "coherent-fiction prompt is not tokenizer-exact: "
+            f"memory={token_counts['memory']} "
+            f"coherent_fiction={token_counts['coherent_fiction']}"
+        )
     proposer = OpenAIProposer(
         base_url=args.base_url, model=args.model,
-        api_key=_read_secret(args.api_key_file),
+        api_key=api_key,
         max_tokens=args.max_tokens, temperature=args.temperature,
         timeout=args.timeout,
     )
@@ -581,6 +626,7 @@ def run(args) -> dict:
         "created_at": datetime.now().astimezone().isoformat(),
         "config": {
             "base_url": args.base_url,
+            "tokenize_url": tokenize_url,
             "model": args.model,
             "n_pairs": args.pairs,
             "temperature": args.temperature,
@@ -596,7 +642,7 @@ def run(args) -> dict:
             "fixed_activity_context": "empty",
         },
         "ledger_snapshot": ledger_before,
-        "prompts": prompt_artifact(prompts),
+        "prompts": prompt_artifact(prompts, token_counts),
         "summary": summary,
         "rows": rows,
     }
@@ -645,6 +691,7 @@ def main(argv=None) -> int:
     parser.add_argument("--base-url", default="http://127.0.0.1:8087/v1")
     parser.add_argument("--model", default="qwen3-8b-q5km-instruct")
     parser.add_argument("--api-key-file", default="")
+    parser.add_argument("--tokenize-url", default="")
     parser.add_argument("--hosts", default="~/.pandosi/hosts.json")
     parser.add_argument("--history-window", type=int, default=8)
     parser.add_argument("--pairs", type=int, default=30)

@@ -3945,7 +3945,8 @@ class TestMemoryAblationCheck(unittest.TestCase):
             for number, action in ((1, "adaptive.governance"),
                                    (2, "dynamic.threshold.adjustment")):
                 row = Round(number, number, proposal=Proposal(
-                    f"p{number}", "mac", "goal", action), published=True)
+                    f"p{number}", "mac", f"在pi5主机执行目标{number}", action),
+                    published=True)
                 ledger.append(row)
             prompts = tool.build_prompts(
                 ledger, 3, 8, ["pi5"], {"adaptive.governance",
@@ -3962,10 +3963,10 @@ class TestMemoryAblationCheck(unittest.TestCase):
         self.assertIn("上一轮你提的是 dynamic.threshold.adjustment", memory)
         self.assertIn("上一轮你提的是 dynamic.threshold.adjustment", last_action)
         self.assertNotIn("你已经提过的动作次数", last_action)
-        self.assertNotIn("目标「goal」", last_action)
+        self.assertNotIn("目标「在pi5主机执行目标1」", last_action)
         self.assertIn("你已经提过的动作次数", counts)
         self.assertNotIn("上一轮你提的是", counts)
-        self.assertNotIn("目标「goal」", counts)
+        self.assertNotIn("目标「在pi5主机执行目标1」", counts)
         self.assertNotIn("dynamic.threshold.adjustment", control)
         self.assertNotIn("你已经提过的动作次数", control)
         self.assertNotIn("上一轮你提的是", control)
@@ -3975,14 +3976,14 @@ class TestMemoryAblationCheck(unittest.TestCase):
         self.assertEqual(len(neutral), len(memory))
         self.assertIn("【中性长度填充】", neutral)
         self.assertIn("neutral padding only", neutral)
-        self.assertNotIn("目标「goal」", neutral)
+        self.assertNotIn("目标「在pi5主机执行目标1」", neutral)
         self.assertNotIn("dynamic.threshold.adjustment", neutral)
         self.assertNotIn("你已经提过的动作次数", neutral)
         self.assertNotIn("上一轮你提的是", neutral)
         self.assertEqual(len(pseudo_history), len(memory))
         self.assertNotIn("r1:", pseudo_history)
         self.assertNotIn("r2:", pseudo_history)
-        self.assertNotIn("目标「goal」", pseudo_history)
+        self.assertNotIn("目标「在pi5主机执行目标1」", pseudo_history)
         self.assertNotIn("已发布", pseudo_history)
         self.assertIn("未发布", pseudo_history)
         self.assertIn("adaptive.governance", pseudo_history)
@@ -3990,7 +3991,9 @@ class TestMemoryAblationCheck(unittest.TestCase):
         self.assertIn("【你已经提过的动作次数】", pseudo_history)
         self.assertIn("上一轮你提的是 dynamic.threshold.adjustment", pseudo_history)
         self.assertEqual(len(coherent_fiction), len(memory))
-        self.assertNotIn("目标「goal」", coherent_fiction)
+        self.assertNotIn("目标「在pi5主机执行目标1」", coherent_fiction)
+        self.assertIn("目标「在nuc主机执行目标1」", coherent_fiction)
+        self.assertNotIn("r1000:", coherent_fiction)
         self.assertNotIn("内容不可用", coherent_fiction)
         self.assertNotIn("不存在的目标", coherent_fiction)
         self.assertIn("已发布", coherent_fiction)
@@ -4000,8 +4003,6 @@ class TestMemoryAblationCheck(unittest.TestCase):
         self.assertIn("【你已经提过的动作次数】", coherent_fiction)
         self.assertIn("上一轮你提的是 dynamic.threshold.adjustment",
                       coherent_fiction)
-        self.assertEqual(tool._coherent_round({"round": 9001}, 0), "1000")
-        self.assertEqual(tool._coherent_round({"round": 9001}, 1), "1001")
 
     def test_arm_orders_balance_each_arm_and_position(self):
         tool = self._tool()
