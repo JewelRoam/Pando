@@ -3922,10 +3922,10 @@ class TestThinkStats(unittest.TestCase):
 class TestMemoryAblationCheck(unittest.TestCase):
     """tools/memory_ablation_check.py - the missing memory control.
 
-    The experiment must separate full history, last-action feedback, and action
-    counts. Group proposals and outcome activity are frozen empty in every arm,
-    and all arms keep the same round number instead of claiming "first round"
-    at round 3500.
+    The experiment must separate full history, last-action feedback, action
+    counts, and prompt length. Group proposals and outcome activity are frozen
+    empty in every arm, and all arms keep the same round number instead of
+    claiming "first round" at round 3500.
     """
 
     def _tool(self):
@@ -3953,6 +3953,7 @@ class TestMemoryAblationCheck(unittest.TestCase):
         memory = prompts["memory"]
         last_action = prompts["last_action"]
         counts = prompts["counts"]
+        neutral = prompts["neutral"]
         control = prompts["control"]
         self.assertIn("dynamic.threshold.adjustment", memory)
         self.assertIn("你已经提过的动作次数", memory)
@@ -3969,6 +3970,13 @@ class TestMemoryAblationCheck(unittest.TestCase):
         self.assertIn("这是你的第 3 轮思考", control)
         self.assertIn("固定为空：实验控制", control)
         self.assertIn("pi5", control)
+        self.assertEqual(len(neutral), len(memory))
+        self.assertIn("【中性长度填充】", neutral)
+        self.assertIn("neutral padding only", neutral)
+        self.assertNotIn("目标「goal」", neutral)
+        self.assertNotIn("dynamic.threshold.adjustment", neutral)
+        self.assertNotIn("你已经提过的动作次数", neutral)
+        self.assertNotIn("上一轮你提的是", neutral)
 
     def test_holm_adjustment_is_monotone_in_rank_order(self):
         tool = self._tool()

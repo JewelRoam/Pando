@@ -3,11 +3,12 @@
 
 The colony can count action shares and repeated proposals, but those numbers do
 not answer whether the proposer's own history changes what it proposes. This
-tool runs four same-seed arms against one local model:
+tool runs five same-seed arms against one local model:
 
 * ``memory``: history rows, action counts, and the last action;
 * ``last_action``: only the last action and its anti-repetition instruction;
 * ``counts``: only the aggregate action counts;
+* ``neutral``: a length-matched, colony-neutral filler prompt;
 * ``control``: none of those memory-derived sections.
 
 Group proposals and outcome activity are fixed empty in every arm. This turns
@@ -16,7 +17,7 @@ the request order balanced across arms.
 
 This is a check, not a claim that the swarm evolves. It reports action-share
 uncertainty, paired label-permutation p-values, and Holm-adjusted p-values over
-the six planned pairwise contrasts.
+the planned pairwise contrasts.
 """
 
 from __future__ import annotations
@@ -35,20 +36,29 @@ from pando.thinkd import (Ledger, OpenAIProposer, SYSTEM_PROMPT, extract_json,
                           host_names_from, replicate_streak)
 
 INVALID = "(invalid)"
-ARMS = ("memory", "last_action", "counts", "control")
+ARMS = ("memory", "last_action", "counts", "neutral", "control")
 ARM_ORDERS = (
-    ("memory", "last_action", "counts", "control"),
-    ("control", "counts", "last_action", "memory"),
-    ("counts", "memory", "control", "last_action"),
-    ("last_action", "control", "memory", "counts"),
+    ("memory", "last_action", "counts", "neutral", "control"),
+    ("control", "memory", "last_action", "counts", "neutral"),
+    ("neutral", "control", "memory", "last_action", "counts"),
+    ("counts", "neutral", "control", "memory", "last_action"),
+    ("last_action", "counts", "neutral", "control", "memory"),
 )
 PAIRWISE = (
     ("memory", "control", "full_memory_vs_none"),
     ("last_action", "control", "last_action_vs_none"),
     ("counts", "control", "counts_vs_none"),
+    ("neutral", "control", "length_neutral_vs_none"),
+    ("memory", "neutral", "full_memory_vs_length_neutral"),
     ("memory", "last_action", "full_memory_vs_last_action"),
     ("memory", "counts", "full_memory_vs_counts"),
     ("last_action", "counts", "last_action_vs_counts"),
+)
+FINAL_INSTRUCTION = "\n\n请提出下一步。只输出一行 JSON。"
+NEUTRAL_FILLER_MARKER = "\n\n【中性长度填充】\n"
+NEUTRAL_FILLER_UNIT = (
+    "中性填充只用于匹配长度，不包含殖民地记忆、提案、动作、目标或结果。"
+    "neutral padding only."
 )
 
 
@@ -64,14 +74,38 @@ def _history_lines(rows: list[dict]) -> list[str]:
     return out
 
 
+def _length_match_neutral(control: str, target_chars: int) -> str:
+    """Add colony-neutral filler of a fixed character count.
+
+    Character equality is deterministic and model-independent. The filler is
+    real prose rather than repeated punctuation so its token scale remains in
+    the same band as the Chinese memory prompt.
+    """
+    if not control.endswith(FINAL_INSTRUCTION):
+        raise ValueError("control prompt is missing its final instruction")
+    gap = target_chars - len(control)
+    available = gap - len(NEUTRAL_FILLER_MARKER)
+    if available < 0:
+        raise ValueError("memory prompt is too short for the neutral filler")
+    repeats = (available + len(NEUTRAL_FILLER_UNIT) - 1) // len(NEUTRAL_FILLER_UNIT)
+    body = (NEUTRAL_FILLER_UNIT * repeats)[:available]
+    neutral = (control[:-len(FINAL_INSTRUCTION)] + NEUTRAL_FILLER_MARKER +
+               body + FINAL_INSTRUCTION)
+    if len(neutral) != target_chars:
+        raise AssertionError("neutral prompt length did not match memory")
+    return neutral
+
+
 def build_prompts(ledger: Ledger, round_no: int, history_window: int,
                   host_names: list[str], action_space) -> dict:
-    """Build four prompts that differ only in memory-derived sections.
+    """Build five prompts that differ only in memory-derived sections.
 
     All arms retain the same round number, fixed empty group/outcome context,
     action-space destination hint, and final output instruction. The ablated
     arms keep an empty-history placeholder so the section structure remains
-    recognizable; only the supplied memory content changes.
+    recognizable; only the supplied memory content changes. The neutral arm
+    starts from the control prompt and adds colony-neutral filler until it has
+    the same character count as the memory prompt.
     """
     own = ledger.tail(history_window)
     counts = ledger.summary()
@@ -119,11 +153,14 @@ def build_prompts(ledger: Ledger, round_no: int, history_window: int,
         lines.extend(["", "请提出下一步。只输出一行 JSON。"])
         return "\n".join(lines)
 
+    control = prompt(False, False, False)
+    memory = prompt(True, True, True)
     return {
-        "memory": prompt(True, True, True),
+        "memory": memory,
         "last_action": prompt(False, False, True),
         "counts": prompt(False, True, False),
-        "control": prompt(False, False, False),
+        "neutral": _length_match_neutral(control, len(memory)),
+        "control": control,
         "last_action_value": last_action,
         "action_space": sorted(action_space),
     }
@@ -366,8 +403,13 @@ def run(args) -> dict:
             "chars": {arm: len(prompts[arm]) for arm in ARMS},
             "memory_sha256": _sha256(prompts["memory"]),
             "control_sha256": _sha256(prompts["control"]),
+            "neutral_sha256": _sha256(prompts["neutral"]),
             "memory_chars": len(prompts["memory"]),
             "control_chars": len(prompts["control"]),
+            "neutral_chars": len(prompts["neutral"]),
+            "neutral_char_matched_to_memory": (
+                len(prompts["neutral"]) == len(prompts["memory"])
+            ),
         },
         "summary": summary,
         "rows": rows,
