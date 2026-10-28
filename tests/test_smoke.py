@@ -11044,6 +11044,35 @@ class TestCodeSync(unittest.TestCase):
             self.assertNotEqual(second_head, first_head)
             self.assertEqual(stamp.read_text(encoding="utf-8").strip(), second_head)
 
+    def test_code_watch_refreshes_the_peer_bundle_on_a_clean_head(self):
+        """The Mac must serve the commit its clients were just restarted onto.
+
+        A local commit advanced the checkout while the fallback bundle stayed
+        on the previous HEAD. Local clients then reported the new commit and
+        code-drift correctly called them ahead of the only pullable tip. The
+        updater now refreshes its own HEAD-keyed cache during the same clean
+        round, while an unchanged cache remains a no-op.
+        """
+        watch = self._load_watch()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env, _src, _bare, client = self._world(root)
+            cache = root / "cache" / "code.bundle"
+            stamp = cache.with_name(cache.name + ".head")
+
+            first = watch.watch_round(repo=client, bundle_cache=str(cache))
+            client_head = subprocess.run(
+                ["git", "-C", str(client), "rev-parse", "HEAD"],
+                check=True, capture_output=True, text=True, env=env
+            ).stdout.strip()
+            self.assertEqual(first["bundle"]["head"], client_head)
+            self.assertTrue(first["bundle"]["rebuilt"])
+            self.assertEqual(stamp.read_text(encoding="utf-8").strip(),
+                             client_head)
+
+            second = watch.watch_round(repo=client, bundle_cache=str(cache))
+            self.assertEqual(second["bundle"]["head"], client_head)
+            self.assertFalse(second["bundle"]["rebuilt"])
 
     def test_the_deployed_updater_adopts_a_newer_copy_only_if_it_compiles(self):
         """The copy that runs on a headless node has to receive its own fixes.

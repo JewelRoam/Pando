@@ -28,6 +28,12 @@ clients to ``code_sync.restart_units``, which picks ``systemctl``,
 ``launchctl`` or the Windows process table from the running interpreter. One
 list of clients, three hosts, no third copy of the deployment to keep in sync.
 
+On the Mac that also serves the fleet's fallback bundle, ``--bundle-cache``
+keeps the served artifact on the same HEAD as the checkout. Merely advancing
+the checkout is not enough: peers that cannot reach GitHub pull the bundle,
+and a stale cache leaves every measured member "ahead" of the only deployable
+tip. The refresh is HEAD-keyed, so an unchanged round does no rebuild.
+
 ``node`` is used automatically when the update changed the supervisor's own
 roster file: a supervisor that is already running cannot learn a new service
 name, so only a restart of the whole stack can add one.
@@ -206,7 +212,8 @@ def send_code_receipt(row: dict, *, url: str, token_file: str,
 
 def watch_round(*, repo, remote="origin", peer="", peers=None, peer_token="",
                 on_update="none", client_cmd="", node_cmd="",
-                supervisor="", ledger=None, platform="", receipt=None) -> dict:
+                supervisor="", ledger=None, platform="", receipt=None,
+                bundle_cache="") -> dict:
     """One sync. Restart whenever the running clients are not on HEAD.
 
     Acting on ``updated`` alone is not enough -- it misses the head that
@@ -226,11 +233,37 @@ def watch_round(*, repo, remote="origin", peer="", peers=None, peer_token="",
 
     head = str(result.get("after") or "")
     clean = result.get("reason") in ("already", "fast-forward")
+    bundle = None
+    if bundle_cache and clean:
+        # A clean checkout is the deployable local tip. Refresh the bundle
+        # before recording the round so a peer can actually pull that head;
+        # otherwise code-drift correctly reports the local members as ahead
+        # of the only artifact a GitHub-less peer can fetch.
+        cache = Path(bundle_cache).expanduser()
+        stamp = cache.with_name(cache.name + ".head")
+        try:
+            before = stamp.read_text(encoding="utf-8").strip()
+        except OSError:
+            before = ""
+        try:
+            from tools.seed_outbox import code_bundle
+
+            built = code_bundle(repo, cache)
+            after = stamp.read_text(encoding="utf-8").strip()
+            bundle = {
+                "cache": str(cache),
+                "head": after,
+                "rebuilt": bool(built and after and after != before),
+            }
+        except (OSError, ValueError) as exc:
+            bundle = {"cache": str(cache), "error": str(exc)[:240]}
     behind = ledger is not None and bool(head) and head != _acted_head(ledger)
 
     row = dict(result)
     row["at"] = round(time.time(), 3)
     row["head"] = head
+    if bundle is not None:
+        row["bundle"] = bundle
     row["roster_changed"] = roster_changed
     row["action"] = "none"
     if result.get("updated") and on_update == "none":
@@ -296,6 +329,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--supervisor", default="",
                         help="roster file; a change in it forces a node restart")
     parser.add_argument("--ledger", default="")
+    parser.add_argument("--bundle-cache", default="",
+                        help="serve this HEAD-keyed git bundle from the local "
+                             "checkout (Mac fallback peer only)")
     parser.add_argument("--receipt-url", default="",
                         help="authenticated endpoint for signed round receipts")
     parser.add_argument("--receipt-token-file", default="")
@@ -341,6 +377,7 @@ def main(argv: list[str] | None = None) -> int:
                           client_cmd=args.client_cmd, node_cmd=args.node_cmd,
                           supervisor=args.supervisor, ledger=ledger,
                           platform=args.platform,
+                          bundle_cache=args.bundle_cache,
                           receipt=receipt if args.receipt_url else None)
         # An idle round is the normal case; only say something when it was not.
         if announce or row.get("updated") or row.get("reason") != "already":

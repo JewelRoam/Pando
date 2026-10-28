@@ -24,6 +24,10 @@
     <string>clients</string>
     <string>--ledger</string>
     <string>/Users/zhengenrong/.pandosi/code-sync-ledger.jsonl</string>
+    <!-- Keep the fallback bundle on the same HEAD as this checkout. The
+         bundle is HEAD-keyed, so unchanged rounds are a no-op. -->
+    <string>--bundle-cache</string>
+    <string>/Users/zhengenrong/.pandosi/code.bundle</string>
     <string>--once</string>
   </array>
   <key>WorkingDirectory</key>
