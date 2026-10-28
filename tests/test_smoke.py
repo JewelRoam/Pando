@@ -3955,6 +3955,7 @@ class TestMemoryAblationCheck(unittest.TestCase):
         counts = prompts["counts"]
         neutral = prompts["neutral"]
         pseudo_history = prompts["pseudo_history"]
+        coherent_fiction = prompts["coherent_fiction"]
         control = prompts["control"]
         self.assertIn("dynamic.threshold.adjustment", memory)
         self.assertIn("你已经提过的动作次数", memory)
@@ -3988,6 +3989,30 @@ class TestMemoryAblationCheck(unittest.TestCase):
         self.assertIn("dynamic.threshold.adjustment", pseudo_history)
         self.assertIn("【你已经提过的动作次数】", pseudo_history)
         self.assertIn("上一轮你提的是 dynamic.threshold.adjustment", pseudo_history)
+        self.assertEqual(len(coherent_fiction), len(memory))
+        self.assertNotIn("目标「goal」", coherent_fiction)
+        self.assertNotIn("内容不可用", coherent_fiction)
+        self.assertNotIn("不存在的目标", coherent_fiction)
+        self.assertIn("已发布", coherent_fiction)
+        self.assertNotIn("未发布", coherent_fiction)
+        self.assertIn("adaptive.governance", coherent_fiction)
+        self.assertIn("dynamic.threshold.adjustment", coherent_fiction)
+        self.assertIn("【你已经提过的动作次数】", coherent_fiction)
+        self.assertIn("上一轮你提的是 dynamic.threshold.adjustment",
+                      coherent_fiction)
+        self.assertEqual(tool._coherent_round({"round": 9001}, 0), "1000")
+        self.assertEqual(tool._coherent_round({"round": 9001}, 1), "1001")
+
+    def test_arm_orders_balance_each_arm_and_position(self):
+        tool = self._tool()
+        self.assertEqual(len(tool.ARM_ORDERS), len(tool.ARMS))
+        for order in tool.ARM_ORDERS:
+            self.assertEqual(set(order), set(tool.ARMS))
+        for position in range(len(tool.ARMS)):
+            self.assertEqual(
+                sorted(order[position] for order in tool.ARM_ORDERS),
+                sorted(tool.ARMS),
+            )
 
     def test_holm_adjustment_is_monotone_in_rank_order(self):
         tool = self._tool()

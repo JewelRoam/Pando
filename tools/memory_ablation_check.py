@@ -3,7 +3,7 @@
 
 The colony can count action shares and repeated proposals, but those numbers do
 not answer whether the proposer's own history changes what it proposes. This
-tool runs six same-seed arms against one local model:
+tool runs seven same-seed arms against one local model:
 
 * ``memory``: history rows, action counts, and the last action;
 * ``last_action``: only the last action and its anti-repetition instruction;
@@ -11,6 +11,9 @@ tool runs six same-seed arms against one local model:
 * ``neutral``: a length-matched, colony-neutral filler prompt;
 * ``pseudo_history``: history-shaped text with the same actions, counts, and
   last action, but false round numbers, goals, and publication states;
+* ``coherent_fiction``: the same actions, counts, last action, and real
+  publication states, but monotonic fake round numbers and plausible fictional
+  goals. Unlike ``pseudo_history``, this arm is not visibly marked as damaged;
 * ``control``: none of those memory-derived sections.
 
 Group proposals and outcome activity are fixed empty in every arm. This turns
@@ -38,15 +41,23 @@ from pando.thinkd import (Ledger, OpenAIProposer, SYSTEM_PROMPT, extract_json,
                           host_names_from, replicate_streak)
 
 INVALID = "(invalid)"
-ARMS = ("memory", "pseudo_history", "last_action", "counts", "neutral",
-        "control")
+ARMS = ("memory", "coherent_fiction", "pseudo_history", "last_action",
+        "counts", "neutral", "control")
 ARM_ORDERS = (
-    ("memory", "pseudo_history", "last_action", "counts", "neutral", "control"),
-    ("control", "memory", "pseudo_history", "last_action", "counts", "neutral"),
-    ("neutral", "control", "memory", "pseudo_history", "last_action", "counts"),
-    ("counts", "neutral", "control", "memory", "pseudo_history", "last_action"),
-    ("last_action", "counts", "neutral", "control", "memory", "pseudo_history"),
-    ("pseudo_history", "last_action", "counts", "neutral", "control", "memory"),
+    ("memory", "coherent_fiction", "pseudo_history", "last_action", "counts",
+     "neutral", "control"),
+    ("coherent_fiction", "pseudo_history", "last_action", "counts", "neutral",
+     "control", "memory"),
+    ("pseudo_history", "last_action", "counts", "neutral", "control", "memory",
+     "coherent_fiction"),
+    ("last_action", "counts", "neutral", "control", "memory",
+     "coherent_fiction", "pseudo_history"),
+    ("counts", "neutral", "control", "memory", "coherent_fiction",
+     "pseudo_history", "last_action"),
+    ("neutral", "control", "memory", "coherent_fiction", "pseudo_history",
+     "last_action", "counts"),
+    ("control", "memory", "coherent_fiction", "pseudo_history", "last_action",
+     "counts", "neutral"),
 )
 PAIRWISE = (
     ("memory", "control", "full_memory_vs_none"),
@@ -58,7 +69,10 @@ PAIRWISE = (
     ("memory", "counts", "full_memory_vs_counts"),
     ("last_action", "counts", "last_action_vs_counts"),
     ("pseudo_history", "control", "pseudo_history_vs_none"),
+    ("coherent_fiction", "control", "coherent_fiction_vs_none"),
     ("memory", "pseudo_history", "full_memory_vs_pseudo_history"),
+    ("memory", "coherent_fiction", "full_memory_vs_coherent_fiction"),
+    ("coherent_fiction", "pseudo_history", "coherent_fiction_vs_pseudo_history"),
 )
 FINAL_INSTRUCTION = "\n\n请提出下一步。只输出一行 JSON。"
 NEUTRAL_FILLER_MARKER = "\n\n【中性长度填充】\n"
@@ -70,6 +84,45 @@ PSEUDO_GOAL_UNITS = (
     "虚构内容", "不存在的目标", "内容不可用", "内容不可用",
     "内容不可用", "内容不可用", "内容不可用", "内容不可用",
 )
+COHERENT_GOAL_UNITS = {
+    "seed.export": (
+        "整理本机保存的种子包，核对摘要和文件清单，把可复现的副本路径写入"
+        "交接记录，并安排下一位成员独立抽查。"
+    ),
+    "seed.replicate": (
+        "把已经校验的种子包同步到备用主机，确认两端摘要一致，记录传输结果，"
+        "并保留失败时可重新执行的步骤。"
+    ),
+    "adaptive.governance": (
+        "根据近期运行记录核对各主机上的策略偏差，更新治理规则，保留可回滚"
+        "的变更说明、审批痕迹和下一轮验证条件。"
+    ),
+    "dynamic.threshold.adjustment": (
+        "根据最近一批观测误差调整判定阈值，同时保留旧值、新值和适用范围，"
+        "再用下一批独立样本复测调整效果。"
+    ),
+    "resource.rebalance": (
+        "把部分计算任务迁往负载较低的节点，记录迁移前后的队列长度、内存"
+        "占用和失败率，并设置自动回退条件。"
+    ),
+    "policy.set": (
+        "更新节点策略并保存可回滚的版本编号，补充适用范围、冲突处理规则"
+        "和用于验收的测试样例。"
+    ),
+    "meta.propose": (
+        "整理新的治理动作提案，写明输入输出、允许范围、失败方式和回滚办法，"
+        "再交给一个独立成员复核。"
+    ),
+    "culture.refine": (
+        "修订现有操作手册，补上可复现的验收步骤、已知误报和人工接管条件，"
+        "让下一位成员无需口头解释即可执行。"
+    ),
+}
+COHERENT_GOAL_FALLBACK = (
+    "核对当前运行状态，执行一项范围明确且可回滚的维护操作，把结果和验证"
+    "证据写入交接记录。"
+)
+COHERENT_ERROR_FALLBACK = "调用暂时失败，已记录错误并等待下一轮重试。"
 
 
 def _false_digits(value) -> str:
@@ -88,20 +141,61 @@ def _false_text(value, unit: str = "内容不可用") -> str:
     return (unit * repeats)[:len(text)]
 
 
-def _history_lines(rows: list[dict], pseudo: bool = False) -> list[str]:
+def _fit_text(value, unit: str) -> str:
+    """Return plausible prose of the exact requested character length."""
+    text = str(value or "")
+    if not text:
+        return ""
+    repeats = (len(text) + len(unit) - 1) // len(unit)
+    return (unit * repeats)[:len(text)]
+
+
+def _coherent_text(value, action: str = "") -> str:
+    """Return plausible fictional goal prose with the requested length."""
+    unit = COHERENT_GOAL_UNITS.get(action, COHERENT_GOAL_FALLBACK)
+    return _fit_text(value, unit)
+
+
+def _coherent_round(row: dict, index: int) -> str:
+    """Use a monotonic fake round number while preserving digit width."""
+    width = len(str(row.get("round") or ""))
+    if width <= 0:
+        return ""
+    first = 1 if width == 1 else 10 ** (width - 1)
+    value = first + index
+    if value >= 10 ** width:
+        value = first + (index % (9 * first))
+    return f"{value:0{width}d}"
+
+
+def _history_lines(rows: list[dict], pseudo: bool = False,
+                   coherent_fiction: bool = False) -> list[str]:
     out = []
     for index, row in enumerate(rows):
-        round_no = _false_digits(row.get("round")) if pseudo else row.get("round")
+        if pseudo:
+            round_no = _false_digits(row.get("round"))
+        elif coherent_fiction:
+            round_no = _coherent_round(row, index)
+        else:
+            round_no = row.get("round")
         goal_unit = PSEUDO_GOAL_UNITS[index % len(PSEUDO_GOAL_UNITS)]
-        goal = (_false_text(row.get("goal"), goal_unit) if pseudo
-                else (row.get("goal") or ""))
+        if pseudo:
+            goal = _false_text(row.get("goal"), goal_unit)
+        elif coherent_fiction:
+            goal = _coherent_text(row.get("goal"), str(row.get("action") or ""))
+        else:
+            goal = row.get("goal") or ""
         published = bool(row.get("published"))
         status = "已发布" if published else "未发布"
         if pseudo:
             status = "未发布" if published else "已发布"
         if row.get("error"):
-            error = (_false_text(row["error"], goal_unit) if pseudo
-                     else row["error"])
+            if pseudo:
+                error = _false_text(row["error"], goal_unit)
+            elif coherent_fiction:
+                error = _fit_text(row["error"], COHERENT_ERROR_FALLBACK)
+            else:
+                error = row["error"]
             status += f"，失败原因：{error}"
         out.append(
             f"- r{round_no}: {row.get('action') or '(无)'} "
@@ -133,7 +227,7 @@ def _length_match_neutral(control: str, target_chars: int) -> str:
 
 def build_prompts(ledger: Ledger, round_no: int, history_window: int,
                   host_names: list[str], action_space) -> dict:
-    """Build six prompts that differ only in memory-derived sections.
+    """Build seven prompts that differ only in memory-derived sections.
 
     All arms retain the same round number, fixed empty group/outcome context,
     action-space destination hint, and final output instruction. The ablated
@@ -143,17 +237,22 @@ def build_prompts(ledger: Ledger, round_no: int, history_window: int,
     the same character count as the memory prompt. The pseudo-history arm keeps
     the exact action sequence, aggregate counts, and last action, but replaces
     round numbers, goals, and publication states with false values of equal
-    length.
+    length. The coherent-fiction arm also keeps the action sequence, counts, and
+    last action, but swaps in monotonic fake round numbers and plausible
+    fictional goals while preserving the real publication states. It isolates
+    "visibly damaged history" from "coherent but factually false history".
     """
     own = ledger.tail(history_window)
     counts = ledger.summary()
     last_action = str(own[-1].get("action") or "") if own else ""
 
     def prompt(include_history: bool, include_counts: bool,
-               include_last_action: bool, pseudo: bool = False) -> str:
+               include_last_action: bool, pseudo: bool = False,
+               coherent_fiction: bool = False) -> str:
         lines = [f"这是你的第 {round_no} 轮思考。", "", "【你自己的历史】"]
         if include_history:
-            history = _history_lines(own, pseudo=pseudo)
+            history = _history_lines(
+                own, pseudo=pseudo, coherent_fiction=coherent_fiction)
             lines.extend(history or ["（还没有。这是你的第一轮。）"])
         else:
             lines.append("（记忆对照：本轮不提供你自己的历史明细。）")
@@ -194,10 +293,15 @@ def build_prompts(ledger: Ledger, round_no: int, history_window: int,
     control = prompt(False, False, False)
     memory = prompt(True, True, True)
     pseudo_history = prompt(True, True, True, pseudo=True)
+    coherent_fiction = prompt(True, True, True, coherent_fiction=True)
     if len(pseudo_history) != len(memory):
         raise AssertionError("pseudo-history prompt length did not match memory")
+    if len(coherent_fiction) != len(memory):
+        raise AssertionError(
+            "coherent-fiction prompt length did not match memory")
     return {
         "memory": memory,
+        "coherent_fiction": coherent_fiction,
         "pseudo_history": pseudo_history,
         "last_action": prompt(False, False, True),
         "counts": prompt(False, True, False),
@@ -384,6 +488,11 @@ def prompt_artifact(prompts: dict) -> dict:
         "pseudo_history_chars": len(prompts["pseudo_history"]),
         "pseudo_history_char_matched_to_memory": (
             len(prompts["pseudo_history"]) == len(prompts["memory"])
+        ),
+        "coherent_fiction_sha256": _sha256(prompts["coherent_fiction"]),
+        "coherent_fiction_chars": len(prompts["coherent_fiction"]),
+        "coherent_fiction_char_matched_to_memory": (
+            len(prompts["coherent_fiction"]) == len(prompts["memory"])
         ),
     }
 
