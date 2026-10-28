@@ -3,7 +3,7 @@
 
 The colony can count action shares and repeated proposals, but those numbers do
 not answer whether the proposer's own history changes what it proposes. This
-tool runs seven same-seed arms against one local model:
+tool runs eight same-seed arms against one local model:
 
 * ``memory``: history rows, action counts, and the last action;
 * ``last_action``: only the last action and its anti-repetition instruction;
@@ -15,6 +15,10 @@ tool runs seven same-seed arms against one local model:
   publication states, with only the host fact in each goal changed to a
   plausible host where that action did not happen. The rewrite preserves both
   character count and, for the frozen replay ledger, tokenizer count;
+* ``goal_counterfactual``: the same actions, counts, rounds, hosts, last action,
+  and publication states, with only the goal's benefit polarity inverted. The
+  rewrite preserves character and tokenizer counts while changing coherent
+  policy facts rather than a host name;
 * ``control``: none of those memory-derived sections.
 
 Group proposals and outcome activity are fixed empty in every arm. This turns
@@ -44,23 +48,25 @@ from pando.thinkd import (Ledger, OpenAIProposer, SYSTEM_PROMPT, extract_json,
                           host_names_from, replicate_streak)
 
 INVALID = "(invalid)"
-ARMS = ("memory", "coherent_fiction", "pseudo_history", "last_action",
-        "counts", "neutral", "control")
+ARMS = ("memory", "coherent_fiction", "goal_counterfactual",
+        "pseudo_history", "last_action", "counts", "neutral", "control")
 ARM_ORDERS = (
-    ("memory", "coherent_fiction", "pseudo_history", "last_action", "counts",
-     "neutral", "control"),
-    ("coherent_fiction", "pseudo_history", "last_action", "counts", "neutral",
-     "control", "memory"),
+    ("memory", "coherent_fiction", "goal_counterfactual", "pseudo_history",
+     "last_action", "counts", "neutral", "control"),
+    ("coherent_fiction", "goal_counterfactual", "pseudo_history",
+     "last_action", "counts", "neutral", "control", "memory"),
+    ("goal_counterfactual", "pseudo_history", "last_action", "counts",
+     "neutral", "control", "memory", "coherent_fiction"),
     ("pseudo_history", "last_action", "counts", "neutral", "control", "memory",
-     "coherent_fiction"),
+     "coherent_fiction", "goal_counterfactual"),
     ("last_action", "counts", "neutral", "control", "memory",
-     "coherent_fiction", "pseudo_history"),
+     "coherent_fiction", "goal_counterfactual", "pseudo_history"),
     ("counts", "neutral", "control", "memory", "coherent_fiction",
-     "pseudo_history", "last_action"),
-    ("neutral", "control", "memory", "coherent_fiction", "pseudo_history",
-     "last_action", "counts"),
-    ("control", "memory", "coherent_fiction", "pseudo_history", "last_action",
-     "counts", "neutral"),
+     "goal_counterfactual", "pseudo_history", "last_action"),
+    ("neutral", "control", "memory", "coherent_fiction", "goal_counterfactual",
+     "pseudo_history", "last_action", "counts"),
+    ("control", "memory", "coherent_fiction", "goal_counterfactual",
+     "pseudo_history", "last_action", "counts", "neutral"),
 )
 PAIRWISE = (
     ("memory", "control", "full_memory_vs_none"),
@@ -75,6 +81,8 @@ PAIRWISE = (
     ("coherent_fiction", "control", "coherent_fiction_vs_none"),
     ("memory", "pseudo_history", "full_memory_vs_pseudo_history"),
     ("memory", "coherent_fiction", "full_memory_vs_coherent_fiction"),
+    ("memory", "goal_counterfactual",
+     "full_memory_vs_goal_counterfactual"),
     ("coherent_fiction", "pseudo_history", "coherent_fiction_vs_pseudo_history"),
 )
 FINAL_INSTRUCTION = "\n\n请提出下一步。只输出一行 JSON。"
@@ -126,6 +134,11 @@ COHERENT_GOAL_FALLBACK = (
     "证据写入交接记录。"
 )
 COHERENT_HOST_REPLACEMENTS = (("pi5", "nuc"), ("mac", "win"))
+GOAL_COUNTERFACTUAL_REPLACEMENTS = (
+    ("减少人工干预", "增加人工干预"),
+    ("提升跨主机策略一致性", "降低跨主机策略一致性"),
+    ("减少重复提案带来的资源浪费", "增加重复提案带来的资源浪费"),
+)
 
 
 def _false_digits(value) -> str:
@@ -165,8 +178,20 @@ def _coherent_text(value, action: str = "") -> str:
     return _fit_text(changed, unit)
 
 
+def _goal_counterfactual_text(value) -> str:
+    """Invert benefit polarity while preserving every character position."""
+    text = str(value or "")
+    changed = text
+    for source, target in GOAL_COUNTERFACTUAL_REPLACEMENTS:
+        changed = changed.replace(source, target)
+    if len(changed) != len(text):
+        raise AssertionError("goal counterfactual changed character count")
+    return changed
+
+
 def _history_lines(rows: list[dict], pseudo: bool = False,
-                   coherent_fiction: bool = False) -> list[str]:
+                   coherent_fiction: bool = False,
+                   goal_counterfactual: bool = False) -> list[str]:
     out = []
     for index, row in enumerate(rows):
         if pseudo:
@@ -178,6 +203,8 @@ def _history_lines(rows: list[dict], pseudo: bool = False,
             goal = _false_text(row.get("goal"), goal_unit)
         elif coherent_fiction:
             goal = _coherent_text(row.get("goal"), str(row.get("action") or ""))
+        elif goal_counterfactual:
+            goal = _goal_counterfactual_text(row.get("goal"))
         else:
             goal = row.get("goal") or ""
         published = bool(row.get("published"))
@@ -220,7 +247,7 @@ def _length_match_neutral(control: str, target_chars: int) -> str:
 
 def build_prompts(ledger: Ledger, round_no: int, history_window: int,
                   host_names: list[str], action_space) -> dict:
-    """Build seven prompts that differ only in memory-derived sections.
+    """Build eight prompts that differ only in memory-derived sections.
 
     All arms retain the same round number, fixed empty group/outcome context,
     action-space destination hint, and final output instruction. The ablated
@@ -233,7 +260,9 @@ def build_prompts(ledger: Ledger, round_no: int, history_window: int,
     length. The coherent-fiction arm also keeps the action sequence, counts,
     rounds, last action, and real publication states, but changes only the host
     fact in each goal. For this frozen ledger that rewrite is tokenizer-exact.
-    It isolates token scale and visible damage from coherent but false facts.
+    The goal-counterfactual arm instead inverts benefit polarity while keeping
+    hosts and all visible structure unchanged. It tests whether a substantively
+    wrong policy fact changes output when token scale and host facts do not.
     """
     own = ledger.tail(history_window)
     counts = ledger.summary()
@@ -241,11 +270,13 @@ def build_prompts(ledger: Ledger, round_no: int, history_window: int,
 
     def prompt(include_history: bool, include_counts: bool,
                include_last_action: bool, pseudo: bool = False,
-               coherent_fiction: bool = False) -> str:
+               coherent_fiction: bool = False,
+               goal_counterfactual: bool = False) -> str:
         lines = [f"这是你的第 {round_no} 轮思考。", "", "【你自己的历史】"]
         if include_history:
             history = _history_lines(
-                own, pseudo=pseudo, coherent_fiction=coherent_fiction)
+                own, pseudo=pseudo, coherent_fiction=coherent_fiction,
+                goal_counterfactual=goal_counterfactual)
             lines.extend(history or ["（还没有。这是你的第一轮。）"])
         else:
             lines.append("（记忆对照：本轮不提供你自己的历史明细。）")
@@ -287,14 +318,20 @@ def build_prompts(ledger: Ledger, round_no: int, history_window: int,
     memory = prompt(True, True, True)
     pseudo_history = prompt(True, True, True, pseudo=True)
     coherent_fiction = prompt(True, True, True, coherent_fiction=True)
+    goal_counterfactual = prompt(
+        True, True, True, goal_counterfactual=True)
     if len(pseudo_history) != len(memory):
         raise AssertionError("pseudo-history prompt length did not match memory")
     if len(coherent_fiction) != len(memory):
         raise AssertionError(
             "coherent-fiction prompt length did not match memory")
+    if len(goal_counterfactual) != len(memory):
+        raise AssertionError(
+            "goal-counterfactual prompt length did not match memory")
     return {
         "memory": memory,
         "coherent_fiction": coherent_fiction,
+        "goal_counterfactual": goal_counterfactual,
         "pseudo_history": pseudo_history,
         "last_action": prompt(False, False, True),
         "counts": prompt(False, True, False),
@@ -488,6 +525,12 @@ def prompt_artifact(prompts: dict,
         "coherent_fiction_char_matched_to_memory": (
             len(prompts["coherent_fiction"]) == len(prompts["memory"])
         ),
+        "goal_counterfactual_sha256": _sha256(
+            prompts["goal_counterfactual"]),
+        "goal_counterfactual_chars": len(prompts["goal_counterfactual"]),
+        "goal_counterfactual_char_matched_to_memory": (
+            len(prompts["goal_counterfactual"]) == len(prompts["memory"])
+        ),
     }
     if token_counts is not None:
         artifact["tokenizer"] = {
@@ -497,6 +540,12 @@ def prompt_artifact(prompts: dict,
             ),
             "memory_vs_coherent_fiction_exact": (
                 token_counts["coherent_fiction"] == token_counts["memory"]
+            ),
+            "memory_vs_goal_counterfactual_delta": (
+                token_counts["goal_counterfactual"] - token_counts["memory"]
+            ),
+            "memory_vs_goal_counterfactual_exact": (
+                token_counts["goal_counterfactual"] == token_counts["memory"]
             ),
         }
     return artifact
@@ -585,6 +634,17 @@ def run(args) -> dict:
             "coherent-fiction prompt is not tokenizer-exact: "
             f"memory={token_counts['memory']} "
             f"coherent_fiction={token_counts['coherent_fiction']}"
+        )
+    if token_counts["memory"] != token_counts["goal_counterfactual"]:
+        raise RuntimeError(
+            "goal-counterfactual prompt is not tokenizer-exact: "
+            f"memory={token_counts['memory']} "
+            f"goal_counterfactual={token_counts['goal_counterfactual']}"
+        )
+    if prompts["goal_counterfactual"] == prompts["memory"]:
+        raise RuntimeError(
+            "goal-counterfactual prompt matched memory; the frozen ledger "
+            "contains none of the expected benefit-polarity phrases"
         )
     proposer = OpenAIProposer(
         base_url=args.base_url, model=args.model,

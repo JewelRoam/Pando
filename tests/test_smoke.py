@@ -4015,6 +4015,39 @@ class TestMemoryAblationCheck(unittest.TestCase):
                 sorted(tool.ARMS),
             )
 
+    def test_goal_counterfactual_changes_polarity_not_layout(self):
+        from pando.thinkd import Ledger, Proposal, Round
+        tool = self._tool()
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Ledger(Path(tmp) / "think.jsonl")
+            goals = (
+                "在pi5主机上部署自适应治理协议以减少人工干预并"
+                "提升跨主机策略一致性",
+                "在mac主机上部署动态阈值调整以减少重复提案带来的资源浪费",
+            )
+            actions = ("adaptive.governance", "dynamic.threshold.adjustment")
+            for number, (goal, action) in enumerate(zip(goals, actions), 1):
+                ledger.append(Round(
+                    number, number,
+                    proposal=Proposal(
+                        f"p{number}", "mac", goal, action),
+                    published=True))
+            prompts = tool.build_prompts(
+                ledger, 3, 8, ["pi5", "mac"],
+                set(actions))
+        memory = prompts["memory"]
+        counterfactual = prompts["goal_counterfactual"]
+        self.assertEqual(len(counterfactual), len(memory))
+        self.assertIn("增加人工干预", counterfactual)
+        self.assertIn("降低跨主机策略一致性", counterfactual)
+        self.assertIn("增加重复提案带来的资源浪费", counterfactual)
+        self.assertNotIn("减少人工干预", counterfactual)
+        self.assertIn("pi5", counterfactual)
+        self.assertIn("mac", counterfactual)
+        self.assertIn("adaptive.governance", counterfactual)
+        self.assertIn("dynamic.threshold.adjustment", counterfactual)
+        self.assertNotEqual(counterfactual, memory)
+
     def test_holm_adjustment_is_monotone_in_rank_order(self):
         tool = self._tool()
         self.assertEqual(tool.holm_adjust([0.01, 0.04, 0.03]),
