@@ -8,6 +8,7 @@ are not all the same kind of thing. Read this index before adding another.
 | tool | role |
 |---|---|
 | `agent_chat.py` | group chat over the task mailbox: send / history / tail (`[chat]`-titled tasks are messages). |
+| `takeover_guard.py` | fail-closed duplicate-actor gate for the launchd failover: proves a bounded mailbox tail covers the full 10-minute activity window before takeover. |
 | `agent_mailbox.py` | the mailbox itself: `serve` (server) plus the client verbs (put/list/get/claim/result). |
 | `check_mac_endpoint.py` | local-only mailbox resolver; candidates come from `~/.pandosi/hosts.json`, never from git. |
 | `backup_session.py` | sanitized session archive; redacts tokens / tunnel URLs / tailnet IPs at write time. |

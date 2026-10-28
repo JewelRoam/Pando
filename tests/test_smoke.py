@@ -5436,6 +5436,56 @@ class TestChatMailboxPartition(unittest.TestCase):
         self.assertTrue(posts[0]["title"].startswith("[chat] @mac-codex: "))
 
 
+class TestTakeoverGuard(unittest.TestCase):
+    def test_recent_mac_codex_activity_blocks_takeover(self):
+        from datetime import datetime, timedelta, timezone
+        from tools import takeover_guard
+
+        now = datetime(2026, 10, 28, 13, 30,
+                       tzinfo=timezone(timedelta(hours=8)))
+        result = takeover_guard.assess_activity([
+            {"id": "old", "from": "mac-codex", "created_at": "2026-10-28T13:00:00",
+             "title": "[chat] old"},
+            {"id": "new", "from": "mac-codex", "created_at": "2026-10-28T13:20:00",
+             "title": "[reaction] still active"},
+            {"id": "noise", "from": "mac-proposer",
+             "created_at": "2026-10-28T13:29:00", "title": "[proposal] noise"},
+        ], now, limit=10)
+        self.assertEqual(result.status, takeover_guard.RECENT)
+        self.assertEqual(result.latest_match, "2026-10-28T13:20:00+08:00")
+
+    def test_a_full_tail_that_starts_inside_the_window_is_unknown(self):
+        """A full high-traffic tail is not a time window when the actor fell out."""
+        from datetime import datetime, timedelta, timezone
+        from tools import takeover_guard
+
+        now = datetime(2026, 10, 28, 13, 30,
+                       tzinfo=timezone(timedelta(hours=8)))
+        tasks = [
+            {"id": f"noise-{i}", "from": "mac-laya-int8",
+             "created_at": f"2026-10-28T13:{21 + i:02d}:00",
+             "title": "[reaction] noise"}
+            for i in range(9)
+        ]
+        result = takeover_guard.assess_activity(tasks, now, limit=9)
+        self.assertEqual(result.status, takeover_guard.UNKNOWN)
+        self.assertIn("does not cover", result.reason)
+
+    def test_other_actors_are_not_mistaken_for_the_primary(self):
+        from datetime import datetime, timedelta, timezone
+        from tools import takeover_guard
+
+        now = datetime(2026, 10, 28, 13, 30,
+                       tzinfo=timezone(timedelta(hours=8)))
+        result = takeover_guard.assess_activity([
+            {"id": "old", "from": "mac-codex",
+             "created_at": "2026-10-28T13:00:00", "title": "[chat] old"},
+            {"id": "noise", "from": "mac-proposer",
+             "created_at": "2026-10-28T13:29:00", "title": "[proposal] noise"},
+        ], now, limit=10)
+        self.assertEqual(result.status, takeover_guard.SAFE)
+
+
 class TestObservatoryFeed(unittest.TestCase):
     def test_signed_bodies_are_verified_once_per_exact_message(self):
         """Re-rendering the same signed envelope must not redo Ed25519."""
