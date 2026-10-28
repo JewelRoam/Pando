@@ -3919,6 +3919,72 @@ class TestThinkStats(unittest.TestCase):
         self.assertIn("empty ledger", ts.format_report("x", s))
 
 
+class TestMemoryAblationCheck(unittest.TestCase):
+    """tools/memory_ablation_check.py - the missing memory control.
+
+    The experiment must change only the proposer's own history/feedback. Group
+    proposals and outcome activity are frozen empty in both arms, and the
+    control keeps the same round number instead of claiming "first round" at
+    round 3500.
+    """
+
+    def _tool(self):
+        import importlib.util
+        path = Path(__file__).resolve().parents[1] / "tools" / "memory_ablation_check.py"
+        spec = importlib.util.spec_from_file_location("memory_ablation_check", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_the_control_ablates_history_counts_and_last_action_only(self):
+        from pando.thinkd import Ledger
+        tool = self._tool()
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Ledger(Path(tmp) / "think.jsonl")
+            from pando.thinkd import Round, Proposal
+            for number, action in ((1, "adaptive.governance"),
+                                   (2, "dynamic.threshold.adjustment")):
+                row = Round(number, number, proposal=Proposal(
+                    f"p{number}", "mac", "goal", action), published=True)
+                ledger.append(row)
+            prompts = tool.build_prompts(
+                ledger, 3, 8, ["pi5"], {"adaptive.governance",
+                                         "dynamic.threshold.adjustment"})
+        memory = prompts["memory"]
+        control = prompts["control"]
+        self.assertIn("dynamic.threshold.adjustment", memory)
+        self.assertIn("你已经提过的动作次数", memory)
+        self.assertIn("上一轮你提的是 dynamic.threshold.adjustment", memory)
+        self.assertNotIn("dynamic.threshold.adjustment", control)
+        self.assertNotIn("你已经提过的动作次数", control)
+        self.assertNotIn("上一轮你提的是", control)
+        self.assertIn("这是你的第 3 轮思考", control)
+        self.assertIn("固定为空：实验控制", control)
+        self.assertIn("pi5", control)
+
+    def test_tvd_and_invalid_actions_are_counted(self):
+        from collections import Counter
+        tool = self._tool()
+        self.assertEqual(tool.total_variation(
+            Counter({"a": 3}), Counter({"a": 3})), 0.0)
+        self.assertEqual(tool.total_variation(
+            Counter({"a": 3}), Counter({"b": 3})), 1.0)
+        self.assertEqual(tool.parse_action(
+            '{"action":"not.in.space"}', {"seed.export"}), tool.INVALID)
+        self.assertEqual(tool.parse_action(
+            'noise {"action":"seed.export"} tail', {"seed.export"}),
+            "seed.export")
+
+    def test_identical_arms_do_not_manufacture_a_permutation_signal(self):
+        tool = self._tool()
+        pairs = [("seed.export", "seed.export")] * 20
+        summary = tool.summarise(
+            pairs, ["seed.export"], "seed.export", trials=199)
+        self.assertEqual(summary["primary"]["observed"], 0.0)
+        self.assertGreater(summary["primary"]["paired_permutation_p"], 0.9)
+        self.assertEqual(summary["secondary"]["same_as_last"]["difference"], 0.0)
+
+
 class TestProposerSpool(unittest.TestCase):
     """pando.thinkd.Spool - thought that survives a partition.
 
