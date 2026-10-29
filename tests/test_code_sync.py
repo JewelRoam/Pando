@@ -435,7 +435,7 @@ class TestCodeSync(unittest.TestCase):
         The point of resolving by probe instead of by branch is that a unit
         definition, a LaunchAgent and a supervisor entry can pass the same
         empty flag and each host still finds its own file -- ``~/.pandosi`` on
-        the Mac, ``~/.pando`` on the Pi, ``D:\\pando-models`` on Windows. A
+        the Mac, ``~/.pando`` on the Pi, ``D:\\PandoRSI\\models`` on Windows. A
         host with none keeps the old behaviour exactly, and an explicit flag
         keeps the last word over the probe.
         """

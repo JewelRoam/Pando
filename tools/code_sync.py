@@ -277,10 +277,10 @@ def source_list(path: str) -> list[str]:
 SOURCE_FILES: dict[str, tuple[str, ...]] = {
     "code": ("~/.pandosi/code-sources.txt",
              "~/.pando/code-sources.txt",
-             "D:/pando-models/code-sources.txt"),
+             "D:/PandoRSI/models/code-sources.txt"),
     "seed": ("~/.pandosi/seed-sources.txt",
              "~/.pando/seed-sources.txt",
-             "D:/pando-models/seed-sources.txt"),
+             "D:/PandoRSI/models/seed-sources.txt"),
 }
 
 
@@ -290,7 +290,7 @@ def source_file(explicit: str = "", *, kind: str = "code") -> str:
     ``explicit`` is the flag and always wins, so a unit that names its own
     file keeps the last word. With no flag the conventional names are probed,
     which is what lets one unit definition run unmodified on a host whose
-    state directory is ``~/.pandosi``, ``~/.pando`` or ``D:\\pando-models``.
+    state directory is ``~/.pandosi``, ``~/.pando`` or ``D:\\PandoRSI\\models``.
     Returning "" rather than raising keeps the case that matters most safe:
     a node with no sources file behaves exactly as it did before this
     existed, and the primary fetch is untouched.

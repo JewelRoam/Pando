@@ -13,7 +13,7 @@
 $ErrorActionPreference = 'Continue'
 $repo = 'D:\PandoRSI'
 $python = (Get-Command python).Source
-$log = 'D:\pando-models\logs\restart-clients.log'
+$log = 'D:\PandoRSI\models\logs\restart-clients.log'
 New-Item -ItemType Directory -Force -Path (Split-Path $log) | Out-Null
 
 $out = & $python "$repo\tools\code_sync.py" --restart-clients --platform windows 2>&1

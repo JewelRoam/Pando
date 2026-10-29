@@ -4001,7 +4001,7 @@ class TestResidentPullAllPlatforms(unittest.TestCase):
         # the dummy key above it: create if absent, then leave it alone.
         for variable, filename in (("$codeSources", "code-sources.txt"),
                                    ("$seedSources", "seed-sources.txt")):
-            self.assertIn(f"{variable} = 'D:\\pando-models\\{filename}'", text)
+            self.assertIn(f"{variable} = 'D:\\PandoRSI\\models\\{filename}'", text)
         self.assertEqual(text.count("if (-not (Test-Path $codeSources))"), 1)
         self.assertEqual(text.count("if (-not (Test-Path $seedSources))"), 1)
         # Tailscale is written before the home-LAN address on purpose: it is
@@ -4011,8 +4011,8 @@ class TestResidentPullAllPlatforms(unittest.TestCase):
         self.assertLess(text.index("100.92.184.4:8478  # mac"),
                         text.index("192.168.31.41:8478 # mac"))
         # And the two consumers are pointed at them.
-        self.assertIn("'--peer-file', 'D:\\pando-models\\code-sources.txt'", text)
-        self.assertIn("'--from-file', 'D:\\pando-models\\seed-sources.txt'", text)
+        self.assertIn("'--peer-file', 'D:\\PandoRSI\\models\\code-sources.txt'", text)
+        self.assertIn("'--from-file', 'D:\\PandoRSI\\models\\seed-sources.txt'", text)
         self.assertIn("'--node-id', 'win'", text)
 
     def test_the_mac_agent_and_the_pi5_units_read_the_same_flag(self):
@@ -4047,7 +4047,7 @@ class TestResidentPullAllPlatforms(unittest.TestCase):
         mailbox = text.split("$mailboxArgs = @(")[1].split("\n#")[0]
         self.assertIn("agent_mailbox.py", mailbox)
         self.assertIn("'--code-repo', \"$repo\"", mailbox)
-        self.assertIn("'--code-cache', 'D:\\pando-models\\code.bundle'", mailbox)
+        self.assertIn("'--code-cache', 'D:\\PandoRSI\\models\\code.bundle'", mailbox)
 
 
     def test_the_executor_reads_a_shelf_list_on_every_platform(self):
