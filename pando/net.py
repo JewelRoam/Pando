@@ -30,7 +30,7 @@ def is_local_host(host: str) -> bool:
             return True
         # mDNS names (*.local) and single-label hostnames resolve on the local
         # segment; a system proxy cannot reach them (seen live: HTTP 502 for
-        # pandosi-pi5.local through the Windows proxy).
+        # a member's mDNS name through the Windows proxy).
         return host.endswith(".local") or "." not in host
 
 
@@ -81,7 +81,10 @@ def local_addresses() -> set[str]:
     try:
         probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
-            probe.connect(("192.168.31.1", 9))
+            # UDP connect sends nothing; the kernel only picks the source
+            # address a route to this destination would use. Any routable
+            # address works -- the point is the routing table, not the host.
+            probe.connect(("8.8.8.8", 9))
             found.add(probe.getsockname()[0])
         finally:
             probe.close()

@@ -42,29 +42,29 @@ MODELS_DIR = Path(
 
 # Client processes only. A model server is not on this list, on purpose.
 #
-# ``pandosi-react`` belongs here: pi5 installs this checkout into its venv, and
+# ``pando-react`` belongs here: a node installs this checkout into its venv, and
 # a fast-forward rewrites that copy on disk. If the consumer is not restarted
 # the running process keeps the old module in memory and silently works with
 # superseded logic -- the exact drift that left the voter without
 # ``--mailbox-fallback`` for four hours after ``a5a7ff5`` landed.
 #
-# ``pandosi-execute`` belongs here for the same reason and with more at stake:
+# ``pando-execute`` belongs here for the same reason and with more at stake:
 # a voter that reloads stale code casts a stale vote, but an executor that
 # reloads stale code *acts* stale -- it would keep sealing seeds and staging
 # drafts through actuators whose contracts this repo has since changed. A
 # restart is how the loop's next round picks up the new module.
 #
-# The three ``pandosi-stem-*`` units belong here, and their absence was a
+# The three ``pando-stem-*`` units belong here, and their absence was a
 # measured bug, not a caution. A *stem* is a client: it is the process that
-# imports ``pando.graft`` and calls ``capability()``, while ``pandosi-llama``
-# is the model server the stem talks to. On 2026-10-19 pi5's checkout and venv
+# imports ``pando.graft`` and calls ``capability()``, while ``pando-llama``
+# is the model server the stem talks to. On 2026-10-19 one node's checkout and venv
 # were at ``9e69dea`` while all three stems had been running since Oct 18
 # 16:42 -- so every one of them reported ``code_head: None``, because
 # ``10f5043`` added that key to ``graft.capability()`` and the running process
 # was holding the previous module in memory. Restarting a stem re-registers it
 # with coordinator; it does not reload a model and costs no memory.
 #
-# ``pandosi-llama`` is the exception the boundary is really about: restarting
+# ``pando-llama`` is the exception the boundary is really about: restarting
 # it would reload a 2.33 GB model on a 4 GB board.
 #
 # ``coordinator`` is deliberately absent: it registers members at startup only and
@@ -82,56 +82,56 @@ MODELS_DIR = Path(
 #: ``""``               -- this host does not run that unit. Absent is not the
 #:                         same fact as refused, and the ledger says which.
 #:
-#: A model server appears in no handle anywhere: not ``pandosi-llama.service``
-#: on Linux, not ``com.jewelroam.pandosi-llm8b`` on macOS, not
+#: A model server appears in no handle anywhere: not ``pando-llama.service``
+#: on Linux, not ``com.pando.llm8b`` on macOS, not
 #: ``llama-server.exe`` on Windows. The Windows roster is the one place this
 #: list is *wider* than Linux's -- ``pando.coordinator`` is stopped there because the
 #: supervisor's comment records the measurement that a half-registered
-#: registry is worse than a rebuilt one -- so the Mac's ``coordinator`` is left
-#: alone here: it is started by ``mac-node.sh`` and restarting it would drop
+#: registry is worse than a rebuilt one -- so the launchd ``coordinator`` is left
+#: alone here: it is started by a supervisor loop and restarting it would drop
 #: the live registry for every local stem, which is the Linux rule too.
 CLIENT_UNITS: dict[str, dict[str, str]] = {
     "think": {
-        "linux": "pandosi-think.service",
-        "darwin": "launchd:com.jewelroam.pandosi-think",
+        "linux": "pando-think.service",
+        "darwin": "launchd:com.pando.think",
         "windows": "proc",
     },
     "chat": {
-        "linux": "pandosi-chat.service",
-        "darwin": "launchd:com.jewelroam.pandosi-chat",
+        "linux": "pando-chat.service",
+        "darwin": "launchd:com.pando.chat",
         "windows": "proc",
     },
     "react": {
-        "linux": "pandosi-react.service",
-        "darwin": "launchd:com.jewelroam.pandosi-react",
+        "linux": "pando-react.service",
+        "darwin": "launchd:com.pando.react",
         "windows": "proc",
     },
     "execute": {
-        "linux": "pandosi-execute.service",
-        "darwin": "launchd:com.jewelroam.pandosi-execute",
+        "linux": "pando-execute.service",
+        "darwin": "launchd:com.pando.execute",
         "windows": "proc",
     },
     "seed-pull": {
-        "linux": "pandosi-seed-pull.service",
+        "linux": "pando-seed-pull.service",
         "darwin": "",
         "windows": "proc",
     },
     # One pattern for all three stems on macOS: the Mac's text stem is
-    # respawned by ``mac-node.sh`` and its two model stems by launchd
+    # respawned by a supervisor loop and its two model stems by launchd
     # ``KeepAlive``, so the driver that works for one works for all three, and
     # ``coordinator`` -- which is a different process -- is not matched.
     "stem-text": {
-        "linux": "pandosi-stem-text.service",
+        "linux": "pando-stem-text.service",
         "darwin": "proc:pando.worker",
         "windows": "proc",
     },
     "stem-laya": {
-        "linux": "pandosi-stem-laya.service",
+        "linux": "pando-stem-laya.service",
         "darwin": "proc:pando.worker",
         "windows": "proc",
     },
     "stem-llm": {
-        "linux": "pandosi-stem-llm.service",
+        "linux": "pando-stem-llm.service",
         "darwin": "proc:pando.worker",
         "windows": "proc",
     },
@@ -230,7 +230,7 @@ def _fetch(repo: Path, env: dict[str, str], remote: str, token: str = "") -> boo
     source = remote
     temporary = None
     if remote.startswith(("http://", "https://")):
-        handle, name = tempfile.mkstemp(prefix="pandosi-", suffix=".bundle")
+        handle, name = tempfile.mkstemp(prefix="pando-", suffix=".bundle")
         os.close(handle)
         temporary = Path(name)
         if not _download(remote, token, temporary):
@@ -261,7 +261,7 @@ def source_list(path: str) -> list[str]:
     moves off the home LAN its old address dies, and the honest repair is to
     write a line -- not to hand-edit three service definitions on three
     operating systems. Measured 2026-10-19: the Mac went
-    ``192.168.31.41`` -> ``172.24.19.146`` and every node that had one
+    ``10.1.0.41`` -> ``172.24.19.146`` and every node that had one
     hardcoded peer went silently unfetched; a list would have kept pulling
     from the Tailscale address further down it.
     """
@@ -282,10 +282,10 @@ def source_list(path: str) -> list[str]:
 #: updater wants a git bundle, the seed puller wants an outbox base it can
 #: append ``/offers`` to. Same file format, same reader.
 SOURCE_FILES: dict[str, tuple[str, ...]] = {
-    "code": ("~/.pandosi/code-sources.txt",
+    "code": ("~/.pando/code-sources.txt",
              "~/.pando/code-sources.txt",
              str(MODELS_DIR / "code-sources.txt")),
-    "seed": ("~/.pandosi/seed-sources.txt",
+    "seed": ("~/.pando/seed-sources.txt",
              "~/.pando/seed-sources.txt",
              str(MODELS_DIR / "seed-sources.txt")),
 }
@@ -297,7 +297,7 @@ def source_file(explicit: str = "", *, kind: str = "code") -> str:
     ``explicit`` is the flag and always wins, so a unit that names its own
     file keeps the last word. With no flag the conventional names are probed,
     which is what lets one unit definition run unmodified on a host whose
-    state directory is ``~/.pandosi``, ``~/.pando`` or the checkout's
+    state directory is ``~/.pando`` or the checkout's
     ``models`` directory (override with ``PANDO_MODELS_DIR``).
     Returning "" rather than raising keeps the case that matters most safe:
     a node with no sources file behaves exactly as it did before this
@@ -388,7 +388,7 @@ def platform_id(explicit: str = "") -> str:
     """Which service manager this process should talk to.
 
     Take the platform from the running interpreter, never from a flag a
-    caller passed by hand: ``--restart pandosi-think.service`` is a
+    caller passed by hand: ``--restart pando-think.service`` is a
     ``systemd`` name, and the same request on a laptop has to become
     ``launchctl kickstart`` without the operator knowing that. ``explicit``
     exists for tests, which cannot change ``sys.platform``.
@@ -411,16 +411,16 @@ def resolve_units(units: list[str], platform: str) -> tuple[list[str], list[str]
     """Resolve names or native handles into handles for ``platform``.
 
     Accepts both vocabularies on purpose. A pi5 unit file says
-    ``pandosi-react.service`` and a Mac ledger says ``think``; refusing either
+    ``pando-react.service`` and a peer ledger says ``think``; refusing either
     would mean one caller had to learn the other's dialect, and the dialect
     is the thing this function exists to hide.
 
     The lookup runs over *every* platform's handles, not this one's, and that
-    is the point: the pi5 unit file says ``pandosi-react.service`` and the Mac
+    is the point: a node unit file says ``pando-react.service`` and a peer
     ledger says ``think``, and both mean the same client. A name that matches
     no platform is refused, which is the only case where "we do not know what
     you mean" and "you may not touch that" can honestly be the same answer --
-    ``pandosi-llama.service``, ``com.jewelroam.pandosi-llm8b`` and
+    ``pando-llama.service``, ``com.pando.llm8b`` and
     ``llama-server.exe`` all land here.
 
     Returns ``(handles, refused)``. A unit that is a client but is not
@@ -618,7 +618,7 @@ def restart_units(units: list[str], *, platform: str = "",
     """Restart only the clients. A model is refused on every platform.
 
     ``units`` may be logical names (``think``), systemd handles
-    (``pandosi-think.service``), launchd labels, or ``proc:`` patterns; the
+    (``pando-think.service``), launchd labels, or ``proc:`` patterns; the
     resolver accepts whatever vocabulary the caller already has and the driver
     below it speaks only the platform's own verbs.
 
@@ -642,7 +642,7 @@ def restart_units(units: list[str], *, platform: str = "",
     return {"restarted": [], "reason": "unknown-platform", "platform": plat}
 
 
-RESTART_STAMP = ".pandosi-restart-state.json"
+RESTART_STAMP = ".pando-restart-state.json"
 
 
 def _restart_stamp_path(repo: Path, unit_target: str = "",
@@ -728,60 +728,47 @@ def _restart_already_recorded(path: Path, fingerprint: str) -> bool:
         and document.get("fingerprint") == fingerprint
 
 
-#: Only units this project ships are ever written. A name outside the prefix is
-#: not copied, so ``--install-units`` cannot be pointed at an arbitrary file.
-UNIT_PREFIX = "pandosi-"
-UNIT_SUFFIXES = (".service", ".timer")
+#: The launchd-label boundary lives in ``pando.deploy.SERVICES`` now: a
+#: service the catalogue does not name cannot be rendered, and ``llm4b`` /
+#: ``llm8b`` / ``cloudflared.*`` / ``seedserve`` are not in the catalogue
+#: because no updater may restart a model or a tunnel.
 
-#: The same boundary, spelled for launchd -- and tighter, because the Mac's
-#: deployment is a superset of what a fast-forward may restart. The rule this
-#: list encodes: **this file writes exactly the agents it can also restart,
-#: and nothing else.** A plist that were adopted but never reloaded would
-#: recreate the pi5 trap one level up -- the file on disk right, the running
-#: process stale -- so the agents outside this set (``mailbox``,
-#: ``mailbox-replicate``, ``observatory``, ``seed-outbox``, ``tick``, ``mac``)
-#: are left to the human who owns their restart. ``llm4b``/``llm8b``,
-#: ``cloudflared.*`` and ``seedserve`` are not here at all: they start a model
-#: or a tunnel, and no updater may restart either.
-#:
-#: ``com.pandosi.stem.llm8b`` is the one that looks like a model and is not:
-#: it runs ``pando.worker``, the client that *calls* the 8B server, which is
-#: why its name carries the model it talks to.
-DARWIN_CLIENT_AGENTS = frozenset({
-    "com.jewelroam.pandosi-think",
-    "com.jewelroam.pandosi-chat",
-    "com.jewelroam.pandosi-react",
-    "com.jewelroam.pandosi-execute",
-    "com.pandosi.stem.laya",
-    "com.pandosi.stem.llm8b",
-})
-
-
-def install_units(source, target, names: list[str] | None = None, *,
+def install_units(config: dict, target, *,
                   platform: str = "", runner=None) -> dict:
-    """Adopt the checkout's service definitions, then reload the manager.
+    """Render this host's units from its config, then reload the manager.
 
-    One caller, three targets. The pi5 units are systemd files in
-    ``~/.config/systemd/user``, the Mac's are plists in
+    One caller, three targets. A Linux node renders systemd units into
+    ``~/.config/systemd/user``, a Mac renders plists into
     ``~/Library/LaunchAgents``, and Windows has no such directory at all: its
     roster is ``tools/win_node_supervisor.ps1`` *inside* the checkout, so the
     fast-forward already carries it and ``node_code_watch`` restarts the stack
-    when the roster's hash changes. That asymmetry is a fact about the three
-    hosts, not a gap in the updater, and reporting it beats pretending to have
-    written something.
+    when the roster's hash changes. That asymmetry is a fact about the
+    platforms, not a gap in the updater, and reporting it beats pretending to
+    have written something.
+
+    The rendered content comes from ``pando.deploy``: the checkout owns the
+    service catalogue, the host config owns the wiring, and no unit file is
+    ever committed -- a template with one operator's paths in it is how the
+    next host gets talked into adopting them.
     """
     plat = platform_id(platform)
-    if plat == "darwin":
-        return _install_launchd(source, target, names, runner=runner)
     if plat == "windows":
         return {"changed": [], "reloaded": False, "installed": False,
                 "reason": "roster-inside-checkout", "platform": plat}
-    return _install_systemd(source, target, names, runner=runner)
+    from pando import deploy
+    try:
+        units = deploy.render_units(config, plat)
+    except deploy.DeployError as exc:
+        return {"changed": [], "reloaded": False,
+                "reason": "render-failed", "error": str(exc)[:200]}
+    if plat == "darwin":
+        return _install_launchd(units, target, runner=runner)
+    return _install_systemd(units, target, runner=runner)
 
 
-def _install_systemd(source, target, names: list[str] | None = None, *,
+def _install_systemd(units: dict, target, *,
                      runner=None) -> dict:
-    """Adopt the checkout's systemd units, then reload systemd.
+    """Adopt the rendered systemd units, then reload systemd.
 
     The units live outside the checkout for the same reason the updater does --
     they describe how the checkout is *run*, so they have to survive a tree that
@@ -798,7 +785,7 @@ def _install_systemd(source, target, names: list[str] | None = None, *,
 
     * The input is the checkout's own directory -- a commit someone reviewed --
       never a name, path, or body taken from a proposal.
-    * Only ``pandosi-*`` files with a ``.service``/``.timer`` suffix are
+    * Only ``pando-*`` files with a ``.service``/``.timer`` suffix are
       written. Everything else in the directory is ignored, not copied.
     * Nothing here enables, disables, starts, or stops a unit. The whole action
       is "write the file, reload systemd", so a template that changes
@@ -817,28 +804,11 @@ def _install_systemd(source, target, names: list[str] | None = None, *,
     needs the ledger, not this function, to say so.
     """
     run = runner or subprocess.run
-    source = Path(source).expanduser()
     target = Path(target).expanduser()
-    if not source.is_dir():
-        return {"changed": [], "reloaded": False, "reason": "no-source"}
-    if names is None:
-        names = sorted(entry.name for entry in source.iterdir()
-                       if entry.is_file() and entry.suffix in UNIT_SUFFIXES)
     changed = []
-    for name in names:
-        if not name.startswith(UNIT_PREFIX) or name.endswith(".bak"):
-            continue
+    for name, text in sorted(units.items()):
         if "/" in name or "\\" in name or name in (".", ".."):
             continue
-        template = source / name
-        if template.suffix not in UNIT_SUFFIXES or not template.is_file():
-            continue
-        try:
-            text = template.read_text(encoding="utf-8")
-        except OSError as exc:
-            return {"changed": changed, "reloaded": False,
-                    "reason": "unreadable-source", "unit": name,
-                    "error": str(exc)[:120]}
         deployed = target / name
         try:
             if deployed.read_text(encoding="utf-8") == text:
@@ -894,15 +864,15 @@ def _plist_label(text: str) -> str:
     return found.group(1).strip() if found else ""
 
 
-def _install_launchd(source, target, names: list[str] | None = None, *,
+def _install_launchd(units: dict, target, *,
                      runner=None) -> dict:
-    """Adopt the checkout's launchd agents, then reload only what changed.
+    """Adopt the rendered launchd agents, then reload only what changed.
 
     The Mac keeps its agents in ``~/Library/LaunchAgents`` -- outside the
     checkout, for the same reason the updater lives outside it -- and until
     now nothing in this repo rewrote them. The measurement that makes that a
     bug and not a preference: on 2026-10-19 the *live*
-    ``com.jewelroam.pandosi-think`` carried two ``--mailbox-fallback``
+    ``com.pando.think`` carried two ``--mailbox-fallback``
     arguments that the checkout's copy did not, so running this function
     against a stale template would have silently rolled a working node's
     mailbox failover back to a single address.
@@ -926,36 +896,19 @@ def _install_launchd(source, target, names: list[str] | None = None, *,
     does not own.
     """
     run = runner or subprocess.run
-    source = Path(source).expanduser()
     target = Path(target).expanduser()
-    if not source.is_dir():
-        return {"changed": [], "reloaded": False, "reason": "no-source"}
-    if names is None:
-        names = sorted(entry.name for entry in source.iterdir()
-                       if entry.is_file() and entry.suffix == ".plist")
     uid = getattr(os, "getuid", lambda: 0)()
     changed: list[str] = []
     booted: list[str] = []
-    #: Templates this repo ships that this round could not adopt. A skip is
-    #: reported, never silent: "the commit is right and the host is wrong" is
-    #: the fact that used to leave no trace anywhere.
+    #: Rendered units this round could not adopt. A skip is reported, never
+    #: silent: "the render is right and the host is wrong" is the fact that
+    #: used to leave no trace anywhere.
     skipped: list[dict] = []
-    for name in names:
-        if not name.endswith(".plist") or name.endswith(".bak"):
+    for name, text in sorted(units.items()):
+        if not name.endswith(".plist"):
             continue
         if "/" in name or "\\" in name or name in (".", ".."):
             continue
-        if name[: -len(".plist")] not in DARWIN_CLIENT_AGENTS:
-            continue
-        template = source / name
-        if not template.is_file():
-            continue
-        try:
-            text = template.read_text(encoding="utf-8")
-        except OSError as exc:
-            return {"changed": changed, "reloaded": False,
-                    "reason": "unreadable-source", "unit": name,
-                    "error": str(exc)[:120]}
         label = _plist_label(text)
         if not label or label != name[: -len(".plist")]:
             # A plist whose Label and filename disagree installs a job whose
@@ -991,9 +944,8 @@ def _install_launchd(source, target, names: list[str] | None = None, *,
                     "error": str(exc)[:120]}
         changed.append(name)
     wanted = changed or [
-        name for name in names
-        if name.endswith(".plist") and not name.endswith(".bak")
-        and name[: -len(".plist")] in DARWIN_CLIENT_AGENTS
+        name for name in units
+        if name.endswith(".plist")
         and (target / name).is_file()
         and _not_loaded(name[: -len(".plist")], uid, run)]
     for name in wanted:
@@ -1217,7 +1169,15 @@ def send_telemetry(repo, *, url: str, token_file: str, root_url: str,
         code_head = _head(repo, _env())
         if not code_head:
             raise ValueError("checkout HEAD is unreadable")
-        envelope = build_envelope(identity, nodes=nodes, code_head=code_head,
+        from pando import hostconfig
+        publish = hostconfig.telemetry_publish(hostconfig.load())
+        if publish is None:
+            raise ValueError(
+                "host config has no [telemetry.publish] section; this node "
+                "does not know what name to sign its observation under")
+        envelope = build_envelope(identity, host=publish["host"],
+                                  member=publish["member"], nodes=nodes,
+                                  code_head=code_head,
                                   think_round=think_round, status=status)
         token = _read_telemetry_token(token_file)
         request = urllib.request.Request(
@@ -1269,8 +1229,15 @@ def main(argv: list[str] | None = None) -> int:
                         help="updater inside the checkout; adopted by --self-target")
     parser.add_argument("--self-target", default="",
                         help="the copy of this file that is running on the node")
-    parser.add_argument("--install-units", default="",
-                        help="checkout directory of systemd unit templates")
+    parser.add_argument("--install-units", nargs="?", const="__render__",
+                        default="",
+                        help="render this node's units from its host config "
+                             "and adopt them (the optional value is ignored: "
+                             "units are rendered, not copied, since the "
+                             "checkout carries no templates)")
+    parser.add_argument("--host-config", default=None,
+                        help="untracked per-host TOML (default: "
+                             "$PANDO_HOST_CONFIG or ~/.pando/host.toml)")
     parser.add_argument("--install-units-target", default="",
                         help="where this node's units are deployed")
     parser.add_argument("--restart-state", default="",
@@ -1320,9 +1287,17 @@ def main(argv: list[str] | None = None) -> int:
             result["self"] = {"adopted": False, **unconfirmed}
     if args.install_units and args.install_units_target:
         if confirmed:
-            result["units"] = install_units(args.install_units,
-                                            args.install_units_target,
-                                            platform=args.platform)
+            from pando import hostconfig
+            try:
+                host_config = hostconfig.load(args.host_config)
+            except hostconfig.HostConfigError as exc:
+                result["units"] = {"changed": [], "reloaded": False,
+                                   "reason": "config-unreadable",
+                                   "error": str(exc)[:200]}
+            else:
+                result["units"] = install_units(
+                    host_config, args.install_units_target,
+                    platform=args.platform)
         else:
             result["units"] = {"changed": [], "reloaded": False, **unconfirmed}
     # Restart *after* the unit files have been installed and reloaded. Doing

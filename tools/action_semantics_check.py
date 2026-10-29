@@ -1439,7 +1439,7 @@ def main(argv=None) -> int:
     parser.add_argument("--base-url", default="http://127.0.0.1:8087/v1")
     parser.add_argument("--tokenize-url", default="")
     parser.add_argument("--model", default="qwen3-8b-q5km-instruct")
-    parser.add_argument("--api-key-file", default="~/.pandosi/llm-api-8b-q6.token")
+    parser.add_argument("--api-key-file", default="~/.pando/llm-api-8b-q6.token")
     parser.add_argument("--pairs", type=int, default=30)
     parser.add_argument("--seed-base", type=int, default=3670)
     parser.add_argument("--temperature", type=float, default=0.7)

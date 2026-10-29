@@ -27,7 +27,7 @@ ledger memory switched off - has not been run on any device. Until it is,
 every diversity number here is a description, not evidence of evolution.
 
 Usage:
-  python tools/think_stats.py ~/.pandosi/think-ledger.jsonl
+  python tools/think_stats.py ~/.pando/think-ledger.jsonl
   python tools/think_stats.py --json mac.jsonl pi5.jsonl
 """
 

@@ -1798,75 +1798,72 @@ class TestThinkWatchdogCodeDelivery(unittest.TestCase):
     def test_the_installed_timer_actually_carries_the_code_leg(self):
         """The lesson of this file, applied to this file's own wiring.
 
-        vote_watchdog.py measured the win-laya wedge correctly for a whole day
-        and nobody acted, because nothing called it. A code_drift_check.py that
-        no timer invokes would repeat that exactly: correct, and paging nobody.
+        vote_watchdog.py measured a wedge correctly for a whole day and
+        nobody acted, because nothing called it. A code_drift_check.py that
+        no timer invokes would repeat that exactly: correct, and paging
+        nobody. The renderer must therefore be able to emit the watchdog
+        with its code leg intact -- which roots it polls and which mirrors
+        it reads are the host config's wiring, not the repo's.
         """
+        from pando import deploy
         root = Path(__file__).resolve().parents[1]
-        plist = (root / "tools" / "mac-launchd"
-                 / "com.jewelroam.pandosi-think-watchdog.plist").read_text(
-                     encoding="utf-8")
+        config = {"render": {"python": "/host/a/venv/bin/python",
+                             "repo": "/host/a/Pando",
+                             "state_dir": "/host/a/.pando"},
+                  "services": {"think-watchdog": {
+                      "args": "--ledger /host/a/.pando/think-ledger.jsonl "
+                              "--code-cmd '/host/a/venv/bin/python "
+                              "/host/a/Pando/tools/code_drift_check.py' "
+                              "--code-timeout 300",
+                      "interval": 900}}}
+        units = deploy.render_units(config, "darwin")
+        plist = units["com.pando.think-watchdog.plist"]
         self.assertIn("--code-cmd", plist)
         self.assertIn("code_drift_check.py", plist)
         self.assertIn("--code-timeout", plist)
-        # Every host in the fleet, or a frozen node is simply invisible.
-        self.assertIn("127.0.0.1:8765", plist)
-        # pi5 sits behind the LAN that this job's responsible process may not
-        # open, so it arrives as the mirror tools/mirror_ledger.py refreshes
-        # over ssh. A LAN address here would look like coverage and be none:
-        # the leg would report pi5 unreadable on every single poll.
-        self.assertNotIn("192.168.31.22", plist)
-        pi5 = re.search(r"--root-json pi5 (\S+)", plist)
-        self.assertIsNotNone(pi5, "pi5 must still be a measured root")
-        self.assertTrue(pi5.group(1).endswith("pi5-root.json"),
-                        f"pi5 is read at {pi5.group(1)}")
-        # An XML comment may not contain a doubled hyphen, and a plist that
-        # does not parse is a timer that silently never runs - both of which
-        # this file has already been through once.
+        self.assertIn("<key>StartInterval</key><integer>900</integer>", plist)
+        self.assertNotIn("/Users/", plist)
+        self.assertNotIn("/home/", plist)
+        # The plist must parse: an XML comment with a doubled hyphen is a
+        # timer that silently never runs.
         self.assertIsInstance(plistlib.loads(plist.encode("utf-8")), dict)
-        # ...but the *address* win is read at matters as much as mentioning it.
-        # A launchd agent whose program is the Homebrew interpreter is refused
-        # on 192.168.31.x - Errno 65 for its own socket, curl rc=7 for a curl it
-        # spawns, because the refusal follows the responsible process into its
-        # children. The tailnet is not "local network" and answers that same
-        # interpreter. Pinning the LAN address here would re-blind the leg that
-        # this file exists to keep honest.
-        win = re.search(r"--root win (\S+)", plist)
-        self.assertIsNotNone(win, "win must still be a measured root")
-        self.assertTrue(win.group(1).startswith("http://100."),
-                        f"win is read at {win.group(1)}, not over the tailnet")
-        # One shared state file, two alarm families - not a second file.
-        self.assertIn("--alarm-state-file", plist)
-        self.assertIn("think-watchdog-alarms.json", plist)
-        self.assertNotIn("code-drift-alarms.json", plist)
         self.assertTrue((root / "tools" / "code_drift_check.py").exists())
 
     def test_the_installed_voter_judges_sleepable_macs_only_while_awake(self):
-        """Mac may sleep, so its voters are gated on wakefulness, not deleted.
-
-        A laptop that sleeps looks exactly like a silent voter on a green
-        panel. Deleting the Mac members (--ignore-member) fixed the false
-        alarm by also deleting the real one: a Mac that is awake and wedged is
-        invisible. The split is --decision (must be voting) plus
-        --sleep-gated-member (but only while this host is awake), so the
-        always-on deployments page as before and an awake Mac pages too.
+        """A laptop that sleeps looks exactly like a silent voter on a green
+        panel. Deleting the sleepy members (--ignore-member) fixed the false
+        alarm by also deleting the real one: awake and wedged is invisible.
+        The split is --decision (must be voting) plus --sleep-gated-member
+        (only while this host is awake). Both flags are the tool's contract;
+        which members they name is the host config's wiring.
         """
-        root = Path(__file__).resolve().parents[1]
-        plist = (root / "tools" / "mac-launchd"
-                 / "com.jewelroam.pandosi-think-watchdog.plist").read_text(
-                     encoding="utf-8")
-        args = plistlib.loads(plist.encode("utf-8"))["ProgramArguments"]
-        vote_index = args.index("--vote-cmd")
-        cmd = args[vote_index + 1]
-        self.assertIn("--decision mac-text", cmd)
-        self.assertIn("--decision mac-laya-int8", cmd)
-        self.assertIn("--sleep-gated-member mac-text", cmd)
-        self.assertIn("--sleep-gated-member mac-laya-int8", cmd)
-        self.assertNotIn("--ignore-member mac-text", cmd)
-        self.assertNotIn("--ignore-member mac-laya-int8", cmd)
-        self.assertIn("--decision pandosi-pi5-x", cmd)
-        self.assertIn("--decision pandosi-pi5-laya", cmd)
-        self.assertIn("--decision win-laya-int8", cmd)
+        import argparse
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "vote_watchdog_under_test",
+            Path(__file__).resolve().parents[1] / "tools" / "vote_watchdog.py")
+        vote_wd = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(vote_wd)
+        text = (Path(__file__).resolve().parents[1]
+                / "tools" / "vote_watchdog.py").read_text(encoding="utf-8")
+        # The flags are the tool's contract; argparse is wired in main(), so
+        # the source is the honest place to pin the contract's shape.
+        self.assertIn('"--decision"', text)
+        self.assertIn('"--sleep-gated-member"', text)
+        self.assertIn('"--ignore-member"', text)
+        # And the renderer carries both flags through verbatim.
+        from pando import deploy
+        config = {"render": {"python": "/host/a/venv/bin/python",
+                             "repo": "/host/a/Pando",
+                             "state_dir": "/host/a/.pando"},
+                  "services": {"think-watchdog": {
+                      "args": "--vote-cmd 'vote_watchdog.py "
+                              "--decision node-a-text "
+                              "--sleep-gated-member node-a-text'"}}}
+        plist = deploy.render_units(config, "darwin")[
+            "com.pando.think-watchdog.plist"]
+        self.assertIn("--decision node-a-text", plist)
+        self.assertIn("--sleep-gated-member node-a-text", plist)
 
     def test_the_body_names_the_action_and_the_falsifier(self):
         """The cheap bounded fix, and what would prove the alarm wrong."""

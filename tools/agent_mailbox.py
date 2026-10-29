@@ -63,8 +63,9 @@ from pando.code_receipt import (  # noqa: E402 - repo root must be importable
     CodeReceiptError, CodeReceiptReceiver, CodeReceiptSignatureError,
 )
 from pando.identity import default_path as default_identity_path  # noqa: E402
+from pando import hostconfig  # noqa: E402 - repo root must be importable
 from pando.telemetry import (  # noqa: E402 - repo root must be importable
-    PI5_PUBKEY, TelemetryError, TelemetryReceiver,
+    TelemetryError, TelemetryReceiver,
     TelemetrySignatureError,
 )
 from tools.seed_outbox import code_bundle  # noqa: E402
@@ -554,7 +555,8 @@ def build_handler(mailbox: Mailbox, token: str, telemetry=None,
                   code_repo: Path | None = None,
                   code_cache: Path | None = None,
                   grant_file: Path | None = None,
-                  identity_file: Path | None = None):
+                  identity_file: Path | None = None,
+                  host_config: dict | None = None):
     def accepts_gzip(value: str) -> bool:
         for item in str(value or "").split(","):
             coding, *params = [part.strip() for part in item.split(";")]
@@ -624,7 +626,10 @@ def build_handler(mailbox: Mailbox, token: str, telemetry=None,
                     self._send(404, {"error": "operator delegation not configured"})
                     return
                 try:
-                    envelope = issue_envelope(grant_file, identity_path=identity_file)
+                    from pando.hostconfig import operator_pubkey
+                    envelope = issue_envelope(
+                        grant_file, identity_path=identity_file,
+                        expected_pubkey=operator_pubkey(host_config or {}))
                 except Exception as exc:  # noqa: BLE001 - HTTP must fail closed
                     try:
                         local = grant_status("deploy_operator", grant_file)
@@ -669,7 +674,7 @@ def build_handler(mailbox: Mailbox, token: str, telemetry=None,
                     self._send(404, {"error": "code bundle not configured"})
                     return
                 cache = (Path(code_cache).expanduser() if code_cache else
-                         Path.home() / ".pandosi" / "code.bundle")
+                         Path.home() / ".pando" / "code.bundle")
                 try:
                     built = code_bundle(Path(code_repo).expanduser(), cache)
                 except OSError as exc:
@@ -771,7 +776,7 @@ def build_handler(mailbox: Mailbox, token: str, telemetry=None,
                     return
                 self._send(200, answer)
                 return
-            if path == "/telemetry/pi5":
+            if path == "/telemetry":
                 if telemetry is None:
                     self._send(404, {"error": "not found"})
                     return
@@ -922,8 +927,8 @@ def serve(args) -> int:
         print(f"generated a new token into {token_file}: {generated}")
     token = token_file.read_text(encoding="utf-8").strip()
     mailbox = Mailbox(directory)
-    telemetry = (TelemetryReceiver(args.telemetry_root)
-                 if getattr(args, "telemetry_root", "") else None)
+    # Config load happens once, below, and serves every pin consumer.
+    telemetry = None
     code_receipts = (CodeReceiptReceiver(args.code_receipts_root)
                      if getattr(args, "code_receipts_root", "") else None)
     code_repo = (Path(args.code_repo).expanduser()
@@ -935,13 +940,18 @@ def serve(args) -> int:
     identity_file = (Path(args.identity_file).expanduser()
                      if getattr(args, "identity_file", "")
                      else default_identity_path())
+    host_config = hostconfig.load(args.host_config)
+    if getattr(args, "telemetry_root", ""):
+        telemetry = TelemetryReceiver.from_config(
+            args.telemetry_root, host_config)
     server = _MailboxServer((args.host, args.port),
                             build_handler(mailbox, token, telemetry,
                                           code_receipts=code_receipts,
                                           code_repo=code_repo,
                                           code_cache=code_cache,
                                           grant_file=grant_file,
-                                          identity_file=identity_file))
+                                          identity_file=identity_file,
+                                          host_config=host_config))
     print(f"agent mailbox serving on http://{args.host}:{args.port} "
           f"(dir {directory}, {mailbox.count(OPEN)} open task(s))",
           flush=True)
@@ -1084,12 +1094,17 @@ def main() -> int:
         "--code-repo", default="",
         help="serve /code.bundle from this git checkout; empty disables it")
     server.add_argument(
-        "--code-cache", default="~/.pandosi/code.bundle",
+        "--code-cache", default="~/.pando/code.bundle",
         help="HEAD-keyed cache for /code.bundle")
     server.add_argument(
+        "--host-config", default=None,
+        help="untracked per-host TOML (default: $PANDO_HOST_CONFIG or "
+             "~/.pando/host.toml)")
+    server.add_argument(
         "--telemetry-root", default="",
-        help="atomically publish signed Pi5 telemetry at this root-table path; "
-             f"the signer is pinned to {PI5_PUBKEY}")
+        help="atomically publish signed telemetry at this root-table path; "
+             "the trusted signer is the [telemetry.accept] pin in the host "
+             "config (see --host-config)")
     server.add_argument(
         "--code-receipts-root", default="",
         help="atomically store signed code-watch receipts per node in this "
@@ -1143,7 +1158,7 @@ def main() -> int:
     copy.add_argument("--url", required=True, help="source mailbox")
     copy.add_argument("--to-url", required=True, help="destination mailbox")
     copy.add_argument("--token")
-    copy.add_argument("--token-file", default="~/.pandosi/mailbox.token")
+    copy.add_argument("--token-file", default="~/.pando/mailbox.token")
     copy.add_argument("--to-token", default=None)
     copy.add_argument("--to-token-file", default=None)
     copy.add_argument("--timeout", type=float, default=15)

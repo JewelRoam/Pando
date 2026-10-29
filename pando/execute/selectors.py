@@ -58,12 +58,12 @@ def _titled(title: str, prefix: str) -> tuple[str, str] | None:
     return parts[1], parts[2]
 DEFAULT_PER_ACTION = 40
 
-#: Where a host keeps its executor state. The Mac has used ``~/.pandosi`` since
+#: Where a host keeps its executor state. The Mac has used ``~/.pando`` since
 #: the first round; a node brought up under the shorter ``~/.pando`` should pass
 #: ``--state-dir`` once rather than spell out ten paths -- spelling them out per
 #: unit is how one host ends up with its ledger in one tree and its outboxes in
 #: another, and how a seal writes a rollout home nobody reads.
-DEFAULT_STATE_DIR = "~/.pandosi"
+DEFAULT_STATE_DIR = "~/.pando"
 def _author_of(title: str, prefix: str = "[proposal]") -> str:
     """The author token of a ``[proposal]`` title, or ``""``.
 
@@ -147,7 +147,7 @@ def rows_for_execution(tasks: list, limit: int,
     return [row for row in rows if row.get("id") in keep]
 
 
-def _hosts_table(path: str = "~/.pandosi/hosts.json") -> dict:
+def _hosts_table(path: str = "~/.pando/hosts.json") -> dict:
     """This host's ``hosts.json``, or ``{}`` when it is missing or corrupt.
 
     The executor already reads the same file for its mailbox and pull

@@ -341,21 +341,21 @@ class TestCodeSync(unittest.TestCase):
                 check=True, capture_output=True, text=True, env=env).stdout.strip()
             self.assertEqual(head, client_head)
 
-            refused = sync.restart_units(["pandosi-llama.service"])
+            refused = sync.restart_units(["pando-llama.service"])
             self.assertEqual(refused["reason"], "refused")
             self.assertEqual(refused["restarted"], [])
             # The voter is a client: a fast-forward must be able to restart it,
             # or pi5 keeps running the previous module from memory.
-            self.assertIn("pandosi-react.service", sync.SAFE_UNITS)
-            self.assertNotIn("pandosi-llama.service", sync.SAFE_UNITS)
+            self.assertIn("pando-react.service", sync.SAFE_UNITS)
+            self.assertNotIn("pando-llama.service", sync.SAFE_UNITS)
             # A stem is the client that *calls* capability(); it is not the
             # model server. Leaving it out is how pi5 kept reporting
             # code_head=None while its checkout was already at the tip.
-            self.assertIn("pandosi-stem-laya.service", sync.SAFE_UNITS)
-            self.assertIn("pandosi-stem-text.service", sync.SAFE_UNITS)
-            self.assertIn("pandosi-stem-llm.service", sync.SAFE_UNITS)
+            self.assertIn("pando-stem-laya.service", sync.SAFE_UNITS)
+            self.assertIn("pando-stem-text.service", sync.SAFE_UNITS)
+            self.assertIn("pando-stem-llm.service", sync.SAFE_UNITS)
             # coordinator holds the live member registry; it is not auto-restarted.
-            self.assertNotIn("pandosi-root.service", sync.SAFE_UNITS)
+            self.assertNotIn("pando-root.service", sync.SAFE_UNITS)
             peer = sync.sync_repo(root / "missing", peer=str(bare))
             self.assertEqual(peer["reason"], "no-git")
 
@@ -621,9 +621,13 @@ class TestCodeSync(unittest.TestCase):
         so the shipped agent is a oneshot with an interval and the job stays
         outside CLIENT_UNITS -- it never restarts itself, launchd does.
         """
-        src = (Path(__file__).resolve().parents[1]
-               / "tools" / "mac-launchd" / "com.jewelroam.pandosi-code-watch.plist")
-        text = src.read_text(encoding="utf-8")
+        from pando import deploy
+        config = {"render": {"python": "/host/a/venv/bin/python",
+                             "repo": "/host/a/Pando",
+                             "state_dir": "/host/a/.pando"},
+                  "services": {"code-watch": {"args": "", "interval": 60}}}
+        text = deploy.render_units(config, "darwin")[
+            "com.pando.code-watch.plist"]
         self.assertIn("<string>--once</string>", text)
         self.assertIn("<key>StartInterval</key>", text)
         self.assertIn("<key>RunAtLoad</key>", text)
@@ -632,7 +636,7 @@ class TestCodeSync(unittest.TestCase):
         sync = self._load()
         self.assertEqual(
             [name for name, row in sync.CLIENT_UNITS.items()
-             if "pandosi-code-watch" in str(row.get("darwin", ""))], [])
+             if "code-watch" in str(row.get("darwin", ""))], [])
 
     def test_a_head_that_moved_without_a_fetch_still_restarts_clients(self):
         """The Mac commits in its own checkout, so HEAD moves with no fetch.
@@ -1039,10 +1043,34 @@ class TestCodeSync(unittest.TestCase):
 
         return fake
 
+    def _write_host_config(self, root: Path,
+                           node_id: str = "a-proposer") -> Path:
+        path = root / "host.toml"
+        path.write_text(
+            "[render]\n"
+            'python = "/host/a/venv/bin/python"\n'
+            'repo = "/host/a/Pando"\n'
+            'state_dir = "/host/a/.pando"\n'
+            "[services.think]\n"
+            f'args = "--node-id {node_id}"\n', encoding="utf-8")
+        return path
+
+    @staticmethod
+    def _unit_config(node_id: str = "a-proposer") -> dict:
+        return {"render": {"python": "/host/a/venv/bin/python",
+                           "repo": "/host/a/Pando",
+                           "state_dir": "/host/a/.pando"},
+                "services": {"think": {"args": f"--node-id {node_id}"}}}
+
+    @staticmethod
+    def _rendered(config: dict) -> dict:
+        from pando import deploy
+        return deploy.render_units(config, "linux")
+
     def test_a_unit_template_outside_the_checkout_is_installed_and_backed_up(self):
         """The units live outside the checkout, so nothing rewrote them either.
 
-        2026-10-19: pi5's ``pandosi-code-sync.service`` on disk carried
+        2026-10-19: a node's ``pando-code-sync.service`` on disk carried
         ``--self-source``/``--self-target`` while the unit *systemd had loaded*
         did not. The file had been overwritten with ``cat >`` and
         ``systemctl --user daemon-reload`` was never run, so the ten-minute
@@ -1053,19 +1081,14 @@ class TestCodeSync(unittest.TestCase):
         sync = self._load()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            source = root / "checkout" / "tools" / "pi5-systemd"
             target = root / ".config" / "systemd" / "user"
-            source.mkdir(parents=True)
             target.mkdir(parents=True)
-            (source / "pandosi-code-sync.service").write_text("ExecStart=/new\n")
-            (target / "pandosi-code-sync.service").write_text("ExecStart=/live\n")
-            # Anything this project does not ship stays where it is: a wrong
-            # prefix, a wrong suffix, a nested path, and a stale backup.
-            (source / "notes.md").write_text("notes\n")
-            (source / "pandosi-notes.txt").write_text("notes\n")
-            (source / "pandosi-old.service.bak").write_text("stale\n")
-            (source / "nested").mkdir()
-            (source / "nested" / "pandosi-evil.service").write_text("evil\n")
+            config = self._unit_config()
+            rendered = self._rendered(config)
+            (target / "pando-think.service").write_text("ExecStart=/live\n")
+            # Foreign files in the target are none of the renderer's business:
+            # it writes its own set and leaves the rest untouched.
+            (target / "notes.md").write_text("notes\n")
 
             calls = []
             real = subprocess.run
@@ -1075,22 +1098,20 @@ class TestCodeSync(unittest.TestCase):
                 # branch: the same call on a laptop has to reach launchd, and
                 # a test that quietly followed the host would stop covering
                 # the branch it was written for the day it ran on a Mac.
-                first = sync.install_units(source, target, platform="linux")
-                second = sync.install_units(source, target, platform="linux")
+                first = sync.install_units(config, target, platform="linux")
+                second = sync.install_units(config, target, platform="linux")
             finally:
                 subprocess.run = real
 
-            self.assertEqual(first["changed"], ["pandosi-code-sync.service"])
+            self.assertEqual(first["changed"], ["pando-think.service"])
             self.assertEqual(first["reason"], "installed")
             self.assertTrue(first["reloaded"])
-            self.assertEqual((target / "pandosi-code-sync.service").read_text(),
-                             "ExecStart=/new\n")
+            self.assertEqual((target / "pando-think.service").read_text(),
+                             rendered["pando-think.service"])
             self.assertEqual(
-                (target / "pandosi-code-sync.service.bak").read_text(),
+                (target / "pando-think.service.bak").read_text(),
                 "ExecStart=/live\n")
-            for junk in ("notes.md", "pandosi-notes.txt", "nested",
-                         "pandosi-old.service.bak"):
-                self.assertFalse((target / junk).exists())
+            self.assertTrue((target / "notes.md").exists())
 
             # Nothing left to rewrite -- and the reload still runs, because
             # "the file matches" is indistinguishable from "a previous round
@@ -1104,17 +1125,17 @@ class TestCodeSync(unittest.TestCase):
             # A reload that fails is reported, and the bytes that were written
             # are named, so a peer can tell "not adopted" from "not written".
             calls.clear()
-            (source / "pandosi-code-sync.service").write_text("ExecStart=/newer\n")
+            config2 = self._unit_config(node_id="a-proposer-v2")
             subprocess.run = self._systemctl_stub(calls, rc=1)
             try:
-                failed = sync.install_units(source, target, platform="linux")
+                failed = sync.install_units(config2, target, platform="linux")
             finally:
                 subprocess.run = real
             self.assertEqual(failed["reason"], "reload-failed")
             self.assertFalse(failed["reloaded"])
-            self.assertEqual(failed["changed"], ["pandosi-code-sync.service"])
-            self.assertEqual((target / "pandosi-code-sync.service").read_text(),
-                             "ExecStart=/newer\n")
+            self.assertEqual(failed["changed"], ["pando-think.service"])
+            self.assertEqual((target / "pando-think.service").read_text(),
+                             self._rendered(config2)["pando-think.service"])
 
     def test_a_dirty_checkout_cannot_rewrite_the_units_either(self):
         """The confirmation that gates the updater gates the units.
@@ -1127,17 +1148,10 @@ class TestCodeSync(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             env, src, bare, client = self._world(root)
-            units = src / "tools" / "pi5-systemd"
-            units.mkdir(parents=True)
-            (units / "pandosi-code-sync.service").write_text("ExecStart=/new\n")
-            self._run(env, "git", "-C", str(src), "add", "-A")
-            self._run(env, "git", "-C", str(src), "commit", "-m", "units")
-            self._run(env, "git", "-C", str(src), "push", str(bare), "main")
-            self._run(env, "git", "-C", str(client), "pull", "--ff-only",
-                      str(bare), "main")
+            host_config = self._write_host_config(root)
             target = root / "deployed-units"
             target.mkdir()
-            (target / "pandosi-code-sync.service").write_text("ExecStart=/live\n")
+            (target / "pando-think.service").write_text("ExecStart=/live\n")
 
             def run():
                 out = io.StringIO()
@@ -1145,7 +1159,7 @@ class TestCodeSync(unittest.TestCase):
                     sync.main(["--repo", str(client),
                                "--platform", "linux",
                                "--install-units",
-                               str(client / "tools" / "pi5-systemd"),
+                               "--host-config", str(host_config),
                                "--install-units-target", str(target)])
                 return json.loads(out.getvalue())
 
@@ -1163,21 +1177,21 @@ class TestCodeSync(unittest.TestCase):
                 self.assertFalse(dirty["units"]["reloaded"])
                 self.assertEqual(calls, [])
                 self.assertEqual(
-                    (target / "pandosi-code-sync.service").read_text(),
+                    (target / "pando-think.service").read_text(),
                     "ExecStart=/live\n")
 
-                # At the tip: the templates may now be adopted.
+                # At the tip: the rendered units may now be adopted.
                 self._run(env, "git", "-C", str(client), "checkout", "--",
                           "README")
                 moved = run()
                 self.assertEqual(moved["reason"], "already")
                 self.assertEqual(moved["units"]["reason"], "installed")
                 self.assertEqual(moved["units"]["changed"],
-                                 ["pandosi-code-sync.service"])
+                                 ["pando-think.service"])
                 self.assertTrue(moved["units"]["reloaded"])
                 self.assertEqual(
-                    (target / "pandosi-code-sync.service").read_text(),
-                    "ExecStart=/new\n")
+                    (target / "pando-think.service").read_text(),
+                    self._rendered(self._unit_config())["pando-think.service"])
             finally:
                 subprocess.run = real
 
@@ -1194,18 +1208,18 @@ class TestCodeSync(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             env, src, bare, client = self._world(root)
-            units = src / "tools" / "pi5-systemd"
-            units.mkdir(parents=True)
-            (units / "pandosi-execute.service").write_text(
-                "ExecStart=/new --grant-url http://example/operator-grant\n")
-            self._run(env, "git", "-C", str(src), "add", "-A")
-            self._run(env, "git", "-C", str(src), "commit", "-m", "units")
-            self._run(env, "git", "-C", str(src), "push", str(bare), "main")
-            self._run(env, "git", "-C", str(client), "pull", "--ff-only",
-                      str(bare), "main")
+            host_config = root / "host.toml"
+            host_config.write_text(
+                "[render]\n"
+                'python = "/host/a/venv/bin/python"\n'
+                'repo = "/host/a/Pando"\n'
+                'state_dir = "/host/a/.pando"\n'
+                "[services.execute]\n"
+                'args = "--grant-url http://example/operator-grant"\n',
+                encoding="utf-8")
             target = root / "deployed-units"
             target.mkdir()
-            (target / "pandosi-execute.service").write_text(
+            (target / "pando-execute.service").write_text(
                 "ExecStart=/old\n")
 
             calls = []
@@ -1216,22 +1230,23 @@ class TestCodeSync(unittest.TestCase):
                 with contextlib.redirect_stdout(out):
                     sync.main(["--repo", str(client),
                                "--platform", "linux",
-                               "--install-units", str(units),
+                               "--install-units",
+                               "--host-config", str(host_config),
                                "--install-units-target", str(target),
-                               "--restart", "pandosi-execute.service"])
+                               "--restart", "pando-execute.service"])
                 result = json.loads(out.getvalue())
             finally:
                 subprocess.run = real
 
             self.assertEqual(result["units"]["changed"],
-                             ["pandosi-execute.service"])
+                             ["pando-execute.service"])
             self.assertTrue(result["units"]["reloaded"])
             self.assertEqual(result["restarted"],
-                             ["pandosi-execute.service"])
+                             ["pando-execute.service"])
             self.assertEqual(calls, [
                 ["systemctl", "--user", "daemon-reload"],
                 ["systemctl", "--user", "restart",
-                 "pandosi-execute.service"],
+                 "pando-execute.service"],
             ])
             self.assertTrue(result["restart_state"]["written"])
 
@@ -1246,9 +1261,10 @@ class TestCodeSync(unittest.TestCase):
                 with contextlib.redirect_stdout(out):
                     sync.main(["--repo", str(client),
                                "--platform", "linux",
-                               "--install-units", str(units),
+                               "--install-units",
+                               "--host-config", str(host_config),
                                "--install-units-target", str(target),
-                               "--restart", "pandosi-execute.service"])
+                               "--restart", "pando-execute.service"])
                 steady = json.loads(out.getvalue())
             finally:
                 subprocess.run = real
@@ -1272,13 +1288,27 @@ class TestCodeSync(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             env, _src, _bare, client = self._world(root)
-            units = client / "tools" / "pi5-systemd"
+            host_config = root / "host.toml"
+            host_config.write_text(
+                "[render]\n"
+                'python = "/host/a/venv/bin/python"\n'
+                'repo = "/host/a/Pando"\n'
+                'state_dir = "/host/a/.pando"\n'
+                "[services.execute]\n"
+                'args = "--grant-url http://example/operator-grant"\n',
+                encoding="utf-8")
             target = root / "deployed-units"
-            units.mkdir(parents=True)
             target.mkdir()
-            text = "ExecStart=/new --grant-url http://example/operator-grant\n"
-            (units / "pandosi-execute.service").write_text(text)
-            (target / "pandosi-execute.service").write_text(text)
+            from pando import deploy
+            rendered = deploy.render_units(
+                {"render": {"python": "/host/a/venv/bin/python",
+                            "repo": "/host/a/Pando",
+                            "state_dir": "/host/a/.pando"},
+                 "services": {"execute": {
+                     "args": "--grant-url http://example/operator-grant"}}},
+                "linux")
+            (target / "pando-execute.service").write_text(
+                rendered["pando-execute.service"], encoding="utf-8")
 
             calls = []
             real = subprocess.run
@@ -1288,9 +1318,10 @@ class TestCodeSync(unittest.TestCase):
                 with contextlib.redirect_stdout(out):
                     sync.main(["--repo", str(client),
                                "--platform", "linux",
-                               "--install-units", str(units),
+                               "--install-units",
+                               "--host-config", str(host_config),
                                "--install-units-target", str(target),
-                               "--restart", "pandosi-execute.service"])
+                               "--restart", "pando-execute.service"])
                 result = json.loads(out.getvalue())
             finally:
                 subprocess.run = real
@@ -1298,11 +1329,11 @@ class TestCodeSync(unittest.TestCase):
             self.assertEqual(result["reason"], "already")
             self.assertEqual(result["units"]["changed"], [])
             self.assertEqual(result["restarted"],
-                             ["pandosi-execute.service"])
+                             ["pando-execute.service"])
             self.assertEqual(calls, [
                 ["systemctl", "--user", "daemon-reload"],
                 ["systemctl", "--user", "restart",
-                 "pandosi-execute.service"],
+                 "pando-execute.service"],
             ])
 
     def test_one_client_list_maps_onto_three_service_managers(self):
@@ -1314,7 +1345,7 @@ class TestCodeSync(unittest.TestCase):
         where the repo could not see it at all. That is three places for the
         same client list to drift, and it drifted: the Mac's live think agent
         carried ``--mailbox-fallback`` addresses its checkout copy did not,
-        and the checkout copy of ``pandosi-code-sync.service`` carried
+        and the checkout copy of ``pando-code-sync.service`` carried
         ``--self-*`` flags the loaded unit did not.
         """
         sync = self._load()
@@ -1346,7 +1377,7 @@ class TestCodeSync(unittest.TestCase):
 
         # A model is not a client on any of the three, and the refusal is
         # spelled the same way from either dialect.
-        for model in ("pandosi-llama.service", "pandosi-root.service",
+        for model in ("pando-llama.service", "pando-root.service",
                       "com.jewelroam.pandosi-llm8b", "llama-server.exe"):
             for platform in ("linux", "darwin", "windows"):
                 handles, refused = sync.resolve_units([model], platform)
@@ -1360,14 +1391,14 @@ class TestCodeSync(unittest.TestCase):
         # The dialects are interchangeable *on purpose*: pi5's unit file
         # names must work when the same code runs on the Mac, and vice versa.
         handles, refused = sync.resolve_units(
-            ["pandosi-think.service", "think", "pandosi-stem-laya.service"],
+            ["pando-think.service", "think", "pando-stem-laya.service"],
             "darwin")
         self.assertEqual(refused, [])
-        self.assertEqual(handles, ["launchd:com.jewelroam.pandosi-think",
+        self.assertEqual(handles, ["launchd:com.pando.think",
                                    "proc:pando.worker"])
-        self.assertEqual(sync.resolve_units(["pandosi-stem-laya.service"],
+        self.assertEqual(sync.resolve_units(["pando-stem-laya.service"],
                                             "linux")[0],
-                         ["pandosi-stem-laya.service"])
+                         ["pando-stem-laya.service"])
 
     def test_a_restart_is_the_hosts_own_verb_not_a_shell_string(self):
         """Same request, three verbs: systemctl, launchctl, Stop-Process.
@@ -1390,7 +1421,7 @@ class TestCodeSync(unittest.TestCase):
                                  runner=darwin_runner)
         self.assertEqual(got["reason"], "restarted")
         self.assertEqual(got["driver"], "launchd")
-        self.assertIn("com.jewelroam.pandosi-think", got["restarted"])
+        self.assertIn("com.pando.think", got["restarted"])
         self.assertEqual(got["killed"], [4242])
         self.assertIn(["kill", "-TERM", "4242"], darwin_calls)
         self.assertTrue(any(call[0] == "launchctl" and call[1] == "kickstart"
@@ -1421,7 +1452,7 @@ class TestCodeSync(unittest.TestCase):
         # And the guard is all-or-nothing before any driver runs.
         linux_calls = []
         refused = sync.restart_units(
-            ["think", "pandosi-llama.service"], platform="linux",
+            ["think", "pando-llama.service"], platform="linux",
             runner=lambda argv, **kw: linux_calls.append(argv))
         self.assertEqual(refused["reason"], "refused")
         self.assertEqual(linux_calls, [])
@@ -1434,32 +1465,21 @@ class TestCodeSync(unittest.TestCase):
         and one of the Mac's agents is the mailbox listener every other Mac
         process talks to. So an unchanged plist is *checked* with
         ``launchctl print`` and reloaded only when launchd does not have it --
-        which is the pi5 trap (a file written, never loaded) closed without
-        turning every five-minute round into a restart of everything.
+        which is the stale-file trap (a file written, never loaded) closed
+        without turning every five-minute round into a restart of everything.
         """
         sync = self._load()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            source = root / "checkout" / "tools" / "mac-launchd"
             target = root / "Library" / "LaunchAgents"
-            source.mkdir(parents=True)
             target.mkdir(parents=True)
-            chat = ("<plist><dict><key>Label</key>"
-                    "<string>com.jewelroam.pandosi-chat</string>"
-                    "<key>RunAtLoad</key><true/></dict></plist>\n")
-            (source / "com.jewelroam.pandosi-chat.plist").write_text(chat)
-            (target / "com.jewelroam.pandosi-chat.plist").write_text("old\n")
-            # A model agent, a stray name, and a stale backup are not adopted.
-            (source / "com.jewelroam.pandosi-llm8b.plist").write_text(
-                "<plist><dict><key>Label</key><string>"
-                "com.jewelroam.pandosi-llm8b</string></dict></plist>\n")
-            (source / "notes.plist").write_text(chat)
-            (source / "com.pandosi.stem.laya.plist.bak").write_text("stale\n")
-            # A plist whose Label and filename disagree is refused, because
-            # the ledger would name a job launchd does not have.
-            (source / "com.pandosi.stem.llm8b.plist").write_text(
-                "<plist><dict><key>Label</key><string>wrong</string>"
-                "</dict></plist>\n")
+            config = {"render": {"python": "/host/a/venv/bin/python",
+                                 "repo": "/host/a/Pando",
+                                 "state_dir": "/host/a/.pando"},
+                      "services": {"chat": {"args": "--root http://10.1.0.1:1"}}}
+            from pando import deploy
+            rendered = deploy.render_units(config, "darwin")
+            (target / "com.pando.chat.plist").write_text("old\n")
 
             calls = []
 
@@ -1471,27 +1491,31 @@ class TestCodeSync(unittest.TestCase):
                     return subprocess.CompletedProcess(argv, 1, "", "no job")
                 return subprocess.CompletedProcess(argv, 0, "", "")
 
-            first = sync.install_units(source, target, platform="darwin",
+            first = sync.install_units(config, target, platform="darwin",
                                        runner=runner)
-            self.assertEqual(first["changed"],
-                             ["com.jewelroam.pandosi-chat.plist"])
+            self.assertEqual(first["changed"], ["com.pando.chat.plist"])
             self.assertEqual(first["reason"], "installed")
-            self.assertEqual(first["booted"], ["com.jewelroam.pandosi-chat"])
-            self.assertEqual((target / "com.jewelroam.pandosi-chat.plist")
-                             .read_text(), chat)
-            self.assertEqual((target / "com.jewelroam.pandosi-chat.plist.bak")
+            self.assertEqual(first["booted"], ["com.pando.chat"])
+            self.assertEqual((target / "com.pando.chat.plist").read_text(),
+                             rendered["com.pando.chat.plist"])
+            self.assertEqual((target / "com.pando.chat.plist.bak")
                              .read_text(), "old\n")
-            self.assertFalse(
-                (target / "com.jewelroam.pandosi-llm8b.plist").exists())
-            self.assertFalse((target / "notes.plist").exists())
-            self.assertFalse(
-                (target / "com.pandosi.stem.laya.plist.bak").exists())
-            self.assertFalse((target / "com.pandosi.stem.llm8b.plist").exists())
-            # The skip is a ledger fact, not a silence: one broken template
-            # must not stop the round, and it must not disappear either.
-            self.assertEqual([row["unit"] for row in first["skipped"]],
-                             ["com.pandosi.stem.llm8b.plist"])
-            self.assertEqual(first["skipped"][0]["reason"], "label-mismatch")
+
+            # The label-mismatch guard still watches the write path: a plist
+            # whose Label and filename disagree installs a job whose name is
+            # not the one the ledger would report. Rendered units always
+            # agree, so the guard is exercised with a hand-built dict.
+            def ok_runner(argv, **kwargs):
+                return subprocess.CompletedProcess(argv, 0, "OK\n", "")
+            guarded = sync._install_launchd(
+                {"com.pando.stem-llm.plist":
+                 "<plist><dict><key>Label</key><string>wrong</string>"
+                 "</dict></plist>\n"},
+                target, runner=ok_runner)
+            self.assertEqual([row["unit"] for row in guarded["skipped"]],
+                             ["com.pando.stem-llm.plist"])
+            self.assertEqual(guarded["skipped"][0]["reason"], "label-mismatch")
+            self.assertFalse((target / "com.pando.stem-llm.plist").exists())
 
             # Second round: the bytes match, launchd has the job, so nothing is
             # stopped and started again.
@@ -1501,7 +1525,7 @@ class TestCodeSync(unittest.TestCase):
                 calls.append(list(argv))
                 return subprocess.CompletedProcess(argv, 0, "", "")
 
-            second = sync.install_units(source, target, platform="darwin",
+            second = sync.install_units(config, target, platform="darwin",
                                         runner=loaded_runner)
             self.assertEqual(second["changed"], [])
             self.assertEqual(second["booted"], [])
@@ -1513,9 +1537,9 @@ class TestCodeSync(unittest.TestCase):
             # without being rewritten. That is the half Linux does with an
             # unconditional ``daemon-reload``.
             self.assertEqual(
-                sync.install_units(source, target, platform="darwin",
+                sync.install_units(config, target, platform="darwin",
                                    runner=runner)["booted"],
-                ["com.jewelroam.pandosi-chat"])
+                ["com.pando.chat"])
 
     def test_windows_keeps_its_roster_inside_the_checkout(self):
         """There is no ``~/Library/LaunchAgents`` to write on Windows.
@@ -1532,7 +1556,7 @@ class TestCodeSync(unittest.TestCase):
             source = root / "checkout"
             target = root / "deployed"
             source.mkdir()
-            (source / "pandosi-think.service").write_text("x\n")
+            (source / "pando-think.service").write_text("x\n")
             got = sync.install_units(source, target, platform="windows")
             self.assertFalse(got["installed"])
             self.assertEqual(got["changed"], [])
@@ -1690,15 +1714,19 @@ class TestCodeReceipts(unittest.TestCase):
         self.assertEqual(result["reason"], "receipt-failed")
 
 
-class TestPi5Telemetry(unittest.TestCase):
-    """Pi5 must be observable over the same direction it already talks.
+class TestNodeTelemetry(unittest.TestCase):
+    """A node must be observable over the same direction it already talks.
 
-    A root table the Mac cannot dial is not evidence that Pi5 stopped. The
-    sender therefore proves its identity with the durable node key, and the
-    receiver stamps its *own* clock. These tests pin both halves of that
+    A root table its observer cannot dial is not evidence the node stopped.
+    The sender therefore proves its identity with the durable node key, and
+    the receiver stamps its *own* clock. These tests pin both halves of that
     contract, including the failures that must leave the previous snapshot
-    untouched.
+    untouched. Host and member names come from the test fixture, exactly as
+    production takes them from the untracked host config.
     """
+
+    HOST = "node-a"
+    MEMBER = "node-a-root"
 
     def _modules(self):
         from pando import telemetry
@@ -1710,70 +1738,80 @@ class TestPi5Telemetry(unittest.TestCase):
         from pando.identity import Identity
         return Identity.generate()
 
+    def _envelope(self, identity, **overrides):
+        from pando import telemetry
+        kwargs = {"host": self.HOST, "member": self.MEMBER,
+                  "nodes": {"node-a-x": {"host": "10.1.0.2"}},
+                  "code_head": "a" * 40, "think_round": 42}
+        kwargs.update(overrides)
+        return telemetry.build_envelope(identity, **kwargs)
+
+    def _receiver(self, destination, pubkey):
+        from pando import telemetry
+        return telemetry.TelemetryReceiver(
+            destination, expected_pubkey=pubkey,
+            expected_host=self.HOST, expected_member=self.MEMBER)
+
+    def _validate(self, envelope, pubkey):
+        from pando import telemetry
+        return telemetry.validate_envelope(
+            envelope, pubkey, expected_host=self.HOST,
+            expected_member=self.MEMBER)
+
     def test_the_receiver_accepts_the_pinned_key_and_stamps_its_clock(self):
         telemetry, _, _ = self._modules()
         identity = self._identity()
-        envelope = telemetry.build_envelope(
-            identity, nodes={"pandosi-pi5-x": {"host": "192.168.31.22"}},
-            code_head="a" * 40, think_round=42, sent_at=1.0)
+        envelope = self._envelope(identity, sent_at=1.0)
         with tempfile.TemporaryDirectory() as tmp:
-            destination = Path(tmp) / "pi5-root.json"
-            receiver = telemetry.TelemetryReceiver(
-                destination, expected_pubkey=identity.public_key)
+            destination = Path(tmp) / "node-root.json"
+            receiver = self._receiver(destination, identity.public_key)
             answer = receiver.receive(envelope, now=2000.0)
             document = json.loads(destination.read_text(encoding="utf-8"))
         self.assertTrue(answer["ok"])
         self.assertEqual(document["mirrored_at"], 2000.0)
         self.assertEqual(document["sent_at"], 1.0,
                          "the sender clock is diagnostic, not freshness")
-        self.assertEqual(document["telemetry"]["host"], "pi5")
+        self.assertEqual(document["telemetry"]["host"], self.HOST)
         self.assertEqual(document["code_head"], "a" * 40)
 
     def test_any_payload_change_or_unknown_field_breaks_the_signature(self):
         telemetry, _, _ = self._modules()
         identity = self._identity()
-        envelope = telemetry.build_envelope(
-            identity, nodes={"pandosi-pi5-x": {"host": "192.168.31.22"}},
-            code_head="a" * 40, think_round=42)
+        envelope = self._envelope(identity)
         changed = json.loads(json.dumps(envelope))
-        changed["payload"]["nodes"]["pandosi-pi5-x"]["host"] = "10.0.0.1"
+        changed["payload"]["nodes"]["node-a-x"]["host"] = "10.0.0.1"
         with self.assertRaises(telemetry.TelemetrySignatureError):
-            telemetry.validate_envelope(changed, identity.public_key)
+            self._validate(changed, identity.public_key)
 
         unknown = json.loads(json.dumps(envelope))
         unknown["payload"]["surprise"] = True
         with self.assertRaises(telemetry.TelemetryError):
-            telemetry.validate_envelope(unknown, identity.public_key)
+            self._validate(unknown, identity.public_key)
         extra_top = json.loads(json.dumps(envelope))
         extra_top["surprise"] = True
         with self.assertRaises(telemetry.TelemetryError):
-            telemetry.validate_envelope(extra_top, identity.public_key)
+            self._validate(extra_top, identity.public_key)
 
     def test_wrong_signer_and_missing_signature_are_refused(self):
         telemetry, _, _ = self._modules()
         identity = self._identity()
         other = self._identity()
-        envelope = telemetry.build_envelope(
-            identity, nodes={"pandosi-pi5-x": {}}, code_head="a" * 40,
-            think_round=1)
+        envelope = self._envelope(identity, think_round=1)
         with self.assertRaises(telemetry.TelemetrySignatureError):
-            telemetry.validate_envelope(envelope, other.public_key)
+            self._validate(envelope, other.public_key)
         envelope["sig"] = ""
         with self.assertRaises(telemetry.TelemetrySignatureError):
-            telemetry.validate_envelope(envelope, identity.public_key)
+            self._validate(envelope, identity.public_key)
 
     def test_a_failed_replace_leaves_the_last_valid_mirror_intact(self):
         telemetry, _, _ = self._modules()
         from unittest import mock
         identity = self._identity()
-        envelope = telemetry.build_envelope(
-            identity, nodes={"pandosi-pi5-x": {}}, code_head="b" * 40,
-            think_round=9)
+        envelope = self._envelope(identity, code_head="b" * 40, think_round=9)
         with tempfile.TemporaryDirectory() as tmp:
-            destination = Path(tmp) / "pi5-root.json"
+            destination = Path(tmp) / "node-root.json"
             destination.write_text('{"mirrored_at": 10}\n', encoding="utf-8")
-            receiver = telemetry.TelemetryReceiver(
-                destination, expected_pubkey=identity.public_key)
+            receiver = self._receiver(destination, identity.public_key)
             with mock.patch.object(telemetry.os, "replace",
                                    side_effect=OSError("disk full")):
                 with self.assertRaises(OSError):
@@ -1784,19 +1822,16 @@ class TestPi5Telemetry(unittest.TestCase):
     def test_the_http_endpoint_requires_both_tokens_and_creates_no_task(self):
         telemetry, mailbox_tool, _ = self._modules()
         identity = self._identity()
-        envelope = telemetry.build_envelope(
-            identity, nodes={"pandosi-pi5-x": {}}, code_head="c" * 40,
-            think_round=7)
+        envelope = self._envelope(identity, code_head="c" * 40, think_round=7)
         with tempfile.TemporaryDirectory() as tmp:
             box = mailbox_tool.Mailbox(Path(tmp) / "mailbox")
-            receiver = telemetry.TelemetryReceiver(
-                Path(tmp) / "pi5-root.json",
-                expected_pubkey=identity.public_key)
+            receiver = self._receiver(Path(tmp) / "node-root.json",
+                                      identity.public_key)
             server = mailbox_tool.ThreadingHTTPServer(
                 ("127.0.0.1", 0),
                 mailbox_tool.build_handler(box, "mail-token", receiver))
             endpoint = (f"http://127.0.0.1:{server.server_address[1]}"
-                        "/telemetry/pi5")
+                        "/telemetry")
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:
@@ -1821,7 +1856,7 @@ class TestPi5Telemetry(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=5)
             self.assertEqual(box.list("open"), [], "telemetry is not work")
-            self.assertTrue((Path(tmp) / "pi5-root.json").is_file())
+            self.assertTrue((Path(tmp) / "node-root.json").is_file())
 
     def test_the_sender_signs_the_live_table_and_largest_ledger_round(self):
         telemetry, mailbox_tool, sync = self._modules()
@@ -1842,8 +1877,12 @@ class TestPi5Telemetry(unittest.TestCase):
             mail_token = root / "mail.token"
             mail_token.write_text("mail-token", encoding="utf-8")
             destination = root / "received.json"
-            receiver = telemetry.TelemetryReceiver(
-                destination, expected_pubkey=identity.public_key)
+            receiver = self._receiver(destination, identity.public_key)
+            publish_config = root / "host.toml"
+            publish_config.write_text(
+                "[telemetry.publish]\n"
+                f'host = "{self.HOST}"\n'
+                f'member = "{self.MEMBER}"\n', encoding="utf-8")
             state: dict = {}
 
             class Handler(mailbox_tool.BaseHTTPRequestHandler):
@@ -1863,8 +1902,8 @@ class TestPi5Telemetry(unittest.TestCase):
                         self._send(403, {"error": "pairing"})
                     elif self.path == "/nodes":
                         self._send(200, {"nodes": {
-                            "pandosi-pi5-x": {"host": "192.168.31.22"},
-                            "pandosi-pi5-laya": {"host": "192.168.31.22"},
+                            "node-a-x": {"host": "10.1.0.2"},
+                            "node-a-laya": {"host": "10.1.0.2"},
                         }})
                     elif self.path == "/status":
                         self._send(200, {"members": 2, "quorum_k": 1})
@@ -1890,9 +1929,12 @@ class TestPi5Telemetry(unittest.TestCase):
             thread.start()
             try:
                 endpoint = (f"http://127.0.0.1:{server.server_address[1]}"
-                            "/telemetry/pi5")
+                            "/telemetry")
                 root_url = f"http://127.0.0.1:{server.server_address[1]}"
-                with mock.patch.object(sync, "_head", return_value="d" * 40):
+                import os
+                with mock.patch.object(sync, "_head", return_value="d" * 40), \
+                        mock.patch.dict(os.environ, {
+                            "PANDO_HOST_CONFIG": str(publish_config)}):
                     result = sync.send_telemetry(
                         repo, url=endpoint, token_file=str(mail_token),
                         root_url=root_url,
@@ -1908,7 +1950,7 @@ class TestPi5Telemetry(unittest.TestCase):
             self.assertEqual(state["envelope"]["payload"]["status"],
                              {"members": 2, "quorum_k": 1})
             self.assertEqual(destination.read_text(encoding="utf-8").count(
-                "pandosi-pi5-x"), 1)
+                "node-a-x"), 1)
 
     def test_a_telemetry_failure_never_changes_the_updater_exit_code(self):
         _, _, sync = self._modules()
@@ -2151,145 +2193,123 @@ class TestCodeIdentity(unittest.TestCase):
                                          "messages": []}), [])
 
 
-class TestPi5UnitTemplates(unittest.TestCase):
-    """The pi5 roster must live in the repo, not only on the SD card.
+class TestDeployCatalogue(unittest.TestCase):
+    """The renderer owns what committed unit files used to prove.
 
-    2026-10-19: the live pi5 ran four user units that had no template here --
-    chat, seed intake, and the ten-minute code fast-forward among them. A node
-    rebuilt from this repo would have looked healthy and been unable to talk,
-    to receive a seed, or to update itself: exactly the parts that let it keep
-    running when no cloud agent is watching. A missing template stays invisible
-    until the rebuild, so the roster is checked here instead.
+    The repo ships no unit files: a checked-in template carries one host's
+    paths and talks the next host into adopting them. What stays testable is
+    the boundary -- the catalogue renders every service a node needs, the
+    restart guard names only services the catalogue can render, and a model
+    server appears in neither. The wiring (paths, peers, fallbacks) is the
+    host config's business, asserted host by host, not here.
     """
 
-    #: Units a rebuilt pi5 must end up with. Adding a resident role to the node
-    #: without adding its template here is the bug this list exists to catch.
-    ROSTER = (
-        "pandosi-llama.service",
-        "pandosi-root.service",
-        "pandosi-stem-text.service",
-        "pandosi-stem-laya.service",
-        "pandosi-stem-llm.service",
-        "pandosi-react.service",
-        "pandosi-think.service",
-        "pandosi-think-watchdog.service",
-        "pandosi-chat.service",
-        "pandosi-seed-pull.service",
-        "pandosi-code-sync.service",
-        "pandosi-execute.service",
-    )
+    def _config(self, **services):
+        config = {"render": {"python": "/host/a/venv/bin/python",
+                             "repo": "/host/a/Pando",
+                             "state_dir": "/host/a/.pando"},
+                  "services": {}}
+        for name, spec in services.items():
+            config["services"][name] = spec
+        return config
 
-    def _units(self) -> dict:
-        root = Path(__file__).resolve().parents[1] / "tools" / "pi5-systemd"
-        return {path.name: path.read_text(encoding="utf-8")
-                for path in sorted(root.iterdir())
-                if path.suffix in (".service", ".timer")}
+    def test_the_catalogue_covers_a_full_node_roster(self):
+        from pando import deploy
+        expected = {"think", "react", "chat", "root", "execute", "mailbox",
+                    "code-sync", "seed-pull", "think-watchdog",
+                    "stem-text", "stem-laya", "stem-llm"}
+        self.assertEqual(expected - set(deploy.SERVICES), set())
 
-    def test_the_roster_is_complete_and_every_template_is_a_unit(self):
-        units = self._units()
-        for name in self.ROSTER:
-            self.assertIn(name, units, f"no template for {name}")
-        for name, text in units.items():
+    def test_every_rendered_unit_is_well_formed(self):
+        from pando import deploy
+        config = self._config(
+            think={"args": "--node-id a-proposer"},
+            **{"code-sync": {"args": "--repo /host/a/Pando", "interval": 300}})
+        linux = deploy.render_units(config, "linux")
+        self.assertIn("pando-think.service", linux)
+        self.assertIn("pando-code-sync.service", linux)
+        self.assertIn("pando-code-sync.timer", linux)
+        for name, text in linux.items():
             self.assertIn("[Unit]", text, name)
             if name.endswith(".service"):
-                self.assertIn("[Service]", text, name)
                 self.assertIn("ExecStart=", text, name)
             else:
-                self.assertIn("[Timer]", text, name)
                 self.assertIn("OnUnitActiveSec=", text, name)
+        darwin = deploy.render_units(config, "darwin")
+        self.assertIn("com.pando.think.plist", darwin)
+        for name, text in darwin.items():
+            self.assertIn("<key>Label</key>", text, name)
+            self.assertIn("<key>ProgramArguments</key>", text, name)
+        self.assertIn("<key>StartInterval</key><integer>300</integer>",
+                      darwin["com.pando.code-sync.plist"])
 
-    def test_a_writer_never_loses_a_message_to_a_mailbox_partition(self):
-        """Every pi5 unit that posts to the colony mailbox needs a fallback.
+    def test_rendered_paths_come_from_the_config_not_the_repo(self):
+        from pando import deploy
+        config = self._config(think={"args": "--node-id a-proposer"})
+        text = deploy.render_units(config, "linux")["pando-think.service"]
+        self.assertIn("/host/a/venv/bin/python", text)
+        self.assertIn("WorkingDirectory=/host/a/Pando", text)
+        self.assertNotIn("/home/", text)
+        self.assertNotIn("/Users/", text)
 
-        2026-10-19: the pi5 react unit was the last writer with no fallback.
-        Win's supervisor and the Mac's launchd both had one, and pi5's own
-        proposer had one -- so this was a single missed flag, found by reading
-        ``systemctl show pandosi-react.service`` on the live board, not by a
-        test. A reaction posted to the fallback replicates back to the primary
-        within one replication pass; that is what "queued" means here. A
-        reaction posted nowhere is gone, and pi5 hosts a decision model whose
-        vote counts toward quorum.
+    def test_an_unknown_service_is_refused(self):
+        from pando import deploy
+        config = self._config(llama={"args": "--port 8085"})
+        with self.assertRaises(deploy.DeployError):
+            deploy.render_units(config, "linux")
+
+    def test_a_timer_is_always_emitted_with_its_service(self):
+        from pando import deploy
+        config = self._config(
+            **{"code-sync": {"args": "--repo /host/a/Pando",
+                             "interval": 300}})
+        units = deploy.render_units(config, "linux")
+        timers = {name for name in units if name.endswith(".timer")}
+        for timer in timers:
+            service = timer[:-len(".timer")] + ".service"
+            self.assertIn(service, units,
+                          f"{timer} without its service is a dead schedule")
+
+    def test_the_restart_guard_names_only_renderable_services(self):
+        """The guard and the catalogue must not drift apart.
+
+        A unit in ``CLIENT_UNITS`` that the catalogue cannot render is
+        restarted onto bytes nothing can rebuild; a catalogue service the
+        guard does not know is adopted but never reloaded -- the stale-code
+        trap one level up.
         """
-        units = self._units()
-        writers = [name for name, text in units.items()
-                   if "pando.reactor" in text or "pando.proposer" in text
-                   or "pando.messenger" in text]
-        self.assertTrue(writers, "no pi5 writer units at all")
-        for name in writers:
-            self.assertIn("--mailbox-fallback", units[name],
-                          f"{name} can lose a message to a partition")
-
-    def test_a_timer_cannot_run_a_job_that_is_not_a_template(self):
-        units = self._units()
-        timers = [name for name in units if name.endswith(".timer")]
-        self.assertTrue(timers, "no timers at all")
-        missing = []
-        for name in timers:
-            for unit in re.findall(r"^Unit=(\S+)$", units[name], re.M):
-                if unit not in units:
-                    missing.append(f"{name} -> {unit}")
-        self.assertEqual(missing, [])
-
-    def test_the_fast_forward_only_restarts_units_the_guard_allows(self):
-        """A ten-minute job that may restart a model would OOM a 4 GB pi5."""
+        from pando import deploy
         from tools import code_sync
+        for name, handles in code_sync.CLIENT_UNITS.items():
+            self.assertIn(name, deploy.SERVICES,
+                          f"{name} is restarted but not renderable")
+            # An empty handle means "this platform does not run that unit" --
+            # a fact the ledger reports, not a gap to fill.
+            if handles["linux"]:
+                self.assertEqual(handles["linux"], f"pando-{name}.service")
+            if handles["darwin"] and not handles["darwin"].startswith("proc"):
+                # A proc: handle means a supervisor respawns the process and
+                # killing it is the whole restart; anything else must be the
+                # launchd label the renderer mints for this service.
+                self.assertEqual(handles["darwin"],
+                                 f"launchd:com.pando.{name}")
 
-        units = self._units()
-        restarted = set(re.findall(
-            r"--restart\s+(\S+)", units["pandosi-code-sync.service"]))
-        self.assertTrue(restarted, "the fast-forward restarts nothing")
-        self.assertEqual(restarted - set(code_sync.SAFE_UNITS), set())
-        # And what it does restart must be a unit this repo can rebuild.
-        self.assertEqual(restarted - set(units), set())
-
-    def test_every_voter_stem_is_restarted_by_the_fast_forward(self):
-        """The allow-list and the deployed unit must not drift apart.
-
-        ``SAFE_UNITS`` is the guard and ``--restart`` is the order. A unit
-        added to one and not the other fails silently in opposite directions:
-        in the guard only, it is never restarted; in the order only,
-        ``restart_units`` refuses the whole batch and *no* unit restarts.
-
-        Measured 2026-10-19: all three pi5 stems reported ``code_head=None``
-        with the checkout at ``9e69dea``, while their unit files had not been
-        touched since Oct 17. The stems are the voters -- restarting them is
-        a re-registration, and is charged at zero model memory.
-        """
+    def test_no_model_server_is_restartable_or_renderable(self):
+        from pando import deploy
         from tools import code_sync
+        self.assertNotIn("llama", deploy.SERVICES)
+        self.assertFalse(any("llama" in name
+                             for name in code_sync.CLIENT_UNITS))
+        self.assertFalse(any("llama" in handle
+                             for handles in code_sync.CLIENT_UNITS.values()
+                             for handle in handles.values()))
 
-        restarted = set(re.findall(
-            r"--restart\s+(\S+)", self._units()["pandosi-code-sync.service"]))
-        wants = {name for name in code_sync.SAFE_UNITS
-                 if name.startswith("pandosi-stem-")}
-        self.assertEqual(wants, {
-            "pandosi-stem-text.service",
-            "pandosi-stem-laya.service",
-            "pandosi-stem-llm.service",
-        })
-        self.assertEqual(wants - restarted, set(),
-                         "a stem the guard allows is never actually restarted")
-        self.assertNotIn("pandosi-llama.service", restarted,
-                         "the fast-forward must never reload a model")
-
-
-    def test_the_updater_running_on_pi5_can_receive_its_own_fixes(self):
-        """The ten-minute job must not run a hand-copied, frozen updater.
-
-        It runs a copy outside the checkout (it has to: the checkout is what
-        gets rewritten), so the copy is told where its successor lives. Source
-        inside the checkout, target outside it -- and adopt only what compiles,
-        which ``refresh_self`` enforces.
-        """
-        units = self._units()
-        line = units["pandosi-code-sync.service"]
-        source = re.search(r"--self-source\s+(\S+)", line)
-        target = re.search(r"--self-target\s+(\S+)", line)
-        self.assertIsNotNone(source, "the updater is never told about its successor")
-        self.assertIsNotNone(target, "no deployed copy to refresh")
-        self.assertTrue(source.group(1).startswith("/home/admin/pandosi-src/"))
-        self.assertTrue(target.group(1).startswith("/home/admin/.pandosi/"))
-        # And the file it adopts is the one this repo can rebuild.
-        self.assertEqual(Path(source.group(1)).name, "code_sync.py")
+    def test_the_updater_is_a_catalogue_service_so_it_can_receive_fixes(self):
+        """code-sync renders like everything else: its unit can name
+        ``--self-source`` inside the checkout and ``--self-target`` outside
+        it, which is what lets the running copy adopt its successor."""
+        from pando import deploy
+        self.assertIn("code-sync", deploy.SERVICES)
 
 
 class TestCodeDriftCheck(unittest.TestCase):

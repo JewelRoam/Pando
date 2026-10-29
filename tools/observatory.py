@@ -18,13 +18,13 @@ Reads live from:
   * the task mailbox  - /health, /tasks (chat + work feed)
   * the island root   - /nodes, /status, /playbook (participants, quorum)
   * local process state - launchd/systemd unit presence for this host
-  * optional extras from ~/.pandosi/hosts.json ("services", "think_ledgers")
+  * optional extras from ~/.pando/hosts.json ("services", "think_ledgers")
 Writes back to:
   * the task mailbox only, and only when the operator types in the chat box;
     posting publishes a "[chat] ..." message from a chosen sender identity.
 
 Config discovery order (first hit wins): command-line flag, environment
-variable, then the per-machine files under ~/.pandosi/.
+variable, then the per-machine files under ~/.pando/.
 """
 from __future__ import annotations
 
@@ -298,11 +298,11 @@ def local_units() -> dict:
     try:
         out = subprocess.run(["launchctl", "list"], capture_output=True,
                              text=True, timeout=5).stdout
-        if "pandosi" in out:
+        if "pando" in out:
             units["source"] = "launchd"
             for line in out.splitlines():
                 parts = line.split("\t")
-                if len(parts) >= 3 and "pandosi" in parts[2]:
+                if len(parts) >= 3 and "pando" in parts[2]:
                     pid = parts[0]
                     units["services"].append({
                         "name": parts[2], "pid": None if pid == "-" else pid,
@@ -314,13 +314,13 @@ def local_units() -> dict:
         try:
             out = subprocess.run(
                 ["systemctl", "--user", "list-units", "--type=service",
-                 "--no-legend", "--no-pager", "*pandosi*"],
+                 "--no-legend", "--no-pager", "*pando*"],
                 capture_output=True, text=True, timeout=5).stdout
             if out.strip():
                 units["source"] = "systemd"
                 for line in out.splitlines():
                     fields = line.split()
-                    if len(fields) >= 4 and "pandosi" in fields[0]:
+                    if len(fields) >= 4 and "pando" in fields[0]:
                         units["services"].append({
                             "name": fields[0], "pid": None,
                             "alive": fields[2] == "running",
@@ -340,7 +340,7 @@ def read_remote_jsonl_tail(target: str, path: str, limit: int = 3,
 
     The page refreshes every 5 s, so a slow ssh must not be paid per poll:
     results are cached for `ttl` seconds and the call itself is bounded.
-    A launchd process on this Mac cannot open 192.168.31.0/24 (EHOSTUNREACH).
+    A launchd process on this host cannot open the LAN (EHOSTUNREACH).
     The error has to stay on the row, or the host looks like an empty person.
     """
     key = (target, path)
@@ -1707,7 +1707,7 @@ def collect_state(cfg: dict) -> dict:
 # --------------------------------------------------------------------------
 def build_handler(cfg: dict):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "pandosi-observatory/1.0"
+        server_version = "pando-observatory/1.0"
 
         def log_message(self, *args):  # keep the console clean
             return
@@ -2078,11 +2078,11 @@ def main() -> int:
                         help="listen port (default 8799)")
     parser.add_argument("--mailbox", default=None,
                         help="mailbox base URL (default: the first candidate "
-                             "in ~/.pandosi/hosts.json that answers /health, "
+                             "in ~/.pando/hosts.json that answers /health, "
                              f"else {DEFAULT_MAILBOX})")
     parser.add_argument("--root", default=None,
                         help="single island root base URL; by default all "
-                             "roots in ~/.pandosi/hosts.json are read")
+                             "roots in ~/.pando/hosts.json are read")
     args = parser.parse_args()
 
     hosts = _read_hosts()

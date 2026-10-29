@@ -39,7 +39,7 @@ from .grants import grant_status
 from .identity import Identity, canonical
 from .identity import verify as verify_signature
 
-DEFAULT_OUTBOX = "~/.pandosi/rebalance-outbox"
+DEFAULT_OUTBOX = "~/.pando/rebalance-outbox"
 ALLOWED_PARAMS = {"node_id", "target_host"}
 MAX_LABEL = 128
 

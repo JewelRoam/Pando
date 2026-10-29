@@ -206,7 +206,7 @@ def make_handler(outbox: Path, token: str, repo: Path | None = None):
             if not self._authed():
                 return
             if path == "/code.bundle":
-                built = code_bundle(repo, Path.home() / ".pandosi" / "code.bundle")
+                built = code_bundle(repo, Path.home() / ".pando" / "code.bundle")
                 if built is None:
                     self._send(404, {"error": "no bundle"})
                     return
@@ -271,8 +271,8 @@ def serve(outbox: Path, token: str, host: str, port: int, repo: Path | None = No
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--outbox", default="~/.pandosi/outbox")
-    parser.add_argument("--token-file", default="~/.pandosi/mailbox.token")
+    parser.add_argument("--outbox", default="~/.pando/outbox")
+    parser.add_argument("--token-file", default="~/.pando/mailbox.token")
     parser.add_argument("--bind", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8478)
     parser.add_argument("--repo", default="")

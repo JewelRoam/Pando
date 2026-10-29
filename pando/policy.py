@@ -38,7 +38,7 @@ import json
 import os
 from pathlib import Path
 
-DEFAULT_PATH = "~/.pandosi/policy.json"
+DEFAULT_PATH = "~/.pando/policy.json"
 
 #: How many decision models must adopt a change that makes the gate easier to
 #: pass. One more than the default ``min_adopt``, and it is a floor, not a

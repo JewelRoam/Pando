@@ -55,7 +55,7 @@ SELECTION_RULE = (
 )
 PREREGISTRATION = {
     "schema": "historical-action-replay-preregistration-v1",
-    "source": "signed proposal payload.goal values in ~/.pandosi/mailbox/tasks",
+    "source": "signed proposal payload.goal values in ~/.pando/mailbox/tasks",
     "source_cutoff": SOURCE_CUTOFF,
     "selection_rule": SELECTION_RULE,
     "per_action": PER_ACTION,
@@ -529,7 +529,7 @@ def print_report(summary: dict) -> None:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tasks-dir",
-                        default=str(Path.home() / ".pandosi/mailbox/tasks"))
+                        default=str(Path.home() / ".pando/mailbox/tasks"))
     parser.add_argument("--source-manifest",
                         default=str(ROOT / "assets" /
                                     "historical-action-heldout-20261029.json"))
@@ -540,7 +540,7 @@ def main(argv=None) -> int:
     parser.add_argument("--run", action="store_true")
     parser.add_argument("--base-url", default="http://127.0.0.1:8087/v1")
     parser.add_argument("--model", default="qwen3-8b-q5km-instruct")
-    parser.add_argument("--api-key-file", default="~/.pandosi/llm-api-8b-q6.token")
+    parser.add_argument("--api-key-file", default="~/.pando/llm-api-8b-q6.token")
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--max-tokens", type=int, default=120)
     parser.add_argument("--timeout", type=float, default=180.0)

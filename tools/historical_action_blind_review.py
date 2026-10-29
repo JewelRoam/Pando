@@ -26,7 +26,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SEMANTICS_PATH = Path(__file__).with_name("action_semantics_check.py")
 HISTORICAL_PATH = Path(__file__).with_name("historical_action_replay.py")
-EXPERIMENTS = Path.home() / ".pandosi" / "experiments"
+EXPERIMENTS = Path.home() / ".pando" / "experiments"
 DEFAULT_ARTIFACT = EXPERIMENTS / "historical-action-replay-20261029.json"
 DEFAULT_PACKET = (ROOT / "assets" /
                   "historical-action-blind-review-20261029.packet.json")

@@ -29,10 +29,10 @@ is never accepted as evidence here.
 
 Usage:
   python tools/code_drift_check.py --repo . \\
-      --root mac http://127.0.0.1:8765 ~/.pandosi/pairing.token \\
-      --root win http://192.168.31.100:8790 ~/.pandosi/win-pairing.token \\
-      --root-json pi5 ~/.pandosi/remote/pi5-root.json \
-      --tip-file ~/.pandosi/code.bundle.head --json
+      --root node-a http://127.0.0.1:8765 ~/.pando/pairing.token \\
+      --root node-b http://10.1.0.10:8790 ~/.pando/node-b-pairing.token \\
+      --root-json node-c ~/.pando/remote/node-c-root.json \
+      --tip-file ~/.pando/code.bundle.head --json
 
 ``--root NAME URL TOKEN_FILE`` dials a root table. ``--root-json NAME FILE``
 reads one that another process copied here, which is how a host this job may
@@ -143,7 +143,7 @@ def load_root_json(path: str, now: float,
 
     This exists because macOS 27 gates local-network reachability per
     *responsible process*, and a launchd job led by the Homebrew interpreter
-    may not open 192.168.31.0/24 at all - a refusal that follows it into its
+    may not open the LAN at all - a refusal that follows it into its
     children, so it cannot be worked around inside this tool. A process that
     *can* reach the peer (an ssh from a job led by ``/bin/sh``; see
     tools/mirror_ledger.py) writes the peer's ``/nodes`` here instead.
@@ -248,7 +248,7 @@ def deploy_tip(repo: Path, tip_files=()) -> str | None:
     local-HEAD behaviour.
 
     A peer bundle is another real deployment path. ``--tip-file`` points at the
-    commit served by that bundle (normally ``~/.pandosi/code.bundle.head``).
+    commit served by that bundle (normally ``~/.pando/code.bundle.head``).
     Take the newer of upstream and that served commit when they are in one
     ancestry chain. This lets the fleet be legitimately ahead of GitHub without
     turning every peer-deployed process into a permanent ``ahead`` alarm.
@@ -508,11 +508,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--retry-delay", type=float,
                         default=DEFAULT_RETRY_DELAY_S,
                         help="seconds between those attempts")
-    parser.add_argument("--state-file", default="~/.pandosi/code-drift-state.json",
+    parser.add_argument("--state-file", default="~/.pando/code-drift-state.json",
                         help="where the first-seen record lives (empty=stateless, "
                              "which makes every poll a fresh grace window)")
     parser.add_argument("--snapshot-file",
-                        default="~/.pandosi/code-drift-check.json",
+                        default="~/.pando/code-drift-check.json",
                         help="where the verdict is published for other readers")
     parser.add_argument("--tip-file", action="append", default=[],
                         metavar="FILE",

@@ -4017,30 +4017,41 @@ class TestResidentPullAllPlatforms(unittest.TestCase):
         self.assertIn("'--from-file', $seedSources", text)
         self.assertIn("'--node-id', 'win'", text)
 
-    def test_the_mac_agent_and_the_pi5_units_read_the_same_flag(self):
-        root = self._root()
-        plist = (root / "tools" / "mac-launchd" /
-                 "com.jewelroam.pandosi-code-watch.plist").read_text(
-                     encoding="utf-8")
-        self.assertIn("<string>--peer-file</string>", plist)
-        self.assertIn("<string>/Users/zhengenrong/.pandosi/code-sources.txt</string>",
-                      plist)
-        units = root / "tools" / "pi5-systemd"
-        sync = (units / "pandosi-code-sync.service").read_text(encoding="utf-8")
-        seed = (units / "pandosi-seed-pull.service").read_text(encoding="utf-8")
-        self.assertIn("--peer-file /home/admin/.pando/code-sources.txt", sync)
-        self.assertIn("--from-file /home/admin/.pando/seed-sources.txt", seed)
-        self.assertIn("--node-id pi5", seed)
-        # Pi5's bootstrap goes through the Windows mailbox, which is already
-        # reachable on the home LAN and has a Tailscale fallback.  Both use the
-        # same 8778 service the node already runs, so this adds no port and no
-        # firewall approval.  The Mac bundle remains available through the
-        # peer file; it is no longer the only baked-in first hop.
-        self.assertIn("--peer http://192.168.31.100:8778/code.bundle", sync)
-        self.assertIn("--peer http://100.93.216.90:8778/code.bundle", sync)
-        self.assertIn("--from http://100.92.184.4:8478", seed)
-        for text in (sync, seed):
-            self.assertNotIn("192.168.31.41", text)
+    def test_every_platform_reads_the_same_source_list_flags(self):
+        """--peer-file/--from-file are the updater contract on every OS.
+
+        The committed plists and units used to pin this by carrying one
+        fleet's paths; the renderer now pins it by construction: whatever
+        source lists the host config names pass through verbatim, on linux
+        and darwin alike, and no fleet address can leak in from the repo.
+        """
+        from pando import deploy
+        config = {"render": {"python": "/host/a/venv/bin/python",
+                             "repo": "/host/a/Pando",
+                             "state_dir": "/host/a/.pando"},
+                  "services": {
+                      "code-sync": {"args":
+                                    "--peer-file /host/a/.pando/code-sources.txt "
+                                    "--peer http://10.1.0.10:8778/code.bundle",
+                                    "interval": 300},
+                      "seed-pull": {"args":
+                                    "--from-file /host/a/.pando/seed-sources.txt "
+                                    "--from http://10.1.0.4:8478 "
+                                    "--node-id node-a"}}}
+        for platform in ("linux", "darwin"):
+            units = deploy.render_units(config, platform)
+            rendered = "\n".join(units.values())
+            # Token-wise: argv splits flags from values on both platforms.
+            for flag, value in (
+                    ("--peer-file", "/host/a/.pando/code-sources.txt"),
+                    ("--from-file", "/host/a/.pando/seed-sources.txt"),
+                    ("--node-id", "node-a"),
+                    ("--peer", "http://10.1.0.10:8778/code.bundle"),
+                    ("--from", "http://10.1.0.4:8478")):
+                self.assertIn(flag, rendered)
+                self.assertIn(value, rendered)
+            self.assertNotIn("/Users/", rendered)
+            self.assertNotIn("/home/", rendered)
 
     def test_the_windows_mailbox_serves_the_checkout_it_already_updates(self):
         root = self._root()
@@ -4086,8 +4097,19 @@ class TestResidentPullAllPlatforms(unittest.TestCase):
         self.assertIn("'--mailbox'", executor)
         self.assertIn("'--mailbox-fallback'", executor)
         self.assertIn("http://127.0.0.1:8778", executor)
-        unit = (root / "tools" / "pi5-systemd" /
-                "pandosi-execute.service").read_text(encoding="utf-8")
+        # The linux half is rendered, not committed: the catalogue owns the
+        # program, the host config owns the mailbox list, and both flags
+        # pass through verbatim.
+        from pando import deploy
+        units = deploy.render_units(
+            {"render": {"python": "/host/a/venv/bin/python",
+                        "repo": "/host/a/Pando",
+                        "state_dir": "/host/a/.pando"},
+             "services": {"execute": {
+                 "args": "--mailbox http://10.1.0.9:8776 "
+                         "--mailbox-fallback http://10.1.0.10:8778"}}},
+            "linux")
+        unit = units["pando-execute.service"]
         self.assertIn("tools/execute_loop.py", unit)
         self.assertIn("--mailbox-fallback ", unit)
 
@@ -4112,9 +4134,9 @@ class TestExecuteStateResolution(unittest.TestCase):
                          str(Path("/tmp/pi5-state") / "seed-home-empty"))
         self.assertEqual(args.policy_path, args.policy)
 
-    def test_the_default_is_still_the_mac_tree(self):
+    def test_the_default_state_tree_is_dot_pando(self):
         args = self._resolve([])
-        home = Path("~/.pandosi").expanduser()
+        home = Path("~/.pando").expanduser()
         self.assertEqual(args.ledger, str(home / "execute-ledger.jsonl"))
         self.assertEqual(args.out_root, str(home / "executions"))
         # The gate's own copy of the installed set has to land on the same
@@ -4161,10 +4183,9 @@ class TestExecuteLoop(unittest.TestCase):
         spec.loader.exec_module(module)
         return module
 
-    def test_the_mac_directory_is_tried_before_the_pi_short_name(self):
+    def test_the_canonical_hosts_file_is_the_only_default(self):
         loop = self._load()
-        self.assertEqual(loop.HOST_FILES[0], "~/.pandosi/hosts.json")
-        self.assertIn("~/.pando/hosts.json", loop.HOST_FILES)
+        self.assertEqual(loop.HOST_FILES, ("~/.pando/hosts.json",))
 
     def test_an_explicit_hosts_file_is_used_as_given(self):
         loop = self._load()
@@ -4176,8 +4197,8 @@ class TestExecuteLoop(unittest.TestCase):
     def test_the_mailbox_comes_from_the_hosts_table(self):
         loop = self._load()
         self.assertEqual(
-            loop.mailbox_url({"mailboxes": ["http://pi5-box:8776", "http://x"]}),
-            "http://pi5-box:8776")
+            loop.mailbox_url({"mailboxes": ["http://node-box:8776", "http://x"]}),
+            "http://node-box:8776")
         self.assertEqual(loop.mailbox_url({}), "http://127.0.0.1:8776")
         self.assertEqual(loop.mailbox_url({"mailboxes": []}),
                          "http://127.0.0.1:8776")

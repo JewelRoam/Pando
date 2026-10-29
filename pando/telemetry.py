@@ -1,16 +1,17 @@
 """Signed, push-only telemetry for a node whose root cannot be dialled.
 
-The Mac used reverse SSH to read Pi5's root table. That made the observation
+Reading such a node's root table over a reverse tunnel made the observation
 depend on a route in the opposite direction from the application traffic:
-Pi5 could keep proposing and voting while the Mac called it unreadable. This
-module makes Pi5 push a small, signed observation over the same path its
-mailbox clients already use.
+the node could keep proposing and voting while its observer called it
+unreadable. This module makes the node push a small, signed observation over
+the same path its mailbox clients already use.
 
 The transport is authenticated twice. The mailbox bearer token says the sender
-may call the authenticated API, and the Pi5 identity signature says the payload
+may call the authenticated API, and the identity signature says the payload
 came from the pinned node key. The receiver stamps its own clock; a sender's
 clock is stored for diagnosis but never decides whether an observation is
-fresh.
+fresh. Pins (host, member, pubkey) arrive from the caller - typically the
+untracked per-host config in ``pando.hostconfig`` - never from this module.
 """
 
 from __future__ import annotations
@@ -26,11 +27,6 @@ from typing import Any
 from .identity import Identity, verify
 
 PROTOCOL_VERSION = 1
-PI5_HOST = "pi5"
-PI5_MEMBER = "pi5-root"
-#: The durable public identity reported by all three Pi5 stems. Pinning it is
-#: what keeps a mailbox-token holder from impersonating the telemetry source.
-PI5_PUBKEY = "zrG0Bho6PhryMadPGkJzFri2I18rRsmMApjXQ5dlTnY="
 
 
 class TelemetryError(ValueError):
@@ -41,11 +37,11 @@ class TelemetrySignatureError(TelemetryError):
     """A well-shaped envelope whose signer or signature is not trusted."""
 
 
-def build_envelope(identity: Identity, *, nodes: dict, code_head: str,
+def build_envelope(identity: Identity, *, host: str, member: str,
+                   nodes: dict, code_head: str,
                    think_round: int, status: dict | None = None,
-                   sent_at: float | None = None, host: str = PI5_HOST,
-                   member: str = PI5_MEMBER) -> dict:
-    """Build the exact JSON object the Pi5 code-sync job posts."""
+                   sent_at: float | None = None) -> dict:
+    """Build the exact JSON object a node's code-sync job posts."""
     payload = {
         "member": member,
         "sent_at": time.time() if sent_at is None else float(sent_at),
@@ -70,8 +66,8 @@ def _is_number(value: Any) -> bool:
 
 
 def validate_envelope(envelope: Any, expected_pubkey: str,
-                      *, expected_host: str = PI5_HOST,
-                      expected_member: str = PI5_MEMBER) -> dict:
+                      *, expected_host: str,
+                      expected_member: str) -> dict:
     """Return a validated payload, or raise and write nothing.
 
     Unknown fields are refused rather than ignored. The protocol is versioned,
@@ -154,13 +150,26 @@ class TelemetryReceiver:
     """Validate one pinned signer and atomically publish its root snapshot."""
 
     def __init__(self, destination: str | Path, *,
-                 expected_pubkey: str = PI5_PUBKEY,
-                 expected_host: str = PI5_HOST,
-                 expected_member: str = PI5_MEMBER):
+                 expected_pubkey: str,
+                 expected_host: str,
+                 expected_member: str):
         self.destination = Path(destination).expanduser()
         self.expected_pubkey = expected_pubkey
         self.expected_host = expected_host
         self.expected_member = expected_member
+
+    @classmethod
+    def from_config(cls, destination: str | Path, config: dict
+                    ) -> "TelemetryReceiver":
+        """Build from the ``telemetry.accept`` section of a host config."""
+        from . import hostconfig
+        pin = hostconfig.telemetry_accept(config)
+        if pin is None:
+            raise TelemetryError(
+                "host config has no [telemetry.accept] pin; the receiver "
+                "cannot trust anyone without one")
+        return cls(destination, expected_pubkey=pin["pubkey"],
+                   expected_host=pin["host"], expected_member=pin["member"])
 
     def receive(self, envelope: Any, now: float | None = None) -> dict:
         payload = validate_envelope(

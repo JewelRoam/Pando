@@ -1393,10 +1393,9 @@ class TestDelegatedOperatorGrant(unittest.TestCase):
         save_grant("deploy_operator", "profile-catalogue/v1", "operator-host",
                    "test-user", format_timestamp(now + dt.timedelta(days=1)),
                    evidence="test authorization", path=grants)
-        with mock.patch.object(self._delegation(), "MAC_OPERATOR_PUBKEY",
-                               identity.public_key):
-            envelope = self._delegation().issue_envelope(
-                grants, identity=identity, now=now)
+        envelope = self._delegation().issue_envelope(
+            grants, identity=identity, expected_pubkey=identity.public_key,
+            now=now)
         return identity, identity_path, grants, now, envelope
 
     def test_signed_delegation_installs_once_and_is_idempotent(self):
@@ -1416,7 +1415,7 @@ class TestDelegatedOperatorGrant(unittest.TestCase):
             self.assertEqual(second["status"], "unchanged")
             self.assertFalse(second["changed"])
             grant = load_grants(target)["deploy_operator"]
-            self.assertEqual(grant["origin"], "mac-delegation/v1")
+            self.assertEqual(grant["origin"], "operator-delegation/v1")
             self.assertEqual(grant["resource"], "profile-catalogue/v1")
             self.assertEqual(grant["scope"], "operator-host")
             self.assertEqual(grant_status("deploy_operator", target, now=now)
@@ -1488,11 +1487,10 @@ class TestDelegatedOperatorGrant(unittest.TestCase):
             save_grant("deploy_operator", "profile-catalogue/v1", "operator-host",
                        "test-user", format_timestamp(now + dt.timedelta(days=1)),
                        evidence="test authorization", path=grants)
-            with mock.patch.object(self._delegation(), "MAC_OPERATOR_PUBKEY",
-                                   pinned.public_key):
-                with self.assertRaises(self._delegation().DelegationError):
-                    self._delegation().issue_envelope(
-                        grants, identity=attacker, now=now)
+            with self.assertRaises(self._delegation().DelegationError):
+                self._delegation().issue_envelope(
+                    grants, identity=attacker,
+                    expected_pubkey=pinned.public_key, now=now)
 
     def test_a_delegated_grant_cannot_mint_another_delegation(self):
         from unittest import mock
@@ -1503,13 +1501,12 @@ class TestDelegatedOperatorGrant(unittest.TestCase):
             target = root / "target-grants.toml"
             self._delegation().install_envelope(
                 envelope, target, expected_pubkey=identity.public_key, now=now)
-            with mock.patch.object(self._delegation(), "MAC_OPERATOR_PUBKEY",
-                                   identity.public_key):
-                with self.assertRaisesRegex(
-                        self._delegation().DelegationError,
-                        "cannot issue another delegation"):
-                    self._delegation().issue_envelope(
-                        target, identity=identity, now=now)
+            with self.assertRaisesRegex(
+                    self._delegation().DelegationError,
+                    "cannot issue another delegation"):
+                self._delegation().issue_envelope(
+                    target, identity=identity,
+                    expected_pubkey=identity.public_key, now=now)
 
     def test_a_damaged_audit_chain_blocks_install_and_revocation(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1529,7 +1526,7 @@ class TestDelegatedOperatorGrant(unittest.TestCase):
                     changed, target, expected_pubkey=identity.public_key, now=now)
             with self.assertRaises(PermissionError):
                 from pando.grants import remove_grant_if_origin
-                remove_grant_if_origin("deploy_operator", "mac-delegation/v1",
+                remove_grant_if_origin("deploy_operator", "operator-delegation/v1",
                                        target)
             self.assertEqual(target.read_bytes(), before)
 
@@ -1549,7 +1546,7 @@ class TestDelegatedOperatorGrant(unittest.TestCase):
                 envelope, target, expected_pubkey=identity.public_key, now=now)
             from pando.grants import remove_grant_if_origin
             removed = remove_grant_if_origin(
-                "deploy_operator", "mac-delegation/v1", target)
+                "deploy_operator", "operator-delegation/v1", target)
 
             self.assertEqual(installed["status"], "manual-preserved")
             self.assertFalse(installed["changed"])
@@ -1674,7 +1671,11 @@ class TestDelegatedOperatorGrant(unittest.TestCase):
             server = module.ThreadingHTTPServer(
                 ("127.0.0.1", 0),
                 module.build_handler(box, "tok", grant_file=grants,
-                                     identity_file=identity_path))
+                                     identity_file=identity_path,
+                                     host_config={
+                                         "delegation": {
+                                             "operator_pubkey":
+                                                 identity.public_key}}))
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             base = f"http://127.0.0.1:{server.server_address[1]}"
@@ -1694,13 +1695,11 @@ class TestDelegatedOperatorGrant(unittest.TestCase):
                                  identity.node_fingerprint)
                 self.assertNotIn("secret_key", json.dumps(status))
 
-                with mock.patch.object(self._delegation(), "MAC_OPERATOR_PUBKEY",
-                                       identity.public_key):
-                    request = urllib.request.Request(
-                        base + "/operator-grant",
-                        headers={"Authorization": "Bearer tok"})
-                    with urllib.request.urlopen(request, timeout=5) as response:
-                        served = json.loads(response.read())
+                request = urllib.request.Request(
+                    base + "/operator-grant",
+                    headers={"Authorization": "Bearer tok"})
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    served = json.loads(response.read())
                 self._delegation().verify_envelope(
                     served, expected_pubkey=identity.public_key, now=now)
             finally:
@@ -1720,19 +1719,31 @@ class TestDelegatedOperatorGrant(unittest.TestCase):
         self.assertIn("'--grant-url', 'http://192.168.31.41:8776/operator-grant'",
                       windows)
 
-        unit = (root / "tools" / "pi5-systemd" /
-                "pandosi-execute.service").read_text(encoding="utf-8")
-        self.assertIn("--state-dir /home/admin/.pando", unit)
-        self.assertIn("--grant-url http://100.92.184.4:8776/operator-grant", unit)
-        self.assertIn("--grant-url http://192.168.31.41:8776/operator-grant", unit)
-
-        for name in ("com.jewelroam.pandosi-execute.plist",
-                     "com.jewelroam.pandosi-mailbox.plist"):
-            plist = plistlib.loads((root / "tools" / "mac-launchd" / name)
-                                   .read_bytes())
-            arguments = plist["ProgramArguments"]
-            self.assertIn("/Users/zhengenrong/.pandosi/grants.toml", arguments)
-            self.assertIn("/Users/zhengenrong/.pando/identity.json", arguments)
+        # The linux/darwin halves are rendered from the host config now:
+        # the signed-grant flags and state paths pass through verbatim, and
+        # the repo contributes no fleet address of its own.
+        from pando import deploy
+        config = {"render": {"python": "/host/a/venv/bin/python",
+                             "repo": "/host/a/Pando",
+                             "state_dir": "/host/a/.pando"},
+                  "services": {
+                      "execute": {"args":
+                                  "--state-dir /host/a/.pando "
+                                  "--grant-url http://10.1.0.4:8776/operator-grant "
+                                  "--grant-url http://10.1.0.41:8776/operator-grant"},
+                      "mailbox": {"args":
+                                  "--grant-file /host/a/.pando/grants.toml "
+                                  "--identity-file /host/a/.pando/identity.json"}}}
+        for platform in ("linux", "darwin"):
+            rendered = "\n".join(
+                deploy.render_units(config, platform).values())
+            for token in ("--state-dir", "/host/a/.pando",
+                          "--grant-url", "operator-grant",
+                          "--grant-file", "grants.toml",
+                          "--identity-file", "identity.json"):
+                self.assertIn(token, rendered)
+            self.assertNotIn("/Users/", rendered)
+            self.assertNotIn("/home/", rendered)
 
 
 class TestVoteAblation(unittest.TestCase):

@@ -6,7 +6,7 @@ branches, fetched from them, or kept as a resolution fallback. Code
 carries structure (host names, ports, env var names); the addresses
 themselves live in per-machine config:
 
-    ~/.pandosi/hosts.json   {"mailboxes": ["<url>", ...]}
+    ~/.pando/hosts.json   {"mailboxes": ["<url>", ...]}
 
 overridable with PANDOSI_HOSTS (inline JSON) or PANDOSI_HOSTS_FILE.
 Without any config the resolver only tries localhost conventions. See
@@ -36,7 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from pando.net import open_url  # noqa: E402 - repo root must be importable
 
 CONFIG_PATH = Path(os.environ.get(
-    "PANDOSI_HOSTS_FILE", "~/.pandosi/hosts.json")).expanduser()
+    "PANDOSI_HOSTS_FILE", "~/.pando/hosts.json")).expanduser()
 DEFAULT_LOCAL = ["http://127.0.0.1:8776", "http://127.0.0.1:8778"]
 
 

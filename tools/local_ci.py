@@ -298,7 +298,7 @@ def shallow_parity(python: str | None = None) -> int:
     same blindness, so the same discovery CI runs also runs here, on the
     machine that can still see the problem cheaply.
     """
-    with tempfile.TemporaryDirectory(prefix="pandosi-shallow-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="pando-shallow-") as tmp:
         dest = Path(tmp) / "checkout"
         _shallow_checkout(dest)
         completed = subprocess.run(

@@ -50,7 +50,7 @@ def replication_skip(destination: str, hosts: dict[str, str] | None) -> str:
 def _seed_module():
     import importlib.util
     tool = Path(__file__).resolve().parents[2] / "tools" / "seed.py"
-    spec = importlib.util.spec_from_file_location("pandosi_seed", tool)
+    spec = importlib.util.spec_from_file_location("pando_seed", tool)
     if spec is None or spec.loader is None:
         raise RuntimeError("seed tool is missing")
     module = importlib.util.module_from_spec(spec)

@@ -248,6 +248,8 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
             handle.write(json.dumps(record, sort_keys=True) + "\n")
 
     knobs = load_policy(getattr(args, "policy_path", DEFAULT_POLICY_PATH))
+    from .. import hostconfig
+    host_config = hostconfig.load(getattr(args, "host_config", None))
     # The installed verbs, read once per round for the same reason the policy
     # store is: every judgment in a round has to use the same set. A record
     # that will not parse leaves the set empty rather than guessing, so the
@@ -348,6 +350,7 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
             deploy_ledger=getattr(args, "operator_deploy_ledger",
                                   DEFAULT_DEPLOY_LEDGER),
             grants_path=getattr(args, "grants", None),
+            host_config=host_config,
             installed_operators=installed_operators,
             installed_error=installed_error)
     except Exception as exc:  # noqa: BLE001 - one audit failure must not kill the loop
@@ -414,7 +417,7 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
     unacted = local_unacted(proposals, reactions, seen, signer, knobs,
                             installed_operators)
     pulls = getattr(args, "pull", None) or set()
-    outbox = getattr(args, "outbox", "~/.pandosi/outbox")
+    outbox = getattr(args, "outbox", "~/.pando/outbox")
     acks = received_acks(ledger, outbox)
     if (foreign or replicates or addressed or unacted or foreign_repl
             or foreign_policy or foreign_culture or foreign_invites
@@ -534,7 +537,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mailbox-fallback", action="append", default=[],
                         help="read this mailbox if the ones before it do not "
                              "answer (repeatable)")
-    parser.add_argument("--hosts", default="~/.pandosi/hosts.json",
+    parser.add_argument("--hosts", default="~/.pando/hosts.json",
                         help="this host's table: proposer_id, mailboxes, roots")
     parser.add_argument("--state-dir", default=DEFAULT_STATE_DIR,
                         help="the directory every blank path below is relative "

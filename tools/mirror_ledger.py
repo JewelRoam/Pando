@@ -1,7 +1,7 @@
 """Copy a remote ledger onto this machine.
 
 The observatory runs under launchd, and launchd on this Mac cannot open
-192.168.31.0/24. A process that can ssh writes the file locally. The
+the LAN. A process that can ssh writes the file locally. The
 observatory then reads a normal path. A failed copy leaves the previous
 file in place, so one outage does not blank the row.
 """

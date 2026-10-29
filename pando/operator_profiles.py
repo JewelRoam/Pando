@@ -62,10 +62,13 @@ _PROFILES: dict[str, dict[str, str]] = {
     },
     "dynamic.threshold.adjustment": {
         "binds_to": "resource.rebalance",
-        "params_json": json.dumps({
-            "node_id": "mac-llm-8b-local",
-            "target_host": "win",
-        }, sort_keys=True, separators=(",", ":")),
+        "params_json": "{}",
+        # Labels this fleet must supply through the host config
+        # ([profiles."dynamic.threshold.adjustment"] in host.toml). The
+        # catalogue names the keys, the host names the members: a member id
+        # compiled into the repo would make the catalogue one fleet's
+        # property.
+        "fleet_params": ("node_id", "target_host"),
     },
 }
 
@@ -75,12 +78,16 @@ def names() -> tuple[str, ...]:
     return tuple(sorted(_PROFILES))
 
 
-def resolve(name: object) -> dict:
+def resolve(name: object, fleet: dict | None = None) -> dict:
     """Return a fresh ``{name, binds_to, params, reviewer}`` profile.
 
     Matching is exact.  There is deliberately no normalization or fuzzy
     mapping: an old proposal spelling such as ``adaptive_governance_protocol``
     is not a licence to run a similarly named profile.
+
+    ``fleet`` supplies the per-host labels a profile declares in
+    ``fleet_params`` -- typically ``pando.hostconfig.profile_params(config,
+    name)``. The catalogue names the keys; the host names the members.
     """
     if not isinstance(name, str) or name not in _PROFILES:
         raise OperatorProfileError(
@@ -88,6 +95,16 @@ def resolve(name: object) -> dict:
             "allowed names are " + ", ".join(names()))
     definition = _PROFILES[name]
     params = json.loads(definition["params_json"])
+    required = definition.get("fleet_params", ())
+    if required:
+        supplied = fleet or {}
+        missing = [key for key in required if key not in supplied]
+        if missing:
+            raise OperatorProfileError(
+                f"profile {name} needs fleet params {missing} from the host "
+                f"config ([profiles.{name}] section); the catalogue names "
+                "the keys, the host names the members")
+        params.update({key: supplied[key] for key in required})
     binds_to = definition["binds_to"]
     checked, why = VALIDATORS[binds_to](params)
     if checked is None:

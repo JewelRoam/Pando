@@ -45,7 +45,7 @@ from .identity import Identity, canonical
 from .identity import verify as verify_signature
 from .reproduce import Target, plan_reproduction
 
-DEFAULT_OUTBOX = "~/.pandosi/reproduce-outbox"
+DEFAULT_OUTBOX = "~/.pando/reproduce-outbox"
 ALLOWED_PARAMS = {"lineage", "node_id"}
 MAX_LABEL = 128
 

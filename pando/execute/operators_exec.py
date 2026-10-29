@@ -119,6 +119,7 @@ def auto_deploy_profiles(proposals: list[Proposal], reactions: list[dict], *,
                          install_ledger: str | Path,
                          deploy_ledger: str | Path,
                          grants_path: str | Path | None,
+                         host_config: dict | None = None,
                          installed_operators: dict | None = None,
                          installed_error: str = "",
                          now: dt.datetime | None = None) -> list[dict]:
@@ -229,7 +230,9 @@ def auto_deploy_profiles(proposals: list[Proposal], reactions: list[dict], *,
                  reason="manifest operator does not match the signed spec")
             continue
         try:
-            profile = resolve_profile(name)
+            from .. import hostconfig
+            profile = resolve_profile(
+                name, fleet=hostconfig.profile_params(host_config or {}, name))
         except OperatorProfileError as exc:
             note(proposal_id=proposal_id, spec_hash=spec_hash, status="refused",
                  operator=name, reason=str(exc))

@@ -34,17 +34,17 @@ ROOT = Path(__file__).resolve().parents[1]
 MODEL_PATH = ROOT / "tools" / "historical_action_model_review.py"
 DEFAULT_PACKET = (ROOT / "assets" /
                   "historical-action-blind-review-20261029.packet.json")
-DEFAULT_KEY = (Path.home() / ".pandosi" / "experiments" /
+DEFAULT_KEY = (Path.home() / ".pando" / "experiments" /
                "historical-action-blind-review-20261029.key.json")
 DEFAULT_BASE_PROTOCOL = (ROOT / "assets" /
                          "historical-action-blind-review-20261029-qwen3-4b-protocol.json")
-DEFAULT_BASE_RESULT = (Path.home() / ".pandosi" / "experiments" /
+DEFAULT_BASE_RESULT = (Path.home() / ".pando" / "experiments" /
                        "historical-action-blind-review-20261029.qwen3-4b.result.json")
 DEFAULT_PROTOCOL = (ROOT / "assets" /
                     "historical-action-goal-control-20261029-protocol.json")
-DEFAULT_RAW = (Path.home() / ".pandosi" / "experiments" /
+DEFAULT_RAW = (Path.home() / ".pando" / "experiments" /
                "historical-action-goal-control-20261029.raw.json")
-DEFAULT_RESULT = (Path.home() / ".pandosi" / "experiments" /
+DEFAULT_RESULT = (Path.home() / ".pando" / "experiments" /
                   "historical-action-goal-control-20261029.result.json")
 PROTOCOL_SCHEMA = "historical-action-goal-control-protocol-v1"
 COLLECTION_SCHEMA = "historical-action-goal-control-collection-v1"

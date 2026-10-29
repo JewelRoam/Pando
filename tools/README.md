@@ -18,7 +18,7 @@ are not all the same kind of thing. Read this index before adding another.
 | `win_node_supervisor.ps1`, `win_stack_restart.ps1` | keep the thirteen resident win services alive; restart everything. |
 | `win_worker.py` | the local model answers `[chat]`/tasks on the win node's behalf. |
 | `win_yi_probe.ps1`, `ctx_guard_probe.py` | one-shot hardware probes (Yi CPU load; llama-server VRAM/context guard). |
-| `pi5_llm_member.sh`, `pi5-systemd/`, `mac-launchd/` | per-host service units for the pi5 and the Mac. |
+| `render_units.py` | renders this host's service units (systemd/launchd) from its untracked `host.toml`; the catalogue lives in `pando.deploy`, the wiring never in git. |
 
 Rule: operational tools carry no machine-local absolute paths or addresses.
 Derive the checkout from the script location, default mutable files under the

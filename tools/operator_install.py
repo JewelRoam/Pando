@@ -13,7 +13,7 @@ can still have an effect -- bounded by an actuator the gate already ran.
 
 Usage:
   python tools/operator_install.py list
-  python tools/operator_install.py install --spec ~/.pandosi/operator-outbox/<id> \
+  python tools/operator_install.py install --spec ~/.pando/operator-outbox/<id> \
       --binds-to recruit.invite --param candidate=node-a --reviewer mac-codex
   python tools/operator_install.py retire <verb> --reason "the group stopped"
 

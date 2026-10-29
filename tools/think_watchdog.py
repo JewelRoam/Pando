@@ -45,16 +45,16 @@ minutes forever, so it must not itself become a thing that can hang, wedge, or
 need a human.
 
 Usage:
-  python tools/think_watchdog.py --ledger ~/.pandosi/think-ledger.jsonl \\
-      --stall-seconds 900 --restart-cmd "launchctl kickstart -k gui/501/com.jewelroam.pandosi-think"
+  python tools/think_watchdog.py --ledger ~/.pando/think-ledger.jsonl \\
+      --stall-seconds 900 --restart-cmd "launchctl kickstart -k gui/501/com.pando.think"
 
-  python tools/think_watchdog.py --ledger ~/.pandosi/think-ledger.jsonl \\
-      --restart-cmd "launchctl kickstart -k gui/501/com.jewelroam.pandosi-think" \\
+  python tools/think_watchdog.py --ledger ~/.pando/think-ledger.jsonl \\
+      --restart-cmd "launchctl kickstart -k gui/501/com.pando.think" \\
       --vote-cmd ".venv/bin/python tools/vote_watchdog.py --url http://127.0.0.1:8776 \\
-          --token-file ~/.pandosi/mailbox.token --decision mac-text --json \\
-          --state-file ~/.pandosi/vote-watchdog-state.json --page-new-only" \\
-      --alarm-url http://127.0.0.1:8776 --alarm-token-file ~/.pandosi/mailbox.token \
-      --alarm-state-file ~/.pandosi/think-watchdog-alarms.json
+          --token-file ~/.pando/mailbox.token --decision mac-text --json \\
+          --state-file ~/.pando/vote-watchdog-state.json --page-new-only" \\
+      --alarm-url http://127.0.0.1:8776 --alarm-token-file ~/.pando/mailbox.token \
+      --alarm-state-file ~/.pando/think-watchdog-alarms.json
 
 ``--alarm-state-file`` turns the alarm task from a snapshot into a log. Without
 it an alarm that is still open is only named on stdout, and the task itself

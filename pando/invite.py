@@ -41,7 +41,7 @@ from pathlib import Path
 from .identity import Identity, canonical
 from .identity import verify as verify_signature
 
-DEFAULT_OUTBOX = "~/.pandosi/invites"
+DEFAULT_OUTBOX = "~/.pando/invites"
 DEFAULT_TTL_HOURS = 24 * 7
 MAX_TTL_HOURS = 24 * 365
 ALLOWED_PARAMS = {"candidate", "expires_in_hours"}

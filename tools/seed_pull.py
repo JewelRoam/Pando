@@ -171,7 +171,7 @@ def main(argv: list[str] | None = None) -> int:
                              "edit, not a service-definition edit on every "
                              "host.")
     parser.add_argument("--token-file", required=True)
-    parser.add_argument("--inbox", default="~/.pandosi/inbox")
+    parser.add_argument("--inbox", default="~/.pando/inbox")
     parser.add_argument("--ledger", default="")
     parser.add_argument("--node-id", default="",
                         help="stable receiver identity stored in the ACK; "
@@ -181,7 +181,7 @@ def main(argv: list[str] | None = None) -> int:
     token = Path(args.token_file).expanduser().read_text(encoding="utf-8").strip()
     # `--from-file` may be empty: then the conventional names are probed, so
     # the same unit definition serves a host whose state directory is
-    # `~/.pandosi`, `~/.pando` or the checkout's `models` directory.
+    # `~/.pando` or the checkout's `models` directory.
     bases = list(args.bases) + source_list(
         source_file(args.from_file, kind="seed"))
     ledger = Path(args.ledger).expanduser() if args.ledger else None

@@ -28,7 +28,7 @@ from pathlib import Path
 from .identity import Identity
 from .playbook import parse_playbook
 
-DEFAULT_OUTBOX = "~/.pandosi/culture-outbox"
+DEFAULT_OUTBOX = "~/.pando/culture-outbox"
 ALLOWED_TOP_LEVEL = {
     "meta",
     "gating",

@@ -86,7 +86,7 @@ def register(url: str, node_id: str, identity, token: str,
 
 def export_bundle(seed, bundle: Path, passphrase_file: Path | None) -> int:
     return seed.cmd_export(argparse.Namespace(
-        out=str(bundle), home=str(Path.home() / ".pandosi"),
+        out=str(bundle), home=str(Path.home() / ".pando"),
         identity=str(Path.home() / ".pando" / "identity.json"),
         rollout_dir=str(REPO / "rollouts"), force=True,
         passphrase_file=(str(passphrase_file) if passphrase_file else None)))
@@ -250,7 +250,7 @@ def main() -> int:
         parser.error("--seed-src-passphrase-file only makes sense with "
                      "--seed-src")
 
-    work = Path(tempfile.mkdtemp(prefix="pandosi-drill."))
+    work = Path(tempfile.mkdtemp(prefix="pando-drill."))
     report: dict = {"ok": False, "workdir": str(work), "modes": {}}
 
     traveled = Path(args.seed_src).expanduser() if args.seed_src else None

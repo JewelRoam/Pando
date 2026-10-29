@@ -5,8 +5,8 @@ an older root has not stored the field yet). A member is answered here only
 when its host address is this machine. Remote models stay remote: their own
 messenger speaks for them.
 
-    python -m pando.messenger --hosts ~/.pandosi/hosts.json \
-        --token-file ~/.pandosi/mailbox.token
+    python -m pando.messenger --hosts ~/.pando/hosts.json \
+        --token-file ~/.pando/mailbox.token
 """
 
 from __future__ import annotations
@@ -169,9 +169,9 @@ def local_chat_members(nodes: dict, addresses: set[str],
 
     ``health_of(url) -> dict`` is only called for a local stem whose node
     record does not yet have the field. ``trust_local_root`` is for the
-    single explicit loopback-root case used by Windows and pi5: every member
-    in that root is on this machine even when its advertised host (for
-    example ``192.168.31.100``) is not one of Python's local addresses.
+    single explicit loopback-root case: every member in that root is on
+    this machine even when its advertised host (for example a LAN address
+    like ``10.1.0.100``) is not one of Python's local addresses.
     """
     members = []
     known: set[str] = set()
@@ -683,8 +683,8 @@ def main() -> int:
                         help="read from, and post to, this mailbox if the "
                              "primary does not answer (repeatable)")
     parser.add_argument("--token-file", default=os.environ.get(
-        "PANDOSI_MAILBOX_TOKEN_FILE", "~/.pandosi/mailbox.token"))
-    parser.add_argument("--ledger", default="~/.pandosi/chat-ledger.jsonl")
+        "PANDOSI_MAILBOX_TOKEN_FILE", "~/.pando/mailbox.token"))
+    parser.add_argument("--ledger", default="~/.pando/chat-ledger.jsonl")
     parser.add_argument("--interval", type=float, default=20)
     parser.add_argument("--open-cooldown", type=float, default=OPEN_COOLDOWN,
                         help="seconds between conversations this host starts "

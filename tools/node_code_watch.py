@@ -358,7 +358,7 @@ def main(argv: list[str] | None = None) -> int:
             encoding="utf-8").strip()
     # `--peer-file` may be empty: then the conventional names are probed, so
     # one unit definition runs on a host whose state directory is
-    # `~/.pandosi`, `~/.pando` or the checkout's `models` directory.
+    # `~/.pando` or the checkout's `models` directory.
     peers = peer_sources("", args.peer, source_file(args.peer_file))
     ledger = Path(args.ledger).expanduser() if args.ledger else None
 

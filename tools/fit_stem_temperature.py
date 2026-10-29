@@ -30,7 +30,7 @@ Usage
 -----
   # fit, report, and eyeball the holdout before writing anything
   python tools/fit_stem_temperature.py \
-      --stem-url http://192.168.31.22:35575 \
+      --stem-url http://10.1.0.22:35575 \
       --fit assets/heldout_test.jsonl,assets/heldout2_test.jsonl,assets/heldout3_test.jsonl \
       --holdout assets/heldout4_test.jsonl,assets/heldout6_test.jsonl \
       --shift assets/heldout5_test.jsonl \
@@ -191,7 +191,7 @@ def worse_domains(by_suite: dict) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stem-url", required=True,
-                        help="e.g. http://192.168.31.22:35575 (from /nodes)")
+                        help="e.g. http://10.1.0.22:35575 (from /nodes)")
     parser.add_argument("--fit", required=True, help="comma-separated suites")
     parser.add_argument("--holdout", default="")
     parser.add_argument("--shift", default="",

@@ -40,23 +40,23 @@ from pathlib import Path
 from .identity import Identity, canonical
 from .identity import verify as verify_signature
 
-DEFAULT_OUTBOX = "~/.pandosi/operator-outbox"
+DEFAULT_OUTBOX = "~/.pando/operator-outbox"
 #: Where a reviewed operator lands once the gate has agreed to run it. One file
 #: per verb, mode 0600, *beside* the spec it came from and never inside it: the
 #: outbox is what was asked for, this directory is what the gate will load, and
 #: a draft that is also an install would be executable without a review.
-DEFAULT_INSTALLED = "~/.pandosi/operators"
+DEFAULT_INSTALLED = "~/.pando/operators"
 
 #: Append-only record of installs and retirements. The rollback requirement in
 #: ``REQUIRES`` is only met if a retirement leaves a trace, so the file moves to
 #: ``retired/`` and this ledger keeps the reason.
-DEFAULT_INSTALL_LEDGER = "~/.pandosi/operator-install-ledger.jsonl"
+DEFAULT_INSTALL_LEDGER = "~/.pando/operator-install-ledger.jsonl"
 
 #: One row per automatic catalogue deployment attempt. Kept separate from the
 #: install ledger: the latter records the host's operator lifecycle, while this
 #: one records why the standing deployment grant did or did not release a
 #: particular staged spec.
-DEFAULT_DEPLOY_LEDGER = "~/.pandosi/operator-deploy-ledger.jsonl"
+DEFAULT_DEPLOY_LEDGER = "~/.pando/operator-deploy-ledger.jsonl"
 
 #: The keys a reviewer may supply as the operator's *implementation*. Both
 #: describe how an existing actuator is reused; neither carries code, and a key

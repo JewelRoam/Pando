@@ -30,7 +30,7 @@ DEFAULT_PACKET = (ROOT / "assets" /
                   "historical-action-blind-review-20261029.packet.json")
 DEFAULT_PROTOCOL = (ROOT / "assets" /
                     "historical-action-blind-review-20261029-qwen3-4b-protocol.json")
-EXPERIMENTS = Path.home() / ".pandosi" / "experiments"
+EXPERIMENTS = Path.home() / ".pando" / "experiments"
 DEFAULT_RAW = (EXPERIMENTS /
                "historical-action-blind-review-20261029.qwen3-4b.raw.json")
 DEFAULT_RESPONSE = (EXPERIMENTS /
@@ -123,7 +123,7 @@ def build_protocol(packet: dict) -> dict:
             "name": REVIEWER_NAME,
             "model": "qwen3-4b-instruct-2507",
             "base_url": "http://127.0.0.1:8080/v1",
-            "api_key_file": "~/.pandosi/llm-api.token",
+            "api_key_file": "~/.pando/llm-api.token",
             "scope": (
                 "existing same-host second checkpoint in the Qwen family; "
                 "not an independent host, not a human, and not a replacement "

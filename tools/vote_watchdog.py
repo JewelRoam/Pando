@@ -28,10 +28,10 @@ The discriminator needs no magic age, and it separates the two cases inside
 one window. Measured live, 2026-10-19 02:24, 90-minute window, mailbox :8776,
 delivered_at minus proposal stamp:
 
-    mac-text            slope -15.17   (draining a backlog, end state bounded)
-    pandosi-pi5-x       slope -22.49   (same)
-    mac-llm-8b-local    slope  -0.01   (steady state: the real noise floor)
-    win-laya-int8       slope  +0.49   (gap widening half a second per second)
+    node-a-text         slope -15.17   (draining a backlog, end state bounded)
+    node-b-x            slope -22.49   (same)
+    node-a-llm          slope  -0.01   (steady state: the real noise floor)
+    node-c-laya         slope  +0.49   (gap widening half a second per second)
 
 Only the positive one is a wedge. The default threshold (0.20) is a margin
 over that measured -0.01 noise floor, not a measured constant; a member is
@@ -39,7 +39,7 @@ accused only when it spends more than a fifth of wall-clock falling behind.
 
 Usage:
   python tools/vote_watchdog.py --url http://127.0.0.1:8776 \\
-      --token-file ~/.pandosi/mailbox.token \\
+      --token-file ~/.pando/mailbox.token \\
       --decision mac-text --decision win-laya-int8
 
 A Mac voter that may sleep is named twice: once in ``--decision``
@@ -91,7 +91,7 @@ DEFAULT_MIN_SPAN_S = 600.0
 DEFAULT_SLOPE = 0.20
 
 #: Where the judgement is published for readers that must not re-derive it.
-DEFAULT_SNAPSHOT = "~/.pandosi/vote-watchdog.json"
+DEFAULT_SNAPSHOT = "~/.pando/vote-watchdog.json"
 
 OK = "ok"
 WEDGED = "wedge"
@@ -443,7 +443,7 @@ def _fmt_lag(seconds: float) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--url", default="http://127.0.0.1:8776")
-    parser.add_argument("--token-file", default="~/.pandosi/mailbox.token")
+    parser.add_argument("--token-file", default="~/.pando/mailbox.token")
     parser.add_argument("--window-seconds", type=float, default=DEFAULT_WINDOW_S)
     parser.add_argument("--min-samples", type=int, default=DEFAULT_MIN_SAMPLES)
     parser.add_argument("--min-span-seconds", type=float, default=DEFAULT_MIN_SPAN_S)

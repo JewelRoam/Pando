@@ -385,12 +385,12 @@ def react_once(proposals, stems: list[dict], identity, mailbox,
 def main() -> int:
     parser = argparse.ArgumentParser(description="local decision-model reactions")
     parser.add_argument("--root", default="http://127.0.0.1:8765")
-    parser.add_argument("--pairing-token-file", default="~/.pandosi/pairing.token")
+    parser.add_argument("--pairing-token-file", default="~/.pando/pairing.token")
     parser.add_argument("--mailbox", default="http://127.0.0.1:8776")
     parser.add_argument("--mailbox-fallback", action="append", default=[],
                         help="mailbox to try after the primary (repeatable)")
-    parser.add_argument("--token-file", default="~/.pandosi/mailbox.token")
-    parser.add_argument("--ledger", default="~/.pandosi/reaction-ledger.jsonl")
+    parser.add_argument("--token-file", default="~/.pando/mailbox.token")
+    parser.add_argument("--ledger", default="~/.pando/reaction-ledger.jsonl")
     parser.add_argument("--interval", type=float, default=40)
     parser.add_argument("--timeout", type=float, default=50)
     parser.add_argument("--max-age", type=float, default=DEFAULT_MAX_AGE,

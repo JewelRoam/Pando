@@ -14,12 +14,12 @@ an impostor and the member can never return under its own name.
 A seed is the minimum state that lets a *different* box become the same member
 of the same group.
 
-    python3 tools/seed.py export    --out <dir> [--home ~/.pandosi] \
+    python3 tools/seed.py export    --out <dir> [--home ~/.pando] \
                                      [--identity ~/.pando/identity.json] \
                                      [--rollout-dir rollouts] \
                                      [--passphrase-file ~/.seed-pass]
     python3 tools/seed.py verify    --from <dir> [--passphrase-file ~/.seed-pass]
-    python3 tools/seed.py receive   --from <dir> [--inbox ~/.pandosi/inbox]
+    python3 tools/seed.py receive   --from <dir> [--inbox ~/.pando/inbox]
     python3 tools/seed.py rehydrate --from <dir> --home <dir> \
                                      --identity <path> [--rollout-dir <dir>] \
                                      [--passphrase-file ~/.seed-pass]
@@ -724,11 +724,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    home_default = str(Path.home() / ".pandosi")
+    home_default = str(Path.home() / ".pando")
     identity_default = str(Path.home() / ".pando" / "identity.json")
 
     p = sub.add_parser("export", help="write a seed bundle")
-    p.add_argument("--out", default=str(Path.home() / ".pandosi" / "seed"))
+    p.add_argument("--out", default=str(Path.home() / ".pando" / "seed"))
     p.add_argument("--home", default=home_default)
     p.add_argument("--identity", default=identity_default)
     p.add_argument("--rollout-dir", default="rollouts")
@@ -746,9 +746,9 @@ def main() -> int:
 
     p = sub.add_parser("receive", help="keep a sealed bundle already on disk")
     p.add_argument("--from", dest="from_", required=True)
-    p.add_argument("--inbox", default=str(Path.home() / ".pandosi" / "inbox"))
+    p.add_argument("--inbox", default=str(Path.home() / ".pando" / "inbox"))
     p.add_argument("--force", action="store_true")
-    p.add_argument("--ledger", default=str(Path.home() / ".pandosi" / "receive-ledger.jsonl"))
+    p.add_argument("--ledger", default=str(Path.home() / ".pando" / "receive-ledger.jsonl"))
     p.set_defaults(func=cmd_receive)
 
     p = sub.add_parser("rehydrate", help="restore a bundle onto this machine")

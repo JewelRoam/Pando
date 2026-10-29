@@ -1468,7 +1468,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--activity-every", type=int, default=4,
                         help="refresh the colony's outcome feed every N rounds "
                              "(the mailbox listing is O(tasks))")
-    parser.add_argument("--hosts", default="~/.pandosi/hosts.json",
+    parser.add_argument("--hosts", default="~/.pando/hosts.json",
                         help="host names a seed.replicate may name; URLs are not shown to the model")
     parser.add_argument("--dry-run", action="store_true",
                         help="think and sign, but never publish")

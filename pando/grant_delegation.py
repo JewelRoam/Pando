@@ -34,14 +34,27 @@ ACTION = "deploy_operator"
 RESOURCE = "profile-catalogue/v1"
 SCOPE = "operator-host"
 AUDIENCE = "operator-host"
-ORIGIN = "mac-delegation/v1"
+ORIGIN = "operator-delegation/v1"
 MAX_TTL = dt.timedelta(days=7)
 CLOCK_SKEW = dt.timedelta(minutes=5)
 
-#: The Mac node identity that is allowed to delegate this action.  This is a
-#: pin, not a value learned from the HTTP response: otherwise a compromised
-#: responder could include its own public key and sign its own authorization.
-MAC_OPERATOR_PUBKEY = "NFqRlNyH6eOKjhOCqcazwQBWTKZ2_HR-dreInL4djq8="
+def _pinned_operator_pubkey(expected_pubkey: str | None) -> str:
+    """Resolve the operator key this host trusts.
+
+    The pin is never learned from an HTTP response -- a compromised responder
+    would include its own key and sign its own authorization. It is either
+    passed explicitly or read from the untracked host config
+    (``delegation.operator_pubkey``); a host with neither trusts nobody.
+    """
+    if expected_pubkey:
+        return expected_pubkey
+    from . import hostconfig
+    pin = hostconfig.operator_pubkey(hostconfig.load())
+    if pin is None:
+        raise DelegationError(
+            "no operator pubkey pinned: pass expected_pubkey or set "
+            "delegation.operator_pubkey in the host config")
+    return pin
 
 ENVELOPE_FIELDS = frozenset({
     "version", "audience", "action", "resource", "scope", "approved_by",
@@ -69,8 +82,7 @@ def _require_text(payload: dict, key: str, limit: int = 2000) -> str:
 def verify_envelope(envelope: dict, *, expected_pubkey: str | None = None,
                     now: dt.datetime | None = None) -> dict:
     """Validate the exact wire shape, lifetime and pinned signature."""
-    if expected_pubkey is None:
-        expected_pubkey = MAC_OPERATOR_PUBKEY
+    expected_pubkey = _pinned_operator_pubkey(expected_pubkey)
     if not isinstance(envelope, dict):
         raise DelegationError("delegation envelope must be a JSON object")
     if set(envelope) != ENVELOPE_FIELDS:
@@ -110,6 +122,7 @@ def verify_envelope(envelope: dict, *, expected_pubkey: str | None = None,
 def issue_envelope(grant_path: Path | str | None = None,
                    identity: Identity | None = None, *,
                    identity_path: Path | str | None = None,
+                   expected_pubkey: str | None = None,
                    now: dt.datetime | None = None) -> dict:
     """Turn one active local deploy grant into a signed wire envelope."""
     path = Path(grant_path) if grant_path else default_grants_path()
@@ -126,6 +139,7 @@ def issue_envelope(grant_path: Path | str | None = None,
         raise DelegationError("deploy_operator grant does not match the fixed catalogue scope")
     if grant.get("origin"):
         raise DelegationError("a delegated grant cannot issue another delegation")
+    expected = _pinned_operator_pubkey(expected_pubkey)
     signer = identity
     if signer is None:
         if identity_path is None:
@@ -136,8 +150,8 @@ def issue_envelope(grant_path: Path | str | None = None,
             signer = Identity.from_json(json.loads(key_path.read_text(encoding="utf-8")))
         except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise DelegationError(f"operator identity is unavailable: {exc}") from exc
-    if signer.public_key != MAC_OPERATOR_PUBKEY:
-        raise DelegationError("operator identity is not the pinned Mac signer")
+    if signer.public_key != expected:
+        raise DelegationError("operator identity is not the pinned signer")
     payload = {"version": 1, "audience": AUDIENCE, "action": ACTION,
                "resource": RESOURCE, "scope": SCOPE}
     for key in ("approved_by", "approved_at", "expires_at", "evidence"):
@@ -149,7 +163,7 @@ def issue_envelope(grant_path: Path | str | None = None,
     # Signing must fail closed too.  The receiver pins the Mac key, so accepting
     # a differently-keyed local signer here would only produce an envelope that
     # every node correctly rejects later -- with a much less obvious failure.
-    verify_envelope(envelope, expected_pubkey=MAC_OPERATOR_PUBKEY, now=now)
+    verify_envelope(envelope, expected_pubkey=expected, now=now)
     return envelope
 
 
@@ -164,8 +178,7 @@ def install_envelope(envelope: dict, grants_path: Path | str | None = None, *,
                      expected_pubkey: str | None = None,
                      now: dt.datetime | None = None) -> dict:
     """Verify and install a delegation, preserving a human-authored grant."""
-    if expected_pubkey is None:
-        expected_pubkey = MAC_OPERATOR_PUBKEY
+    expected_pubkey = _pinned_operator_pubkey(expected_pubkey)
     payload = verify_envelope(envelope, expected_pubkey=expected_pubkey, now=now)
     path = Path(grants_path) if grants_path else default_grants_path()
     current = load_grants(path).get(ACTION)
@@ -240,12 +253,11 @@ def refresh_and_install(urls: list[str] | tuple[str, ...], *,
     revocation, and even then only a grant carrying this module's origin is
     deleted.
     """
-    if expected_pubkey is None:
-        expected_pubkey = MAC_OPERATOR_PUBKEY
     ordered = list(dict.fromkeys(str(url).rstrip("/") for url in urls
                                  if str(url or "").strip()))
     if not ordered:
         return {"status": "disabled", "changed": False}
+    expected_pubkey = _pinned_operator_pubkey(expected_pubkey)
     try:
         token = Path(token_file).expanduser().read_text(encoding="utf-8").strip()
     except OSError as exc:

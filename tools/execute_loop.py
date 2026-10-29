@@ -49,7 +49,7 @@ from pando.grants import default_path as default_grants_path  # noqa: E402
 
 #: Tried in order when `--hosts` is not given: the Mac's directory first, then
 #: the shorter one the Pi and the Windows node were set up under.
-HOST_FILES = ("~/.pandosi/hosts.json", "~/.pando/hosts.json")
+HOST_FILES = ("~/.pando/hosts.json",)
 
 
 def host_file(explicit: str = "") -> Path | None:

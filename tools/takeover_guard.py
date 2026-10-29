@@ -151,7 +151,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--token", default=os.environ.get(
         "PANDOSI_MAILBOX_TOKEN"))
     parser.add_argument("--token-file", default=os.environ.get(
-        "PANDOSI_MAILBOX_TOKEN_FILE", "~/.pandosi/mailbox.token"))
+        "PANDOSI_MAILBOX_TOKEN_FILE", "~/.pando/mailbox.token"))
     parser.add_argument("--timeout", type=float, default=10.0)
     parser.add_argument("--window-seconds", type=int, default=600)
     parser.add_argument("--identity", default="mac-codex")

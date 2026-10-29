@@ -18,7 +18,6 @@ from pando.grant_delegation import (
     AUDIENCE,
     DelegationError,
     ENVELOPE_FIELDS,
-    MAC_OPERATOR_PUBKEY,
     MAX_TTL,
     ORIGIN,
     RESOURCE,
@@ -63,49 +62,37 @@ def _signed_envelope(identity: Identity | None = None, **overrides) -> dict:
 
 
 class _PatchedKeyTestCase(unittest.TestCase):
-    """Base class that patches the pinned Mac operator key for all tests."""
-
-    def setUp(self):
-        # Patch the module-level constant *before* each test body runs.
-        # grant_delegation reads MAC_OPERATOR_PUBKEY at call time (inside
-        # verify_envelope / issue_envelope), so patching the module attribute
-        # for the duration of the test is sufficient and safe.
-        self._patch = patch(
-            "pando.grant_delegation.MAC_OPERATOR_PUBKEY",
-            _OPERATOR.public_key,
-        )
-        self._patch.start()
-        self.addCleanup(self._patch.stop)
+    """Passes the operator pin explicitly; the module carries no constant."""
 
 
 class TestVerifyEnvelope(_PatchedKeyTestCase):
 
     def test_valid_envelope_passes(self):
         env = _signed_envelope()
-        payload = verify_envelope(env, now=_NOW)
+        payload = verify_envelope(env, expected_pubkey=_OPERATOR.public_key, now=_NOW)
         self.assertEqual(payload["action"], ACTION)
 
     def test_extra_field_rejected(self):
         env = _signed_envelope()
         env["rogue"] = "inject"
         with self.assertRaises(DelegationError):
-            verify_envelope(env, now=_NOW)
+            verify_envelope(env, expected_pubkey=_OPERATOR.public_key, now=_NOW)
 
     def test_missing_field_rejected(self):
         env = _signed_envelope()
         del env["evidence"]
         with self.assertRaises(DelegationError):
-            verify_envelope(env, now=_NOW)
+            verify_envelope(env, expected_pubkey=_OPERATOR.public_key, now=_NOW)
 
     def test_wrong_version_rejected(self):
         env = _signed_envelope(version=2)
         with self.assertRaises(DelegationError):
-            verify_envelope(env, now=_NOW)
+            verify_envelope(env, expected_pubkey=_OPERATOR.public_key, now=_NOW)
 
     def test_wrong_action_rejected(self):
         env = _signed_envelope(action="not_deploy")
         with self.assertRaises(DelegationError):
-            verify_envelope(env, now=_NOW)
+            verify_envelope(env, expected_pubkey=_OPERATOR.public_key, now=_NOW)
 
     def test_expired_envelope_rejected(self):
         past = _NOW - dt.timedelta(days=2)
@@ -114,7 +101,7 @@ class TestVerifyEnvelope(_PatchedKeyTestCase):
             expires_at=(past + dt.timedelta(hours=1)).isoformat(),
         )
         with self.assertRaises(DelegationError):
-            verify_envelope(env, now=_NOW)
+            verify_envelope(env, expected_pubkey=_OPERATOR.public_key, now=_NOW)
 
     def test_ttl_exceeded_rejected(self):
         env = _signed_envelope(
@@ -122,7 +109,7 @@ class TestVerifyEnvelope(_PatchedKeyTestCase):
             expires_at=(_NOW + dt.timedelta(days=8)).isoformat(),
         )
         with self.assertRaises(DelegationError):
-            verify_envelope(env, now=_NOW)
+            verify_envelope(env, expected_pubkey=_OPERATOR.public_key, now=_NOW)
 
     def test_future_approved_at_rejected(self):
         future = _NOW + dt.timedelta(hours=1)
@@ -131,13 +118,13 @@ class TestVerifyEnvelope(_PatchedKeyTestCase):
             expires_at=(future + dt.timedelta(hours=1)).isoformat(),
         )
         with self.assertRaises(DelegationError):
-            verify_envelope(env, now=_NOW)
+            verify_envelope(env, expected_pubkey=_OPERATOR.public_key, now=_NOW)
 
     def test_wrong_signer_rejected(self):
         impostor = Identity.generate()
         env = _signed_envelope(identity=impostor)
         with self.assertRaises(DelegationError):
-            verify_envelope(env, now=_NOW)
+            verify_envelope(env, expected_pubkey=_OPERATOR.public_key, now=_NOW)
 
 
 class TestIssueEnvelope(_PatchedKeyTestCase):
@@ -164,8 +151,10 @@ class TestIssueEnvelope(_PatchedKeyTestCase):
         with tempfile.TemporaryDirectory() as td:
             now = _NOW
             grants = self._make_active_grant(Path(td), now)
-            env = issue_envelope(grant_path=grants, identity=_OPERATOR, now=now)
-            payload = verify_envelope(env, now=now)
+            env = issue_envelope(grant_path=grants, identity=_OPERATOR,
+                                 expected_pubkey=_OPERATOR.public_key, now=now)
+            payload = verify_envelope(
+                env, expected_pubkey=_OPERATOR.public_key, now=now)
             self.assertEqual(payload["approved_by"], "test-op")
 
     def test_issue_fails_without_grant(self):
@@ -174,6 +163,7 @@ class TestIssueEnvelope(_PatchedKeyTestCase):
                 issue_envelope(
                     grant_path=Path(td) / "empty.toml",
                     identity=_OPERATOR,
+                    expected_pubkey=_OPERATOR.public_key,
                     now=_NOW,
                 )
 
@@ -183,7 +173,8 @@ class TestIssueEnvelope(_PatchedKeyTestCase):
             now = _NOW
             grants = self._make_active_grant(Path(td), now)
             with self.assertRaises(DelegationError):
-                issue_envelope(grant_path=grants, identity=impostor, now=now)
+                issue_envelope(grant_path=grants, identity=impostor,
+                               expected_pubkey=_OPERATOR.public_key, now=now)
 
 
 class TestInstallEnvelope(_PatchedKeyTestCase):
@@ -192,9 +183,9 @@ class TestInstallEnvelope(_PatchedKeyTestCase):
         env = _signed_envelope()
         with tempfile.TemporaryDirectory() as td:
             grants = Path(td) / "grants.toml"
-            result = install_envelope(env, grants, now=_NOW)
+            result = install_envelope(env, grants, expected_pubkey=_OPERATOR.public_key, now=_NOW)
             self.assertEqual(result["status"], "installed")
-            again = install_envelope(env, grants, now=_NOW)
+            again = install_envelope(env, grants, expected_pubkey=_OPERATOR.public_key, now=_NOW)
             self.assertEqual(again["status"], "unchanged")
 
     def test_manual_grant_not_overwritten(self):
@@ -207,7 +198,7 @@ class TestInstallEnvelope(_PatchedKeyTestCase):
                 evidence="human-installed",
                 path=grants,
             )
-            result = install_envelope(env, grants, now=_NOW)
+            result = install_envelope(env, grants, expected_pubkey=_OPERATOR.public_key, now=_NOW)
             self.assertEqual(result["status"], "manual-preserved")
             status = grant_status(ACTION, grants, now=_NOW)
             self.assertEqual(status["grant"]["approved_by"], "human-op")
@@ -245,6 +236,7 @@ class TestRefreshAndInstall(_PatchedKeyTestCase):
                     ["http://shelf.local/grant"],
                     token_file=token,
                     grants_path=grants,
+                    expected_pubkey=_OPERATOR.public_key,
                     now=_NOW,
                 )
             self.assertEqual(result["status"], "installed")
@@ -256,7 +248,7 @@ class TestRefreshAndInstall(_PatchedKeyTestCase):
             token = self._write_token(tmp)
             grants = tmp / "grants.toml"
             env = _signed_envelope()
-            install_envelope(env, grants, now=_NOW)
+            install_envelope(env, grants, expected_pubkey=_OPERATOR.public_key, now=_NOW)
 
             import urllib.error
 
@@ -272,6 +264,7 @@ class TestRefreshAndInstall(_PatchedKeyTestCase):
                     ["http://shelf.local/grant"],
                     token_file=token,
                     grants_path=grants,
+                    expected_pubkey=_OPERATOR.public_key,
                     now=_NOW,
                 )
             self.assertEqual(result["status"], "revoked")
@@ -282,7 +275,7 @@ class TestRefreshAndInstall(_PatchedKeyTestCase):
             token = self._write_token(tmp)
             grants = tmp / "grants.toml"
             env = _signed_envelope()
-            install_envelope(env, grants, now=_NOW)
+            install_envelope(env, grants, expected_pubkey=_OPERATOR.public_key, now=_NOW)
 
             import urllib.error
 
@@ -296,6 +289,7 @@ class TestRefreshAndInstall(_PatchedKeyTestCase):
                     ["http://shelf.local/grant"],
                     token_file=token,
                     grants_path=grants,
+                    expected_pubkey=_OPERATOR.public_key,
                     now=_NOW,
                 )
             self.assertEqual(result["status"], "unreachable")
@@ -318,7 +312,7 @@ class TestOperatorStatus(_PatchedKeyTestCase):
         env = _signed_envelope()
         with tempfile.TemporaryDirectory() as td:
             grants = Path(td) / "grants.toml"
-            install_envelope(env, grants, now=_NOW)
+            install_envelope(env, grants, expected_pubkey=_OPERATOR.public_key, now=_NOW)
             result = operator_status(grants, now=_NOW)
             self.assertTrue(result["authorized"])
 
