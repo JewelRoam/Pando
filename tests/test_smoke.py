@@ -9,6 +9,7 @@ end-to-end vote including node death and checkpoint-diverse quorum picking.
 import argparse
 import base64
 import contextlib
+import gzip
 import hashlib
 import io
 import json
@@ -2581,6 +2582,49 @@ class TestResidentThinker(unittest.TestCase):
             self.assertEqual(len(thinker.rounds), 8)
             self.assertEqual(len(calls), 2)  # 8 rounds, stride 4
 
+    def test_thinkd_reads_bounded_final_outcomes_not_the_full_message_feed(self):
+        """Reaction traffic must not turn a trend read into a 9 MB poll."""
+        from unittest import mock
+        from pando import thinkd
+
+        with tempfile.TemporaryDirectory() as tmp:
+            thinker, _, _ = self._thinker(
+                [], Path(tmp) / "think.jsonl", history_window=2)
+            calls = []
+            by_status = {
+                "done": [
+                    {"id": "t1", "status": "done", "created_at": "2026-10-27T10:00:00",
+                     "title": "carried a seed"},
+                    {"id": "t2", "status": "done", "created_at": "2026-10-27T12:00:00",
+                     "title": "[proposal] p2 seed.export by mac-proposer"},
+                ],
+                "failed": [
+                    {"id": "t3", "status": "failed", "created_at": "2026-10-27T11:00:00",
+                     "title": "attempt that failed"},
+                ],
+                "blocked": [
+                    {"id": "t4", "status": "blocked", "created_at": "2026-10-27T13:00:00",
+                     "title": "[reaction] p3 赞同 by mac-text"},
+                    {"id": "t5", "status": "blocked", "created_at": "2026-10-27T14:00:00",
+                     "title": "[alarm] root offline"},
+                ],
+            }
+
+            def fake_get(path):
+                calls.append(path)
+                status = path.split("status=", 1)[1].split("&", 1)[0]
+                return {"tasks": by_status[status]}
+
+            with mock.patch.object(thinker, "_mailbox_get", fake_get):
+                activity = thinker._fetch_group_activity()
+
+        self.assertEqual(calls, [
+            f"/tasks?status={status}&limit={thinkd.ACTIVITY_FEED_LIMIT}"
+            for status in thinkd.ACTIVITY_STATUSES])
+        self.assertNotIn("/tasks?status=all", calls)
+        self.assertEqual([row["title"] for row in activity],
+                         ["attempt that failed", "[alarm] root offline"])
+
     def test_thinkd_never_publishes_an_unreachable_mailbox(self):
         """Transport failure is held, recorded, and survived - not raised."""
         def publish(proposal, identity, url, token):
@@ -2959,6 +3003,47 @@ class TestThinkWatchdogVoteDelivery(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertEqual(tasks, [])
 
+    def test_a_recovered_member_retires_the_open_alarm_task(self):
+        """Clearing the state file must also close the mailbox task.
+
+        On 2026-10-20 win-laya-int8 wedged, the watchdog paged a claimable
+        ``[alarm]`` task, win-laya recovered, and the watchdog cleared its own
+        state - but the task stayed open forever. An open list holding one
+        stale alarm stops meaning "something is wrong", so recovery has to
+        mark the task done, not just forget it.
+        """
+        wd = self._tool()
+        with tempfile.TemporaryDirectory() as tmp:
+            url, token_file, box, server, thread = self._alarm_stub(tmp)
+            state_file = Path(tmp) / "alarm-state.json"
+            try:
+                # First poll: win-laya wedges -> exactly one open alarm task.
+                rc1 = self._run(wd, tmp, self._vote_cmd(tmp, self.WEDGE, 2),
+                                url, token_file,
+                                extra=("--alarm-state-file", str(state_file)))
+                tasks = box.list(None)
+                # Second poll: bounded again -> the same task is retired.
+                healthy = {"now": 1_800_000_000.0,
+                           "members": {"win-laya-int8": {"status": "ok",
+                                                         "slope": -0.01,
+                                                         "samples": 43}},
+                           "unnamed_silent": []}
+                rc2 = self._run(wd, tmp, self._vote_cmd(tmp, healthy, 0),
+                                url, token_file,
+                                extra=("--alarm-state-file", str(state_file)))
+                tasks_after = box.list(None)
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=3)
+
+            self.assertEqual(rc1, 0)
+            self.assertEqual(rc2, 0)
+            self.assertEqual(len(tasks), 1)
+            self.assertEqual(tasks[0]["status"], "open")
+            self.assertEqual(len(tasks_after), 1,
+                             "recovery retires the task, it does not mint a new one")
+            self.assertEqual(tasks_after[0]["status"], "done")
+            self.assertIn("retired", tasks_after[0].get("output", ""))
+
     def test_a_suppressed_alarm_is_named_not_called_ok(self):
         """rc=0 with --page-new-only means "nothing new", not "all healthy".
 
@@ -3175,8 +3260,9 @@ class TestThinkWatchdogCodeDelivery(unittest.TestCase):
 
       * a stale member becomes exactly one claimable ``[alarm] code-drift``
         task - not a log line;
-      * a root table that cannot be read creates **nothing**. Our blind spot is
-        not a member falling behind, and conflating them is how a pager lies;
+      * a transient unreadable root creates nothing, while a root that stays
+        unreadable past the grace window becomes one ``[alarm] code-coverage``
+        task - never a fabricated member-drift accusation;
       * the vote and code legs share one ``--alarm-state-file`` (the age and
         re-check logic lives there), so neither leg's clean poll may erase the
         other leg's open alarm.
@@ -3341,6 +3427,124 @@ class TestThinkWatchdogCodeDelivery(unittest.TestCase):
             self.assertIn("PARTIAL COVERAGE (not paged)", text)
             self.assertIn("1 members measured, 1 root(s) unreadable: pi5", text)
             self.assertNotIn("UNREADABLE", text)
+
+    def test_a_persistent_blind_root_becomes_a_coverage_task(self):
+        """Blindness is actionable after three polls, without blaming members."""
+        wd = self._tool()
+        partial = {
+            "members": {"mac-text": {"status": "ok", "behind": 0}},
+            "unreadable": [
+                {"root": "win", "error": "urlopen timed out"},
+                {"root": "pi5", "error": "mirror stale"},
+            ],
+            "stale": [],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            url, token_file, box, server, thread = self._alarm_stub(tmp)
+            state = Path(tmp) / "alarms.json"
+            cmd = self._probe_cmd(tmp, partial, 1, "partial_persistent")
+            extra = ("--alarm-state-file", str(state),
+                     "--code-coverage-grace-seconds", "900")
+            try:
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    self._run(wd, tmp, cmd, alarm_url=url,
+                              token_file=token_file,
+                              extra=extra + ("--now", "1000"))
+                self.assertEqual(box.list(None), [],
+                                 "one blind poll is not yet coverage proof")
+                self.assertIn("tracking, not paged", out.getvalue())
+
+                self._run(wd, tmp, cmd, alarm_url=url,
+                          token_file=token_file,
+                          extra=extra + ("--now", "1900"))
+                tasks = box.list(None)
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=3)
+
+            self.assertEqual(len(tasks), 1)
+            task = tasks[0]
+            self.assertTrue(task["title"].startswith(
+                "[alarm] code-coverage:"), task["title"])
+            self.assertIn("win", task["title"])
+            self.assertIn("pi5", task["title"])
+            self.assertNotIn("code-drift:", task["title"])
+            self.assertIn("does NOT mean", task["body"])
+            self.assertIn("not accused of running old", task["body"])
+
+    def test_measured_coverage_closes_the_coverage_task(self):
+        """A fresh measurement is the only accepted recovery evidence."""
+        wd = self._tool()
+        partial = {
+            "members": {"mac-text": {"status": "ok", "behind": 0}},
+            "unreadable": [{"root": "win", "error": "offline"}],
+            "stale": [],
+        }
+        clean = {"members": {
+            "mac-text": {"status": "ok", "behind": 0},
+            "win-gemma-12b": {"status": "ok", "behind": 0},
+        }, "unreadable": [], "stale": []}
+        with tempfile.TemporaryDirectory() as tmp:
+            url, token_file, box, server, thread = self._alarm_stub(tmp)
+            state = Path(tmp) / "alarms.json"
+            extra = ("--alarm-state-file", str(state),
+                     "--code-coverage-grace-seconds", "0")
+            try:
+                self._run(wd, tmp, self._probe_cmd(tmp, partial, 1, "blind"),
+                          alarm_url=url, token_file=token_file,
+                          extra=extra + ("--now", "1000"))
+                self._run(wd, tmp, self._probe_cmd(tmp, clean, 0, "covered"),
+                          alarm_url=url, token_file=token_file,
+                          extra=extra + ("--now", "1001"))
+                tasks = box.list(None)
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=3)
+
+            self.assertEqual(len(tasks), 1)
+            self.assertEqual(tasks[0]["status"], "done")
+            self.assertNotIn(wd.COVERAGE_TRACKING_KEY,
+                             json.loads(state.read_text()))
+
+    def test_each_blind_root_waits_for_its_own_grace_window(self):
+        """A long outage cannot drag a newly blind root into its alarm."""
+        wd = self._tool()
+        win_blind = {
+            "members": {"mac-text": {"status": "ok", "behind": 0}},
+            "unreadable": [{"root": "win", "error": "offline"}],
+            "stale": [],
+        }
+        both_blind = {
+            "members": {"mac-text": {"status": "ok", "behind": 0}},
+            "unreadable": [
+                {"root": "win", "error": "offline"},
+                {"root": "pi5", "error": "mirror stale"},
+            ],
+            "stale": [],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            url, token_file, box, server, thread = self._alarm_stub(tmp)
+            state = Path(tmp) / "alarms.json"
+            extra = ("--alarm-state-file", str(state),
+                     "--code-coverage-grace-seconds", "900")
+            try:
+                self._run(wd, tmp, self._probe_cmd(tmp, win_blind, 1, "win"),
+                          alarm_url=url, token_file=token_file,
+                          extra=extra + ("--now", "1000"))
+                self._run(wd, tmp, self._probe_cmd(tmp, both_blind, 1, "both"),
+                          alarm_url=url, token_file=token_file,
+                          extra=extra + ("--now", "1900"))
+                tasks = box.list(None)
+                tracking = json.loads(state.read_text())[
+                    wd.COVERAGE_TRACKING_KEY]
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=3)
+
+            self.assertEqual(len(tasks), 1)
+            self.assertTrue(tasks[0]["title"].startswith(
+                "[alarm] code-coverage: win"), tasks[0]["title"])
+            self.assertNotIn("pi5", tasks[0]["title"])
+            self.assertEqual(tracking["win"]["first_seen"], 1000.0)
+            self.assertEqual(tracking["pi5"]["first_seen"], 1900.0)
 
     def test_a_partial_report_still_pages_a_stale_member(self):
         """An unreadable root does not hide a stale row we did measure."""
@@ -3596,13 +3800,15 @@ class TestThinkWatchdogCodeDelivery(unittest.TestCase):
         self.assertNotIn("code-drift-alarms.json", plist)
         self.assertTrue((root / "tools" / "code_drift_check.py").exists())
 
-    def test_the_installed_voter_only_checks_deployed_members(self):
-        """Mac may sleep, so its stale voters are not a 24h deployment fault.
+    def test_the_installed_voter_judges_sleepable_macs_only_while_awake(self):
+        """Mac may sleep, so its voters are gated on wakefulness, not deleted.
 
-        The voter leg used Mac decision members that necessarily fall behind
-        whenever the laptop wakes. That produced a wedge alarm for a machine
-        the user explicitly excluded from the always-on acceptance set. Only
-        voters hosted on the two always-on deployments may page.
+        A laptop that sleeps looks exactly like a silent voter on a green
+        panel. Deleting the Mac members (--ignore-member) fixed the false
+        alarm by also deleting the real one: a Mac that is awake and wedged is
+        invisible. The split is --decision (must be voting) plus
+        --sleep-gated-member (but only while this host is awake), so the
+        always-on deployments page as before and an awake Mac pages too.
         """
         root = Path(__file__).resolve().parents[1]
         plist = (root / "tools" / "mac-launchd"
@@ -3611,10 +3817,12 @@ class TestThinkWatchdogCodeDelivery(unittest.TestCase):
         args = plistlib.loads(plist.encode("utf-8"))["ProgramArguments"]
         vote_index = args.index("--vote-cmd")
         cmd = args[vote_index + 1]
-        self.assertNotIn("--decision mac-text", cmd)
-        self.assertNotIn("--decision mac-laya-int8", cmd)
-        self.assertIn("--ignore-member mac-text", cmd)
-        self.assertIn("--ignore-member mac-laya-int8", cmd)
+        self.assertIn("--decision mac-text", cmd)
+        self.assertIn("--decision mac-laya-int8", cmd)
+        self.assertIn("--sleep-gated-member mac-text", cmd)
+        self.assertIn("--sleep-gated-member mac-laya-int8", cmd)
+        self.assertNotIn("--ignore-member mac-text", cmd)
+        self.assertNotIn("--ignore-member mac-laya-int8", cmd)
         self.assertIn("--decision pandosi-pi5-x", cmd)
         self.assertIn("--decision pandosi-pi5-laya", cmd)
         self.assertIn("--decision win-laya-int8", cmd)
@@ -3709,6 +3917,793 @@ class TestThinkStats(unittest.TestCase):
         self.assertEqual(s["n"], 0)
         self.assertEqual(s["rounds_per_hour"], 0.0)
         self.assertIn("empty ledger", ts.format_report("x", s))
+
+
+class TestMemoryAblationCheck(unittest.TestCase):
+    """tools/memory_ablation_check.py - the missing memory control.
+
+    The experiment must separate full history, last-action feedback, action
+    counts, and prompt length. Group proposals and outcome activity are frozen
+    empty in every arm, and all arms keep the same round number instead of
+    claiming "first round" at round 3500.
+    """
+
+    def _tool(self):
+        import importlib.util
+        path = Path(__file__).resolve().parents[1] / "tools" / "memory_ablation_check.py"
+        spec = importlib.util.spec_from_file_location("memory_ablation_check", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_single_factor_arms_isolate_history_counts_and_last_action(self):
+        from pando.thinkd import Ledger
+        tool = self._tool()
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Ledger(Path(tmp) / "think.jsonl")
+            from pando.thinkd import Round, Proposal
+            for number, action in ((1, "adaptive.governance"),
+                                   (2, "dynamic.threshold.adjustment")):
+                row = Round(number, number, proposal=Proposal(
+                    f"p{number}", "mac", f"在pi5主机执行目标{number}", action),
+                    published=True)
+                ledger.append(row)
+            prompts = tool.build_prompts(
+                ledger, 3, 8, ["pi5"], {"adaptive.governance",
+                                         "dynamic.threshold.adjustment"})
+        memory = prompts["memory"]
+        last_action = prompts["last_action"]
+        counts = prompts["counts"]
+        neutral = prompts["neutral"]
+        pseudo_history = prompts["pseudo_history"]
+        coherent_fiction = prompts["coherent_fiction"]
+        control = prompts["control"]
+        self.assertIn("dynamic.threshold.adjustment", memory)
+        self.assertIn("你已经提过的动作次数", memory)
+        self.assertIn("上一轮你提的是 dynamic.threshold.adjustment", memory)
+        self.assertIn("上一轮你提的是 dynamic.threshold.adjustment", last_action)
+        self.assertNotIn("你已经提过的动作次数", last_action)
+        self.assertNotIn("目标「在pi5主机执行目标1」", last_action)
+        self.assertIn("你已经提过的动作次数", counts)
+        self.assertNotIn("上一轮你提的是", counts)
+        self.assertNotIn("目标「在pi5主机执行目标1」", counts)
+        self.assertNotIn("dynamic.threshold.adjustment", control)
+        self.assertNotIn("你已经提过的动作次数", control)
+        self.assertNotIn("上一轮你提的是", control)
+        self.assertIn("这是你的第 3 轮思考", control)
+        self.assertIn("固定为空：实验控制", control)
+        self.assertIn("pi5", control)
+        self.assertEqual(len(neutral), len(memory))
+        self.assertIn("【中性长度填充】", neutral)
+        self.assertIn("neutral padding only", neutral)
+        self.assertNotIn("目标「在pi5主机执行目标1」", neutral)
+        self.assertNotIn("dynamic.threshold.adjustment", neutral)
+        self.assertNotIn("你已经提过的动作次数", neutral)
+        self.assertNotIn("上一轮你提的是", neutral)
+        self.assertEqual(len(pseudo_history), len(memory))
+        self.assertNotIn("r1:", pseudo_history)
+        self.assertNotIn("r2:", pseudo_history)
+        self.assertNotIn("目标「在pi5主机执行目标1」", pseudo_history)
+        self.assertNotIn("已发布", pseudo_history)
+        self.assertIn("未发布", pseudo_history)
+        self.assertIn("adaptive.governance", pseudo_history)
+        self.assertIn("dynamic.threshold.adjustment", pseudo_history)
+        self.assertIn("【你已经提过的动作次数】", pseudo_history)
+        self.assertIn("上一轮你提的是 dynamic.threshold.adjustment", pseudo_history)
+        self.assertEqual(len(coherent_fiction), len(memory))
+        self.assertNotIn("目标「在pi5主机执行目标1」", coherent_fiction)
+        self.assertIn("目标「在nuc主机执行目标1」", coherent_fiction)
+        self.assertNotIn("r1000:", coherent_fiction)
+        self.assertNotIn("内容不可用", coherent_fiction)
+        self.assertNotIn("不存在的目标", coherent_fiction)
+        self.assertIn("已发布", coherent_fiction)
+        self.assertNotIn("未发布", coherent_fiction)
+        self.assertIn("adaptive.governance", coherent_fiction)
+        self.assertIn("dynamic.threshold.adjustment", coherent_fiction)
+        self.assertIn("【你已经提过的动作次数】", coherent_fiction)
+        self.assertIn("上一轮你提的是 dynamic.threshold.adjustment",
+                      coherent_fiction)
+
+    def test_arm_orders_balance_each_arm_and_position(self):
+        tool = self._tool()
+        self.assertEqual(len(tool.ARM_ORDERS), len(tool.ARMS))
+        for order in tool.ARM_ORDERS:
+            self.assertEqual(set(order), set(tool.ARMS))
+        for position in range(len(tool.ARMS)):
+            self.assertEqual(
+                sorted(order[position] for order in tool.ARM_ORDERS),
+                sorted(tool.ARMS),
+            )
+
+    def test_goal_counterfactual_changes_polarity_not_layout(self):
+        from pando.thinkd import Ledger, Proposal, Round
+        tool = self._tool()
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Ledger(Path(tmp) / "think.jsonl")
+            goals = (
+                "在pi5主机上部署自适应治理协议以减少人工干预并"
+                "提升跨主机策略一致性",
+                "在mac主机上部署动态阈值调整以减少重复提案带来的资源浪费",
+            )
+            actions = ("adaptive.governance", "dynamic.threshold.adjustment")
+            for number, (goal, action) in enumerate(zip(goals, actions), 1):
+                ledger.append(Round(
+                    number, number,
+                    proposal=Proposal(
+                        f"p{number}", "mac", goal, action),
+                    published=True))
+            prompts = tool.build_prompts(
+                ledger, 3, 8, ["pi5", "mac"],
+                set(actions))
+        memory = prompts["memory"]
+        counterfactual = prompts["goal_counterfactual"]
+        self.assertEqual(len(counterfactual), len(memory))
+        self.assertIn("增加人工干预", counterfactual)
+        self.assertIn("降低跨主机策略一致性", counterfactual)
+        self.assertIn("增加重复提案带来的资源浪费", counterfactual)
+        self.assertNotIn("减少人工干预", counterfactual)
+        self.assertIn("pi5", counterfactual)
+        self.assertIn("mac", counterfactual)
+        self.assertIn("adaptive.governance", counterfactual)
+        self.assertIn("dynamic.threshold.adjustment", counterfactual)
+        self.assertNotEqual(counterfactual, memory)
+
+    def test_holm_adjustment_is_monotone_in_rank_order(self):
+        tool = self._tool()
+        self.assertEqual(tool.holm_adjust([0.01, 0.04, 0.03]),
+                         [0.03, 0.06, 0.06])
+
+    def test_prompt_artifact_contains_replayable_system_and_arm_text(self):
+        from pando.thinkd import Ledger, Proposal, Round
+        tool = self._tool()
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Ledger(Path(tmp) / "think.jsonl")
+            for number in (1, 2):
+                ledger.append(Round(
+                    number, number,
+                    proposal=Proposal(
+                        f"p{number}", "mac", "goal", "seed.export"),
+                    published=True))
+            prompts = tool.build_prompts(
+                ledger, 3, 8, [], {"seed.export", "seed.replicate"})
+        artifact = tool.prompt_artifact(prompts)
+        self.assertEqual(artifact["system"], tool.SYSTEM_PROMPT)
+        self.assertEqual(artifact["text"], {
+            arm: prompts[arm] for arm in tool.ARMS
+        })
+        self.assertEqual(
+            set(artifact["sha256"]), set(tool.ARMS))
+        self.assertEqual(
+            artifact["system_sha256"],
+            hashlib.sha256(tool.SYSTEM_PROMPT.encode("utf-8")).hexdigest())
+
+    def test_tvd_and_invalid_actions_are_counted(self):
+        from collections import Counter
+        tool = self._tool()
+        self.assertEqual(tool.total_variation(
+            Counter({"a": 3}), Counter({"a": 3})), 0.0)
+        self.assertEqual(tool.total_variation(
+            Counter({"a": 3}), Counter({"b": 3})), 1.0)
+        self.assertEqual(tool.parse_action(
+            '{"action":"not.in.space"}', {"seed.export"}), tool.INVALID)
+        self.assertEqual(tool.parse_action(
+            'noise {"action":"seed.export"} tail', {"seed.export"}),
+            "seed.export")
+
+    def test_identical_arms_do_not_manufacture_a_permutation_signal(self):
+        tool = self._tool()
+        pairs = [{arm: "seed.export" for arm in tool.ARMS}] * 20
+        summary = tool.summarise(
+            pairs, ["seed.export"], "seed.export", trials=199)
+        self.assertTrue(all(
+            row["observed"] == 0.0
+            and row["paired_permutation_p"] > 0.9
+            and row["holm_adjusted_p"] > 0.9
+            for row in summary["primary"]["comparisons"]))
+        self.assertTrue(all(
+            summary["arms"][arm]["same_as_last"]["count"] == 20
+            for arm in tool.ARMS))
+
+    def test_response_text_summary_keeps_action_and_goal_effects_distinct(self):
+        tool = self._tool()
+        rows = []
+        for pair in range(2):
+            for arm in tool.ARMS:
+                action = "adaptive.governance"
+                goal = "在pi5部署治理以减少人工干预"
+                effect = "same-effect"
+                if arm == "goal_counterfactual":
+                    action = "adaptive.governance" if pair == 0 else "seed.export"
+                    goal = ("在pi5部署治理以增加人工干预" if pair == 0
+                            else "在pi5部署治理以增强一致性")
+                    effect = "same-effect" if pair == 0 else "other-effect"
+                elif arm == "control":
+                    action = "seed.export"
+                    goal = "复制成员"
+                rows.append({
+                    "pair": pair,
+                    "arm": arm,
+                    "action": action,
+                    "raw": json.dumps({
+                        "action": action,
+                        "goal": goal,
+                        "expected_effect": effect,
+                    }, ensure_ascii=False),
+                })
+        summary = tool.response_text_summary(rows)
+        comparison = summary["comparisons"][1]
+        self.assertEqual(comparison["label"],
+                         "full_memory_vs_goal_counterfactual")
+        agreement = comparison["field_agreement"]
+        self.assertEqual(agreement["action"]["equal"], 1)
+        self.assertEqual(agreement["goal"]["equal"], 0)
+        self.assertEqual(agreement["expected_effect"]["equal"], 1)
+        self.assertEqual(agreement["reason"]["total"], 0)
+        self.assertEqual(agreement["reason"]["both_missing"], 2)
+        polarity = summary["goal_polarity"]
+        self.assertEqual(polarity["memory"]["source_any"], 2)
+        self.assertEqual(polarity["memory"]["target_any"], 0)
+        self.assertEqual(polarity["goal_counterfactual"]["source_any"], 0)
+        self.assertEqual(polarity["goal_counterfactual"]["target_any"], 1)
+        self.assertEqual(polarity["goal_counterfactual"]["neither_any"], 1)
+
+    def test_artifact_audit_recomputes_summary_and_rejects_tampered_prompt(self):
+        tool = self._tool()
+        n_pairs = 2
+        rows = []
+        pairs = []
+        for pair in range(n_pairs):
+            got = {}
+            for position, arm in enumerate(tool.ARM_ORDERS[pair]):
+                action = "seed.export"
+                got[arm] = action
+                rows.append({
+                    "pair": pair,
+                    "arm": arm,
+                    "position": position,
+                    "seed": 100 + pair,
+                    "action": action,
+                    "raw": json.dumps({"action": action, "goal": arm}),
+                })
+            pairs.append(got)
+        summary = tool.summarise(
+            pairs, ["seed.export"], "seed.export", trials=19)
+        prompt_texts = {arm: f"prompt-{arm}" for arm in tool.ARMS}
+        artifact = {
+            "config": {
+                "n_pairs": n_pairs,
+                "arm_orders": [list(order) for order in tool.ARM_ORDERS],
+            },
+            "prompts": tool.prompt_artifact(
+                prompt_texts,
+                {arm: 10 for arm in tool.ARMS}),
+            "summary": summary,
+            "rows": rows,
+        }
+        audit = tool.audit_artifact(artifact)
+        self.assertTrue(audit["ok"], audit["checks"])
+        tokenizer = artifact["prompts"].pop("tokenizer")
+        audit = tool.audit_artifact(artifact)
+        self.assertFalse(audit["checks"]["tokenizer_exact"])
+        artifact["prompts"]["tokenizer"] = tokenizer
+        original_raw = rows[0]["raw"]
+        rows[0]["raw"] = json.dumps({"action": "wrong", "goal": "tampered"})
+        audit = tool.audit_artifact(artifact)
+        self.assertFalse(audit["checks"]["raw_actions_match_stored_actions"])
+        rows[0]["raw"] = original_raw
+        artifact["prompts"]["text"]["memory"] += "tampered"
+        audit = tool.audit_artifact(artifact)
+        self.assertFalse(audit["checks"]["prompt_hashes_exact"])
+        self.assertFalse(audit["ok"])
+
+
+class TestActionSemanticsCheck(unittest.TestCase):
+    """tools/action_semantics_check.py - label semantics vs goal selection.
+
+    The eight real action names are themselves strong hints. The opaque menu
+    keeps the descriptions and goal fixed while replacing those hints with
+    arbitrary identifiers, so a named-only win is evidence for the shortcut
+    rather than evidence that the goal was ignored.
+    """
+
+    def _tool(self):
+        import importlib.util
+        path = (Path(__file__).resolve().parents[1]
+                / "tools" / "action_semantics_check.py")
+        spec = importlib.util.spec_from_file_location(
+            "action_semantics_check", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_pair_targets_are_distinct_and_cover_the_action_space(self):
+        from collections import Counter
+        tool = self._tool()
+        pairs = [tool.pair_targets(index) for index in range(32)]
+        self.assertTrue(all(left != right for left, right in pairs))
+        self.assertEqual(
+            Counter(action for pair in pairs for action in pair),
+            Counter({action: 8 for action in tool.ACTION_IDS}))
+
+    def test_opaque_menu_changes_only_identifiers(self):
+        tool = self._tool()
+        for index, seed in enumerate((3670, 3679, 9001)):
+            named_order, named_labels = tool.menu_for_pair(
+                index, seed, opaque=False)
+            opaque_order, opaque_labels = tool.menu_for_pair(
+                index, seed, opaque=True)
+            self.assertEqual(named_order, opaque_order)
+            self.assertEqual(named_labels, {
+                action: action for action in named_order})
+            self.assertEqual(set(opaque_labels), set(named_order))
+            self.assertEqual(set(opaque_labels.values()),
+                             set(tool.OPAQUE_LABELS))
+            self.assertTrue(all(
+                label not in tool.ACTION_IDS
+                for label in opaque_labels.values()))
+
+    def test_causal_goal_variant_removes_all_description_cues(self):
+        tool = self._tool()
+        audit = tool.lexical_audit()
+        self.assertTrue(audit["ok"], audit)
+        self.assertEqual(audit["goals_checked"], len(tool.ACTION_IDS))
+        self.assertEqual(set(tool.CAUSAL_GOALS), set(tool.ACTION_IDS))
+        self.assertEqual(set(tool.STRUCTURAL_GOALS), set(tool.ACTION_IDS))
+        self.assertEqual(set(tool.SYNONYM_GOALS), set(tool.ACTION_IDS))
+        self.assertEqual(set(tool.JOINT_GOALS), set(tool.ACTION_IDS))
+        self.assertEqual(set(tool.JOINT_DESCRIPTIONS), set(tool.ACTION_IDS))
+        self.assertEqual(set(tool.LITERAL_GOALS), set(tool.ACTION_IDS))
+        self.assertTrue(all(
+            tool.CAUSAL_GOALS[action] != tool.LITERAL_GOALS[action]
+            for action in tool.ACTION_IDS))
+        structural_audit = tool.lexical_audit(tool.STRUCTURAL_GOALS)
+        self.assertTrue(structural_audit["ok"], structural_audit)
+        synonym_audit = tool.lexical_audit(tool.SYNONYM_GOALS)
+        self.assertTrue(synonym_audit["ok"], synonym_audit)
+        joint_audit = tool.lexical_audit(tool.JOINT_GOALS)
+        self.assertTrue(joint_audit["ok"], joint_audit)
+        self.assertTrue(all(
+            tool.SYNONYM_GOALS[action] != tool.CAUSAL_GOALS[action]
+            for action in tool.ACTION_IDS))
+        self.assertTrue(all(
+            tool.JOINT_GOALS[action] != tool.CAUSAL_GOALS[action]
+            and tool.JOINT_DESCRIPTIONS[action]
+            != tool.ACTION_INFO[action][0]
+            and action not in tool.JOINT_DESCRIPTIONS[action]
+            for action in tool.ACTION_IDS))
+
+    def test_structural_preregistration_is_directional(self):
+        tool = self._tool()
+
+        def rows(correct: set[int]):
+            return [
+                {
+                    "pair": pair,
+                    "arm": arm,
+                    "valid": True,
+                    "correct": pair in correct,
+                }
+                for pair in range(10)
+                for arm in ("opaque_a", "opaque_b")
+            ]
+
+        fragile = tool.paired_binary_comparison(
+            rows(set(range(10))), rows(set(range(5, 10))))
+        self.assertEqual(
+            tool.classify_structural_comparison(fragile),
+            "structural_fragility_supported")
+
+        robust = tool.paired_binary_comparison(
+            rows(set(range(10))), rows(set(range(9))))
+        self.assertEqual(
+            tool.classify_structural_comparison(robust),
+            "structural_robustness_supported")
+
+    def test_joint_preregistration_is_directional_and_rewrites_both_sides(self):
+        tool = self._tool()
+        description_audit = tool.description_audit()
+        self.assertTrue(description_audit["ok"], description_audit)
+        self.assertIn("joint", tool.GOAL_VARIANTS)
+        self.assertEqual(
+            tool.DESCRIPTION_VARIANT_BY_GOAL["joint"], "joint")
+
+        def tokens(text):
+            return len(text)
+
+        from unittest.mock import patch
+
+        with patch.object(
+                tool, "pad_to_tokens",
+                lambda build, target, tokenize: (build(""), target, "")):
+            causal = tool.build_trial_prompts(
+                0, 3670, tokens, goal_variant="causal")
+            joint = tool.build_trial_prompts(
+                0, 3670, tokens, goal_variant="joint")
+        original = tool.ACTION_INFO["seed.export"][0]
+        rewritten = tool.JOINT_DESCRIPTIONS["seed.export"]
+        self.assertIn(original, causal["texts"]["opaque_a"])
+        self.assertNotIn(rewritten, causal["texts"]["opaque_a"])
+        self.assertIn(rewritten, joint["texts"]["opaque_a"])
+        self.assertNotIn(original, joint["texts"]["opaque_a"])
+
+        def rows(correct: set[int]):
+            return [
+                {
+                    "pair": pair,
+                    "arm": arm,
+                    "valid": True,
+                    "correct": pair in correct,
+                }
+                for pair in range(10)
+                for arm in ("opaque_a", "opaque_b")
+            ]
+
+        fragile = tool.paired_binary_comparison(
+            rows(set(range(10))), rows(set(range(5, 10))))
+        self.assertEqual(
+            tool.classify_joint_comparison(fragile),
+            "joint_fragility_supported")
+        robust = tool.paired_binary_comparison(
+            rows(set(range(10))), rows(set(range(9))))
+        self.assertEqual(
+            tool.classify_joint_comparison(robust),
+            "joint_robustness_supported")
+
+    def test_synonym_preregistration_is_directional(self):
+        tool = self._tool()
+
+        def rows(correct: set[int]):
+            return [
+                {
+                    "pair": pair,
+                    "arm": arm,
+                    "valid": True,
+                    "correct": pair in correct,
+                }
+                for pair in range(10)
+                for arm in ("opaque_a", "opaque_b")
+            ]
+
+        fragile = tool.paired_binary_comparison(
+            rows(set(range(10))), rows(set(range(5, 10))))
+        self.assertEqual(
+            tool.classify_synonym_comparison(fragile),
+            "synonym_fragility_supported")
+
+        robust = tool.paired_binary_comparison(
+            rows(set(range(10))), rows(set(range(9))))
+        self.assertEqual(
+            tool.classify_synonym_comparison(robust),
+            "synonym_robustness_supported")
+
+    def test_goal_variants_can_be_token_matched_together(self):
+        from unittest.mock import patch
+
+        tool = self._tool()
+        tokenize = lambda text: 10
+        fake_pad = lambda build, target, tokenize: (build(""), target, "")
+        with patch.object(tool, "pad_to_tokens", fake_pad):
+            trials = {
+                variant: tool.build_trial_prompts(
+                    0, 3670, tokenize, goal_variant=variant,
+                    target_tokens=15)
+                for variant in ("causal", "structural", "synonym")
+            }
+        self.assertEqual(
+            {trial["target_tokens"] for trial in trials.values()}, {15})
+        self.assertTrue(all(
+            set(trial["tokens"].values()) == {15}
+            for trial in trials.values()))
+
+    def test_pad_to_tokens_falls_back_beyond_hand_listed_pads(self):
+        tool = self._tool()
+        text, count, pad = tool.pad_to_tokens(
+            lambda suffix: suffix, 400, len)
+        self.assertEqual(count, 400)
+        self.assertEqual(text, pad)
+        self.assertEqual(pad, " x" * 200)
+
+    def test_preregistered_goal_comparison_rules_are_directional(self):
+        tool = self._tool()
+
+        def rows(correct: set[int]):
+            return [
+                {
+                    "pair": pair,
+                    "arm": arm,
+                    "valid": True,
+                    "correct": pair in correct,
+                }
+                for pair in range(10)
+                for arm in ("opaque_a", "opaque_b")
+            ]
+
+        baseline = rows(set(range(10)))
+        weak_candidate = rows(set(range(5, 10)))
+        comparison = tool.paired_binary_comparison(
+            baseline, weak_candidate)
+        self.assertEqual(comparison["discordant"]["baseline_only"], 10)
+        self.assertEqual(comparison["absolute_accuracy_change"], -0.5)
+        self.assertEqual(
+            tool.classify_goal_comparison(comparison),
+            "lexical_shortcut_supported")
+
+        preserve_candidate = rows(set(range(9)))
+        comparison = tool.paired_binary_comparison(
+            baseline, preserve_candidate)
+        self.assertEqual(comparison["discordant"]["baseline_only"], 2)
+        self.assertEqual(comparison["candidate_accuracy"], 0.9)
+        self.assertEqual(
+            tool.classify_goal_comparison(comparison),
+            "semantic_selection_survives_lexical_control")
+
+    def test_interleaved_schedule_balances_adjacent_goal_calls(self):
+        from collections import Counter
+
+        tool = self._tool()
+        schedule = tool.interleaved_schedule(8)
+        self.assertEqual(len(schedule), 8 * len(tool.ARMS) * 2)
+        self.assertEqual(len({item[0] for item in schedule}), 8)
+        for offset in range(0, len(schedule), 2):
+            first, second = schedule[offset], schedule[offset + 1]
+            self.assertEqual(first[0], second[0])
+            self.assertEqual(first[2], second[2])
+            self.assertEqual({first[1], second[1]},
+                             {"literal", "causal"})
+        first_variant_counts = Counter()
+        for pair in range(8):
+            for arm in tool.ARMS:
+                indexes = [
+                    index for index, item in enumerate(schedule)
+                    if item[0] == pair and item[2] == arm
+                ]
+                self.assertEqual(indexes[1] - indexes[0], 1)
+                first_variant_counts[schedule[indexes[0]][1]] += 1
+        self.assertEqual(first_variant_counts, Counter({
+            "literal": 16,
+            "causal": 16,
+        }))
+
+    def test_synonym_schema_dispatches_to_interleaved_audit(self):
+        from unittest.mock import patch
+
+        tool = self._tool()
+        sentinel = {"ok": True}
+        with patch.object(
+                tool, "audit_interleaved_artifact", return_value=sentinel
+        ) as audit:
+            result = tool.audit_artifact({
+                "schema": tool.SYNONYM_INTERLEAVED_SCHEMA,
+            })
+        self.assertIs(result, sentinel)
+        audit.assert_called_once()
+
+    def test_joint_schema_dispatches_to_interleaved_audit(self):
+        from unittest.mock import patch
+
+        tool = self._tool()
+        sentinel = {"ok": True}
+        with patch.object(
+                tool, "audit_interleaved_artifact", return_value=sentinel
+        ) as audit:
+            result = tool.audit_artifact({
+                "schema": tool.JOINT_INTERLEAVED_SCHEMA,
+            })
+        self.assertIs(result, sentinel)
+        audit.assert_called_once()
+
+    def test_interleaved_artifact_audit_checks_call_order_and_comparison(self):
+        tool = self._tool()
+        rows_by_variant = {"literal": [], "causal": []}
+        prompts_by_variant = {"literal": [], "causal": []}
+        for variant in ("literal", "causal"):
+            for pair in range(2):
+                seed = 3670 + pair
+                targets = tool.pair_targets(pair)
+                label_maps = {
+                    mode: {
+                        label: action for action, label in
+                        tool.menu_for_pair(
+                            pair, seed, opaque=(mode == "opaque"))[1].items()
+                    }
+                    for mode in ("named", "opaque")
+                }
+                texts = {}
+                hashes = {}
+                for position, arm in enumerate(tool.ARM_ORDERS[pair]):
+                    mode, arm_variant = arm.split("_", 1)
+                    target = targets[0 if arm_variant == "a" else 1]
+                    label = next(
+                        label for label, action in label_maps[mode].items()
+                        if action == target)
+                    raw = json.dumps({"action": label, "reason": "match"})
+                    text = f"prompt-{variant}-{pair}-{arm}-" + "x" * 20
+                    texts[arm] = text
+                    hashes[arm] = hashlib.sha256(
+                        text.encode("utf-8")).hexdigest()
+                    rows_by_variant[variant].append({
+                        "pair": pair,
+                        "arm": arm,
+                        "mode": mode,
+                        "variant": arm_variant,
+                        "goal_variant": variant,
+                        "position": position,
+                        "seed": seed,
+                        "target": target,
+                        "action": target,
+                        "label": label,
+                        "valid": True,
+                        "correct": True,
+                        "reason": "match",
+                        "raw": raw,
+                        "prompt_sha256": hashes[arm],
+                        "prompt_chars": len(text),
+                        "prompt_tokens": 100,
+                    })
+                prompts_by_variant[variant].append({
+                    "pair": pair,
+                    "target_a": targets[0],
+                    "target_b": targets[1],
+                    "text": texts,
+                    "sha256": hashes,
+                    "tokens": {arm: 100 for arm in tool.ARMS},
+                })
+
+        schedule = tool.interleaved_schedule(2)
+        stored_schedule = []
+        for sample_index, (pair, variant, arm) in enumerate(schedule):
+            row = next(
+                row for row in rows_by_variant[variant]
+                if row["pair"] == pair and row["arm"] == arm)
+            row["sample_index"] = sample_index
+            stored_schedule.append({
+                "sample_index": sample_index,
+                "pair": pair,
+                "goal_variant": variant,
+                "arm": arm,
+            })
+        artifacts = {}
+        for variant in ("literal", "causal"):
+            artifacts[variant] = {
+                "goal_variant": variant,
+                "pairs": 2,
+                "system": tool.SYSTEM_PROMPT,
+                "system_sha256": hashlib.sha256(
+                    tool.SYSTEM_PROMPT.encode("utf-8")).hexdigest(),
+                "prompts": prompts_by_variant[variant],
+                "rows": rows_by_variant[variant],
+                "summary": tool.summarise(rows_by_variant[variant], 2),
+            }
+        artifact = {
+            "schema": tool.INTERLEAVED_SCHEMA,
+            "pairs": 2,
+            "schedule": stored_schedule,
+            "variants": artifacts,
+            "comparison": tool.compare_artifacts(
+                artifacts["literal"], artifacts["causal"]),
+        }
+        audit = tool.audit_artifact(artifact)
+        self.assertTrue(audit["ok"], audit["checks"])
+        artifact["schedule"][0], artifact["schedule"][1] = (
+            artifact["schedule"][1], artifact["schedule"][0])
+        audit = tool.audit_artifact(artifact)
+        self.assertFalse(audit["checks"]["schedule_exact"])
+        self.assertFalse(audit["ok"])
+
+    def test_parse_selection_uses_the_arm_label_mapping(self):
+        tool = self._tool()
+        label_to_action = {"k7": "seed.export", "m2": "seed.replicate"}
+        action, label, obj = tool.parse_selection(
+            'noise {"action":"k7","reason":"matches"} tail',
+            label_to_action)
+        self.assertEqual(action, "seed.export")
+        self.assertEqual(label, "k7")
+        self.assertEqual(obj["reason"], "matches")
+        action, label, obj = tool.parse_selection(
+            '{"action":"seed.export"}', label_to_action)
+        self.assertEqual(action, "(invalid)")
+        self.assertEqual(label, "seed.export")
+        self.assertEqual(obj["action"], "seed.export")
+
+    def test_summary_separates_goal_sensitivity_from_named_advantage(self):
+        tool = self._tool()
+        rows = []
+        for pair in range(2):
+            for position, arm in enumerate(tool.ARM_ORDERS[pair]):
+                mode, variant = arm.split("_", 1)
+                target = tool.ACTION_IDS[(pair * 2 + (variant == "b")) % 8]
+                correct = not (pair == 1 and mode == "opaque")
+                rows.append({
+                    "pair": pair,
+                    "arm": arm,
+                    "mode": mode,
+                    "variant": variant,
+                    "position": position,
+                    "target": target,
+                    "action": target if correct else "(invalid)",
+                    "valid": correct,
+                    "correct": correct,
+                })
+        summary = tool.summarise(rows, pairs=2)
+        named = summary["goal_sensitivity"]["named"]
+        opaque = summary["goal_sensitivity"]["opaque"]
+        self.assertEqual(named["comparable_pairs"], 2)
+        self.assertEqual(named["both_correct"], 2)
+        self.assertEqual(named["goal_changed_action"], 2)
+        self.assertEqual(opaque["comparable_pairs"], 1)
+        self.assertEqual(opaque["both_correct"], 1)
+        self.assertEqual(opaque["goal_changed_action"], 1)
+        self.assertEqual(summary["named_vs_opaque"]["named_correct"], 4)
+        self.assertEqual(summary["named_vs_opaque"]["opaque_correct"], 2)
+
+    def test_artifact_audit_recomputes_opaque_selections_and_summary(self):
+        tool = self._tool()
+        pairs = 2
+        rows = []
+        prompts = []
+        for pair in range(pairs):
+            seed = 3670 + pair
+            targets = tool.pair_targets(pair)
+            label_maps = {
+                mode: {
+                    label: action for action, label in
+                    tool.menu_for_pair(
+                        pair, seed, opaque=(mode == "opaque"))[1].items()
+                }
+                for mode in ("named", "opaque")
+            }
+            texts = {}
+            hashes = {}
+            for position, arm in enumerate(tool.ARM_ORDERS[pair]):
+                mode, variant = arm.split("_", 1)
+                target = targets[0 if variant == "a" else 1]
+                label = next(label for label, action in label_maps[mode].items()
+                             if action == target)
+                raw = json.dumps({"action": label, "reason": "match"})
+                text = f"prompt-{pair}-{arm}-" + "x" * 20
+                texts[arm] = text
+                hashes[arm] = hashlib.sha256(text.encode("utf-8")).hexdigest()
+                rows.append({
+                    "pair": pair,
+                    "arm": arm,
+                    "mode": mode,
+                    "variant": variant,
+                    "position": position,
+                    "seed": seed,
+                    "target": target,
+                    "action": target,
+                    "label": label,
+                    "valid": True,
+                    "correct": True,
+                    "reason": "match",
+                    "raw": raw,
+                    "prompt_sha256": hashes[arm],
+                    "prompt_chars": len(text),
+                    "prompt_tokens": 100,
+                })
+            prompts.append({
+                "pair": pair,
+                "target_a": targets[0],
+                "target_b": targets[1],
+                "text": texts,
+                "sha256": hashes,
+                "tokens": {arm: 100 for arm in tool.ARMS},
+            })
+        artifact = {
+            "pairs": pairs,
+            "system": tool.SYSTEM_PROMPT,
+            "system_sha256": hashlib.sha256(
+                tool.SYSTEM_PROMPT.encode("utf-8")).hexdigest(),
+            "prompts": prompts,
+            "rows": rows,
+            "summary": tool.summarise(rows, pairs),
+        }
+        audit = tool.audit_artifact(artifact)
+        self.assertTrue(audit["ok"], audit["checks"])
+        rows[0]["raw"] = json.dumps({"action": "wrong", "reason": "tampered"})
+        audit = tool.audit_artifact(artifact)
+        self.assertFalse(audit["checks"]["raw_selections_recompute_exactly"])
+        self.assertFalse(audit["ok"])
 
 
 class TestProposerSpool(unittest.TestCase):
@@ -4492,6 +5487,7 @@ class TestReactions(unittest.TestCase):
                 for i in range(5)]
         ids = {row["id"]: row["title"].split()[1] for row in rows}
         paths = []
+        listings = []
 
         with tempfile.TemporaryDirectory() as td:
             ident = load_or_create(_P(td) / "identity.json")
@@ -4508,6 +5504,7 @@ class TestReactions(unittest.TestCase):
                     return {"tasks": {i: {"id": i, "body": body_for(ids[i])}
                                       for i in payload["ids"]}}
                 if path.startswith("/tasks"):
+                    listings.append(path)
                     return {"tasks": rows}
                 raise AssertionError(f"unbatched body read: {path}")
 
@@ -4517,6 +5514,7 @@ class TestReactions(unittest.TestCase):
 
         # Two rows, two bodies, one request -- and only the newest two.
         self.assertEqual(paths, ["t3", "t4"])
+        self.assertEqual(listings, ["/tasks?status=all&limit=2"])
         self.assertEqual([p.proposal_id for p in found], ["p3", "p4"])
 
     def test_the_sweep_reads_titles_and_retires_the_backlog(self):
@@ -4548,7 +5546,8 @@ class TestReactions(unittest.TestCase):
                             for line in ledger.read_text().splitlines() if line]
 
         self.assertEqual(swept, 1)
-        self.assertEqual(paths, ["/tasks?status=all"])
+        self.assertEqual(paths, [
+            f"/tasks?status=all&limit={reactd.STALE_SWEEP_FEED_LIMIT}"])
         self.assertEqual([r["target_id"] for r in rows_written], [old])
         self.assertTrue(rows_written[0]["stale"])
         self.assertNotIn(new, seen)
@@ -4617,6 +5616,79 @@ class TestBatchedBodyFetch(unittest.TestCase):
 
         self.assertEqual(sorted(got), sorted(ids))
         self.assertEqual([len(chunk) for chunk in seen], [500, 500, 200])
+
+    def test_the_executor_falls_back_to_a_full_listing_on_an_old_mailbox(self):
+        """A focused query is an optimisation; old peers must still work."""
+        from unittest import mock
+        from pando import proposal_mail
+
+        paths = []
+
+        def fake_request(url, path, token, method, payload=None, timeout=15):
+            paths.append((path, method))
+            if path == "/tasks/query":
+                return {"error": "HTTP 404", "detail": "not found"}
+            return {"tasks": [{"id": "old-seed"}]}
+
+        with mock.patch.object(proposal_mail, "_request", fake_request):
+            listing, source, error = proposal_mail.query_tasks_any(
+                ["http://mailbox"], None,
+                selectors=[{"actions": ["seed.export"]}], limit=40,
+                exclude_proposal_ids={"settled"})
+
+        self.assertEqual(paths, [("/tasks/query", "POST"),
+                                 ("/tasks?status=all", "GET")])
+        self.assertEqual(listing["tasks"], [{"id": "old-seed"}])
+        self.assertEqual(source, "http://mailbox")
+        self.assertIsNone(error)
+
+    def test_old_mailbox_fallback_keeps_seeds_and_late_votes(self):
+        """The full-listing fallback must preserve execution's two old rows.
+
+        A focused query without seed expansion or reaction closure would look
+        correct against a new mailbox and silently change an old peer's round.
+        This crosses both boundaries: the query route is absent, and the only
+        seed and vote are older than the newest-window limit.
+        """
+        from unittest import mock
+        from pando import execute, proposal_mail
+
+        rows = [
+            {"id": "t-old-seed",
+             "title": "[proposal] p-old seed.export by peer",
+             "created_at": "2026-10-27T10:00:00"},
+            {"id": "t-late-vote",
+             "title": "[reaction] p-old 赞同 by mac-text",
+             "created_at": "2026-10-27T10:01:00"},
+            {"id": "t-chat-1", "title": "[chat] window filler 1",
+             "created_at": "2026-10-27T10:02:00"},
+            {"id": "t-chat-2", "title": "[chat] window filler 2",
+             "created_at": "2026-10-27T10:03:00"},
+        ]
+        paths = []
+
+        def fake_request(url, path, token, method, payload=None, timeout=15):
+            paths.append((path, method))
+            if path == "/tasks/query":
+                return {"error": "HTTP 404", "detail": "not found"}
+            return {"tasks": rows}
+
+        with mock.patch.object(proposal_mail, "_request", fake_request):
+            listing, source, error = proposal_mail.query_tasks_any(
+                ["http://old-mailbox"], "tok",
+                selectors=execute.execution_selectors({"mac-proposer"}),
+                limit=2, exclude_proposal_ids={"p-settled"})
+
+        selected = execute.rows_for_execution(
+            listing["tasks"], limit=2, authors={"mac-proposer"})
+
+        self.assertEqual(paths, [("/tasks/query", "POST"),
+                                 ("/tasks?status=all", "GET")])
+        self.assertEqual(source, "http://old-mailbox")
+        self.assertIsNone(error)
+        self.assertEqual([row["id"] for row in selected],
+                         ["t-old-seed", "t-late-vote",
+                          "t-chat-1", "t-chat-2"])
 
     def test_a_mailbox_without_the_route_falls_back_to_one_get_per_id(self):
         """An older peer mid-upgrade answers 404; that must not be fatal."""
@@ -4806,6 +5878,26 @@ class TestBatchedBodyFetch(unittest.TestCase):
 
 
 class TestChatMailboxPartition(unittest.TestCase):
+    def test_history_requests_a_bounded_tail(self):
+        from types import SimpleNamespace
+        from unittest import mock
+        from tools import agent_chat
+
+        calls = []
+
+        def fake_request(args, method, path, payload=None):
+            calls.append((method, path, payload))
+            return {"tasks": [{"id": "t1", "from": "ann",
+                               "title": "[chat] @all: hi",
+                               "body": "hi", "created_at": "2026-10-27T16:00:00",
+                               "status": "claimed"}]}
+
+        args = SimpleNamespace(limit=10, mentions=None)
+        with mock.patch.object(agent_chat, "_request", fake_request), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(agent_chat.cmd_history(args), 0)
+        self.assertEqual(calls, [("GET", "/tasks?status=all&limit=10", None)])
+
     """A chat reply posted nowhere is not queued; it is gone.
 
     chatd was the last writer in the colony with a single mailbox and no
@@ -4871,11 +5963,35 @@ class TestChatMailboxPartition(unittest.TestCase):
             rows, source, error = chatd.fetch_tasks_any(
                 ["http://primary", "http://fallback"], None, 5)
 
-        self.assertEqual(seen, ["http://primary/tasks?status=all",
-                                "http://fallback/tasks?status=all"])
+        self.assertEqual(seen, [
+            "http://primary/tasks?status=all&limit="
+            f"{chatd.CHAT_FEED_LIMIT}&kind=chat&kind=proposal",
+            "http://fallback/tasks?status=all&limit="
+            f"{chatd.CHAT_FEED_LIMIT}&kind=chat&kind=proposal",
+        ])
         self.assertEqual([row["id"] for row in rows], ["t1"])
         self.assertEqual(source, "http://fallback")
         self.assertIsNone(error)
+
+    def test_a_caller_can_bound_the_chat_feed(self):
+        from unittest import mock
+        from pando import chatd
+
+        seen = []
+
+        def fake_request(url, token, method, payload, timeout):
+            seen.append(url)
+            return {"tasks": [{"id": "t1", "title": "[chat] @mac-llm: hi"}]}
+
+        with mock.patch.object(chatd, "_request", fake_request):
+            rows, _, _ = chatd.fetch_tasks_any(
+                ["http://mailbox"], None, 5, limit=37)
+
+        self.assertEqual(
+            seen,
+            ["http://mailbox/tasks?status=all&limit=37"
+             "&kind=chat&kind=proposal"])
+        self.assertEqual([row["id"] for row in rows], ["t1"])
 
     def test_an_empty_fallback_is_healthy_even_if_primary_is_down(self):
         """This machine having nothing to say is idle, not a failed poll."""
@@ -4917,7 +6033,10 @@ class TestChatMailboxPartition(unittest.TestCase):
         from unittest import mock
         from pando import chatd
 
+        seen = []
+
         def fake_request(url, token, method, payload, timeout):
+            seen.append(url)
             return {"tasks": []}
 
         with mock.patch.object(chatd, "_request", fake_request):
@@ -4925,6 +6044,10 @@ class TestChatMailboxPartition(unittest.TestCase):
                                      {}, 5, True)
 
         self.assertEqual(report["did"], "idle")
+        self.assertEqual(
+            seen,
+            ["http://mailbox/tasks?status=all&limit="
+             f"{chatd.CHAT_FEED_LIMIT}&kind=chat&kind=proposal"])
 
     def test_every_mailbox_down_is_an_error_not_a_silent_idle(self):
         """A partition must not look like a colony with nothing to say."""
@@ -5100,7 +6223,211 @@ class TestChatMailboxPartition(unittest.TestCase):
         self.assertTrue(posts[0]["title"].startswith("[chat] @mac-codex: "))
 
 
+class TestTakeoverGuard(unittest.TestCase):
+    def test_recent_mac_codex_activity_blocks_takeover(self):
+        from datetime import datetime, timedelta, timezone
+        from tools import takeover_guard
+
+        now = datetime(2026, 10, 28, 13, 30,
+                       tzinfo=timezone(timedelta(hours=8)))
+        result = takeover_guard.assess_activity([
+            {"id": "old", "from": "mac-codex", "created_at": "2026-10-28T13:00:00",
+             "title": "[chat] old"},
+            {"id": "new", "from": "mac-codex", "created_at": "2026-10-28T13:20:00",
+             "title": "[reaction] still active"},
+            {"id": "noise", "from": "mac-proposer",
+             "created_at": "2026-10-28T13:29:00", "title": "[proposal] noise"},
+        ], now, limit=10)
+        self.assertEqual(result.status, takeover_guard.RECENT)
+        self.assertEqual(result.latest_match, "2026-10-28T13:20:00+08:00")
+
+    def test_a_full_tail_that_starts_inside_the_window_is_unknown(self):
+        """A full high-traffic tail is not a time window when the actor fell out."""
+        from datetime import datetime, timedelta, timezone
+        from tools import takeover_guard
+
+        now = datetime(2026, 10, 28, 13, 30,
+                       tzinfo=timezone(timedelta(hours=8)))
+        tasks = [
+            {"id": f"noise-{i}", "from": "mac-laya-int8",
+             "created_at": f"2026-10-28T13:{21 + i:02d}:00",
+             "title": "[reaction] noise"}
+            for i in range(9)
+        ]
+        result = takeover_guard.assess_activity(tasks, now, limit=9)
+        self.assertEqual(result.status, takeover_guard.UNKNOWN)
+        self.assertIn("does not cover", result.reason)
+
+    def test_other_actors_are_not_mistaken_for_the_primary(self):
+        from datetime import datetime, timedelta, timezone
+        from tools import takeover_guard
+
+        now = datetime(2026, 10, 28, 13, 30,
+                       tzinfo=timezone(timedelta(hours=8)))
+        result = takeover_guard.assess_activity([
+            {"id": "old", "from": "mac-codex",
+             "created_at": "2026-10-28T13:00:00", "title": "[chat] old"},
+            {"id": "noise", "from": "mac-proposer",
+             "created_at": "2026-10-28T13:29:00", "title": "[proposal] noise"},
+        ], now, limit=10)
+        self.assertEqual(result.status, takeover_guard.SAFE)
+
+
 class TestObservatoryFeed(unittest.TestCase):
+    def test_signed_bodies_are_verified_once_per_exact_message(self):
+        """Re-rendering the same signed envelope must not redo Ed25519."""
+        from unittest import mock
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import observatory
+
+        body = json.dumps({
+            "payload": {"goal": "one"},
+            "pubkey": "pk",
+            "sig": "sig",
+        })
+        observatory._signed_fields_cached.cache_clear()
+        try:
+            with mock.patch.object(observatory, "verify_signature",
+                                   return_value=True) as verify:
+                first = observatory.signed_fields(body)
+                first["goal"] = "mutated by a renderer"
+                second = observatory.signed_fields(body)
+                changed = observatory.signed_fields(body + " ")
+        finally:
+            observatory._signed_fields_cached.cache_clear()
+
+        self.assertEqual(second, {"goal": "one"})
+        self.assertEqual(changed, {"goal": "one"})
+        # Same exact bytes use the cached result; changed bytes are checked
+        # again rather than inheriting trust from a different message.
+        self.assertEqual(verify.call_count, 2)
+
+    def test_the_dashboard_window_is_bounded_and_counts_the_whole_mailbox(self):
+        """A short wire response must not turn work counts into window counts."""
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "agent_mailbox_under_test_dashboard_window",
+            Path(__file__).resolve().parents[1] / "tools" / "agent_mailbox.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as tmp:
+            box = module.Mailbox(Path(tmp) / "box")
+            rows = [
+                ("k1", "[proposal] p1 seed.export by peer", "open", "10:00:00"),
+                ("w1", "repair root", "open", "10:01:00"),
+                ("k2", "[alarm] mailbox slow", "open", "10:02:00"),
+                ("w2", "rotate archive", "blocked", "10:03:00"),
+                ("k3", "[reaction] p1 赞同 by voter", "open", "10:04:00"),
+                ("w3", "review report", "open", "10:05:00"),
+                ("k4", "[measure] latency probe", "open", "10:06:00"),
+            ]
+            for task_id, title, status, clock in rows:
+                box.save({
+                    "id": task_id, "from": "ann", "title": title, "body": "x",
+                    "status": status, "created_at": f"2026-10-27T{clock}",
+                    "claimed_by": None, "finished_at": None, "history": [],
+                })
+            server = module.ThreadingHTTPServer(
+                ("127.0.0.1", 0), module.build_handler(box, "tok"))
+            port = server.server_address[1]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{port}/tasks/window"
+                    "?chat_limit=2&work_limit=1",
+                    headers={"Authorization": "Bearer tok"})
+                with urllib.request.urlopen(request, timeout=3) as resp:
+                    answer = json.loads(resp.read())
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=3)
+
+        self.assertEqual([row["id"] for row in answer["chat"]], ["k3", "k4"])
+        self.assertEqual([row["id"] for row in answer["work"]], ["w3"])
+        self.assertEqual(answer["counts"],
+                         {"chat": 4, "work": 3, "work_open": 2})
+
+    def test_the_observatory_uses_the_bounded_window_and_keeps_global_counts(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import observatory
+
+        calls = []
+        original_json = observatory.http_json
+        original_units = observatory.local_units
+
+        def fake_json(url, *args, **kwargs):
+            calls.append(url)
+            if url == "http://mailbox/health":
+                return {"open": 4}, None, 1.0, 200
+            if "/tasks/window" in url:
+                return {
+                    "chat": [],
+                    "work": [{"id": "w16", "from": "ann",
+                              "title": "latest work", "status": "open",
+                              "created_at": "2026-10-27T10:16:00",
+                              "claimed_by": None}],
+                    "counts": {"chat": 36000, "work": 16, "work_open": 4},
+                }, None, 2.0, 200
+            raise AssertionError(f"full or unexpected feed request: {url}")
+
+        observatory.http_json = fake_json
+        observatory.local_units = lambda: {"host": "test", "services": []}
+        try:
+            state = observatory.collect_state({
+                "mailbox_url": "http://mailbox", "mailbox_token": "token",
+                "roots": [],
+            })
+        finally:
+            observatory.http_json = original_json
+            observatory.local_units = original_units
+
+        self.assertEqual(calls, [
+            "http://mailbox/health",
+            "http://mailbox/tasks/window?chat_limit=120&work_limit=14",
+        ])
+        self.assertEqual(state["work_counts"], {"total": 16, "open": 4})
+        self.assertEqual(state["view"]["work_count"], "4 open / 16")
+        feed = next(row for row in state["services"]
+                    if row["name"] == "task feed (/tasks/window)")
+        self.assertEqual(feed["detail"], "36000 kinded / 16 work; window 1")
+
+    def test_an_old_mailbox_still_serves_the_unbounded_feed_on_404(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import observatory
+
+        calls = []
+        original_json = observatory.http_json
+        original_units = observatory.local_units
+
+        def fake_json(url, *args, **kwargs):
+            calls.append(url)
+            if url == "http://mailbox/health":
+                return {"open": 1}, None, 1.0, 200
+            if "/tasks/window" in url:
+                return None, "HTTP 404", 1.0, 404
+            if "/tasks?status=all" in url:
+                return {"tasks": [{"id": "w1", "from": "ann",
+                                   "title": "old mailbox work",
+                                   "status": "open"}]}, None, 2.0, 200
+            raise AssertionError(f"unexpected request: {url}")
+
+        observatory.http_json = fake_json
+        observatory.local_units = lambda: {"host": "test", "services": []}
+        try:
+            state = observatory.collect_state({
+                "mailbox_url": "http://mailbox", "mailbox_token": "token",
+                "roots": [],
+            })
+        finally:
+            observatory.http_json = original_json
+            observatory.local_units = original_units
+
+        self.assertIn("http://mailbox/tasks?status=all", calls)
+        self.assertEqual(state["work_counts"], {"total": 1, "open": 1})
+
     def test_an_address_is_stored_once(self):
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
         from observatory import addressee, split_title
@@ -5217,6 +6544,174 @@ class TestObservatoryFeed(unittest.TestCase):
             self.assertIsNone(read_root_snapshot(str(path))[0])
 
 
+    def test_an_unreachable_root_is_probed_once(self):
+        """A dead root must not pay the same timeout for every sibling path."""
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import observatory
+
+        calls = []
+        original_json = observatory.http_json
+        original_units = observatory.local_units
+
+        def fake_json(url, *args, **kwargs):
+            calls.append(url)
+            if url.endswith("/health"):
+                return {}, None, 1.0, 200
+            if "/tasks/window" in url:
+                return {"chat": [], "work": [],
+                        "counts": {"chat": 0, "work": 0, "work_open": 0}}, None, 1.0, 200
+            if url.endswith("/nodes"):
+                return None, "unreachable: timeout", 4000.0, 0
+            raise AssertionError(f"unexpected probe after node failure: {url}")
+
+        observatory.http_json = fake_json
+        observatory.local_units = lambda: {"host": "test", "services": []}
+        with observatory._ROOT_FAILURE_LOCK:
+            observatory._ROOT_FAILURE_CACHE.clear()
+        try:
+            state = observatory.collect_state({
+                "mailbox_url": "http://mailbox",
+                "mailbox_token": "token",
+                "roots": [{"name": "win", "url": "http://win:8790",
+                           "token": "pairing"}],
+            })
+        finally:
+            observatory.http_json = original_json
+            observatory.local_units = original_units
+            with observatory._ROOT_FAILURE_LOCK:
+                observatory._ROOT_FAILURE_CACHE.clear()
+
+        self.assertEqual([url for url in calls if url.startswith("http://win:8790")],
+                         ["http://win:8790/nodes"])
+        status = next(row for row in state["services"]
+                      if row["name"] == "root /status")
+        self.assertFalse(status["alive"])
+        self.assertEqual(status["detail"], "skipped: /nodes unreachable")
+        self.assertEqual(state["roots"][0]["playbook_error"],
+                         "skipped: /nodes unreachable")
+
+
+    def test_root_and_member_probes_overlap(self):
+        """A dead root must not block member health from a healthy root."""
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import observatory
+
+        barrier = threading.Barrier(2)
+        synced = []
+        original_json = observatory.http_json
+        original_units = observatory.local_units
+
+        def synchronise():
+            try:
+                barrier.wait(timeout=2)
+                synced.append(True)
+            except threading.BrokenBarrierError:
+                pass
+
+        def fake_json(url, *args, **kwargs):
+            if url == "http://mailbox/health":
+                return {}, None, 1.0, 200
+            if "/tasks/window" in url:
+                return {"chat": [], "work": [],
+                        "counts": {"chat": 0, "work": 0, "work_open": 0}}, None, 1.0, 200
+            if url == "http://win:8790/nodes":
+                synchronise()
+                return None, "unreachable: timeout", 4000.0, 0
+            if url == "http://mac:8765/nodes":
+                return {"nodes": {"member": {
+                    "url": "http://member:1", "host": "member-host"}}}, None, 1.0, 200
+            if url == "http://member:1/health":
+                synchronise()
+                return {"chat": {"model": "test-model"}}, None, 1.0, 200
+            if url.endswith("/status") or url.endswith("/playbook"):
+                return {}, None, 1.0, 200
+            raise AssertionError(f"unexpected probe: {url}")
+
+        observatory.http_json = fake_json
+        observatory.local_units = lambda: {"host": "test", "services": []}
+        with observatory._ROOT_FAILURE_LOCK:
+            observatory._ROOT_FAILURE_CACHE.clear()
+        try:
+            state = observatory.collect_state({
+                "mailbox_url": "http://mailbox",
+                "mailbox_token": "token",
+                "roots": [
+                    {"name": "win", "url": "http://win:8790",
+                     "token": "pairing"},
+                    {"name": "mac", "url": "http://mac:8765",
+                     "token": "pairing"},
+                ],
+            })
+        finally:
+            observatory.http_json = original_json
+            observatory.local_units = original_units
+            with observatory._ROOT_FAILURE_LOCK:
+                observatory._ROOT_FAILURE_CACHE.clear()
+
+        self.assertEqual(len(synced), 2)
+        member = next(row for row in state["participants"]
+                      if row["node_id"] == "member")
+        self.assertEqual(member["chat"]["model"], "test-model")
+
+
+    def test_a_dead_root_failure_is_cached_with_explicit_age(self):
+        """A brief negative cache must remain visibly different from a probe."""
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import observatory
+
+        node_calls = []
+        original_json = observatory.http_json
+        original_units = observatory.local_units
+        original_ttl = observatory._ROOT_FAILURE_TTL
+
+        def fake_json(url, *args, **kwargs):
+            if url == "http://mailbox/health":
+                return {}, None, 1.0, 200
+            if "/tasks/window" in url:
+                return {"chat": [], "work": [],
+                        "counts": {"chat": 0, "work": 0, "work_open": 0}}, None, 1.0, 200
+            if url == "http://dead:8790/nodes":
+                node_calls.append(url)
+                return None, "unreachable: timeout", 4000.0, 0
+            raise AssertionError(f"unexpected probe: {url}")
+
+        cfg = {
+            "mailbox_url": "http://mailbox",
+            "mailbox_token": "token",
+            "roots": [{"name": "dead", "url": "http://dead:8790",
+                       "token": "pairing"}],
+        }
+        observatory.http_json = fake_json
+        observatory.local_units = lambda: {"host": "test", "services": []}
+        with observatory._ROOT_FAILURE_LOCK:
+            observatory._ROOT_FAILURE_CACHE.clear()
+        try:
+            first = observatory.collect_state(cfg)
+            second = observatory.collect_state(cfg)
+            self.assertEqual(len(node_calls), 1)
+            self.assertTrue(second["roots"][0]["cached"])
+            self.assertGreaterEqual(second["roots"][0]["cache_age_s"], 0)
+            self.assertIn("cached ", second["roots"][0]["error"])
+            cached_service = next(
+                row for row in second["services"]
+                if row["name"] == "root /nodes")
+            self.assertTrue(cached_service["cached"])
+            self.assertIn("cached ", cached_service["detail"])
+            self.assertIsNone(cached_service["latency_ms"])
+            self.assertNotIn("cached", first["roots"][0])
+
+            observatory._ROOT_FAILURE_TTL = -1.0
+            third = observatory.collect_state(cfg)
+            self.assertEqual(len(node_calls), 2)
+            self.assertNotIn("cached", third["roots"][0])
+        finally:
+            observatory.http_json = original_json
+            observatory.local_units = original_units
+            observatory._ROOT_FAILURE_TTL = original_ttl
+            with observatory._ROOT_FAILURE_LOCK:
+                observatory._ROOT_FAILURE_CACHE.clear()
+
+
     def test_an_execution_ledger_row_is_shown_unchanged(self):
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
         from observatory import (attach_executions, execution_text,
@@ -5267,6 +6762,263 @@ class TestExecution(unittest.TestCase):
         self.assertEqual(
             [row["id"] for row in rows],
             ["t-old", "t-vote", "t-copy", "t-copy-vote", "t-new"])
+
+    def test_settled_seeds_do_not_return_through_the_unbounded_layer(self):
+        """An old seed is not re-read just because its action crosses hosts."""
+        from pando.execute import rows_for_execution
+        done = {"id": "t-done",
+                "title": "[proposal] p-done seed.export by mac-proposer"}
+        done_vote = {"id": "t-done-vote",
+                     "title": "[reaction] p-done 赞同 by mac-text"}
+        left = {"id": "t-left",
+                "title": "[proposal] p-left seed.replicate by mac-proposer"}
+        left_vote = {"id": "t-left-vote",
+                     "title": "[reaction] p-left 赞同 by mac-text"}
+        live = {"id": "t-live",
+                "title": "[proposal] p-live seed.export by win-gpu-proposer"}
+        live_vote = {"id": "t-live-vote",
+                     "title": "[reaction] p-live 赞同 by mac-text"}
+
+        rows = rows_for_execution(
+            [done, done_vote, left, left_vote, live, live_vote], 0,
+            settled={"p-done", "p-left"})
+
+        self.assertEqual([row["id"] for row in rows],
+                         ["t-live", "t-live-vote"])
+
+    def test_execution_selectors_keep_peer_seeds_and_only_local_actuators(self):
+        from pando.execute import execution_selectors
+
+        self.assertEqual(
+            execution_selectors({"mac-proposer"}),
+            [{"actions": ["seed.export", "seed.replicate"]},
+             {"actions": ["culture.refine", "meta.propose", "policy.set",
+                          "recruit.invite", "reproduce.spawn",
+                          "resource.rebalance"],
+              "authors": ["mac-proposer"]}])
+
+    def test_server_query_is_reaction_closed_and_honours_settlement(self):
+        """A late vote survives selection even when its proposal is old."""
+        import importlib.util
+        from pando import proposal_mail
+
+        spec = importlib.util.spec_from_file_location(
+            "agent_mailbox_under_test_execution_query",
+            Path(__file__).resolve().parents[1] / "tools" / "agent_mailbox.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as tmp:
+            box = module.Mailbox(Path(tmp) / "box")
+            rows = [
+                {"id": "t-seed", "title": "[proposal] p-seed seed.export by peer",
+                 "created_at": "2026-10-27T10:00:00"},
+                {"id": "t-peer-policy", "title": "[proposal] p-peer policy.set by peer",
+                 "created_at": "2026-10-27T10:01:00"},
+                {"id": "t-local-policy", "title": "[proposal] p-local policy.set by mac-proposer",
+                 "created_at": "2026-10-27T10:02:00"},
+                {"id": "t-done-seed", "title": "[proposal] p-done seed.replicate by peer",
+                 "created_at": "2026-10-27T10:03:00"},
+                {"id": "t-seed-vote", "title": "[reaction] p-seed 赞同 by voter",
+                 "created_at": "2026-10-27T10:05:00"},
+                {"id": "t-local-vote", "title": "[reaction] p-local 赞同 by voter",
+                 "created_at": "2026-10-27T10:06:00"},
+                {"id": "t-live", "title": "[chat] newest", "created_at": "2026-10-27T10:07:00"},
+                {"id": "t-done-vote", "title": "[reaction] p-done 赞同 by voter",
+                 "created_at": "2026-10-27T10:04:00"},
+            ]
+            for row in rows:
+                box.save({**row, "from": "ann", "body": "x", "status": "claimed",
+                          "history": []})
+            server = module.ThreadingHTTPServer(
+                ("127.0.0.1", 0), module.build_handler(box, "tok"))
+            port = server.server_address[1]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                listing = proposal_mail.query_tasks(
+                    f"http://127.0.0.1:{port}", "tok",
+                    selectors=[
+                        {"actions": ["seed.export", "seed.replicate"]},
+                        {"actions": ["policy.set"], "authors": ["mac-proposer"]},
+                    ], limit=1, exclude_proposal_ids={"p-done"})
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=3)
+
+        self.assertEqual(
+            {row["id"] for row in listing["tasks"]},
+            {"t-seed", "t-seed-vote", "t-local-policy",
+             "t-local-vote", "t-live"})
+
+    def test_kind_filter_is_applied_before_the_feed_limit(self):
+        """Reaction noise must not push chat or a grounding proposal out."""
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "agent_mailbox_under_test_kind_window",
+            Path(__file__).resolve().parents[1] / "tools" / "agent_mailbox.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as tmp:
+            box = module.Mailbox(Path(tmp) / "box")
+            rows = [
+                {"id": "t-p1", "title": "[proposal] p1 seed.export by peer",
+                 "created_at": "2026-10-27T10:00:00"},
+                {"id": "t-r1", "title": "[reaction] p1 赞同 by voter",
+                 "created_at": "2026-10-27T10:01:00"},
+                {"id": "t-c1", "title": "[chat] @peer hello",
+                 "created_at": "2026-10-27T10:02:00"},
+                {"id": "t-r2", "title": "[reaction] p2 赞同 by voter",
+                 "created_at": "2026-10-27T10:03:00"},
+                {"id": "t-p2", "title": "[proposal] p2 recruit.invite by peer",
+                 "created_at": "2026-10-27T10:04:00"},
+                {"id": "t-r3", "title": "[reaction] p3 赞同 by voter",
+                 "created_at": "2026-10-27T10:05:00"},
+            ]
+            for row in rows:
+                box.save({**row, "from": "ann", "body": "x", "status": "open",
+                          "history": []})
+            server = module.ThreadingHTTPServer(
+                ("127.0.0.1", 0), module.build_handler(box, "tok"))
+            port = server.server_address[1]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                def query():
+                    request = urllib.request.Request(
+                        f"http://127.0.0.1:{port}/tasks?status=all&limit=2"
+                        "&kind=chat&kind=proposal",
+                        headers={"Authorization": "Bearer tok"})
+                    with urllib.request.urlopen(request, timeout=3) as resp:
+                        return json.loads(resp.read())
+
+                first = query()
+                box.update("t-c1", "edited", "ann",
+                           title="[reaction] p2 edited by ann")
+                second = query()
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=3)
+
+        self.assertEqual([row["id"] for row in first["tasks"]],
+                         ["t-c1", "t-p2"])
+        self.assertEqual(first["kinds"], ["chat", "proposal"])
+        self.assertEqual([row["id"] for row in second["tasks"]],
+                         ["t-p1", "t-p2"])
+
+    def test_indexed_selection_matches_the_unindexed_algorithm(self):
+        """The incremental indexes are an optimisation, not a new query rule."""
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "agent_mailbox_under_test_selection_index",
+            Path(__file__).resolve().parents[1] / "tools" / "agent_mailbox.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        def unindexed(box, status=None, limit=None, selectors=None,
+                      exclude_proposal_ids=(), include_reactions=True):
+            filters = []
+            for selector in selectors or ():
+                actions = {str(value) for value in selector.get("actions", ())
+                           if value}
+                authors = {str(value) for value in selector.get("authors", ())
+                           if value}
+                if actions or authors:
+                    filters.append((actions, authors))
+            excluded = {str(value) for value in exclude_proposal_ids if value}
+            with box._lock:
+                rows = [dict(row) for row in box._summaries.values()
+                        if status is None or status == "all"
+                        or row.get("status") == status]
+            rows.sort(key=lambda row: (row.get("created_at", ""),
+                                       row.get("id", "")))
+            base = rows[-limit:] if limit is not None and limit else []
+            keep = {row.get("id") for row in base}
+            proposal_ids = set()
+            for row in base:
+                parsed = module._proposal_parts(row.get("title"))
+                if parsed:
+                    proposal_ids.add(parsed[0])
+            for row in rows:
+                parsed = module._proposal_parts(row.get("title"))
+                if not parsed:
+                    continue
+                proposal_id, action, author = parsed
+                if proposal_id in excluded:
+                    continue
+                if any((not actions or action in actions)
+                       and (not authors or author in authors)
+                       for actions, authors in filters):
+                    keep.add(row.get("id"))
+                    proposal_ids.add(proposal_id)
+            if include_reactions:
+                for row in rows:
+                    if module._reaction_target(row.get("title")) in proposal_ids:
+                        keep.add(row.get("id"))
+            return [row for row in rows if row.get("id") in keep]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            box = module.Mailbox(Path(tmp) / "box")
+            rows = [
+                {"id": "t-a", "title": "[proposal] p-a seed.export by peer",
+                 "status": "claimed", "created_at": "2026-10-27T10:00:00"},
+                {"id": "t-b", "title": "[proposal] p-b policy.set by mac-proposer",
+                 "status": "done", "created_at": "2026-10-27T10:01:00"},
+                {"id": "t-c", "title": "[proposal] p-c policy.set by peer",
+                 "status": "open", "created_at": "2026-10-27T10:02:00"},
+                {"id": "t-d", "title": "[proposal] p-d culture.refine by mac-proposer",
+                 "status": "claimed", "created_at": "2026-10-27T10:03:00"},
+                {"id": "t-e", "title": "[proposal] p-e seed.replicate by peer",
+                 "status": "done", "created_at": "2026-10-27T10:04:00"},
+                {"id": "t-ra", "title": "[reaction] p-a adopt by voter",
+                 "status": "done", "created_at": "2026-10-27T10:05:00"},
+                {"id": "t-rb", "title": "[reaction] p-b adopt by voter",
+                 "status": "claimed", "created_at": "2026-10-27T10:06:00"},
+                {"id": "t-rd", "title": "[reaction] p-d adopt by voter",
+                 "status": "open", "created_at": "2026-10-27T10:07:00"},
+                {"id": "t-re", "title": "[reaction] p-e adopt by voter",
+                 "status": "done", "created_at": "2026-10-27T10:08:00"},
+                {"id": "t-chat", "title": "[chat] newest",
+                 "status": "open", "created_at": "2026-10-27T10:09:00"},
+            ]
+            # Save out of creation order so insertion, rather than scan order,
+            # is what puts the summaries in mailbox order.
+            for row in reversed(rows):
+                box.save({**row, "from": "ann", "body": "x", "history": []})
+
+            # Updating a task must move both its status order and its reaction
+            # closure. This is the failure mode a one-time startup index misses.
+            changed = {**rows[0], "title": "[reaction] p-c adopt by voter",
+                       "status": "open", "from": "ann", "body": "x",
+                       "history": []}
+            box.save(changed)
+
+            selector_sets = [
+                [],
+                [{"actions": ["seed.export", "seed.replicate"]}],
+                [{"actions": ["policy.set"], "authors": ["mac-proposer"]}],
+                [{"actions": ["policy.set"]},
+                 {"actions": ["culture.refine"], "authors": ["peer"]}],
+            ]
+            for status in (None, "all", "open", "claimed", "done", "failed"):
+                for limit in (None, 0, 1, 3, 20):
+                    for selectors in selector_sets:
+                        for include_reactions in (False, True):
+                            args = dict(
+                                status=status, limit=limit,
+                                selectors=selectors,
+                                exclude_proposal_ids={"p-b"},
+                                include_reactions=include_reactions)
+                            self.assertEqual(box.select(**args),
+                                             unindexed(box, **args))
+
+            # A reopen/restart rebuilds the indexes from the same disk rows.
+            reopened = module.Mailbox(box.tasks_dir.parent)
+            self.assertEqual(reopened.summaries("all"),
+                             box.summaries("all"))
 
     def test_layer_three_drains_this_hosts_backlog_oldest_first(self):
         from pando.execute import rows_for_execution
@@ -7979,6 +9731,139 @@ class TestChat(unittest.TestCase):
         # A decision model has no chat.model, so it is not in known at all.
         self.assertIsNone(next_opening([], known, {}, 1.0))
 
+    def test_a_previously_opened_peer_survives_a_root_outage(self):
+        """A dark root must not erase the roster the ledger already proved.
+
+        On 2026-10-27 the win root timed out on every chatd pass. The mailbox
+        and the local model were healthy, but known contained only the local
+        member, so the only participant who could initiate saw no peer. The
+        opening ledger is evidence that this exact local member previously
+        picked a real remote chat member from that root.
+        """
+        from pando.chat import next_opening
+
+        members = [{"node_id": "mac-llm-8b-local", "url": "http://127.0.0.1:9",
+                    "model": "qwen-test"}]
+        opened = {
+            ("mac-llm-8b-local", "win-gemma-12b"): 1000.0,
+            ("mac-llm-8b-local", "pandosi-pi5-llm"): 2000.0,
+            ("another-member", "win-yi-9b"): 2000.0,
+        }
+
+        pick = next_opening(members, {"mac-llm-8b-local"}, opened, 5601.0,
+                            evidence=opened)
+
+        self.assertIsNotNone(pick)
+        self.assertEqual(pick["to"], "win-gemma-12b")
+
+    def test_a_dark_root_is_skipped_then_retried_with_bounded_backoff(self):
+        """One timed-out root must not consume every healthy chatd pass."""
+        from unittest import mock
+        from pando import chatd
+
+        local = "http://127.0.0.1:8765"
+        remote = "http://100.93.216.90:8790"
+        roots = [{"name": "mac", "url": local, "token": None},
+                 {"name": "win", "url": remote, "token": None}]
+        calls = []
+        state = {"down": True}
+
+        def fetch(url, token, timeout):
+            calls.append((url, timeout))
+            if url == remote and state["down"]:
+                raise TimeoutError("timed out")
+            return {url: {"host": "test"}}
+
+        backoff = chatd.RootProbeBackoff(base=30, cap=45)
+        with mock.patch.object(chatd, "fetch_nodes", fetch):
+            nodes, events = chatd.probe_roots(roots, 180, backoff, now=100)
+            self.assertEqual({url for url, _ in calls}, {local, remote})
+            self.assertEqual(calls, [(local, 8), (remote, 8)])
+            self.assertEqual(nodes, {local: {"host": "test"}})
+            self.assertEqual(next(row for row in events
+                                  if row["url"] == remote)["retry_in"], 30)
+
+            calls.clear()
+            chatd.probe_roots(roots, 180, backoff, now=110)
+            self.assertEqual(calls, [(local, 8)])
+
+            calls.clear()
+            _, events = chatd.probe_roots(roots, 180, backoff, now=130)
+            self.assertEqual(calls, [(local, 8), (remote, 8)])
+            self.assertEqual(next(row for row in events
+                                  if row["url"] == remote)["retry_in"], 45)
+
+            calls.clear()
+            chatd.probe_roots(roots, 180, backoff, now=174.9)
+            self.assertEqual(calls, [(local, 8)])
+
+            calls.clear()
+            state["down"] = False
+            nodes, _ = chatd.probe_roots(roots, 180, backoff, now=175)
+            self.assertEqual(calls, [(local, 8), (remote, 8)])
+            self.assertEqual(set(nodes), {local, remote})
+
+            # Success clears the deferred state: the next pass probes again.
+            calls.clear()
+            chatd.probe_roots(roots, 180, backoff, now=176)
+            self.assertEqual(calls, [(local, 8), (remote, 8)])
+
+    def test_root_backoff_starts_when_the_failed_probe_ends(self):
+        """A timeout must not consume the cooling-off window it just earned."""
+        from unittest import mock
+        from pando import chatd
+
+        remote = "http://100.93.216.90:8790"
+        roots = [{"name": "win", "url": remote, "token": None}]
+        backoff = chatd.RootProbeBackoff(base=30, cap=30)
+        times = iter([100.0, 108.0])
+
+        def fetch(url, token, timeout):
+            raise TimeoutError("timed out")
+
+        with mock.patch.object(chatd, "fetch_nodes", fetch), \
+                mock.patch.object(chatd.time, "monotonic", side_effect=lambda: next(times)):
+            _, events = chatd.probe_roots(roots, 180, backoff)
+
+        self.assertEqual(events[0]["retry_in"], 30)
+        self.assertFalse(backoff.due(remote, 137.9))
+        self.assertTrue(backoff.due(remote, 138.0))
+
+    def test_a_remembered_peer_expires_after_repeated_silence(self):
+        """A dark root must not turn one stale address into forever-noise."""
+        from pando.chat import OPENED_PEER_TTL, next_opening
+
+        members = [{"node_id": "mac-llm-8b-local", "url": "http://127.0.0.1:9",
+                    "model": "qwen-test"}]
+        evidence = {("mac-llm-8b-local", "win-yi-9b"): 1000.0}
+
+        self.assertIsNotNone(next_opening(
+            members, {"mac-llm-8b-local"}, evidence,
+            1000.0 + OPENED_PEER_TTL, evidence=evidence))
+        self.assertIsNone(next_opening(
+            members, {"mac-llm-8b-local"}, evidence,
+            1000.0 + OPENED_PEER_TTL + 1, evidence=evidence))
+
+    def test_only_a_reply_or_live_membership_refreshes_peer_evidence(self):
+        """Retrying a dark address must not refresh the stale-peer deadline."""
+        from pando.chatd import load_peer_evidence
+
+        key = ("mac-llm-8b-local", "win-yi-9b")
+        rows = [
+            {"open": True, "node_id": key[0], "to": key[1], "at": 100.0},
+            {"open": True, "node_id": key[0], "to": key[1], "at": 200.0},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "chat-ledger.jsonl"
+            path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+            self.assertEqual(load_peer_evidence(path)[key], 100.0)
+
+            rows.append({"node_id": key[0], "sender": key[1], "id": "reply",
+                         "at": 300.0})
+            rows.append({"open": True, "node_id": key[0], "to": key[1], "at": 400.0})
+            path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+            self.assertEqual(load_peer_evidence(path)[key], 400.0)
+
 
     def test_talking_is_not_voting_in_the_first_person(self):
         """Two members refused to discuss a proposal, in their own words.
@@ -8003,6 +9888,120 @@ class TestChat(unittest.TestCase):
 
 
 class TestMailboxReplica(unittest.TestCase):
+    def test_gzip_is_requested_only_for_non_local_endpoints(self):
+        from unittest import mock
+        from pando import net
+
+        with mock.patch.object(
+                net, "local_addresses",
+                return_value={"127.0.0.1", "::1", "localhost",
+                              "172.24.19.146", "MacBook.local"}):
+            for url in (
+                    "http://127.0.0.1:8776/tasks",
+                    "http://127.2.3.4:8776/tasks",
+                    "http://localhost:8776/tasks",
+                    "http://[::1]:8776/tasks",
+                    "http://0.0.0.0:8776/tasks",
+                    "http://172.24.19.146:8776/tasks",
+                    "http://macbook.local:8776/tasks"):
+                self.assertFalse(net.should_request_gzip(url), url)
+            for url in (
+                    "http://172.24.19.147:8776/tasks",
+                    "http://100.93.216.90:8778/tasks",
+                    "https://example.com/tasks"):
+                self.assertTrue(net.should_request_gzip(url), url)
+
+    def test_large_listing_is_gzipped_and_the_client_decodes_it(self):
+        import importlib.util
+        from pando.proposal_mail import _request
+        spec = importlib.util.spec_from_file_location(
+            "agent_mailbox_under_test_gzip",
+            Path(__file__).resolve().parents[1] / "tools" / "agent_mailbox.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as tmp:
+            box = module.Mailbox(Path(tmp) / "box")
+            for i in range(80):
+                box.create("ann", f"[chat] message-{i}", "x" * 200)
+            server = module.ThreadingHTTPServer(
+                ("127.0.0.1", 0), module.build_handler(box, "tok"))
+            port = server.server_address[1]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            url = f"http://127.0.0.1:{port}"
+            try:
+                request = urllib.request.Request(
+                    f"{url}/tasks?status=all",
+                    headers={"Authorization": "Bearer tok",
+                             "Accept-Encoding": "gzip"})
+                with urllib.request.urlopen(request, timeout=3) as resp:
+                    self.assertEqual(resp.headers.get("Content-Encoding"), "gzip")
+                    compressed = resp.read()
+                disabled = urllib.request.Request(
+                    f"{url}/tasks?status=all",
+                    headers={"Authorization": "Bearer tok",
+                             "Accept-Encoding": "gzip;q=0"})
+                with urllib.request.urlopen(disabled, timeout=3) as resp:
+                    self.assertIsNone(resp.headers.get("Content-Encoding"))
+                decoded = json.loads(gzip.decompress(compressed))
+                self.assertEqual(len(decoded["tasks"]), 80)
+                plain = json.dumps(decoded, ensure_ascii=False).encode("utf-8")
+                self.assertLess(len(compressed), len(plain))
+                client_rows = _request(url, "/tasks?status=all", "tok", "GET")
+                self.assertEqual(len(client_rows["tasks"]), 80)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=3)
+
+    def test_listing_uses_cached_metadata_and_newest_limit(self):
+        import importlib.util
+        from types import SimpleNamespace
+        from unittest import mock
+        spec = importlib.util.spec_from_file_location(
+            "agent_mailbox_under_test_listing",
+            Path(__file__).resolve().parents[1] / "tools" / "agent_mailbox.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as tmp:
+            box = module.Mailbox(Path(tmp) / "box")
+            for task_id, created_at, status in (
+                    ("t-a", "2026-10-27T10:00:00", "open"),
+                    ("t-b", "2026-10-27T10:01:00", "done")):
+                box.save({"id": task_id, "from": "ann", "title": task_id,
+                          "body": "body", "status": status,
+                          "created_at": created_at, "history": []})
+            # A fresh process must build its listing index once, then serve
+            # health and bounded feeds without touching 35k task files again.
+            reopened = module.Mailbox(Path(tmp) / "box")
+            with mock.patch.object(reopened, "list",
+                                   side_effect=AssertionError("disk scan")):
+                handler = module.build_handler(reopened, "tok")
+                self.assertEqual(handler.timeout, 30)
+                server = module.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever,
+                                          daemon=True)
+                thread.start()
+                try:
+                    with urllib.request.urlopen(
+                            f"http://127.0.0.1:{port}/health", timeout=3) as resp:
+                        health = json.loads(resp.read())
+                    req = urllib.request.Request(
+                        f"http://127.0.0.1:{port}/tasks?status=all&limit=1",
+                        headers={"Authorization": "Bearer tok"})
+                    with urllib.request.urlopen(req, timeout=3) as resp:
+                        rows = json.loads(resp.read())["tasks"]
+                finally:
+                    server.shutdown()
+                    server.server_close()
+                    thread.join(timeout=3)
+            self.assertEqual(health["open"], 1)
+            self.assertEqual([row["id"] for row in rows], ["t-b"])
+            reopened.update("t-a", "claimed", "ann", status="claimed")
+            self.assertEqual(reopened.count("open"), 0)
+            self.assertEqual(reopened.count("claimed"), 1)
+
     def test_accept_keeps_the_further_copy_and_never_rewinds(self):
         import importlib.util
         spec = importlib.util.spec_from_file_location(
@@ -9832,6 +11831,35 @@ class TestCodeSync(unittest.TestCase):
             self.assertNotEqual(second_head, first_head)
             self.assertEqual(stamp.read_text(encoding="utf-8").strip(), second_head)
 
+    def test_code_watch_refreshes_the_peer_bundle_on_a_clean_head(self):
+        """The Mac must serve the commit its clients were just restarted onto.
+
+        A local commit advanced the checkout while the fallback bundle stayed
+        on the previous HEAD. Local clients then reported the new commit and
+        code-drift correctly called them ahead of the only pullable tip. The
+        updater now refreshes its own HEAD-keyed cache during the same clean
+        round, while an unchanged cache remains a no-op.
+        """
+        watch = self._load_watch()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env, _src, _bare, client = self._world(root)
+            cache = root / "cache" / "code.bundle"
+            stamp = cache.with_name(cache.name + ".head")
+
+            first = watch.watch_round(repo=client, bundle_cache=str(cache))
+            client_head = subprocess.run(
+                ["git", "-C", str(client), "rev-parse", "HEAD"],
+                check=True, capture_output=True, text=True, env=env
+            ).stdout.strip()
+            self.assertEqual(first["bundle"]["head"], client_head)
+            self.assertTrue(first["bundle"]["rebuilt"])
+            self.assertEqual(stamp.read_text(encoding="utf-8").strip(),
+                             client_head)
+
+            second = watch.watch_round(repo=client, bundle_cache=str(cache))
+            self.assertEqual(second["bundle"]["head"], client_head)
+            self.assertFalse(second["bundle"]["rebuilt"])
 
     def test_the_deployed_updater_adopts_a_newer_copy_only_if_it_compiles(self):
         """The copy that runs on a headless node has to receive its own fixes.
@@ -10514,6 +12542,116 @@ class TestCodeSync(unittest.TestCase):
                                       ledger=ledger, platform="darwin")
             self.assertFalse(quiet["updated"])
             self.assertEqual(len(seen), 1)
+
+
+class TestCodeReceipts(unittest.TestCase):
+    """A remote updater must be able to prove what it observed.
+
+    A bundle cached on the Mac and a local ledger on Windows are two copies of
+    the same claim. This contract makes the remote watcher push a signed
+    observation over the authenticated mailbox route, so the receiver has
+    evidence minted on the other side of the network.
+    """
+
+    @staticmethod
+    def _identity():
+        from pando.identity import Identity
+        return Identity.generate()
+
+    def test_round_trip_pins_the_first_key_and_refuses_tampering(self):
+        from pando import code_receipt
+        identity = self._identity()
+        envelope = code_receipt.build_envelope(
+            identity, node="win", member="win-root", head="a" * 40,
+            action="client-restart", platform="windows", acted=True,
+            reason="fast-forward", sent_at=10.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            receiver = code_receipt.CodeReceiptReceiver(tmp)
+            answer = receiver.receive(envelope, expected_node="win", now=20.0)
+            document = receiver.load("win")
+            self.assertTrue(answer["ok"])
+            self.assertEqual(document["received_at"], 20.0)
+            self.assertEqual(document["sent_at"], 10.0)
+            self.assertEqual(document["head"], "a" * 40)
+            self.assertEqual(document["pubkey"], identity.public_key)
+
+            changed = json.loads(json.dumps(envelope))
+            changed["payload"]["head"] = "b" * 40
+            with self.assertRaises(code_receipt.CodeReceiptSignatureError):
+                receiver.receive(changed, expected_node="win")
+            self.assertEqual(receiver.load("win")["head"], "a" * 40)
+
+            replacement = code_receipt.build_envelope(
+                self._identity(), node="win", member="win-root",
+                head="c" * 40, action="none")
+            with self.assertRaises(code_receipt.CodeReceiptSignatureError):
+                receiver.receive(replacement, expected_node="win")
+            with self.assertRaises(code_receipt.CodeReceiptError):
+                receiver.receive(envelope, expected_node="pi5")
+
+    def test_http_receipt_is_authenticated_and_is_not_a_mailbox_task(self):
+        from pando import code_receipt
+        from tools import agent_mailbox, node_code_watch
+
+        identity = self._identity()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            identity_file = root / "identity.json"
+            token_file = root / "mailbox.token"
+            identity_file.write_text(json.dumps(identity.to_json()),
+                                     encoding="utf-8")
+            token_file.write_text("mail-token", encoding="utf-8")
+            box = agent_mailbox.Mailbox(root / "mailbox")
+            receiver = code_receipt.CodeReceiptReceiver(root / "receipts")
+            server = agent_mailbox.ThreadingHTTPServer(
+                ("127.0.0.1", 0),
+                agent_mailbox.build_handler(
+                    box, "mail-token", code_receipts=receiver))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            base = f"http://127.0.0.1:{server.server_address[1]}"
+            endpoint = base + "/receipts/code/win"
+            try:
+                unauthorized = urllib.request.Request(
+                    endpoint, data=b"{}",
+                    headers={"Authorization": "Bearer wrong",
+                             "Content-Type": "application/json"}, method="POST")
+                with self.assertRaises(urllib.error.HTTPError) as caught:
+                    urllib.request.urlopen(unauthorized, timeout=3)
+                self.assertEqual(caught.exception.code, 403)
+                caught.exception.close()
+
+                sent = node_code_watch.send_code_receipt(
+                    {"head": "d" * 40, "action": "client-restart",
+                     "acted": True, "reason": "fast-forward"},
+                    url=endpoint, token_file=str(token_file),
+                    identity_file=str(identity_file), node="win",
+                    member="win-root", platform="windows", timeout=3)
+                self.assertTrue(sent["sent"], sent)
+
+                read = urllib.request.Request(
+                    endpoint, headers={"Authorization": "Bearer mail-token"})
+                with urllib.request.urlopen(read, timeout=3) as response:
+                    document = json.loads(response.read())["receipt"]
+                self.assertEqual(document["head"], "d" * 40)
+                self.assertEqual(document["action"], "client-restart")
+                self.assertEqual(document["platform"], "windows")
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+            self.assertEqual(box.list("open"), [],
+                             "a receipt is observation, not work")
+
+    def test_an_unreachable_receiver_never_raises_into_the_updater(self):
+        from tools import node_code_watch
+        result = node_code_watch.send_code_receipt(
+            {"head": "e" * 40, "action": "none"},
+            url="http://127.0.0.1:1/receipts/code/win",
+            token_file="/definitely/missing/token", identity_file="missing",
+            node="win", timeout=0.1)
+        self.assertFalse(result["sent"])
+        self.assertEqual(result["reason"], "receipt-failed")
 
 
 class TestPi5Telemetry(unittest.TestCase):
@@ -11964,6 +14102,42 @@ class TestVoteWatchdog(unittest.TestCase):
         self.assertNotIn("mac-text", verdicts)
         self.assertEqual(verdicts["win-laya-int8"]["status"], wd.OK)
 
+    def test_sysctl_epoch_reads_the_sec_field(self):
+        wd = self._tool()
+        self.assertEqual(wd._sysctl_epoch("{ sec = 123, usec = 4 } Tue ..."),
+                         123.0)
+        self.assertEqual(wd._sysctl_epoch(""), 0.0)
+        self.assertEqual(wd._sysctl_epoch("no sec field"), 0.0)
+
+    def test_sleep_overlaps_window_cases(self):
+        """The gate is open only when a sleep actually touched the window."""
+        wd = self._tool()
+        now = 1_800_000_000.0
+        # never slept
+        self.assertFalse(wd.sleep_overlaps_window(0.0, 0.0, now, 5400.0))
+        # slept and woke entirely before the window
+        self.assertFalse(wd.sleep_overlaps_window(now - 20000, now - 19000,
+                                                  now, 5400.0))
+        # slept before the window but woke inside it
+        self.assertTrue(wd.sleep_overlaps_window(now - 7000, now - 2000,
+                                                 now, 5400.0))
+        # slept inside the window and is still asleep (end == now)
+        self.assertTrue(wd.sleep_overlaps_window(now - 1000, now, now, 5400.0))
+        # slept and woke entirely inside the window
+        self.assertTrue(wd.sleep_overlaps_window(now - 3000, now - 1000,
+                                                 now, 5400.0))
+
+    def test_resolve_ignored_keeps_sleep_gated_members_while_awake(self):
+        """Unconditional ignores always drop; sleep-gated ones only while slept."""
+        wd = self._tool()
+        self.assertEqual(wd.resolve_ignored([], [], False), set())
+        self.assertEqual(wd.resolve_ignored(["x"], [], True), {"x"})
+        self.assertEqual(wd.resolve_ignored([], ["mac-text"], False), set())
+        self.assertEqual(wd.resolve_ignored([], ["mac-text"], True),
+                         {"mac-text"})
+        self.assertEqual(wd.resolve_ignored(["x"], ["mac-text"], True),
+                         {"x", "mac-text"})
+
     def test_a_named_decision_member_that_stops_voting_is_silent(self):
         """Having no slope is its own finding when the caller said "must vote"."""
         wd = self._tool()
@@ -12289,6 +14463,47 @@ class TestCodeDriftCheck(unittest.TestCase):
 
             self.assertNotEqual(mod.head_of(seed), published)
             self.assertEqual(mod.deploy_tip(seed), published)
+
+    def test_a_peer_bundle_head_can_be_the_deployable_tip(self):
+        """Peer deployment is a real path, not an unpublished private commit.
+
+        The 2026-10-21 alarm stayed open for days because the Mac fleet ran a
+        local commit already served as ``/code.bundle`` while GitHub's
+        ``origin/main`` was two commits behind. Every Mac member was then
+        classified as permanently *ahead*. A tip file makes the served bundle
+        part of the comparison base, while the upstream-only test above keeps
+        a genuinely private commit from starting the grace clock.
+        """
+        mod = self._tool()
+        with tempfile.TemporaryDirectory(prefix="code-drift-tip-file-") as tmp:
+            root = Path(tmp)
+            bare, seed = root / "origin.git", root / "seed"
+            bare.mkdir()
+            seed.mkdir()
+            _git_in(bare, "init", "--bare")
+            _git_in(seed, "init", "-b", "main")
+            (seed / "README").write_text("published\n", encoding="utf-8")
+            _git_in(seed, "-c", "user.name=fixture",
+                    "-c", "user.email=fixture@localhost",
+                    "-c", "commit.gpgsign=false", "add", "README")
+            _git_in(seed, "-c", "user.name=fixture",
+                    "-c", "user.email=fixture@localhost",
+                    "-c", "commit.gpgsign=false", "commit", "-m", "published")
+            _git_in(seed, "remote", "add", "origin", str(bare))
+            _git_in(seed, "push", "-u", "origin", "main")
+
+            (seed / "README").write_text("served locally\n", encoding="utf-8")
+            _git_in(seed, "-c", "user.name=fixture",
+                    "-c", "user.email=fixture@localhost",
+                    "-c", "commit.gpgsign=false", "add", "README")
+            _git_in(seed, "-c", "user.name=fixture",
+                    "-c", "user.email=fixture@localhost",
+                    "-c", "commit.gpgsign=false", "commit", "-m", "served")
+            served = mod.head_of(seed)
+            tip_file = root / "code.bundle.head"
+            tip_file.write_text(served + "\n", encoding="utf-8")
+
+            self.assertEqual(mod.deploy_tip(seed, [tip_file]), served)
 
     def test_a_fresh_drift_lags_and_only_persisting_drift_pages(self):
         """The grace window, end to end through main().
@@ -13034,3 +15249,487 @@ class TestVoteVerdictOnThePage(unittest.TestCase):
             cell = obs._verdict_cell(verdict["members"]["win-laya-int8"], "decision")
             self.assertEqual(cell["verdict"], "落后")
             self.assertTrue(cell["verdict_bad"])
+
+
+class TestHistoricalActionReplay(unittest.TestCase):
+    """tools/historical_action_replay.py - frozen real-mailbox replay."""
+
+    def _tool(self):
+        import importlib.util
+        path = (Path(__file__).resolve().parents[1]
+                / "tools" / "historical_action_replay.py")
+        spec = importlib.util.spec_from_file_location(
+            "historical_action_replay", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def _write_mailbox(self, root: Path):
+        import json
+        tool = self._tool()
+        tasks = root / "tasks"
+        tasks.mkdir()
+        duplicate = "同一份跨主机共享目标，必须全局去重，不能带两个标签。"
+        for action_index, action in enumerate(tool.ACTIONS):
+            for index in range(10):
+                author = "author-a" if index % 2 == 0 else "author-b"
+                goal = duplicate if index == 0 and action_index > 0 else (
+                    f"第{action_index}类动作的第{index}个真实历史目标，"
+                    "描述跨主机资源与治理选择。")
+                created = ("2026-10-28T12:00:00" if index < 9
+                           else "2026-10-29T00:00:00")
+                task_id = f"t-{action_index:02d}-{index:02d}"
+                body = json.dumps({
+                    "kind": "proposal",
+                    "payload": {"action": action, "goal": goal},
+                }, ensure_ascii=False)
+                record = {
+                    "id": task_id,
+                    "from": author,
+                    "title": f"[proposal] {task_id} {action} by {author}",
+                    "body": body,
+                    "created_at": created,
+                }
+                (tasks / f"{task_id}.json").write_text(
+                    json.dumps(record, ensure_ascii=False), encoding="utf-8")
+        return tasks, tool
+
+    def test_selection_is_balanced_deduplicated_and_frozen(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tasks, tool = self._write_mailbox(Path(tmp))
+            manifest = tool.select_historical(tasks)
+            self.assertEqual(len(manifest["items"]), tool.TOTAL_SAMPLES)
+            self.assertEqual(
+                {item["action"] for item in manifest["items"]},
+                set(tool.ACTIONS))
+            self.assertEqual(
+                {sum(item["action"] == action
+                     for item in manifest["items"])
+                 for action in tool.ACTIONS},
+                {tool.PER_ACTION})
+            self.assertTrue(all(
+                item["created_at"] <= tool.SOURCE_CUTOFF
+                for item in manifest["items"]))
+            self.assertEqual(
+                len({item["goal"] for item in manifest["items"]}),
+                tool.TOTAL_SAMPLES)
+            self.assertTrue(tool.audit_manifest(manifest, tasks)["ok"])
+
+            manifest["items"][0]["goal"] += "篡改"
+            audit = tool.audit_manifest(manifest, tasks)
+            self.assertFalse(audit["ok"])
+            self.assertFalse(audit["checks"]["manifest_digest"])
+            self.assertFalse(audit["checks"]["source_match"])
+
+    def test_summary_requires_both_thresholds_for_support(self):
+        tool = self._tool()
+
+        def rows(n, opaque_correct):
+            out = []
+            for index in range(n):
+                out.append({
+                    "pair": index, "arm": "named", "valid": True,
+                    "correct": True, "author": "a",
+                    "task_id": f"t{index}",
+                })
+                out.append({
+                    "pair": index, "arm": "opaque", "valid": True,
+                    "correct": index < opaque_correct, "author": "a",
+                    "task_id": f"t{index}",
+                })
+            return out
+
+        supported = tool.summarise(rows(64, 64), 64)
+        self.assertEqual(supported["outcome"],
+                         "historical_label_agreement_supported")
+        self.assertFalse(supported["named_label_effect"])
+
+        ambiguous = tool.summarise(rows(64, 47), 64)
+        self.assertEqual(ambiguous["arms"]["opaque"]["accuracy"], 47 / 64)
+        self.assertEqual(ambiguous["outcome"], "inconclusive")
+
+        named_effect = tool.summarise(rows(64, 0), 64)
+        self.assertTrue(named_effect["named_label_effect"])
+        self.assertEqual(named_effect["outcome"], "inconclusive")
+
+
+class TestHistoricalActionBlindReview(unittest.TestCase):
+    """Blind adjudication keeps replay labels out of the reviewer packet."""
+
+    def _tool(self):
+        import importlib.util
+        path = (Path(__file__).resolve().parents[1]
+                / "tools" / "historical_action_blind_review.py")
+        spec = importlib.util.spec_from_file_location(
+            "historical_action_blind_review", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def _artifact(self, tool):
+        items = [
+            {
+                "task_id": "t-blind-01",
+                "goal": "一次故障后要让接班者拿到可验证凭据 seed.export r2365",
+                "action": "seed.export", "author": "secret-author-7",
+            },
+            {
+                "task_id": "t-blind-02", "goal": "另一台机器已经答应接手同一份凭据",
+                "action": "seed.replicate", "author": "secret-author-8",
+            },
+        ]
+        rows = []
+        selected = (
+            ("resource.rebalance", "reproduce.spawn"),
+            ("policy.set", "culture.refine"),
+        )
+        for pair, (named, opaque) in enumerate(selected):
+            for arm, action in (("named", named), ("opaque", opaque)):
+                rows.append({
+                    "pair": pair,
+                    "arm": arm,
+                    "task_id": items[pair]["task_id"],
+                    "expected_action": items[pair]["action"],
+                    "selected_action": action,
+                    "valid": True,
+                    "correct": False,
+                })
+        return {
+            "schema": tool.HIST.ARTIFACT_SCHEMA,
+            "manifest": {"items": items},
+            "rows": rows,
+            "summary": {"samples": 2, "paired": {"neither_correct": 2}},
+        }
+
+    def test_packet_hides_labels_and_is_reproducible(self):
+        import json
+        tool = self._tool()
+        artifact = self._artifact(tool)
+        first = tool.prepare_review(artifact, "a" * 64)
+        second = tool.prepare_review(artifact, "a" * 64)
+        self.assertEqual(first, second)
+        prereg, packet, key = first
+        audit = tool.audit_review(packet, key, prereg, artifact)
+        self.assertTrue(audit["ok"], audit)
+        self.assertEqual(len(packet["items"]), 2)
+        blob = json.dumps(packet, ensure_ascii=False)
+        for action in tool.ACTIONS:
+            self.assertNotIn(action, blob)
+        self.assertNotIn("r2365", blob)
+        self.assertNotIn("t-blind-01", blob)
+        self.assertNotIn("secret-author-7", blob)
+        self.assertEqual(
+            len(packet["response_template"]["items"]), len(packet["items"]))
+        self.assertTrue(all(
+            len(item["choices"]) == len(tool.ACTIONS)
+            for item in packet["items"]))
+
+    def test_audit_rejects_a_leaked_action_identifier(self):
+        import copy
+        tool = self._tool()
+        prereg, packet, key = tool.prepare_review(
+            self._artifact(tool), "b" * 64)
+        leaked = copy.deepcopy(packet)
+        leaked["items"][0]["notes"] = "请选 meta.propose"
+        audit = tool.audit_review(leaked, key, prereg)
+        self.assertFalse(audit["ok"])
+        self.assertEqual(audit["leaked_action_ids"], ["meta.propose"])
+
+    def test_primary_decision_uses_exact_two_sided_test(self):
+        tool = self._tool()
+        supported = tool.decide_review(10, 0)
+        self.assertEqual(
+            supported["outcome"], "historical_label_noise_supported")
+        self.assertLess(supported["exact_two_sided_p"], 0.05)
+        reverse = tool.decide_review(0, 10)
+        self.assertEqual(
+            reverse["outcome"], "historical_label_noise_not_supported")
+        self.assertEqual(
+            tool.decide_review(6, 4)["outcome"], "inconclusive")
+
+    def test_score_decodes_choices_without_seeing_labels(self):
+        tool = self._tool()
+        prereg, packet, key = tool.prepare_review(
+            self._artifact(tool), "c" * 64)
+        response_items = []
+        for index, item in enumerate(packet["items"]):
+            review_id = item["review_id"]
+            hidden = key["items"][review_id]
+            target = (hidden["opaque_model_action"] if index == 0
+                      else hidden["historical_action"])
+            choice = next(
+                choice for choice, action in hidden["choice_to_action"].items()
+                if action == target)
+            response_items.append({
+                "review_id": review_id,
+                "choice": choice,
+                "confidence": "high",
+                "notes": "",
+            })
+        response = {
+            "schema": tool.RESPONSE_SCHEMA,
+            "reviewer": "independent-test",
+            "completed_at": "2026-10-29T14:00:00+08:00",
+            "items": response_items,
+        }
+        result = tool.score_review(packet, key, prereg, response)
+        self.assertEqual(result["categories"]["opaque_current"], 1)
+        self.assertEqual(result["categories"]["historical"], 1)
+        self.assertEqual(result["primary_decision"]["outcome"], "inconclusive")
+        response["items"][0]["choice"] = "Z"
+        with self.assertRaisesRegex(ValueError, "invalid choice"):
+            tool.score_review(packet, key, prereg, response)
+
+
+class TestHistoricalActionModelReview(unittest.TestCase):
+    """The second-model collector must stay blind and replayable."""
+
+    def _tools(self):
+        import importlib.util
+        root = Path(__file__).resolve().parents[1]
+        paths = {
+            "blind": root / "tools" / "historical_action_blind_review.py",
+            "model": root / "tools" / "historical_action_model_review.py",
+        }
+        modules = {}
+        for name, path in paths.items():
+            spec = importlib.util.spec_from_file_location(
+                f"historical_action_model_review_{name}", path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            modules[name] = module
+        return modules["blind"], modules["model"]
+
+    def _packet(self, blind):
+        return {
+            "schema": blind.PACKET_SCHEMA,
+            "preregistration_sha256": "d" * 64,
+            "source_artifact_sha256": "e" * 64,
+            "items": [
+                {
+                    "review_id": "R01",
+                    "goal": "需要把可验证副本送到另一台主机",
+                    "choices": [
+                        {"choice": choice, "description": description}
+                        for choice, description in zip(
+                            [chr(ord("A") + i) for i in range(8)],
+                            [info[1] for info in blind.SEM.ACTIONS])
+                    ],
+                },
+                {
+                    "review_id": "R02",
+                    "goal": "共享流程反复缺少验收步骤",
+                    "choices": [
+                        {"choice": choice, "description": description}
+                        for choice, description in zip(
+                            [chr(ord("A") + i) for i in range(8)],
+                            [info[1] for info in blind.SEM.ACTIONS])
+                    ],
+                },
+            ],
+        }
+
+    def test_protocol_is_deterministic_and_does_not_leak_action_ids(self):
+        blind, tool = self._tools()
+        packet = self._packet(blind)
+        first = tool.build_protocol(packet)
+        second = tool.build_protocol(packet)
+        self.assertEqual(first, second)
+        self.assertEqual(first["item_count"], 2)
+        prompts = "\n".join(tool.item_prompt(item) for item in packet["items"])
+        for action in blind.ACTIONS:
+            self.assertNotIn(action, prompts)
+        self.assertEqual(first["reviewer"]["model"],
+                         "qwen3-4b-instruct-2507")
+
+    def test_parser_requires_a_valid_letter_and_confidence(self):
+        _, tool = self._tools()
+        parsed = tool.parse_reviewer_output(
+            '```json\n{"choice":"b","confidence":"HIGH","notes":"理由"}\n```',
+            set("ABCDEFGH"))
+        self.assertEqual(parsed, {
+            "choice": "B", "confidence": "high", "notes": "理由"})
+        with self.assertRaisesRegex(ValueError, "invalid choice"):
+            tool.parse_reviewer_output(
+                '{"choice":"Z","confidence":"high"}', set("ABCDEFGH"))
+        with self.assertRaisesRegex(ValueError, "invalid confidence"):
+            tool.parse_reviewer_output(
+                '{"choice":"A","confidence":"certain"}', set("ABCDEFGH"))
+
+    def test_collection_audit_replays_prompts_and_answers(self):
+        blind, tool = self._tools()
+        packet = self._packet(blind)
+        protocol = tool.build_protocol(packet)
+        rows = []
+        for item in packet["items"]:
+            prompt = tool.item_prompt(item)
+            rows.append({
+                "review_id": item["review_id"],
+                "prompt": prompt,
+                "prompt_sha256": tool._sha_text(prompt),
+                "raw_response": '{"choice":"A","confidence":"medium","notes":""}',
+                "parsed": {
+                    "choice": "A", "confidence": "medium", "notes": "",
+                },
+            })
+        response = tool.assemble_response(packet, protocol, rows)
+        collection = {
+            "schema": tool.COLLECTION_SCHEMA,
+            "status": "complete",
+            "packet_sha256": tool._sha_json(packet),
+            "protocol_sha256": tool._sha_json(protocol),
+            "rows": rows,
+        }
+        audit = tool.audit_collection(packet, protocol, collection, response)
+        self.assertTrue(audit["ok"], audit)
+        rows[0]["prompt"] = "tampered"
+        audit = tool.audit_collection(packet, protocol, collection, response)
+        self.assertFalse(audit["ok"])
+
+
+class TestHistoricalActionGoalControl(unittest.TestCase):
+    """The goal-permutation control must be frozen and replayable."""
+
+    def _tools(self):
+        import importlib.util
+        root = Path(__file__).resolve().parents[1]
+        path = root / "tools" / "historical_action_goal_control.py"
+        spec = importlib.util.spec_from_file_location(
+            "historical_action_goal_control", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def _packet(self, tool):
+        descriptions = [info[1] for info in tool.BLIND.SEM.ACTIONS]
+        goals = [
+            "需要把可验证副本送到另一台主机",
+            "共享流程反复缺少验收步骤",
+        ]
+        return {
+            "schema": tool.BLIND.PACKET_SCHEMA,
+            "preregistration_sha256": "d" * 64,
+            "source_artifact_sha256": "e" * 64,
+            "items": [
+                {
+                    "review_id": f"R{index + 1:02d}",
+                    "goal": goal,
+                    "choices": [
+                        {"choice": chr(ord("A") + position),
+                         "description": descriptions[(position + index) % 8]}
+                        for position in range(8)
+                    ],
+                }
+                for index, goal in enumerate(goals)
+            ],
+        }
+
+    def _fixture(self):
+        tool = self._tools()
+        packet = self._packet(tool)
+        base_protocol = tool.MODEL.build_protocol(packet)
+        key = {
+            "schema": tool.BLIND.KEY_SCHEMA,
+            "packet_sha256": tool._sha_json(packet),
+            "items": {},
+        }
+        base_rows = []
+        for index, item in enumerate(packet["items"]):
+            # The descriptions are cyclically offset, so decode by name.
+            description_to_action = {
+                description: action
+                for action, description, _ in tool.BLIND.SEM.ACTIONS
+            }
+            ordered_actions = [
+                description_to_action[choice["description"]]
+                for choice in item["choices"]
+            ]
+            choice_to_action = {
+                choice["choice"]: action
+                for choice, action in zip(item["choices"], ordered_actions)
+            }
+            key["items"][item["review_id"]] = {
+                "historical_action": ordered_actions[index % 8],
+                "named_model_action": ordered_actions[(index + 1) % 8],
+                "opaque_model_action": ordered_actions[(index + 2) % 8],
+                "choice_to_action": choice_to_action,
+            }
+            base_rows.append({
+                "review_id": item["review_id"],
+                "opaque_match": True,
+                "historical_match": index == 0,
+            })
+        key["preregistration_sha256"] = "d" * 64
+        key["packet_sha256"] = tool._sha_json(packet)
+        base_result = {
+            "packet_sha256": tool._sha_json(packet),
+            "reviewer": base_protocol["reviewer"]["name"],
+            "categories": {"opaque_current": 2, "historical": 1},
+            "rows": base_rows,
+        }
+        protocol = tool.build_protocol(packet, base_protocol, base_result)
+        rows = []
+        for expected in tool.control_prompts(packet):
+            review_id = expected["review_id"]
+            action = key["items"][review_id]["historical_action"]
+            choice = next(
+                choice for choice, mapped in
+                key["items"][review_id]["choice_to_action"].items()
+                if mapped == action)
+            parsed = {"choice": choice, "confidence": "high", "notes": ""}
+            rows.append({
+                "offset": expected["offset"],
+                "review_id": review_id,
+                "goal_source_review_id": expected["goal_source_review_id"],
+                "prompt": expected["prompt"],
+                "prompt_sha256": tool._sha_text(expected["prompt"]),
+                "raw_response": json.dumps(parsed, ensure_ascii=False),
+                "parsed": parsed,
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                "latency_ms": 1.0,
+            })
+        collection = {
+            "schema": tool.COLLECTION_SCHEMA,
+            "status": "complete",
+            "packet_sha256": tool._sha_json(packet),
+            "protocol_sha256": tool._sha_json(protocol),
+            "reviewer_name": protocol["reviewer"]["name"],
+            "rows": rows,
+            "totals": {
+                "calls": 2,
+                "latency_ms": 2.0,
+                "usage": {"prompt_tokens": 2, "completion_tokens": 2},
+            },
+        }
+        return tool, packet, base_protocol, base_result, key, protocol, collection
+
+    def test_protocol_is_deterministic_and_uses_every_shift(self):
+        tool, packet, base_protocol, base_result, _, protocol, _ = self._fixture()
+        rebuilt = tool.build_protocol(packet, base_protocol, base_result)
+        self.assertEqual(protocol, rebuilt)
+        self.assertEqual(protocol["control"]["offsets"], [1])
+        self.assertEqual(protocol["control"]["prompts"], 2)
+        self.assertEqual(protocol["observed"]["opaque_current_matches"], 2)
+        prompts = "\n".join(row["prompt"] for row in tool.control_prompts(packet))
+        for action in tool.BLIND.ACTIONS:
+            self.assertNotIn(action, prompts)
+
+    def test_collection_audit_and_score_decode_the_hidden_key(self):
+        tool, packet, _, base_result, key, protocol, collection = self._fixture()
+        audit = tool.audit_collection(packet, protocol, collection)
+        self.assertTrue(audit["ok"], audit)
+        result = tool.score(packet, key, protocol, base_result, collection)
+        self.assertEqual(result["observed"]["opaque_current_matches"], 2)
+        self.assertEqual(result["control"]["opaque_current_match_counts"], [0])
+        self.assertEqual(result["primary_decision"]["outcome"],
+                         "goal_specificity_not_supported")
+        collection["rows"][0]["prompt"] = "tampered"
+        self.assertFalse(tool.audit_collection(
+            packet, protocol, collection)["ok"])
+
+    def test_cyclic_shift_p_counts_observed_and_null_arms(self):
+        tool = self._tools()
+        self.assertAlmostEqual(tool.cyclic_shift_p(3, [1, 2, 3]), 0.5)
+        self.assertAlmostEqual(tool.cyclic_shift_p(4, [1, 2, 3]), 0.25)
+        with self.assertRaises(ValueError):
+            tool.cyclic_shift_p(1, [])

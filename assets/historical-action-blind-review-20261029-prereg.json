@@ -1,0 +1,33 @@
+{
+  "schema": "historical-action-blind-review-preregistration-v1",
+  "source_artifact": {
+    "sha256": "fc939a01516ac47d9d13951f81572b6bd8b3ace8d8c51dc5f92061da0ecaf0bb",
+    "schema": "historical-action-replay-artifact-v1",
+    "samples": 64,
+    "both_wrong_pairs": 22,
+    "replay_named_only": 8,
+    "replay_opaque_only": 2
+  },
+  "selection_rule": "include every replay pair for which both arms are valid and both are incorrect; preserve all such pairs without further filtering",
+  "review_unit": "one goal and the same eight action descriptions per pair; choice letters are independently shuffled and mapped only in the hidden key",
+  "blinding": "the reviewer packet omits task ids, authors, historical labels, named/opaque model choices, raw model responses, pair indices, and action identifiers; action identifiers, task ids, and round ids quoted inside goals are redacted, and only the hidden key can decode choices",
+  "reviewer_task": "select exactly one of eight unnamed action descriptions and rate confidence without consulting the replay artifact, key, notes, or another model",
+  "primary_comparison": {
+    "current_candidate": "the opaque arm's selected action",
+    "historical_candidate": "the historical expected action",
+    "informative_case": "reviewer choice decodes to exactly one of the two candidates",
+    "test": "two-sided exact binomial test on current-vs-historical discordant choices at probability 0.5",
+    "alpha": 0.05
+  },
+  "primary_outcomes": {
+    "historical_label_noise_supported": "current candidate wins more informative cases and the two-sided exact binomial p is below alpha",
+    "historical_label_noise_not_supported": "historical candidate wins more informative cases and the two-sided exact binomial p is below alpha",
+    "otherwise": "inconclusive"
+  },
+  "secondary_outcomes": [
+    "reviewer match rate for historical label, opaque choice, named choice, and either current choice",
+    "confidence-stratified counts without changing the primary outcome"
+  ],
+  "power_note": "at most 22 items are reviewed, and non-informative reviewer choices further reduce discordant pairs; an inconclusive result does not mean the two candidates are equivalent",
+  "claim_boundary": "this adjudicates only the 22 both-wrong replay pairs; even a clear result cannot validate the replay overall, establish semantic understanding, or prove collective intelligence"
+}

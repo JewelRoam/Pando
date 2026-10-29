@@ -1,0 +1,74 @@
+{
+  "schema": "historical-action-goal-control-protocol-v1",
+  "source": {
+    "packet_sha256": "4f20cb25fe3b1a17006c696a01f2ee61520d1c59850a2761393ff425ef148d43",
+    "packet_preregistration_sha256": "f24da4fca029df8977816b42217c4869d93eb3f439984d7156d597f1e1069ae9",
+    "base_protocol_sha256": "7241264062c3cbce20e90f939ddeacb85cc6f36929a4118e2195ebf6485843c5",
+    "base_result_sha256": "d89d4092d22fdc176a8d2fd333ffbdba454d15cd5b38264b2726de076a27601a"
+  },
+  "reviewer": {
+    "name": "qwen3-4b-instruct-2507-same-host",
+    "model": "qwen3-4b-instruct-2507",
+    "base_url": "http://127.0.0.1:8080/v1",
+    "api_key_file": "~/.pandosi/llm-api.token",
+    "scope": "existing same-host second checkpoint in the Qwen family; not an independent host, not a human, and not a replacement for external preregistered review"
+  },
+  "generation": {
+    "temperature": 0.0,
+    "max_tokens": 96,
+    "seed": 20261029,
+    "timeout_seconds": 180,
+    "retry_policy": "none"
+  },
+  "system_prompt": "你是独立盲评员。你只能使用用户消息里的目标与八个候选描述，不得猜测隐藏的动作编号，不得补充外部知识。必须从 A 到 H 中选择恰好一个最符合目标的描述，并给出 low、medium 或 high 的置信度。只输出一个合法 JSON 对象，格式为 {\"choice\":\"A\",\"confidence\":\"high\",\"notes\":\"简短理由\"}，不要代码块，不要输出任何额外文字。",
+  "system_prompt_sha256": "4106af00dbbb8c05400669de5c8751d91cedb4ab2195861bd54249f61252d92f",
+  "item_count": 22,
+  "control": {
+    "rule": "for each non-zero cyclic offset k, keep every destination item's eight choices and choice order unchanged but replace its goal with the goal from source item (destination + k) mod item_count",
+    "offsets": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21
+    ],
+    "arms": 21,
+    "prompts": 462,
+    "goal_prompts_sha256": "62ef441aebbac781984079a73a57b855826337d4adca418b936977a4f2e900d0"
+  },
+  "observed": {
+    "items": 22,
+    "opaque_current_matches": 15,
+    "historical_matches": 1
+  },
+  "primary_comparison": {
+    "statistic": "number of destination items where the reviewer-selected action equals the destination item's opaque-arm current candidate",
+    "observed_arm": "offset 0, frozen base result (not re-sampled)",
+    "null_arms": "all 21 non-zero cyclic goal substitutions",
+    "test": "one-sided exact cyclic-shift randomization: (1 + number of null arms with count >= observed) / (1 + number of null arms)",
+    "alpha": 0.05,
+    "supported_outcome": "goal_specificity_supported_in_same_model_control when p < alpha and the observed count is greater than every non-zero-shift count",
+    "otherwise": "goal_specificity_not_supported"
+  },
+  "secondary_outcomes": [
+    "match counts against the destination historical and named candidates",
+    "reviewer action distribution across all control calls"
+  ],
+  "claim_boundary": "internal same-host, same-family negative control only; it cannot establish external replication, semantic understanding, or collective intelligence"
+}

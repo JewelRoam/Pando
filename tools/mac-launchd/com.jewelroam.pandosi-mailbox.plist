@@ -21,6 +21,8 @@
     <string>/Users/zhengenrong/.pandosi/mailbox.token</string>
     <string>--telemetry-root</string>
     <string>/Users/zhengenrong/.pandosi/remote/pi5-root.json</string>
+    <string>--code-receipts-root</string>
+    <string>/Users/zhengenrong/.pandosi/remote/code-receipts</string>
     <string>--grant-file</string>
     <string>/Users/zhengenrong/.pandosi/grants.toml</string>
     <string>--identity-file</string>

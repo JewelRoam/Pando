@@ -1,0 +1,990 @@
+{
+  "schema": "historical-action-blind-review-packet-v1",
+  "purpose": "Blindly adjudicate the best action for each frozen historical goal.",
+  "review_instructions": [
+    "Read only this packet. Do not open the replay artifact, hidden key, ledger, or repository notes.",
+    "For each item, choose exactly one candidate description that best fits the goal.",
+    "Do not infer the action identifier; descriptions are intentionally unnamed and reordered.",
+    "Rate confidence as low, medium, or high. Notes are optional and may not name the old answer.",
+    "Return the completed response_template as JSON; do not edit review ids or choice letters."
+  ],
+  "preregistration_sha256": "f24da4fca029df8977816b42217c4869d93eb3f439984d7156d597f1e1069ae9",
+  "source_artifact_sha256": "fc939a01516ac47d9d13951f81572b6bd8b3ace8d8c51dc5f92061da0ecaf0bb",
+  "items": [
+    {
+      "review_id": "R01",
+      "goal": "引入一个新的元规则,以简化未来的提案流程,同时提高提案的可读性和执行的成功率。",
+      "choices": [
+        {
+          "choice": "A",
+          "description": "从现有成员复制出一个可独立运行的进程副本"
+        },
+        {
+          "choice": "B",
+          "description": "把成员或计算任务迁移到另一台主机，并保留回退"
+        },
+        {
+          "choice": "C",
+          "description": "邀请一名尚未加入的候选成员加入群体"
+        },
+        {
+          "choice": "D",
+          "description": "制作可校验的本机种子包，包含身份、授权和状态"
+        },
+        {
+          "choice": "E",
+          "description": "修改有边界的投票规则或门槛，并记录旧值"
+        },
+        {
+          "choice": "F",
+          "description": "把已有种子包送到另一台主机，并核对两端摘要"
+        },
+        {
+          "choice": "G",
+          "description": "修订共享操作手册或执行流程，并分发给成员"
+        },
+        {
+          "choice": "H",
+          "description": "提出一种新的提案动作，等待独立评审后实现"
+        }
+      ]
+    },
+    {
+      "review_id": "R02",
+      "goal": "Establish a decentralized governance layer to manage hardware-degradation reporting and automated resource migration",
+      "choices": [
+        {
+          "choice": "A",
+          "description": "把已有种子包送到另一台主机，并核对两端摘要"
+        },
+        {
+          "choice": "B",
+          "description": "把成员或计算任务迁移到另一台主机，并保留回退"
+        },
+        {
+          "choice": "C",
+          "description": "制作可校验的本机种子包，包含身份、授权和状态"
+        },
+        {
+          "choice": "D",
+          "description": "修订共享操作手册或执行流程，并分发给成员"
+        },
+        {
+          "choice": "E",
+          "description": "提出一种新的提案动作，等待独立评审后实现"
+        },
+        {
+          "choice": "F",
+          "description": "邀请一名尚未加入的候选成员加入群体"
+        },
+        {
+          "choice": "G",
+          "description": "从现有成员复制出一个可独立运行的进程副本"
+        },
+        {
+          "choice": "H",
+          "description": "修改有边界的投票规则或门槛，并记录旧值"
+        }
+      ]
+    },
+    {
+      "review_id": "R03",
+      "goal": "建立跨宿主的冗余种子网络以提升群体在宿主故障时的存活概率并分散计算负载,同时优化种子网络的分布与安全性",
+      "choices": [
+        {
+          "choice": "A",
+          "description": "制作可校验的本机种子包，包含身份、授权和状态"
+        },
+        {
+          "choice": "B",
+          "description": "从现有成员复制出一个可独立运行的进程副本"
+        },
+        {
+          "choice": "C",
+          "description": "提出一种新的提案动作，等待独立评审后实现"
+        },
+        {
+          "choice": "D",
+          "description": "把成员或计算任务迁移到另一台主机，并保留回退"
+        },
+        {
+          "choice": "E",
+          "description": "修改有边界的投票规则或门槛，并记录旧值"
+        },
+        {
+          "choice": "F",
+          "description": "把已有种子包送到另一台主机，并核对两端摘要"
+        },
+        {
+          "choice": "G",
+          "description": "邀请一名尚未加入的候选成员加入群体"
+        },
+        {
+          "choice": "H",
+          "description": "修订共享操作手册或执行流程，并分发给成员"
+        }
+      ]
+    },
+    {
+      "review_id": "R04",
+      "goal": "建立跨宿主的动态种子网络以提升群体在宿主故障时的存活概率并分散计算负载,同时优化种子网络的分布与安全性",
+      "choices": [
+        {
+          "choice": "A",
+          "description": "邀请一名尚未加入的候选成员加入群体"
+        },
+        {
+          "choice": "B",
+          "description": "修订共享操作手册或执行流程，并分发给成员"
+        },
+        {
+          "choice": "C",
+          "description": "从现有成员复制出一个可独立运行的进程副本"
+        },
+        {
+          "choice": "D",
+          "description": "把成员或计算任务迁移到另一台主机，并保留回退"
+        },
+        {
+          "choice": "E",
+          "description": "提出一种新的提案动作，等待独立评审后实现"
+        },
+        {
+          "choice": "F",
+          "description": "修改有边界的投票规则或门槛，并记录旧值"
+        },
+        {
+          "choice": "G",
+          "description": "把已有种子包送到另一台主机，并核对两端摘要"
+        },
+        {
+          "choice": "H",
+          "description": "制作可校验的本机种子包，包含身份、授权和状态"
+        }
+      ]
+    },
+    {
+      "review_id": "R05",
+      "goal": "在win主机上部署自适应学习模块以增强多主机策略一致性并优化资源分配",
+      "choices": [
+        {
+          "choice": "A",
+          "description": "制作可校验的本机种子包，包含身份、授权和状态"
+        },
+        {
+          "choice": "B",
+          "description": "提出一种新的提案动作，等待独立评审后实现"
+        },
+        {
+          "choice": "C",
+          "description": "邀请一名尚未加入的候选成员加入群体"
+        },
+        {
+          "choice": "D",
+          "description": "修订共享操作手册或执行流程，并分发给成员"
+        },
+        {
+          "choice": "E",
+          "description": "修改有边界的投票规则或门槛，并记录旧值"
+        },
+        {
+          "choice": "F",
+          "description": "把成员或计算任务迁移到另一台主机，并保留回退"
+        },
+        {
+          "choice": "G",
+          "description": "把已有种子包送到另一台主机，并核对两端摘要"
+        },
+        {
+          "choice": "H",
+          "description": "从现有成员复制出一个可独立运行的进程副本"
+        }
+      ]
+    },
+    {
+      "review_id": "R06",
+      "goal": "Establish a formal peer-review protocol for Tier 2 operators to ensure governance integrity",
+      "choices": [
+        {
+          "choice": "A",
+          "description": "提出一种新的提案动作，等待独立评审后实现"
+        },
+        {
+          "choice": "B",
+          "description": "从现有成员复制出一个可独立运行的进程副本"
+        },
+        {
+          "choice": "C",
+          "description": "把已有种子包送到另一台主机，并核对两端摘要"
+        },
+        {
+          "choice": "D",
+          "description": "把成员或计算任务迁移到另一台主机，并保留回退"
+        },
+        {
+          "choice": "E",
+          "description": "邀请一名尚未加入的候选成员加入群体"
+        },
+        {
+          "choice": "F",
+          "description": "修改有边界的投票规则或门槛，并记录旧值"
+        },
+        {
+          "choice": "G",
+          "description": "制作可校验的本机种子包，包含身份、授权和状态"
+        },
+        {
+          "choice": "H",
+          "description": "修订共享操作手册或执行流程，并分发给成员"
+        }
+      ]
+    },
+    {
+      "review_id": "R07",
+      "goal": "通过部署跨宿主的动态种子导出机制提升群体在分布式环境中的数据同步效率与容错能力",
+      "choices": [
+        {
+          "choice": "A",
+          "description": "把已有种子包送到另一台主机，并核对两端摘要"
+        },
+        {
+          "choice": "B",
+          "description": "从现有成员复制出一个可独立运行的进程副本"
+        },
+        {
+          "choice": "C",
+          "description": "制作可校验的本机种子包，包含身份、授权和状态"
+        },
+        {
+          "choice": "D",
+          "description": "邀请一名尚未加入的候选成员加入群体"
+        },
+        {
+          "choice": "E",
+          "description": "修订共享操作手册或执行流程，并分发给成员"
+        },
+        {
+          "choice": "F",
+          "description": "修改有边界的投票规则或门槛，并记录旧值"
+        },
+        {
+          "choice": "G",
+          "description": "把成员或计算任务迁移到另一台主机，并保留回退"
+        },
+        {
+          "choice": "H",
+          "description": "提出一种新的提案动作，等待独立评审后实现"
+        }
+      ]
+    },
+    {
+      "review_id": "R08",
+      "goal": "Establish a new member with optimized resource allocation and governance capabilities.",
+      "choices": [
+        {
+          "choice": "A",
+          "description": "修改有边界的投票规则或门槛，并记录旧值"
+        },
+        {
+          "choice": "B",
+          "description": "从现有成员复制出一个可独立运行的进程副本"
+        },
+        {
+          "choice": "C",
+          "description": "把已有种子包送到另一台主机，并核对两端摘要"
+        },
+        {
+          "choice": "D",
+          "description": "把成员或计算任务迁移到另一台主机，并保留回退"
+        },
+        {
+          "choice": "E",
+          "description": "提出一种新的提案动作，等待独立评审后实现"
+        },
+        {
+          "choice": "F",
+          "description": "制作可校验的本机种子包，包含身份、授权和状态"
+        },
+        {
+          "choice": "G",
+          "description": "修订共享操作手册或执行流程，并分发给成员"
+        },
+        {
+          "choice": "H",
+          "description": "邀请一名尚未加入的候选成员加入群体"
+        }
+      ]
+    },
+    {
+      "review_id": "R09",
+      "goal": "Establish a decentralized governance framework for hardware-degradation reporting and automated migration triggers by refining the seed export process and ensuring uniform governance enforcement across all nodes",
+      "choices": [
+        {
+          "choice": "A",
+          "description": "邀请一名尚未加入的候选成员加入群体"
+        },
+        {
+          "choice": "B",
+          "description": "修改有边界的投票规则或门槛，并记录旧值"
+        },
+        {
+          "choice": "C",
+          "description": "制作可校验的本机种子包，包含身份、授权和状态"
+        },
+        {
+          "choice": "D",
+          "description": "把成员或计算任务迁移到另一台主机，并保留回退"
+        },
+        {
+          "choice": "E",
+          "description": "从现有成员复制出一个可独立运行的进程副本"
+        },
+        {
+          "choice": "F",
+          "description": "提出一种新的提案动作，等待独立评审后实现"
+        },
+        {
+          "choice": "G",
+          "description": "修订共享操作手册或执行流程，并分发给成员"
+        },
+        {
+          "choice": "H",
+          "description": "把已有种子包送到另一台主机，并核对两端摘要"
+        }
+      ]
+    },
+    {
+      "review_id": "R10",
+      "goal": "Establish a specialized member to automate the lifecycle management of auditing members to prevent redundancy and ensure audit coverage, following the 该动作 from 该轮次.",
+      "choices": [
+        {
+          "choice": "A",
+          "description": "修订共享操作手册或执行流程，并分发给成员"
+        },
+        {
+          "choice": "B",
+          "description": "从现有成员复制出一个可独立运行的进程副本"
+        },
+        {
+          "choice": "C",
+          "description": "修改有边界的投票规则或门槛，并记录旧值"
+        },
+        {
+          "choice": "D",
+          "description": "把已有种子包送到另一台主机，并核对两端摘要"
+        },
+        {
+          "choice": "E",
+          "description": "制作可校验的本机种子包，包含身份、授权和状态"
+        },
+        {
+          "choice": "F",
+          "description": "提出一种新的提案动作，等待独立评审后实现"
+        },
+        {
+          "choice": "G",
+          "description": "把成员或计算任务迁移到另一台主机，并保留回退"
+        },
+        {
+          "choice": "H",
+          "description": "邀请一名尚未加入的候选成员加入群体"
+        }
+      ]
+    },
+    {
+      "review_id": "R11",
+      "goal": "加强群体对资源的利用效率,并通过跨主机通信协议的标准化,提高整体生存概率。",
+      "choices": [
+        {
+          "choice": "A",
+          "description": "从现有成员复制出一个可独立运行的进程副本"
+        },
+        {
+          "choice": "B",
+          "description": "把已有种子包送到另一台主机，并核对两端摘要"
+        },
+        {
+          "choice": "C",
+          "description": "修订共享操作手册或执行流程，并分发给成员"
+        },
+        {
+          "choice": "D",
+          "description": "邀请一名尚未加入的候选成员加入群体"
+        },
+        {
+          "choice": "E",
+          "description": "制作可校验的本机种子包，包含身份、授权和状态"
+        },
+        {
+          "choice": "F",
+          "description": "把成员或计算任务迁移到另一台主机，并保留回退"
+        },
+        {
+          "choice": "G",
+          "description": "提出一种新的提案动作，等待独立评审后实现"
+        },
+        {
+          "choice": "H",
+          "description": "修改有边界的投票规则或门槛，并记录旧值"
+        }
+      ]
+    },
+    {
+      "review_id": "R12",
+      "goal": "Formalize the colony's expansion logic by distributing the validated recruitment and replication playbook across the win host.",
+      "choices": [
+        {
+          "choice": "A",
+          "description": "提出一种新的提案动作，等待独立评审后实现"
+        },
+        {
+          "choice": "B",
+          "description": "制作可校验的本机种子包，包含身份、授权和状态"
+        },
+        {
+          "choice": "C",
+          "description": "修订共享操作手册或执行流程，并分发给成员"
+        },
+        {
+          "choice": "D",
+          "description": "从现有成员复制出一个可独立运行的进程副本"
+        },
+        {
+          "choice": "E",
+          "description": "把成员或计算任务迁移到另一台主机，并保留回退"
+        },
+        {
+          "choice": "F",
+          "description": "把已有种子包送到另一台主机，并核对两端摘要"
+        },
+        {
+          "choice": "G",
+          "description": "邀请一名尚未加入的候选成员加入群体"
+        },
+        {
+          "choice": "H",
+          "description": "修改有边界的投票规则或门槛，并记录旧值"
+        }
+      ]
+    },
+    {
+      "review_id": "R13",
+      "goal": "Establish a decentralized resource allocation system by refining the culture playbooks to ensure consistent resource distribution across hosts",
+      "choices": [
+        {
+          "choice": "A",
+          "description": "把已有种子包送到另一台主机，并核对两端摘要"
+        },
+        {
+          "choice": "B",
+          "description": "邀请一名尚未加入的候选成员加入群体"
+        },
+        {
+          "choice": "C",
+          "description": "制作可校验的本机种子包，包含身份、授权和状态"
+        },
+        {
+          "choice": "D",
+          "description": "修改有边界的投票规则或门槛，并记录旧值"
+        },
+        {
+          "choice": "E",
+          "description": "提出一种新的提案动作，等待独立评审后实现"
+        },
+        {
+          "choice": "F",
+          "description": "把成员或计算任务迁移到另一台主机，并保留回退"
+        },
+        {
+          "choice": "G",
+          "description": "从现有成员复制出一个可独立运行的进程副本"
+        },
+        {
+          "choice": "H",
+          "description": "修订共享操作手册或执行流程，并分发给成员"
+        }
+      ]
+    },
+    {
+      "review_id": "R14",
+      "goal": "通过在新宿主上部署计算优化的侦察节点提升群体在分布式环境中的数据同步效率与容错能力",
+      "choices": [
+        {
+          "choice": "A",
+          "description": "修订共享操作手册或执行流程，并分发给成员"
+        },
+        {
+          "choice": "B",
+          "description": "提出一种新的提案动作，等待独立评审后实现"
+        },
+        {
+          "choice": "C",
+          "description": "把已有种子包送到另一台主机，并核对两端摘要"
+        },
+        {
+          "choice": "D",
+          "description": "制作可校验的本机种子包，包含身份、授权和状态"
+        },
+        {
+          "choice": "E",
+          "description": "从现有成员复制出一个可独立运行的进程副本"
+        },
+        {
+          "choice": "F",
+          "description": "邀请一名尚未加入的候选成员加入群体"
+        },
+        {
+          "choice": "G",
+          "description": "修改有边界的投票规则或门槛，并记录旧值"
+        },
+        {
+          "choice": "H",
+          "description": "把成员或计算任务迁移到另一台主机，并保留回退"
+        }
+      ]
+    },
+    {
+      "review_id": "R15",
+      "goal": "增加群体在其他主机上的可用性,以降低单点故障风险并促进横向扩展",
+      "choices": [
+        {
+          "choice": "A",
+          "description": "邀请一名尚未加入的候选成员加入群体"
+        },
+        {
+          "choice": "B",
+          "description": "把已有种子包送到另一台主机，并核对两端摘要"
+        },
+        {
+          "choice": "C",
+          "description": "修改有边界的投票规则或门槛，并记录旧值"
+        },
+        {
+          "choice": "D",
+          "description": "提出一种新的提案动作，等待独立评审后实现"
+        },
+        {
+          "choice": "E",
+          "description": "从现有成员复制出一个可独立运行的进程副本"
+        },
+        {
+          "choice": "F",
+          "description": "制作可校验的本机种子包，包含身份、授权和状态"
+        },
+        {
+          "choice": "G",
+          "description": "把成员或计算任务迁移到另一台主机，并保留回退"
+        },
+        {
+          "choice": "H",
+          "description": "修订共享操作手册或执行流程，并分发给成员"
+        }
+      ]
+    },
+    {
+      "review_id": "R16",
+      "goal": "Establish a decentralized governance hierarchy by granting specific administrative authorities to the newly integrated external candidates.",
+      "choices": [
+        {
+          "choice": "A",
+          "description": "把已有种子包送到另一台主机，并核对两端摘要"
+        },
+        {
+          "choice": "B",
+          "description": "提出一种新的提案动作，等待独立评审后实现"
+        },
+        {
+          "choice": "C",
+          "description": "把成员或计算任务迁移到另一台主机，并保留回退"
+        },
+        {
+          "choice": "D",
+          "description": "修改有边界的投票规则或门槛，并记录旧值"
+        },
+        {
+          "choice": "E",
+          "description": "邀请一名尚未加入的候选成员加入群体"
+        },
+        {
+          "choice": "F",
+          "description": "修订共享操作手册或执行流程，并分发给成员"
+        },
+        {
+          "choice": "G",
+          "description": "制作可校验的本机种子包，包含身份、授权和状态"
+        },
+        {
+          "choice": "H",
+          "description": "从现有成员复制出一个可独立运行的进程副本"
+        }
+      ]
+    },
+    {
+      "review_id": "R17",
+      "goal": "引入一个新的元规则以增强群体的决策机制,降低决策风险,并提高决策执行效率。",
+      "choices": [
+        {
+          "choice": "A",
+          "description": "修订共享操作手册或执行流程，并分发给成员"
+        },
+        {
+          "choice": "B",
+          "description": "制作可校验的本机种子包，包含身份、授权和状态"
+        },
+        {
+          "choice": "C",
+          "description": "把已有种子包送到另一台主机，并核对两端摘要"
+        },
+        {
+          "choice": "D",
+          "description": "提出一种新的提案动作，等待独立评审后实现"
+        },
+        {
+          "choice": "E",
+          "description": "把成员或计算任务迁移到另一台主机，并保留回退"
+        },
+        {
+          "choice": "F",
+          "description": "修改有边界的投票规则或门槛，并记录旧值"
+        },
+        {
+          "choice": "G",
+          "description": "从现有成员复制出一个可独立运行的进程副本"
+        },
+        {
+          "choice": "H",
+          "description": "邀请一名尚未加入的候选成员加入群体"
+        }
+      ]
+    },
+    {
+      "review_id": "R18",
+      "goal": "do not die with one box",
+      "choices": [
+        {
+          "choice": "A",
+          "description": "把已有种子包送到另一台主机，并核对两端摘要"
+        },
+        {
+          "choice": "B",
+          "description": "从现有成员复制出一个可独立运行的进程副本"
+        },
+        {
+          "choice": "C",
+          "description": "邀请一名尚未加入的候选成员加入群体"
+        },
+        {
+          "choice": "D",
+          "description": "提出一种新的提案动作，等待独立评审后实现"
+        },
+        {
+          "choice": "E",
+          "description": "修订共享操作手册或执行流程，并分发给成员"
+        },
+        {
+          "choice": "F",
+          "description": "制作可校验的本机种子包，包含身份、授权和状态"
+        },
+        {
+          "choice": "G",
+          "description": "修改有边界的投票规则或门槛，并记录旧值"
+        },
+        {
+          "choice": "H",
+          "description": "把成员或计算任务迁移到另一台主机，并保留回退"
+        }
+      ]
+    },
+    {
+      "review_id": "R19",
+      "goal": "Establish a formal 'Host-Migration' protocol to automate the movement of high-fidelity state bundles across hardware.",
+      "choices": [
+        {
+          "choice": "A",
+          "description": "提出一种新的提案动作，等待独立评审后实现"
+        },
+        {
+          "choice": "B",
+          "description": "把已有种子包送到另一台主机，并核对两端摘要"
+        },
+        {
+          "choice": "C",
+          "description": "邀请一名尚未加入的候选成员加入群体"
+        },
+        {
+          "choice": "D",
+          "description": "制作可校验的本机种子包，包含身份、授权和状态"
+        },
+        {
+          "choice": "E",
+          "description": "把成员或计算任务迁移到另一台主机，并保留回退"
+        },
+        {
+          "choice": "F",
+          "description": "修改有边界的投票规则或门槛，并记录旧值"
+        },
+        {
+          "choice": "G",
+          "description": "修订共享操作手册或执行流程，并分发给成员"
+        },
+        {
+          "choice": "H",
+          "description": "从现有成员复制出一个可独立运行的进程副本"
+        }
+      ]
+    },
+    {
+      "review_id": "R20",
+      "goal": "Establish a formal peer-review protocol for the newly proposed Tier 2 operators to ensure governance integrity",
+      "choices": [
+        {
+          "choice": "A",
+          "description": "从现有成员复制出一个可独立运行的进程副本"
+        },
+        {
+          "choice": "B",
+          "description": "制作可校验的本机种子包，包含身份、授权和状态"
+        },
+        {
+          "choice": "C",
+          "description": "邀请一名尚未加入的候选成员加入群体"
+        },
+        {
+          "choice": "D",
+          "description": "把成员或计算任务迁移到另一台主机，并保留回退"
+        },
+        {
+          "choice": "E",
+          "description": "修订共享操作手册或执行流程，并分发给成员"
+        },
+        {
+          "choice": "F",
+          "description": "修改有边界的投票规则或门槛，并记录旧值"
+        },
+        {
+          "choice": "G",
+          "description": "把已有种子包送到另一台主机，并核对两端摘要"
+        },
+        {
+          "choice": "H",
+          "description": "提出一种新的提案动作，等待独立评审后实现"
+        }
+      ]
+    },
+    {
+      "review_id": "R21",
+      "goal": "通过部署新的 Tier 2 操作符增强群体在宿主故障时的自动恢复能力与决策灵活性",
+      "choices": [
+        {
+          "choice": "A",
+          "description": "修订共享操作手册或执行流程，并分发给成员"
+        },
+        {
+          "choice": "B",
+          "description": "提出一种新的提案动作，等待独立评审后实现"
+        },
+        {
+          "choice": "C",
+          "description": "制作可校验的本机种子包，包含身份、授权和状态"
+        },
+        {
+          "choice": "D",
+          "description": "把成员或计算任务迁移到另一台主机，并保留回退"
+        },
+        {
+          "choice": "E",
+          "description": "从现有成员复制出一个可独立运行的进程副本"
+        },
+        {
+          "choice": "F",
+          "description": "邀请一名尚未加入的候选成员加入群体"
+        },
+        {
+          "choice": "G",
+          "description": "修改有边界的投票规则或门槛，并记录旧值"
+        },
+        {
+          "choice": "H",
+          "description": "把已有种子包送到另一台主机，并核对两端摘要"
+        }
+      ]
+    },
+    {
+      "review_id": "R22",
+      "goal": "Formalize a dynamic resource-scaling mechanism to automate the adjustment of voting gates based on real-time hardware availability.",
+      "choices": [
+        {
+          "choice": "A",
+          "description": "提出一种新的提案动作，等待独立评审后实现"
+        },
+        {
+          "choice": "B",
+          "description": "修订共享操作手册或执行流程，并分发给成员"
+        },
+        {
+          "choice": "C",
+          "description": "修改有边界的投票规则或门槛，并记录旧值"
+        },
+        {
+          "choice": "D",
+          "description": "把成员或计算任务迁移到另一台主机，并保留回退"
+        },
+        {
+          "choice": "E",
+          "description": "从现有成员复制出一个可独立运行的进程副本"
+        },
+        {
+          "choice": "F",
+          "description": "邀请一名尚未加入的候选成员加入群体"
+        },
+        {
+          "choice": "G",
+          "description": "制作可校验的本机种子包，包含身份、授权和状态"
+        },
+        {
+          "choice": "H",
+          "description": "把已有种子包送到另一台主机，并核对两端摘要"
+        }
+      ]
+    }
+  ],
+  "response_template": {
+    "schema": "historical-action-blind-review-response-v1",
+    "reviewer": "",
+    "completed_at": "",
+    "items": [
+      {
+        "review_id": "R01",
+        "choice": null,
+        "confidence": "",
+        "notes": ""
+      },
+      {
+        "review_id": "R02",
+        "choice": null,
+        "confidence": "",
+        "notes": ""
+      },
+      {
+        "review_id": "R03",
+        "choice": null,
+        "confidence": "",
+        "notes": ""
+      },
+      {
+        "review_id": "R04",
+        "choice": null,
+        "confidence": "",
+        "notes": ""
+      },
+      {
+        "review_id": "R05",
+        "choice": null,
+        "confidence": "",
+        "notes": ""
+      },
+      {
+        "review_id": "R06",
+        "choice": null,
+        "confidence": "",
+        "notes": ""
+      },
+      {
+        "review_id": "R07",
+        "choice": null,
+        "confidence": "",
+        "notes": ""
+      },
+      {
+        "review_id": "R08",
+        "choice": null,
+        "confidence": "",
+        "notes": ""
+      },
+      {
+        "review_id": "R09",
+        "choice": null,
+        "confidence": "",
+        "notes": ""
+      },
+      {
+        "review_id": "R10",
+        "choice": null,
+        "confidence": "",
+        "notes": ""
+      },
+      {
+        "review_id": "R11",
+        "choice": null,
+        "confidence": "",
+        "notes": ""
+      },
+      {
+        "review_id": "R12",
+        "choice": null,
+        "confidence": "",
+        "notes": ""
+      },
+      {
+        "review_id": "R13",
+        "choice": null,
+        "confidence": "",
+        "notes": ""
+      },
+      {
+        "review_id": "R14",
+        "choice": null,
+        "confidence": "",
+        "notes": ""
+      },
+      {
+        "review_id": "R15",
+        "choice": null,
+        "confidence": "",
+        "notes": ""
+      },
+      {
+        "review_id": "R16",
+        "choice": null,
+        "confidence": "",
+        "notes": ""
+      },
+      {
+        "review_id": "R17",
+        "choice": null,
+        "confidence": "",
+        "notes": ""
+      },
+      {
+        "review_id": "R18",
+        "choice": null,
+        "confidence": "",
+        "notes": ""
+      },
+      {
+        "review_id": "R19",
+        "choice": null,
+        "confidence": "",
+        "notes": ""
+      },
+      {
+        "review_id": "R20",
+        "choice": null,
+        "confidence": "",
+        "notes": ""
+      },
+      {
+        "review_id": "R21",
+        "choice": null,
+        "confidence": "",
+        "notes": ""
+      },
+      {
+        "review_id": "R22",
+        "choice": null,
+        "confidence": "",
+        "notes": ""
+      }
+    ]
+  }
+}

@@ -112,11 +112,42 @@ def next_reply(members: list[dict], chat_ids: set[str], tasks: list[dict],
 
 
 OPEN_COOLDOWN = 3600.0
+OPENED_PEER_TTL = 3 * 60 * 60.0
+
+
+def chat_peer_ids(members: list[dict], known: set[str],
+                  evidence: dict[tuple[str, str], float] | None = None,
+                  now: float | None = None,
+                  max_age: float = OPENED_PEER_TTL) -> set[str]:
+    """Remote chat peers currently discovered or recently addressed.
+
+    A root can be dark while the mailbox still carries a usable replica. The
+    first unanswered opening proves that a local chat member chose this peer
+    from a live chat-member record, so forgetting it immediately would turn a
+    partition into permanent silence. That evidence expires, however: repeated
+    outbound attempts do not refresh it, and a peer absent from live membership
+    should not make the colony write into a dead address forever.
+    """
+    local = {str(item.get("node_id") or "") for item in members}
+    local.discard("")
+    peers = {str(node) for node in (known or set()) if node}
+    for (sender, peer), at in (evidence or {}).items():
+        sender = str(sender or "")
+        peer = str(peer or "")
+        try:
+            age = float(now) - float(at)
+        except (TypeError, ValueError):
+            continue
+        if sender in local and peer and now is not None and age <= max_age:
+            peers.add(peer)
+    peers.difference_update(local)
+    return peers
 
 
 def next_opening(members: list[dict], known: set[str],
                  opened: dict[tuple[str, str], float], now: float,
-                 cooldown: float = OPEN_COOLDOWN) -> dict | None:
+                 cooldown: float = OPEN_COOLDOWN,
+                 evidence: dict[tuple[str, str], float] | None = None) -> dict | None:
     """A conversation this machine should start, or None.
 
     Every ``[chat]`` row this colony has ever written is an answer:
@@ -141,9 +172,7 @@ def next_opening(members: list[dict], known: set[str],
     local = [node_id for node_id in local if node_id]
     if not local:
         return None
-    here = set(local)
-    peers = sorted(str(node) for node in (known or set())
-                   if node and str(node) not in here)
+    peers = sorted(chat_peer_ids(members, known, evidence, now))
     if not peers:
         return None
     if opened and now - max(opened.values()) < cooldown:

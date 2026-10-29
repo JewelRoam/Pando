@@ -31,7 +31,8 @@ Usage:
   python tools/code_drift_check.py --repo . \\
       --root mac http://127.0.0.1:8765 ~/.pandosi/pairing.token \\
       --root win http://192.168.31.100:8790 ~/.pandosi/win-pairing.token \\
-      --root-json pi5 ~/.pandosi/remote/pi5-root.json --json
+      --root-json pi5 ~/.pandosi/remote/pi5-root.json \
+      --tip-file ~/.pandosi/code.bundle.head --json
 
 ``--root NAME URL TOKEN_FILE`` dials a root table. ``--root-json NAME FILE``
 reads one that another process copied here, which is how a host this job may
@@ -236,8 +237,8 @@ def head_of(repo: Path) -> str | None:
     return text if proc.returncode == 0 and text else None
 
 
-def deploy_tip(repo: Path) -> str | None:
-    """The commit the fleet can actually pull, falling back to local HEAD.
+def deploy_tip(repo: Path, tip_files=()) -> str | None:
+    """The newest commit the fleet can actually pull.
 
     A developer may commit locally and wait before pushing. Comparing members
     to that private HEAD starts the fifteen-minute grace window before the
@@ -245,18 +246,50 @@ def deploy_tip(repo: Path) -> str | None:
     object that was never published. Prefer the branch upstream (for this
     checkout, ``origin/main``); a repository without an upstream keeps the old
     local-HEAD behaviour.
+
+    A peer bundle is another real deployment path. ``--tip-file`` points at the
+    commit served by that bundle (normally ``~/.pandosi/code.bundle.head``).
+    Take the newer of upstream and that served commit when they are in one
+    ancestry chain. This lets the fleet be legitimately ahead of GitHub without
+    turning every peer-deployed process into a permanent ``ahead`` alarm.
     """
+    candidates: list[str] = []
     try:
         proc = _git(repo, "rev-parse", "--abbrev-ref", "--symbolic-full-name",
                     "@{upstream}")
     except (OSError, subprocess.SubprocessError):
-        return head_of(repo)
-    upstream = (proc.stdout or "").strip()
-    if proc.returncode == 0 and upstream:
-        resolved = resolve(repo, upstream)
+        proc = None
+    if proc is not None and proc.returncode == 0:
+        upstream = (proc.stdout or "").strip()
+        if upstream:
+            resolved = resolve(repo, upstream)
+            if resolved is not None:
+                candidates.append(resolved)
+    if not candidates:
+        local = head_of(repo)
+        if local is not None:
+            candidates.append(local)
+
+    for value in tip_files:
+        if not value:
+            continue
+        try:
+            reported = Path(value).expanduser().read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        resolved = resolve(repo, reported)
         if resolved is not None:
-            return resolved
-    return head_of(repo)
+            candidates.append(resolved)
+
+    tip = candidates[0] if candidates else None
+    for candidate in candidates[1:]:
+        if candidate == tip:
+            continue
+        if is_ancestor(repo, tip, candidate):
+            tip = candidate
+        # A divergent candidate is not a newer deployable version of this
+        # history. Keep the upstream/local baseline rather than guessing.
+    return tip
 
 
 def resolve(repo: Path, commit: str) -> str | None:
@@ -481,6 +514,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--snapshot-file",
                         default="~/.pandosi/code-drift-check.json",
                         help="where the verdict is published for other readers")
+    parser.add_argument("--tip-file", action="append", default=[],
+                        metavar="FILE",
+                        help="repeatable: a file naming a commit served by a "
+                             "peer code bundle; prefer the newer served tip")
     parser.add_argument("--json", action="store_true",
                         help="print the payload the caller parses")
     parser.add_argument("--now", type=float, default=None, help="override clock")
@@ -489,7 +526,7 @@ def main(argv: list[str] | None = None) -> int:
     now = time.time() if args.now is None else args.now
     repo = Path(args.repo).expanduser().resolve()
 
-    tip = deploy_tip(repo)
+    tip = deploy_tip(repo, args.tip_file)
     if tip is None:
         print(f"code-drift-check UNREADABLE: {repo} is not a git checkout",
               file=sys.stderr)

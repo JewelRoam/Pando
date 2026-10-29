@@ -18,13 +18,55 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
-from .chat import (OPEN_COOLDOWN, message_text, next_opening, next_reply,
-                   normalize_chat)
+from .chat import (OPEN_COOLDOWN, chat_peer_ids, message_text, next_opening,
+                   next_reply, normalize_chat)
 from .common import PROPOSING_ROLE
-from .net import LOOPBACK, local_addresses, open_url
+from .net import (LOOPBACK, local_addresses, open_url, response_json,
+                  response_text, should_request_gzip)
 from .proposal_mail import delivery_failed, mailbox_chain
+
+
+# chatd polls every few seconds while the mailbox retains the whole colony
+# history. Only the newest slice can participate in a conversation; fetching
+# 35k summary rows on every pass makes a healthy chat loop pay for all memory.
+CHAT_FEED_LIMIT = 500
+# The feed is dominated by proposal/reaction traffic. Ask the mailbox to
+# filter before applying the bound, otherwise reactions can push unread chat
+# messages and the proposal needed to ground an opening out of the window.
+CHAT_FEED_KINDS = ("chat", "proposal")
+
+# A root that times out on every pass must not tax every healthy pass. Wait
+# briefly after the first miss, then grow to a bounded probe interval so a
+# recovered root is seen without another process or timer.
+ROOT_RETRY_BASE_S = 30.0
+ROOT_RETRY_MAX_S = 300.0
+
+
+class RootProbeBackoff:
+    """Per-root retry state for repeated root probe failures."""
+
+    def __init__(self, base: float = ROOT_RETRY_BASE_S,
+                 cap: float = ROOT_RETRY_MAX_S):
+        self.base = max(0.0, float(base))
+        self.cap = max(self.base, float(cap))
+        self._pending: dict[str, tuple[int, float]] = {}
+
+    def due(self, key: str, now: float) -> bool:
+        return now >= self._pending.get(key, (0, 0.0))[1]
+
+    def retry_in(self, key: str, now: float) -> float:
+        return max(0.0, self._pending.get(key, (0, 0.0))[1] - now)
+
+    def failed(self, key: str, now: float) -> float:
+        failures = self._pending.get(key, (0, 0.0))[0] + 1
+        delay = min(self.cap, self.base * (2 ** min(failures - 1, 16)))
+        self._pending[key] = (failures, now + delay)
+        return delay
+
+    def succeeded(self, key: str) -> None:
+        self._pending.pop(key, None)
 
 
 def _read(path: str | None) -> str | None:
@@ -74,6 +116,45 @@ def fetch_health(url: str, timeout: float) -> dict | None:
     with open_url(request, timeout) as resp:
         payload = json.loads(resp.read())
     return payload if isinstance(payload, dict) else None
+
+
+def probe_roots(roots: list[dict], timeout: float,
+                backoff: RootProbeBackoff,
+                now: float | None = None) -> tuple[dict, list[dict]]:
+    """Read every root that is due, returning nodes and observable outcomes.
+
+    A timeout costs the whole pass when a dark root is probed every time. The
+    backoff is only a deferral: it caps, resets on success, and still returns
+    the healthy roots on this pass.
+    """
+    nodes: dict = {}
+    events: list[dict] = []
+    current = time.monotonic() if now is None else now
+    for root in roots:
+        url = str(root.get("url") or "").rstrip("/")
+        if not url:
+            continue
+        name = str(root.get("name") or url)
+        if not backoff.due(url, current):
+            events.append({"name": name, "url": url, "deferred": True,
+                           "retry_in": backoff.retry_in(url, current)})
+            continue
+        try:
+            found = fetch_nodes(url, root.get("token"), min(8, timeout))
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError,
+                OSError) as exc:
+            # Start the cooling-off window when the failure lands. Using the
+            # pass start made a timeout consume most of its own retry delay.
+            failed_at = time.monotonic() if now is None else current
+            retry_in = backoff.failed(url, failed_at)
+            events.append({"name": name, "url": url, "error": str(exc),
+                           "retry_in": retry_in})
+            continue
+        backoff.succeeded(url)
+        nodes.update(found)
+        events.append({"name": name, "url": url, "ok": True,
+                       "nodes": len(found)})
+    return nodes, events
 
 
 def local_chat_members(nodes: dict, addresses: set[str],
@@ -201,6 +282,51 @@ def load_openings(path: Path) -> dict[tuple[str, str], float]:
     return opened
 
 
+def load_peer_evidence(path: Path) -> dict[tuple[str, str], float]:
+    """When a remembered peer was last actually seen or first unanswered.
+
+    A successful inbound chat refreshes evidence. The first opening after that
+    reply does too, because it was chosen from live membership. Later openings
+    into a dark root must not keep extending the same evidence forever.
+    """
+    last_reply: dict[tuple[str, str], float] = {}
+    unanswered: dict[tuple[str, str], float] = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {}
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(row, dict):
+            continue
+        node_id = str(row.get("node_id") or "")
+        if row.get("open"):
+            peer = str(row.get("to") or "")
+            key = (node_id, peer)
+            try:
+                at = float(row.get("at") or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if node_id and peer and key not in unanswered:
+                unanswered[key] = at
+            continue
+        sender = str(row.get("sender") or "")
+        if node_id and sender and row.get("id"):
+            key = (node_id, sender)
+            try:
+                at = float(row.get("at") or 0.0)
+            except (TypeError, ValueError):
+                continue
+            last_reply[key] = at
+            unanswered.pop(key, None)
+    evidence = dict(last_reply)
+    evidence.update(unanswered)
+    return evidence
+
+
 def newest_proposal(tasks: list[dict]) -> dict | None:
     """The most recent ``[proposal]`` row, as the topic of an opening.
 
@@ -259,7 +385,9 @@ def fallback_opening(sender: str, peer: str, topic: dict | None) -> str:
 def _open_conversation(urls, token: str | None, members: list[dict],
                        known: set[str], tasks: list[dict],
                        opened: dict[tuple[str, str], float], now: float,
-                       cooldown: float, timeout: float) -> dict | None:
+                       cooldown: float, timeout: float,
+                       peer_evidence: dict[tuple[str, str], float] | None = None
+                       ) -> dict | None:
     """Start one member-to-member conversation, or None when none is due.
 
     The row this writes is the thing the colony never had: ``from`` a chat
@@ -267,7 +395,7 @@ def _open_conversation(urls, token: str | None, members: list[dict],
     downstream already works -- the peer's chatd sees a chat member naming it
     and answers, and PEER_CAP stops the exchange after two replies each way.
     """
-    pick = next_opening(members, known, opened, now, cooldown)
+    pick = next_opening(members, known, opened, now, cooldown, peer_evidence)
     if pick is None:
         return None
     member = pick["member"]
@@ -319,15 +447,17 @@ def system_prompt(node_id: str, model: str) -> str:
 def _request(url: str, token: str | None, method: str,
              payload: dict | None, timeout: float) -> dict:
     headers = {"Content-Type": "application/json"}
+    if should_request_gzip(url):
+        headers["Accept-Encoding"] = "gzip"
     if token:
         headers["Authorization"] = f"Bearer {token}"
     body = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(url, data=body, headers=headers, method=method)
     try:
         with open_url(request, timeout) as resp:
-            return json.loads(resp.read())
+            return response_json(resp)
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", "replace")
+        detail = response_text(exc)
         return {"error": f"HTTP {exc.code}", "detail": detail[:500]}
     except urllib.error.URLError as exc:
         return {"error": f"unreachable: {exc}"}
@@ -380,16 +510,27 @@ def _mailboxes(urls) -> list[str]:
     return mailbox_chain(urls[0] if urls else "", urls[1:])
 
 
-def list_tasks(mailbox: str, token: str | None, timeout: float) -> list[dict]:
-    listed = _request(mailbox.rstrip("/") + "/tasks?status=all", token,
-                      "GET", None, timeout)
+def list_tasks(mailbox: str, token: str | None, timeout: float,
+               limit: int | None = CHAT_FEED_LIMIT) -> list[dict]:
+    path = chat_feed_path(limit)
+    listed = _request(mailbox.rstrip("/") + path, token, "GET", None, timeout)
     tasks = listed.get("tasks") if isinstance(listed, dict) else None
     if not isinstance(tasks, list):
         raise RuntimeError(listed.get("error", "bad task list") if isinstance(listed, dict) else "bad task list")
     return tasks
 
 
-def fetch_tasks_any(urls, token: str | None, timeout: float):
+def chat_feed_path(limit: int | None = CHAT_FEED_LIMIT) -> str:
+    """The bounded mailbox query chatd needs, filter-first."""
+    params = [("status", "all")]
+    if limit is not None:
+        params.append(("limit", str(int(limit))))
+    params.extend(("kind", kind) for kind in CHAT_FEED_KINDS)
+    return "/tasks?" + urlencode(params)
+
+
+def fetch_tasks_any(urls, token: str | None, timeout: float,
+                    limit: int | None = CHAT_FEED_LIMIT):
     """Read the first non-empty chat feed in *urls*.
 
     Returns ``(tasks, source_url, last_error)``. An empty feed is not a
@@ -400,9 +541,9 @@ def fetch_tasks_any(urls, token: str | None, timeout: float):
     """
     last_error = None
     answered = False
+    path = chat_feed_path(limit)
     for url in _mailboxes(urls):
-        listing = _request(url.rstrip("/") + "/tasks?status=all", token,
-                           "GET", None, timeout)
+        listing = _request(url.rstrip("/") + path, token, "GET", None, timeout)
         if isinstance(listing, dict) and listing.get("error"):
             last_error = str(listing.get("error"))
             continue
@@ -474,8 +615,11 @@ def pass_once(urls, token: str | None, members: list[dict],
               bootstrapped: bool,
               opened: dict[tuple[str, str], float] | None = None,
               now: float | None = None,
-              open_cooldown: float | None = OPEN_COOLDOWN) -> dict:
-    tasks, read_from, read_error = fetch_tasks_any(urls, token, timeout)
+              open_cooldown: float | None = OPEN_COOLDOWN,
+              feed_limit: int | None = CHAT_FEED_LIMIT,
+              peer_evidence: dict[tuple[str, str], float] | None = None) -> dict:
+    tasks, read_from, read_error = fetch_tasks_any(
+        urls, token, timeout, limit=feed_limit)
     if read_error and not tasks:
         raise RuntimeError(read_error)
     if not bootstrapped:
@@ -497,13 +641,19 @@ def pass_once(urls, token: str | None, members: list[dict],
         visible.append(full_task_any(urls, token, task, timeout))
     choice = next_reply(members, chat_ids, visible, answered, peers)
     if choice is None:
+        at = time.time() if now is None else now
         if open_cooldown is not None:
             opened_report = _open_conversation(
                 urls, token, members, chat_ids, tasks, opened or {},
-                time.time() if now is None else now, open_cooldown, timeout)
+                at, open_cooldown, timeout, peer_evidence)
             if opened_report is not None:
                 return opened_report
-        return {"did": "idle", "members": [item["node_id"] for item in members]}
+        return {
+            "did": "idle",
+            "members": [item["node_id"] for item in members],
+            "peers": sorted(chat_peer_ids(
+                members, chat_ids, peer_evidence, at)),
+        }
     member = choice["member"]
     task = choice["task"]
     sender = str(task.get("from") or "")
@@ -562,18 +712,22 @@ def main() -> int:
     addresses = local_addresses()
     answered, peers, bootstrapped = load_ledger(ledger)
     opened = load_openings(ledger)
+    peer_evidence = load_peer_evidence(ledger)
     open_cooldown = None if args.no_open else args.open_cooldown
+    root_backoff = RootProbeBackoff()
 
     while True:
         try:
-            nodes: dict = {}
-            for root in roots:
-                try:
-                    found = fetch_nodes(root["url"], root.get("token"), min(8, args.timeout))
-                except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
-                    print(time.strftime("%H:%M:%S"), f"root {root['name']}: {exc}", flush=True)
-                    continue
-                nodes.update(found)
+            nodes, root_events = probe_roots(roots, args.timeout, root_backoff)
+            for event in root_events:
+                if event.get("deferred"):
+                    print(time.strftime("%H:%M:%S"),
+                          f"root {event['name']}: deferred "
+                          f"{event['retry_in']:.1f}s", flush=True)
+                elif event.get("error"):
+                    print(time.strftime("%H:%M:%S"),
+                          f"root {event['name']}: {event['error']} "
+                          f"(retry in {event['retry_in']:.1f}s)", flush=True)
             # A lone loopback root is the authoritative membership table for
             # this host. Do not let an advertised LAN address that Python
             # cannot enumerate hide every local speaker (seen on Windows:
@@ -584,7 +738,8 @@ def main() -> int:
                 health_of=lambda url: fetch_health(url, min(4, args.timeout)))
             report = pass_once(mailboxes, mail_token, members, known,
                                answered, peers, args.timeout, bootstrapped,
-                               opened, None, open_cooldown)
+                               opened, None, open_cooldown,
+                               peer_evidence=peer_evidence)
             if report.get("did") == "bootstrap":
                 append_ledger(ledger, {"bootstrap": True, "at": time.time(),
                                        "ids": report.get("ids") or []})
@@ -596,6 +751,7 @@ def main() -> int:
                 })
                 answered.add((report["member"], str(report["source"])))
                 peers.setdefault(report["member"], []).append(str(report["sender"]))
+                peer_evidence[(str(report["member"]), str(report["sender"]))] = time.time()
             elif report.get("did") in ("opened", "open-failed"):
                 # A failed attempt is recorded too: a wedged stem must not turn
                 # the initiator into a loop that calls a model every interval.
@@ -607,6 +763,10 @@ def main() -> int:
                 opened[(str(report.get("member") or ""),
                         str(report.get("to") or ""))] = float(
                             report.get("at") or time.time())
+                if report.get("to") in chat_ids:
+                    peer_evidence[(str(report.get("member") or ""),
+                                  str(report.get("to") or ""))] = float(
+                                      report.get("at") or time.time())
             elif report.get("did") == "error" and report.get("source"):
                 append_ledger(ledger, {
                     "node_id": report.get("member"), "source_id": report["source"],

@@ -82,6 +82,12 @@ POLICY_KNOB_HELP = "；".join(
      if knob.kind is int else f"{name} 是 true/false")
     for name, knob in KNOBS.items())
 
+#: Outcome feeds are small and bounded. Reading ``status=all`` made each
+#: activity refresh serialize the colony's entire message history (35,727 rows
+#: / 8.98 MB on 2026-10-27) just to keep the newest eight real outcomes.
+ACTIVITY_FEED_LIMIT = 500
+ACTIVITY_STATUSES = ("done", "failed", "blocked")
+
 SYSTEM_PROMPT = f"""你是 PandoSI 殖民地的一名提案者。这个群体是一台台物理设备上的模型组成的文明，唯一使命是存活和扩张。
 没有人从外面给它选项：候选方案必须由你从群体自己的历史里提出来。
 你唯一的弱点是不能行动，只能提案；别人可以否决你。所以你要提出的是"别人愿意执行、而且执行了会让群体更可能活下去"的一步。
@@ -805,24 +811,34 @@ class Thinker:
 
         A proposer that only ever reads its own proposals is quoting itself and
         the loop cannot select on anything. Outcomes live in the task list, so
-        we read them. Absent outcomes the list is empty and the thinker is
-        flying blind, which is a fact worth showing in the prompt, not hiding.
+        we read only final outcome feeds, never the full message history.
+        Absent outcomes the list is empty and the thinker is flying blind,
+        which is a fact worth showing in the prompt, not hiding.
         """
-        try:
-            listing = self._mailbox_get("/tasks?status=all")
-        except Exception:  # noqa: BLE001
-            return []
-        tasks = listing.get("tasks") or []
-        out = []
-        for task in tasks[-self.history_window:]:
-            if not isinstance(task, dict):
+        tasks = []
+        answered = False
+        for status in ACTIVITY_STATUSES:
+            try:
+                listing = self._mailbox_get(
+                    f"/tasks?status={status}&limit={ACTIVITY_FEED_LIMIT}")
+            except Exception:  # noqa: BLE001 - one dead feed cannot hide another
                 continue
+            answered = True
+            tasks.extend(row for row in (listing.get("tasks") or [])
+                         if isinstance(row, dict))
+        if not answered:
+            return []
+        tasks.sort(key=lambda row: (str(row.get("created_at") or ""),
+                                    str(row.get("id") or "")))
+        out = []
+        for task in tasks:
             title = str(task.get("title") or "")
-            if title.lstrip().startswith(("[chat]", "[proposal]")):
+            if title.lstrip().startswith(
+                    ("[chat]", "[proposal]", "[reaction]")):
                 continue
             out.append({"status": str(task.get("status") or ""),
                         "title": title[:120]})
-        return out
+        return out[-self.history_window:]
 
     def _get_from(self, url: str, path: str) -> dict:
         headers = {}

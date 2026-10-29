@@ -24,7 +24,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from pando.net import open_url  # noqa: E402 - repo root must be importable
+from pando.net import (open_url, response_json,  # noqa: E402
+                       response_text, should_request_gzip)
 
 # Connection info lives in per-machine config, not in the repo (doctrine
 # 2026-10-17). Pass --url or set PANDOSI_MAILBOX_URL; the bare default is the
@@ -38,18 +39,21 @@ def _request(args, method: str, path: str,
     token = args.token or None
     if not token and args.token_file and os.path.exists(args.token_file):
         token = open(args.token_file, encoding="utf-8").read().strip()
+    request_url = f"{args.url.rstrip('/')}{path}"
     headers = {"Content-Type": "application/json"}
+    if should_request_gzip(request_url):
+        headers["Accept-Encoding"] = "gzip"
     if token:
         headers["Authorization"] = f"Bearer {token}"
     body = None if payload is None else json.dumps(payload).encode("utf-8")
-    request = urllib.request.Request(f"{args.url.rstrip('/')}{path}",
+    request = urllib.request.Request(request_url,
                                      data=body, headers=headers,
                                      method=method)
     try:
         with open_url(request, args.timeout) as resp:
-            return json.loads(resp.read())
+            return response_json(resp)
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", "replace")
+        detail = response_text(exc)
         return {"error": f"HTTP {exc.code}", "detail": detail}
     except urllib.error.URLError as exc:
         return {"error": f"unreachable: {exc}"}
@@ -75,8 +79,12 @@ def render(task: dict, mentions: str | None = None) -> str | None:
     return f"{created}  {sender:>10} [{task.get('status', '?')}] {title}"
 
 
-def fetch_tasks(args, status: str = "all") -> list[dict]:
-    result = _request(args, "GET", f"/tasks?status={status}")
+def fetch_tasks(args, status: str = "all",
+                limit: int | None = None) -> list[dict]:
+    path = f"/tasks?status={status}"
+    if limit is not None:
+        path += f"&limit={limit}"
+    result = _request(args, "GET", path)
     if "tasks" not in result:
         raise RuntimeError(result.get("error", "bad response"))
     return result["tasks"]
@@ -110,7 +118,10 @@ def cmd_send(args) -> int:
 
 
 def cmd_history(args) -> int:
-    tasks = fetch_tasks(args)
+    # The mailbox can contain tens of thousands of activity records.  A full
+    # listing is several megabytes and was regularly outliving the client's
+    # ten-second timeout; only the newest N rows can affect this output.
+    tasks = fetch_tasks(args, limit=args.limit)
     lines = [line for line in
              (render(task, args.mentions) for task in tasks) if line]
     for line in lines[-args.limit:]:

@@ -30,7 +30,7 @@ import urllib.request
 
 from .genesis import (Proposal, proposals_from_log, sign_proposal,
                       sign_reaction)
-from .net import open_url
+from .net import open_url, response_json, response_text, should_request_gzip
 
 TITLE_PREFIX = "[proposal]"
 PROPOSAL_PREFIX = TITLE_PREFIX
@@ -82,7 +82,11 @@ def is_reaction_task(title: str) -> bool:
 
 def _request(url: str, path: str, token: str | None, method: str,
              payload: dict | None = None, timeout: float = 15) -> dict:
+    # Task listings are the largest mailbox responses. Ask for compression only
+    # across a network; loopback decompression costs more than it saves.
     headers = {"Content-Type": "application/json"}
+    if should_request_gzip(url):
+        headers["Accept-Encoding"] = "gzip"
     if token:
         headers["Authorization"] = f"Bearer {token}"
     body = None if payload is None else json.dumps(payload).encode("utf-8")
@@ -90,9 +94,9 @@ def _request(url: str, path: str, token: str | None, method: str,
                                      headers=headers, method=method)
     try:
         with open_url(request, timeout=timeout) as resp:
-            return json.loads(resp.read())
+            return response_json(resp)
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", "replace")
+        detail = response_text(exc)
         return {"error": f"HTTP {exc.code}", "detail": detail}
     except urllib.error.URLError as exc:
         return {"error": f"unreachable: {exc}"}
@@ -194,7 +198,10 @@ def fetch_proposals_any(urls, token: str | None = None,
     last_error = None
     answered = False
     for url in chain:
-        listing = _request(url, f"/tasks?status={status}", token, "GET",
+        path = f"/tasks?status={status}"
+        if max_items is not None:
+            path += f"&limit={int(max_items)}"
+        listing = _request(url, path, token, "GET",
                            timeout=timeout)
         if isinstance(listing, dict) and listing.get("error"):
             last_error = str(listing.get("error"))
@@ -244,6 +251,69 @@ def listing_any(urls, token: str | None = None, status: str = "all",
     for url in chain:
         listing = _request(url, f"/tasks?status={status}", token, "GET",
                            timeout=timeout)
+        if not isinstance(listing, dict) or listing.get("error"):
+            last_error = str((listing or {}).get("error") or "no answer")
+            continue
+        last_error = None
+        rows = listing.get("tasks")
+        if isinstance(rows, list) and rows:
+            return listing, url, None
+        if quiet is None:
+            quiet = (listing, url)
+    if quiet is not None:
+        return quiet[0], quiet[1], None
+    return {}, None, last_error
+
+
+def query_tasks(url: str, token: str | None = None, *, selectors,
+                limit: int | None = None, exclude_proposal_ids=(),
+                status: str = "all", timeout: float = 15) -> dict:
+    """Select a bounded executor feed on a mailbox that supports it.
+
+    Older mailboxes answer 404.  The caller must then fall back to a full
+    listing rather than adding ``limit`` to this request, because applying a
+    limit before seeing focused rows would drop old seed offers and late
+    votes.
+    """
+    payload = {
+        "status": status,
+        "limit": limit if limit is not None else None,
+        "selectors": list(selectors or ()),
+        "exclude_proposal_ids": sorted(str(value) for value in
+                                       (exclude_proposal_ids or ()) if value),
+        "include_reactions": True,
+    }
+    return _request(url, "/tasks/query", token, "POST", payload,
+                    timeout=timeout)
+
+
+def query_tasks_any(urls, token: str | None = None, *, selectors,
+                    limit: int | None = None, exclude_proposal_ids=(),
+                    status: str = "all", timeout: float = 15):
+    """Read a focused feed, falling back to the full listing on old peers.
+
+    Returns ``(listing, source_url, last_error)`` with the same shelf rule as
+    ``listing_any``: a quiet primary does not hide a populated replica.
+    """
+    if isinstance(urls, str):
+        chain = mailbox_chain(urls)
+    else:
+        urls = list(urls or [])
+        chain = mailbox_chain(urls[0] if urls else "", urls[1:])
+    last_error = None
+    quiet: tuple[dict, str] | None = None
+    for url in chain:
+        listing = query_tasks(
+            url, token, selectors=selectors, limit=limit,
+            exclude_proposal_ids=exclude_proposal_ids,
+            status=status, timeout=timeout)
+        if not isinstance(listing, dict) or listing.get("error"):
+            if str((listing or {}).get("error") or "") == "HTTP 404":
+                listing = _request(url, f"/tasks?status={status}", token, "GET",
+                                   timeout=timeout)
+            else:
+                last_error = str((listing or {}).get("error") or "no answer")
+                continue
         if not isinstance(listing, dict) or listing.get("error"):
             last_error = str((listing or {}).get("error") or "no answer")
             continue

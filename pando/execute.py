@@ -97,7 +97,7 @@ from .policy import PolicyError
 from .policy import apply as apply_policy
 from .policy import load as load_policy
 from .proposal_mail import (fetch_proposals, is_reaction_task,
-                            mailbox_chain)
+                            mailbox_chain, query_tasks_any)
 
 ADOPT = "赞同"
 HOLD = "搁置"
@@ -230,10 +230,12 @@ def rows_for_execution(tasks: list, limit: int,
 
     1. the last ``limit`` rows -- the live window the dry run and the ledger
        describe;
-    2. every ``seed.export`` and ``seed.replicate``. Those two are the only
-       actions with a second host on the other end, so the send/receive
+    2. every unsettled ``seed.export`` and ``seed.replicate``. Those two are
+       the only actions with a second host on the other end, so the send/receive
        bookkeeping has to see a peer's offer as well as this host's: an
-       addressed replication pushed out of the window would be offered twice;
+       addressed replication pushed out of the window would be offered twice.
+       A proposal already named by ``settled`` needs neither its own body nor
+       its votes again;
     3. with ``authors`` set, the oldest ``per_action`` proposals of each
        actuator action that this host signs under and that no ledger row has
        settled yet (``settled``).
@@ -266,6 +268,8 @@ def rows_for_execution(tasks: list, limit: int,
             continue
         proposal_id, action = parsed
         if action in ("seed.export", "seed.replicate"):
+            if proposal_id in settled:
+                continue
             seed_ids.add(proposal_id)
             keep.add(row.get("id"))
             continue
@@ -347,6 +351,24 @@ def local_authors(table: dict | None, extra=()) -> set[str]:
     if isinstance(table, dict) and table.get("proposer_id"):
         names.add(str(table["proposer_id"]))
     return names
+
+
+def execution_selectors(authors: set[str] | None) -> list[dict]:
+    """Server-side rows whose omission would change an execution round.
+
+    Seeds are selected across every author because the other end of the offer
+    is a peer.  Other actuators are selected only for names this host signs
+    under; those are the only proposals layer 3 of ``rows_for_execution`` may
+    drain.  The mailbox adds every reaction that targets a selected proposal,
+    which is what keeps an old proposal's late vote visible.
+    """
+    selectors = [{"actions": ["seed.export", "seed.replicate"]}]
+    names = sorted(str(name) for name in (authors or ()) if name)
+    if names:
+        actions = sorted(action for action in ACTUATORS
+                         if action not in ("seed.export", "seed.replicate"))
+        selectors.append({"actions": actions, "authors": names})
+    return selectors
 
 
 #: How many rounds one proposal may raise before the executor stops retrying
@@ -1905,11 +1927,19 @@ def main() -> int:
         print("pass exactly one of --dry-run or --once", flush=True)
         return 2
     token = Path(args.token_file).expanduser().read_text(encoding="utf-8").strip()
-    from .proposal_mail import listing_any
     table = _hosts_table(args.hosts)
     mailboxes = executor_mailboxes(args.mailbox, table, args.mailbox_fallback)
-    listing, source, read_error = listing_any(mailboxes, token, status="all")
+    authors = local_authors(table, args.author)
     ledger = Path(args.ledger).expanduser()
+    settled = done_ids(ledger) | left_ids(ledger)
+    # New mailboxes return only the latest window plus seed offers, this
+    # host's actuator backlog, and their reactions. Old mailboxes ignore the
+    # route and fall back to the old full listing, so mixed-version peers lose
+    # no work. The full listing must not be requested with ``limit`` here:
+    # the focus rows may all be older than the newest 40.
+    listing, source, read_error = query_tasks_any(
+        mailboxes, token, selectors=execution_selectors(authors),
+        limit=args.limit, exclude_proposal_ids=settled, status="all")
     if source is None:
         # Nobody answered. That is a property of the network, not of any
         # proposal, so it is recorded where a person looks -- the status file
@@ -1926,8 +1956,7 @@ def main() -> int:
     args.mailbox_chain = list(mailboxes)
     rows = rows_for_execution(
         listing.get("tasks") or [], args.limit,
-        authors=local_authors(table, args.author),
-        settled=done_ids(ledger) | left_ids(ledger))
+        authors=authors, settled=settled)
     # One shelf per round: the rows, the bodies those rows point at, and the
     # reactions all come from the mailbox the listing came from. Mixing them
     # is not a union -- it is a round that reads one host's row ids and

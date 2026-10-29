@@ -35,6 +35,8 @@ everything else is closed.
 from __future__ import annotations
 
 import argparse
+import bisect
+import gzip
 import hmac
 import json
 import secrets
@@ -44,16 +46,21 @@ import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from pando.net import open_url  # noqa: E402 - repo root must be importable
+from pando.net import (open_url, response_json,  # noqa: E402
+                       response_text, should_request_gzip)
 from pando.grant_delegation import (  # noqa: E402 - repo root must be importable
     DelegationError, issue_envelope, operator_status,
 )
 from pando.grants import (  # noqa: E402 - repo root must be importable
     default_path as default_grants_path, grant_status,
+)
+from pando.code_receipt import (  # noqa: E402 - repo root must be importable
+    CodeReceiptError, CodeReceiptReceiver, CodeReceiptSignatureError,
 )
 from pando.identity import default_path as default_identity_path  # noqa: E402
 from pando.telemetry import (  # noqa: E402 - repo root must be importable
@@ -69,6 +76,9 @@ STATUSES = {OPEN, CLAIMED, DONE, FAILED, BLOCKED}
 #: How many task records one ``/tasks/bodies`` call may return. A caller that
 #: names more gets the first ``MAX_BODIES`` back and asks again for the rest.
 MAX_BODIES = 2000
+#: The observatory only renders a recent chat tail and a compact work queue.
+#: Keep its purpose-built read bounded even if a caller sends huge limits.
+MAX_FEED_WINDOW = 2000
 # Finished states share a rank so "done" is not newer than "blocked".
 _RANK = {OPEN: 0, CLAIMED: 1, DONE: 2, FAILED: 2, BLOCKED: 2}
 _ID_OK = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
@@ -114,6 +124,53 @@ def mailbox_brief(payload) -> dict:
     return {"type": type(payload).__name__}
 
 
+def _proposal_parts(title) -> tuple[str, str, str] | None:
+    """``(proposal_id, action, author)`` from an executor title.
+
+    The mailbox has stored these titles since the first proposal.  This is a
+    read-side convention only: no task is rewritten and older rows remain
+    valid.  A malformed title is simply not selectable.
+    """
+    parts = str(title or "").split()
+    if (len(parts) < 5 or parts[0] != "[proposal]"
+            or parts[3] != "by"):
+        return None
+    return parts[1], parts[2], parts[4]
+
+
+def _reaction_target(title) -> str:
+    parts = str(title or "").split()
+    if (len(parts) < 5 or parts[0] != "[reaction]"
+            or parts[3] != "by"):
+        return ""
+    return parts[1]
+
+
+def _task_kind(title) -> str:
+    """The leading ``[kind]`` marker, lower-cased, or an empty string."""
+    token = str(title or "").strip().split(None, 1)[0]
+    if len(token) < 3 or not token.startswith("[") or not token.endswith("]"):
+        return ""
+    return token[1:-1].strip().lower()
+
+
+def _clean_kinds(kinds) -> list[str]:
+    """Normalise a caller's kind filter without changing its order."""
+    if isinstance(kinds, str):
+        kinds = [kinds]
+    clean = []
+    for value in kinds or ():
+        kind = str(value).strip().strip("[]").lower()
+        if kind and kind not in clean:
+            clean.append(kind)
+    return clean
+
+
+def _summary_order(row: dict) -> tuple[str, str]:
+    """Stable mailbox order: creation time, then id as the tie-breaker."""
+    return str(row.get("created_at", "")), str(row.get("id", ""))
+
+
 def replication_ids(source_rows: list, dest_rows: list) -> dict:
     """Ids to send. Listings only carry status, so "behind" means status rank.
 
@@ -148,6 +205,135 @@ class Mailbox:
         self.tasks_dir = directory / "tasks"
         self.tasks_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
+        # Listings ask for a small amount of metadata from every task.  At
+        # tens of thousands of files, re-reading every JSON body for /health
+        # and every tail poll makes the mailbox look offline.  Keep one
+        # metadata copy in memory and refresh it on our own writes; full
+        # bodies are still read on demand by load()/list().
+        self._summaries: dict[str, dict] = {}
+        # Derived, incrementally maintained indexes behind the summaries. A
+        # focused executor poll used to copy and sort every summary on every
+        # round, even though the mailbox itself changes one task at a time.
+        self._ordered: list[dict] = []
+        self._by_status: dict[str, list[dict]] = {}
+        self._by_kind: dict[str, list[dict]] = {}
+        self._by_status_kind: dict[tuple[str, str], list[dict]] = {}
+        self._kinded: list[dict] = []
+        self._work: list[dict] = []
+        self._proposal_by_task: dict[str, tuple[str, str, str]] = {}
+        self._reactions_by_target: dict[str, list[str]] = {}
+        for path in sorted(self.tasks_dir.glob("*.json")):
+            try:
+                task = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(task, dict) and task.get("id"):
+                self._summaries[task["id"]] = self._summary(task)
+        self._build_indexes()
+
+    @staticmethod
+    def _insert_ordered(rows: list[dict], row: dict) -> None:
+        bisect.insort(rows, row, key=_summary_order)
+
+    @staticmethod
+    def _remove_ordered(rows: list[dict], row: dict) -> None:
+        key = _summary_order(row)
+        index = bisect.bisect_left(rows, key, key=_summary_order)
+        while index < len(rows) and _summary_order(rows[index]) == key:
+            if rows[index].get("id") == row.get("id"):
+                rows.pop(index)
+                return
+            index += 1
+
+    @staticmethod
+    def _status_rows(by_status: dict[str, list[dict]],
+                     row: dict) -> list[dict]:
+        return by_status.setdefault(str(row.get("status", "")), [])
+
+    def _index_summary(self, row: dict) -> None:
+        self._insert_ordered(self._ordered, row)
+        self._insert_ordered(self._status_rows(self._by_status, row), row)
+        kind = _task_kind(row.get("title"))
+        if kind:
+            self._insert_ordered(self._kinded, row)
+            self._insert_ordered(
+                self._by_kind.setdefault(kind, []), row)
+            status_kind = (str(row.get("status", "")), kind)
+            self._insert_ordered(
+                self._by_status_kind.setdefault(status_kind, []), row)
+        else:
+            self._insert_ordered(self._work, row)
+        task_id = str(row.get("id", ""))
+        parsed = _proposal_parts(row.get("title"))
+        if parsed:
+            self._proposal_by_task[task_id] = parsed
+        target = _reaction_target(row.get("title"))
+        if target:
+            self._reactions_by_target.setdefault(target, []).append(task_id)
+
+    def _unindex_summary(self, row: dict) -> None:
+        self._remove_ordered(self._ordered, row)
+        self._remove_ordered(self._status_rows(self._by_status, row), row)
+        kind = _task_kind(row.get("title"))
+        if kind:
+            self._remove_ordered(self._kinded, row)
+            rows = self._by_kind.get(kind)
+            if rows is not None:
+                self._remove_ordered(rows, row)
+                if not rows:
+                    self._by_kind.pop(kind, None)
+            status_kind = (str(row.get("status", "")), kind)
+            rows = self._by_status_kind.get(status_kind)
+            if rows is not None:
+                self._remove_ordered(rows, row)
+                if not rows:
+                    self._by_status_kind.pop(status_kind, None)
+        else:
+            self._remove_ordered(self._work, row)
+        task_id = str(row.get("id", ""))
+        self._proposal_by_task.pop(task_id, None)
+        target = _reaction_target(row.get("title"))
+        if target:
+            task_ids = self._reactions_by_target.get(target)
+            if task_ids is not None and task_id in task_ids:
+                task_ids.remove(task_id)
+                if not task_ids:
+                    self._reactions_by_target.pop(target, None)
+
+    def _build_indexes(self) -> None:
+        self._ordered = sorted(self._summaries.values(), key=_summary_order)
+        self._by_status = {}
+        self._by_kind = {}
+        self._by_status_kind = {}
+        self._kinded = []
+        self._work = []
+        self._proposal_by_task = {}
+        self._reactions_by_target = {}
+        for row in self._ordered:
+            self._status_rows(self._by_status, row).append(row)
+            kind = _task_kind(row.get("title"))
+            if kind:
+                self._kinded.append(row)
+                self._by_kind.setdefault(kind, []).append(row)
+                self._by_status_kind.setdefault(
+                    (str(row.get("status", "")), kind), []).append(row)
+            else:
+                self._work.append(row)
+            task_id = str(row.get("id", ""))
+            parsed = _proposal_parts(row.get("title"))
+            if parsed:
+                self._proposal_by_task[task_id] = parsed
+            target = _reaction_target(row.get("title"))
+            if target:
+                self._reactions_by_target.setdefault(target, []).append(task_id)
+
+    @staticmethod
+    def _summary(task: dict) -> dict:
+        return {"id": task.get("id"), "from": task.get("from"),
+                "title": task.get("title"), "status": task.get("status"),
+                "created_at": task.get("created_at", ""),
+                "claimed_by": task.get("claimed_by"),
+                "finished_at": task.get("finished_at")}
 
     def _path(self, task_id: str) -> Path:
         safe = "".join(ch for ch in task_id
@@ -163,6 +349,149 @@ class Mailbox:
     def save(self, task: dict) -> None:
         self._path(task["id"]).write_text(
             json.dumps(task, indent=2, ensure_ascii=False), encoding="utf-8")
+        previous = self._summaries.get(task["id"])
+        if previous is not None:
+            self._unindex_summary(previous)
+        summary = self._summary(task)
+        self._summaries[task["id"]] = summary
+        self._index_summary(summary)
+
+    def summaries(self, status: str | None = None,
+                  limit: int | None = None,
+                  kinds=None) -> list[dict]:
+        """Return cached listing rows, filtered by kind before limiting.
+
+        Filtering after ``limit`` lets a noisy kind displace the rows a
+        consumer actually needs. ``kinds`` uses the leading title marker, so
+        ``["chat", "proposal"]`` selects those two classes without walking
+        the entire history.
+        """
+        kinds = _clean_kinds(kinds)
+        with self._lock:
+            if not kinds:
+                if status is None or status == "all":
+                    rows = self._ordered
+                else:
+                    rows = self._by_status.get(status, [])
+                if limit is not None:
+                    rows = rows[-limit:] if limit else []
+                return [dict(row) for row in rows]
+
+            selected = []
+            for kind in kinds:
+                if status is None or status == "all":
+                    rows = self._by_kind.get(kind, [])
+                else:
+                    rows = self._by_status_kind.get((status, kind), [])
+                # Each list is already in mailbox order. Taking its tail is
+                # enough to find the newest N across the union.
+                if limit is None:
+                    selected.extend(rows)
+                else:
+                    selected.extend(rows[-limit:] if limit else [])
+            selected.sort(key=_summary_order)
+            if limit is not None:
+                selected = selected[-limit:] if limit else []
+            return [dict(row) for row in selected]
+
+    def feed_window(self, chat_limit: int = 120,
+                    work_limit: int = 14) -> dict:
+        """Return only the dashboard's latest chat and work rows.
+
+        ``/tasks?status=all`` now serialises tens of thousands of summaries
+        every five seconds. The observatory never renders that whole history:
+        it keeps a recent kinded feed (chat/proposal/reaction/etc.) and a short
+        unkinded work queue. Split here, where rows are already indexed, so the
+        wire response stays bounded without letting reaction noise displace
+        work. Counts remain whole-mailbox facts rather than window facts.
+        """
+        with self._lock:
+            chat = self._kinded[-chat_limit:] if chat_limit else []
+            work = self._work[-work_limit:] if work_limit else []
+            return {
+                "chat": [dict(row) for row in chat],
+                "work": [dict(row) for row in work],
+                "counts": {
+                    "chat": len(self._kinded),
+                    "work": len(self._work),
+                    "work_open": sum(row.get("status") == OPEN
+                                     for row in self._work),
+                },
+            }
+
+    def select(self, status: str | None = None, limit: int | None = None,
+               selectors=None, exclude_proposal_ids=(),
+               include_reactions: bool = True) -> list[dict]:
+        """The latest window plus matching proposals and their reactions.
+
+        ``selectors`` is an OR-list of ``{"actions": [...], "authors": [...]}``
+        filters.  Within one selector the two fields are ANDed; an omitted or
+        empty field matches any value.  Excluded proposal ids are skipped in
+        the focused selection but never removed from the latest window: the
+        caller still decides what the current window means.
+
+        Reaction closure is the important part.  A late vote is a new task
+        whose creation order says nothing about the old proposal it names, so
+        filtering rows only by their own timestamp would silently drop it.
+        """
+        filters = []
+        for selector in selectors or ():
+            if not isinstance(selector, dict):
+                continue
+            actions = {str(value) for value in selector.get("actions", ())
+                       if value}
+            authors = {str(value) for value in selector.get("authors", ())
+                       if value}
+            if actions or authors:
+                filters.append((actions, authors))
+        excluded = {str(value) for value in exclude_proposal_ids or () if value}
+        with self._lock:
+            rows = (self._ordered if status is None or status == "all"
+                    else self._by_status.get(status, []))
+
+            base = rows[-limit:] if limit is not None and limit else []
+            keep = {row.get("id") for row in base}
+            proposal_ids = set()
+            for row in base:
+                parsed = _proposal_parts(row.get("title"))
+                if parsed:
+                    proposal_ids.add(parsed[0])
+
+            if filters:
+                for task_id, (proposal_id, action, author) in \
+                        self._proposal_by_task.items():
+                    row = self._summaries[task_id]
+                    if not (status is None or status == "all"
+                            or row.get("status") == status):
+                        continue
+                    if proposal_id in excluded:
+                        continue
+                    if any((not actions or action in actions)
+                           and (not authors or author in authors)
+                           for actions, authors in filters):
+                        keep.add(task_id)
+                        proposal_ids.add(proposal_id)
+
+            if include_reactions:
+                for proposal_id in proposal_ids:
+                    for task_id in self._reactions_by_target.get(
+                            proposal_id, ()):
+                        row = self._summaries[task_id]
+                        if status is None or status == "all" \
+                                or row.get("status") == status:
+                            keep.add(task_id)
+
+            selected = [self._summaries[task_id] for task_id in keep
+                        if task_id in self._summaries]
+            selected.sort(key=_summary_order)
+            return [dict(row) for row in selected]
+
+    def count(self, status: str | None = None) -> int:
+        with self._lock:
+            if status is None or status == "all":
+                return len(self._summaries)
+            return sum(row.get("status") == status
+                       for row in self._summaries.values())
 
     def create(self, sender: str, title: str, body: str) -> dict:
         task_id = ("t-" + time.strftime("%Y%m%d-%H%M%S") + "-"
@@ -221,19 +550,47 @@ class Mailbox:
 
 
 def build_handler(mailbox: Mailbox, token: str, telemetry=None,
+                  code_receipts=None,
                   code_repo: Path | None = None,
                   code_cache: Path | None = None,
                   grant_file: Path | None = None,
                   identity_file: Path | None = None):
+    def accepts_gzip(value: str) -> bool:
+        for item in str(value or "").split(","):
+            coding, *params = [part.strip() for part in item.split(";")]
+            if coding.lower() != "gzip":
+                continue
+            for param in params:
+                key, _, raw = param.partition("=")
+                if key.strip().lower() == "q":
+                    try:
+                        return float(raw) > 0
+                    except ValueError:
+                        return False
+            return True
+        return False
+
     class MailboxHandler(BaseHTTPRequestHandler):
+        # A peer may keep an idle HTTP/1.1 connection open.  Without a
+        # timeout every such client permanently occupies a request thread;
+        # repeated polling then exhausts the service after a few days.
+        timeout = 30
+
         def log_message(self, fmt, *args):
             pass
 
         def _send(self, code: int, payload: dict) -> None:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            compressed = (len(body) >= 1024 and
+                          accepts_gzip(self.headers.get("Accept-Encoding", "")))
+            if compressed:
+                body = gzip.compress(body, compresslevel=6, mtime=0)
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
+            if compressed:
+                self.send_header("Content-Encoding", "gzip")
+                self.send_header("Vary", "Accept-Encoding")
             self.end_headers()
             self.wfile.write(body)
 
@@ -257,9 +614,8 @@ def build_handler(mailbox: Mailbox, token: str, telemetry=None,
             path = self.path.split("?", 1)[0]
             query = self.path.split("?", 1)[1] if "?" in self.path else ""
             if path == "/health":
-                open_count = len(mailbox.list(OPEN))
                 self._send(200, {"ok": True, "service": "agent-mailbox",
-                                 "open": open_count})
+                                 "open": mailbox.count(OPEN)})
                 return
             if not self._authed():
                 return
@@ -286,6 +642,22 @@ def build_handler(mailbox: Mailbox, token: str, telemetry=None,
                     self._send(404, {"error": "operator status not configured"})
                     return
                 self._send(200, operator_status(grant_file, identity_file))
+                return
+            receipt_prefix = "/receipts/code/"
+            if path.startswith(receipt_prefix):
+                if code_receipts is None:
+                    self._send(404, {"error": "code receipts not configured"})
+                    return
+                node = path[len(receipt_prefix):]
+                try:
+                    document = code_receipts.load(node)
+                except CodeReceiptError as exc:
+                    self._send(400, {"error": str(exc)[:200]})
+                    return
+                if document is None:
+                    self._send(404, {"error": "no receipt for node"})
+                else:
+                    self._send(200, {"receipt": document})
                 return
             if path == "/code.bundle":
                 # The mailbox can be the only service another host can reach
@@ -321,17 +693,49 @@ def build_handler(mailbox: Mailbox, token: str, telemetry=None,
                 self.wfile.write(raw)
                 return
             if path == "/tasks":
-                status = None
-                for part in query.split("&"):
-                    if part.startswith("status="):
-                        status = part.split("=", 1)[1]
-                summaries = [{"id": t["id"], "from": t["from"],
-                              "title": t["title"], "status": t["status"],
-                              "created_at": t["created_at"],
-                              "claimed_by": t.get("claimed_by"),
-                              "finished_at": t.get("finished_at")}
-                             for t in mailbox.list(status)]
-                self._send(200, {"tasks": summaries})
+                params = parse_qs(query, keep_blank_values=True)
+                status = (params.get("status") or [None])[0]
+                raw_limit = (params.get("limit") or [None])[0]
+                try:
+                    limit = int(raw_limit) if raw_limit is not None else None
+                    if limit is not None and limit < 0:
+                        raise ValueError
+                except ValueError:
+                    self._send(400, {"error": "limit must be a non-negative integer"})
+                    return
+                raw_kinds = (params.get("kind") or []) + \
+                    (params.get("kinds") or [])
+                kinds = []
+                for raw in raw_kinds:
+                    for value in str(raw).split(","):
+                        kind = value.strip().strip("[]").lower()
+                        if kind and kind not in kinds:
+                            kinds.append(kind)
+                if len(kinds) > 16:
+                    self._send(400, {"error": "at most 16 kinds are allowed"})
+                    return
+                answer = {"tasks": mailbox.summaries(status, limit, kinds)}
+                if kinds:
+                    answer["kinds"] = kinds
+                self._send(200, answer)
+                return
+            if path == "/tasks/window":
+                params = parse_qs(query, keep_blank_values=True)
+                limits = {}
+                for name, default in (("chat_limit", 120),
+                                      ("work_limit", 14)):
+                    raw = (params.get(name) or [str(default)])[0]
+                    try:
+                        value = int(raw)
+                        if value < 0 or value > MAX_FEED_WINDOW:
+                            raise ValueError
+                    except (TypeError, ValueError):
+                        self._send(400, {
+                            "error": f"{name} must be an integer from 0 to "
+                                     f"{MAX_FEED_WINDOW}"})
+                        return
+                    limits[name] = value
+                self._send(200, mailbox.feed_window(**limits))
                 return
             if path.startswith("/task/"):
                 task = mailbox.load(path.split("/", 2)[2])
@@ -347,6 +751,26 @@ def build_handler(mailbox: Mailbox, token: str, telemetry=None,
                 return
             path = self.path.split("?", 1)[0]
             payload = self._body()
+            receipt_prefix = "/receipts/code/"
+            if path.startswith(receipt_prefix):
+                if code_receipts is None:
+                    self._send(404, {"error": "code receipts not configured"})
+                    return
+                node = path[len(receipt_prefix):]
+                try:
+                    answer = code_receipts.receive(payload, expected_node=node)
+                except CodeReceiptSignatureError as exc:
+                    self._send(403, {"error": str(exc)[:200]})
+                    return
+                except CodeReceiptError as exc:
+                    self._send(400, {"error": str(exc)[:200]})
+                    return
+                except OSError as exc:
+                    self._send(500, {"error": "code receipt write failed",
+                                     "detail": str(exc)[:200]})
+                    return
+                self._send(200, answer)
+                return
             if path == "/telemetry/pi5":
                 if telemetry is None:
                     self._send(404, {"error": "not found"})
@@ -381,6 +805,30 @@ def build_handler(mailbox: Mailbox, token: str, telemetry=None,
                     if task is not None:
                         found[str(task_id)] = task
                 self._send(200, {"tasks": found})
+                return
+            if path == "/tasks/query":
+                selectors = payload.get("selectors", []) if isinstance(payload, dict) else []
+                excluded = payload.get("exclude_proposal_ids", []) if isinstance(payload, dict) else []
+                if not isinstance(selectors, list) or not isinstance(excluded, list):
+                    self._send(400, {"error": "selectors and exclude_proposal_ids must be lists"})
+                    return
+                if len(selectors) > 16:
+                    self._send(400, {"error": "at most 16 selectors are allowed"})
+                    return
+                raw_limit = payload.get("limit") if isinstance(payload, dict) else None
+                try:
+                    limit = None if raw_limit is None else int(raw_limit)
+                    if limit is not None and limit < 0:
+                        raise ValueError
+                except (TypeError, ValueError):
+                    self._send(400, {"error": "limit must be a non-negative integer"})
+                    return
+                tasks = mailbox.select(
+                    status=str(payload.get("status") or "all"),
+                    limit=limit, selectors=selectors,
+                    exclude_proposal_ids=excluded,
+                    include_reactions=bool(payload.get("include_reactions", True)))
+                self._send(200, {"tasks": tasks})
                 return
             if path == "/task":
                 task = mailbox.create(str(payload.get("from", "?")),
@@ -476,6 +924,8 @@ def serve(args) -> int:
     mailbox = Mailbox(directory)
     telemetry = (TelemetryReceiver(args.telemetry_root)
                  if getattr(args, "telemetry_root", "") else None)
+    code_receipts = (CodeReceiptReceiver(args.code_receipts_root)
+                     if getattr(args, "code_receipts_root", "") else None)
     code_repo = (Path(args.code_repo).expanduser()
                  if getattr(args, "code_repo", "") else None)
     code_cache = (Path(args.code_cache).expanduser()
@@ -487,12 +937,13 @@ def serve(args) -> int:
                      else default_identity_path())
     server = _MailboxServer((args.host, args.port),
                             build_handler(mailbox, token, telemetry,
+                                          code_receipts=code_receipts,
                                           code_repo=code_repo,
                                           code_cache=code_cache,
                                           grant_file=grant_file,
                                           identity_file=identity_file))
     print(f"agent mailbox serving on http://{args.host}:{args.port} "
-          f"(dir {directory}, {len(mailbox.list(OPEN))} open task(s))",
+          f"(dir {directory}, {mailbox.count(OPEN)} open task(s))",
           flush=True)
     try:
         server.serve_forever()
@@ -506,18 +957,20 @@ def _request(args, method: str, path: str, payload: dict | None = None):
     token = args.token or (Path(token_file).expanduser()
                            .read_text(encoding="utf-8").strip()
                            if token_file else None)
+    request_url = f"{args.url.rstrip('/')}{path}"
     headers = {"Content-Type": "application/json"}
+    if should_request_gzip(request_url):
+        headers["Accept-Encoding"] = "gzip"
     if token:
         headers["Authorization"] = f"Bearer {token}"
     body = None if payload is None else json.dumps(payload).encode("utf-8")
-    request = urllib.request.Request(f"{args.url.rstrip('/')}{path}",
+    request = urllib.request.Request(request_url,
                                      data=body, headers=headers, method=method)
     try:
         with open_url(request, args.timeout) as response:
-            return json.loads(response.read())
+            return response_json(response)
     except urllib.error.HTTPError as exc:
-        return {"error": f"HTTP {exc.code}", "detail": exc.read().decode(
-            "utf-8", "replace")}
+        return {"error": f"HTTP {exc.code}", "detail": response_text(exc)}
     except urllib.error.URLError as exc:
         return {"error": f"unreachable: {exc}"}
 
@@ -637,6 +1090,10 @@ def main() -> int:
         "--telemetry-root", default="",
         help="atomically publish signed Pi5 telemetry at this root-table path; "
              f"the signer is pinned to {PI5_PUBKEY}")
+    server.add_argument(
+        "--code-receipts-root", default="",
+        help="atomically store signed code-watch receipts per node in this "
+             "directory; empty disables /receipts/code/<node>")
     server.add_argument(
         "--grant-file", default="",
         help="local grants ledger to delegate (default: pando.grants discovery)")
