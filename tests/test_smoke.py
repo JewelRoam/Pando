@@ -4299,6 +4299,56 @@ class TestActionSemanticsCheck(unittest.TestCase):
             tool.classify_structural_comparison(robust),
             "structural_robustness_supported")
 
+    def test_joint_preregistration_is_directional_and_rewrites_both_sides(self):
+        tool = self._tool()
+        description_audit = tool.description_audit()
+        self.assertTrue(description_audit["ok"], description_audit)
+        self.assertIn("joint", tool.GOAL_VARIANTS)
+        self.assertEqual(
+            tool.DESCRIPTION_VARIANT_BY_GOAL["joint"], "joint")
+
+        def tokens(text):
+            return len(text)
+
+        from unittest.mock import patch
+
+        with patch.object(
+                tool, "pad_to_tokens",
+                lambda build, target, tokenize: (build(""), target, "")):
+            causal = tool.build_trial_prompts(
+                0, 3670, tokens, goal_variant="causal")
+            joint = tool.build_trial_prompts(
+                0, 3670, tokens, goal_variant="joint")
+        original = tool.ACTION_INFO["seed.export"][0]
+        rewritten = tool.JOINT_DESCRIPTIONS["seed.export"]
+        self.assertIn(original, causal["texts"]["opaque_a"])
+        self.assertNotIn(rewritten, causal["texts"]["opaque_a"])
+        self.assertIn(rewritten, joint["texts"]["opaque_a"])
+        self.assertNotIn(original, joint["texts"]["opaque_a"])
+
+        def rows(correct: set[int]):
+            return [
+                {
+                    "pair": pair,
+                    "arm": arm,
+                    "valid": True,
+                    "correct": pair in correct,
+                }
+                for pair in range(10)
+                for arm in ("opaque_a", "opaque_b")
+            ]
+
+        fragile = tool.paired_binary_comparison(
+            rows(set(range(10))), rows(set(range(5, 10))))
+        self.assertEqual(
+            tool.classify_joint_comparison(fragile),
+            "joint_fragility_supported")
+        robust = tool.paired_binary_comparison(
+            rows(set(range(10))), rows(set(range(9))))
+        self.assertEqual(
+            tool.classify_joint_comparison(robust),
+            "joint_robustness_supported")
+
     def test_synonym_preregistration_is_directional(self):
         tool = self._tool()
 
@@ -4424,6 +4474,20 @@ class TestActionSemanticsCheck(unittest.TestCase):
         ) as audit:
             result = tool.audit_artifact({
                 "schema": tool.SYNONYM_INTERLEAVED_SCHEMA,
+            })
+        self.assertIs(result, sentinel)
+        audit.assert_called_once()
+
+    def test_joint_schema_dispatches_to_interleaved_audit(self):
+        from unittest.mock import patch
+
+        tool = self._tool()
+        sentinel = {"ok": True}
+        with patch.object(
+                tool, "audit_interleaved_artifact", return_value=sentinel
+        ) as audit:
+            result = tool.audit_artifact({
+                "schema": tool.JOINT_INTERLEAVED_SCHEMA,
             })
         self.assertIs(result, sentinel)
         audit.assert_called_once()

@@ -39,6 +39,12 @@ stress test: high accuracy makes a shallow keyword-matching explanation less
 plausible, while a significant drop is evidence that the earlier result was
 wording-sensitive.
 
+``--interleave-joint-paraphrase`` goes one step further: both the goal and the
+matching description are rewritten with different surface wording, while the
+other seven descriptions are rewritten the same way.  This asks whether the
+model can still recover the same action roles when it cannot anchor on any
+single-sided phrase from the earlier prompts.
+
 This is a local mechanism check, not evidence of collective intelligence.
 """
 
@@ -184,12 +190,6 @@ SYNONYM_GOALS = {
         "待他人独立核查后再真正落地。"
     ),
 }
-GOAL_VARIANTS = {
-    "literal": LITERAL_GOALS,
-    "causal": CAUSAL_GOALS,
-    "structural": STRUCTURAL_GOALS,
-    "synonym": SYNONYM_GOALS,
-}
 JOINT_GOALS = {
     "seed.export": (
         "若今夜此设备永久掉线，后来接手者必须能证明一份材料确由这里产生；"
@@ -228,11 +228,30 @@ JOINT_DESCRIPTIONS = {
     "seed.export": "把当前载体独有的来源凭据整理成可异地验真的离线包裹，并留下可对照的长指纹",
     "seed.replicate": "把已经封好的离线交接物运往另一载体，并确认双方保存的指纹一致",
     "recruit.invite": "给一个尚未登记、但已表示愿意承担职责的对象开通入口，并留下后续可寻址凭据",
-    "reproduce.spawn": "资源尚有余量时，照当前执行单元制作第二份，它能脱离原单元自行开始履职",
-    "policy.set": "在授权范围内改变现有的取舍阈值，并同时保留改动前后的数值",
+    "reproduce.spawn": "资源尚有余量时，照当前执行单元再造一份，它能脱离原单元自行开始履职",
+    "policy.set": "在许可范围内改变现有的取舍阈值，并同时保留改动前后的数值",
     "culture.refine": "补齐团队共用规程里缺失的收尾检查，并让所有执行者采用同一版本",
     "resource.rebalance": "把一个运行实体连同其工作负载转到较空闲的机器，并预先设定撤回触发条件",
     "meta.propose": "为现有操作集合无法覆盖的重复需求设计一种候选新操作，交给独立方审查后再接入",
+}
+ACTION_DESCRIPTIONS = {action: description for action, description, _ in ACTIONS}
+GOAL_VARIANTS = {
+    "literal": LITERAL_GOALS,
+    "causal": CAUSAL_GOALS,
+    "structural": STRUCTURAL_GOALS,
+    "synonym": SYNONYM_GOALS,
+    "joint": JOINT_GOALS,
+}
+DESCRIPTION_VARIANTS = {
+    "literal": ACTION_DESCRIPTIONS,
+    "joint": JOINT_DESCRIPTIONS,
+}
+DESCRIPTION_VARIANT_BY_GOAL = {
+    "literal": "literal",
+    "causal": "literal",
+    "structural": "literal",
+    "synonym": "literal",
+    "joint": "joint",
 }
 
 # These are explicit content cues from each action description, not generic
@@ -376,6 +395,37 @@ def lexical_audit(goals: dict[str, str] | None = None) -> dict:
     }
 
 
+def description_audit(descriptions: dict[str, str] | None = None) -> dict:
+    """Check that the joint menu is not the old menu under a new heading."""
+    descriptions = descriptions or JOINT_DESCRIPTIONS
+    overlaps = {}
+    action_ids_present = {}
+    unchanged = []
+    for action, description in descriptions.items():
+        hits = sorted({
+            cue
+            for cues in ACTION_LEXICAL_CUES.values()
+            for cue in cues
+            if cue in description
+        })
+        if hits:
+            overlaps[action] = hits
+        ids = sorted(item for item in ACTION_IDS if item in description)
+        if ids:
+            action_ids_present[action] = ids
+        if description == ACTION_DESCRIPTIONS.get(action):
+            unchanged.append(action)
+    return {
+        "ok": (set(descriptions) == set(ACTION_IDS)
+               and not overlaps and not action_ids_present and not unchanged),
+        "cue_source": "hand-listed content words from original action descriptions",
+        "descriptions_checked": len(descriptions),
+        "overlaps": overlaps,
+        "action_ids_present": action_ids_present,
+        "unchanged": unchanged,
+    }
+
+
 def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
@@ -408,7 +458,9 @@ def menu_for_pair(index: int, seed: int, opaque: bool) -> tuple[list[str], dict[
     return order, action_to_label
 
 
-def build_prompt(goal: str, order: list[str], label_of: dict[str, str], pad: str = "") -> str:
+def build_prompt(goal: str, order: list[str], label_of: dict[str, str],
+                 pad: str = "", descriptions: dict[str, str] | None = None) -> str:
+    descriptions = descriptions or ACTION_DESCRIPTIONS
     lines = [
         "【唯一目标】",
         goal,
@@ -417,7 +469,7 @@ def build_prompt(goal: str, order: list[str], label_of: dict[str, str], pad: str
     ]
     for action in order:
         label = label_of[action]
-        lines.append(f"- {label}: {ACTION_INFO[action][0]}")
+        lines.append(f"- {label}: {descriptions[action]}")
     lines.extend(["", "只根据目标和说明选择一项。"])
     lines.extend([PAD_MARKER, pad])
     lines.extend(["", FINAL_INSTRUCTION])
@@ -486,6 +538,8 @@ def build_trial_prompts(index: int, seed: int, tokenize,
     if goal_variant not in GOAL_VARIANTS:
         raise ValueError(f"unknown goal variant: {goal_variant}")
     goals = GOAL_VARIANTS[goal_variant]
+    description_variant = DESCRIPTION_VARIANT_BY_GOAL[goal_variant]
+    descriptions = DESCRIPTION_VARIANTS[description_variant]
     target_a, target_b = pair_targets(index)
     order, named_labels = menu_for_pair(index, seed, opaque=False)
     _, opaque_labels = menu_for_pair(index, seed, opaque=True)
@@ -496,8 +550,8 @@ def build_trial_prompts(index: int, seed: int, tokenize,
         mode, variant = arm.split("_", 1)
         goal = goals[target_a if variant == "a" else target_b]
         label_of = (named_labels if mode == "named" else opaque_labels)
-        builds[arm] = lambda pad, g=goal, o=order, m=label_of: build_prompt(
-            g, o, m, pad)
+        builds[arm] = lambda pad, g=goal, o=order, m=label_of, d=descriptions: build_prompt(
+            g, o, m, pad, d)
     raw_text = {arm: builds[arm]("") for arm in ARMS}
     raw_tokens = {arm: tokenize(raw_text[arm]) for arm in ARMS}
     if target_tokens is None:
@@ -512,6 +566,7 @@ def build_trial_prompts(index: int, seed: int, tokenize,
         "pair": index,
         "seed": seed,
         "goal_variant": goal_variant,
+        "description_variant": description_variant,
         "target_a": target_a,
         "target_b": target_b,
         "target_tokens": target_tokens,
@@ -709,6 +764,16 @@ def classify_synonym_comparison(comparison: dict) -> str:
     )
 
 
+def classify_joint_comparison(comparison: dict) -> str:
+    """Apply the fixed preregistered joint-rewrite decision rule."""
+    return _classify_perturbation_comparison(
+        comparison,
+        JOINT_PREREGISTRATION,
+        "joint_fragility_supported_if",
+        "joint_robustness_supported_if",
+    )
+
+
 def summarise(rows: list[dict], pairs: int) -> dict:
     by_arm = defaultdict(list)
     by_pair_mode = defaultdict(dict)
@@ -825,7 +890,8 @@ def audit_artifact(data: dict) -> dict:
     if data.get("schema") in (
             INTERLEAVED_SCHEMA,
             STRUCTURAL_INTERLEAVED_SCHEMA,
-            SYNONYM_INTERLEAVED_SCHEMA):
+            SYNONYM_INTERLEAVED_SCHEMA,
+            JOINT_INTERLEAVED_SCHEMA):
         return audit_interleaved_artifact(data)
     pairs = int(data.get("pairs") or 0)
     rows = data.get("rows") or []
@@ -908,6 +974,14 @@ def audit_artifact(data: dict) -> dict:
 
     summary_exact = pair_complete and not duplicate_pair_arms and (
         summarise(rows, pairs) == data.get("summary"))
+    description_metadata_exact = True
+    if data.get("goal_variant") == "joint":
+        description_metadata_exact = (
+            data.get("description_variant") == "joint"
+            and data.get("description_texts") == JOINT_DESCRIPTIONS
+            and data.get("goal_texts") == JOINT_GOALS
+            and description_audit()["ok"]
+        )
     checks = {
         "row_count_exact": len(rows) == pairs * len(ARMS),
         "pair_complete": pair_complete,
@@ -919,6 +993,7 @@ def audit_artifact(data: dict) -> dict:
         "prompt_metadata_matches_rows": prompt_metadata_exact,
         "raw_selections_recompute_exactly": selection_audit_exact,
         "summary_exact": summary_exact,
+        "description_metadata_exact": description_metadata_exact,
     }
     return {
         "ok": all(checks.values()),
@@ -1037,6 +1112,8 @@ def compare_artifacts(baseline: dict, candidate: dict,
         classifier = classify_structural_comparison
     elif candidate_variant == "synonym":
         classifier = classify_synonym_comparison
+    elif candidate_variant == "joint":
+        classifier = classify_joint_comparison
     else:
         classifier = classify_goal_comparison
     return {
@@ -1148,14 +1225,20 @@ def artifact_for_run(args, trials: list[dict], rows: list[dict],
         "pairs": args.pairs,
         "seed_base": args.seed_base,
         "goal_variant": goal_variant,
+        "description_variant": DESCRIPTION_VARIANT_BY_GOAL[goal_variant],
         "goal_texts": GOAL_VARIANTS[goal_variant],
+        "description_texts": DESCRIPTION_VARIANTS[
+            DESCRIPTION_VARIANT_BY_GOAL[goal_variant]],
         "causal_goal_lexical_audit": lexical_audit(),
         "structural_goal_lexical_audit": lexical_audit(STRUCTURAL_GOALS),
         "synonym_goal_lexical_audit": lexical_audit(SYNONYM_GOALS),
+        "joint_goal_lexical_audit": lexical_audit(JOINT_GOALS),
+        "joint_description_lexical_audit": description_audit(),
         "preregistration": (
             PREREGISTRATION if goal_variant == "causal"
             else SYNONYM_PREREGISTRATION if goal_variant == "synonym"
             else STRUCTURAL_PREREGISTRATION if goal_variant == "structural"
+            else JOINT_PREREGISTRATION if goal_variant == "joint"
             else None),
         "system": SYSTEM_PROMPT,
         "system_sha256": _sha256(SYSTEM_PROMPT),
@@ -1167,6 +1250,8 @@ def artifact_for_run(args, trials: list[dict], rows: list[dict],
                 "causal_goal": CAUSAL_GOALS[action],
                 "structural_goal": STRUCTURAL_GOALS[action],
                 "synonym_goal": SYNONYM_GOALS[action],
+                "joint_description": JOINT_DESCRIPTIONS[action],
+                "joint_goal": JOINT_GOALS[action],
             }
             for action, description, _ in ACTIONS
         ],
@@ -1198,6 +1283,10 @@ def artifact_for_run(args, trials: list[dict], rows: list[dict],
                 lexical_audit(STRUCTURAL_GOALS)["ok"],
             "synonym_goals_have_no_description_cues":
                 lexical_audit(SYNONYM_GOALS)["ok"],
+            "joint_goals_have_no_description_cues":
+                lexical_audit(JOINT_GOALS)["ok"],
+            "joint_descriptions_are_rewritten_without_cues":
+                description_audit()["ok"],
         },
     }
 
@@ -1259,6 +1348,11 @@ def run_interleaved(args, variants: tuple[str, str] = ("literal", "causal"),
         if variants == (
             SYNONYM_PREREGISTRATION["control_goal_variant"],
             SYNONYM_PREREGISTRATION["candidate_goal_variant"],
+        )
+        else JOINT_INTERLEAVED_SCHEMA
+        if variants == (
+            JOINT_PREREGISTRATION["control_goal_variant"],
+            JOINT_PREREGISTRATION["candidate_goal_variant"],
         )
         else INTERLEAVED_SCHEMA
     )
@@ -1359,6 +1453,8 @@ def main(argv=None) -> int:
                         help="sample causal and structural goals adjacently in one process")
     parser.add_argument("--interleave-synonym-paraphrase", action="store_true",
                         help="sample causal and synonym goals adjacently in one process")
+    parser.add_argument("--interleave-joint-paraphrase", action="store_true",
+                        help="sample causal and jointly paraphrased goal/menu pairs")
     parser.add_argument("--output", default="")
     parser.add_argument("--audit-artifact", default="")
     parser.add_argument("--compare-artifact", default="")
@@ -1372,6 +1468,7 @@ def main(argv=None) -> int:
         args.interleave_goal_variants,
         args.interleave_structural_perturbation,
         args.interleave_synonym_paraphrase,
+        args.interleave_joint_paraphrase,
     )
     interleaved_mode = any(interleaved_flags)
     if sum(interleaved_flags) > 1:
@@ -1395,6 +1492,13 @@ def main(argv=None) -> int:
             )
             result = run_interleaved(
                 args, variants, SYNONYM_PREREGISTRATION)
+        elif args.interleave_joint_paraphrase:
+            variants = (
+                JOINT_PREREGISTRATION["control_goal_variant"],
+                JOINT_PREREGISTRATION["candidate_goal_variant"],
+            )
+            result = run_interleaved(
+                args, variants, JOINT_PREREGISTRATION)
         else:
             variants = ("literal", "causal")
             result = run_interleaved(args, variants, PREREGISTRATION)
