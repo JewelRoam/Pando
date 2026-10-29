@@ -1,9 +1,9 @@
 # Research Log
 
-*Active research state. For the archived original see
+*Active research state. For the full archived snapshot see
 [archive/PROJECT-STATE-2026-10.md](../archive/PROJECT-STATE-2026-10.md).*
 
-## Current state
+## How to resume
 
 1. Read docs/evidence/SUMMARY.md for the definitive findings
 2. Run `python tools/demo.py` to verify everything still works

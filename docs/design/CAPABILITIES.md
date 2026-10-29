@@ -3,7 +3,56 @@
 Current component map. Every entry has been live-verified; the detailed
 numbers behind each claim are in [FINDINGS.md](../evidence/FINDINGS.md).
 
-## What is proven (key numbers)
+## Where we are
+
+PandoSI research preview is **feature-complete for Phase 1-2** and
+**Phase 5 data layer is verified**. The system runs on a single Intel AI PC
+(Core Ultra 7 255H) with three heterogeneous execution units (CPU, iGPU,
+NPU) all voting in the same consensus quorum.
+
+## What exists (verified)
+
+| Component | Files | Status |
+|---|---|---|
+| Decision swarm (coordinator + worker) | coordinator.py, worker.py, backend.py, common.py | quorum gating + real-HTTP e2e vote |
+| Capability probe + EU enumeration | graft.py | 3 EUs detected live |
+| Calibration layer (temperature scaling) | calibrate.py | math verified |
+| Signed self-replication (Spore) | spore.py | 3-hop chain, 0 failures |
+| Sandbox gate (Ring 2) | lab.py | refusal + attested paths |
+| Playbook governance (5 layers) | playbook.py + coordinator integration | 6/6 E2E |
+| RLCD evolution data path | rollout.py + export | trainer-compatible |
+| 40-task graft suite | assets/graft_suite.jsonl + graft_eval.py | 3 lineages measured |
+| NPU-compatible graph | postprocess_onnx.py + IsNaN removal | GPU compile OK |
+| Multi-bucket iGPU serving | backend.py (_MultiBucketSession) | 25-40ms variable-length |
+| Dashboard v2 | tools/dashboard.py | lineage + attribution + disagreements |
+| CUDA worker | backend.py CUDA branch + tools/cuda_bench.py | RTX 3070 live |
+| Heterogeneous HTTP check | tools/hetero_http_check.py | CPU+iGPU+NPU+CUDA live |
+| PyTorch (non-OpenVINO) stem | backend.py TorchLayaBackend + worker --backend laya | torch-cuda votes in the same quorum |
+| Stem wire contract | docs/design/PROTOCOL-stem.md | framework-free join spec (3 endpoints) |
+| Stage graph splitter | tools/stage_split.py | node-boundary cut, shared external weights |
+| Pipeline measurement | tools/stage_pipeline_check.py | real HTTP 2-stage chain, latency + throughput |
+| Cross-ecosystem votes | tools/cross_ecosystem_check.py | ONNX vs PyTorch, 27/27 agreement |
+| Topology planner | pando/topology.py + tools/topology_check.py | replicate/stage/infeasible from measured numbers |
+| Autonomy loop | pando/autonomy.py + tools/autonomy_check.py | observe-decide-act, two-part gate |
+| Gate risk-coverage | tools/gating_check.py | auto 51.8% coverage at 92.9% accuracy |
+| Gate threshold tuning | tools/gate_tune.py | shipped 0.6/0.6 already optimal |
+| Gate live verification | tools/gate_e2e_check.py | live == offline, delta 0.0000 |
+| Adaptive stem timeouts | coordinator.py per-stem EWMA | 5s cold -> 0.7-1.0s learned |
+| Slow-node isolation | tools/slow_stem_check.py | 4->3 quorum, 24ms cooldown skip |
+| LAN-interface HTTP | tools/lan_http_check.py + worker advertise host | same-host protocol path verified |
+| Remote-link degradation | tools/remote_latency_check.py | timeout -> skip -> recovery verified |
+| Runtime elastic membership | tools/swarm_check.py | live 3 -> 5 -> 4 transitions |
+| CUDA hot-plug | tools/hetero_http_check.py --hotplug-cuda | Intel 3 -> +RTX 3070 |
+| Hierarchical groups | pando/bridge.py + tools/two_group_check.py | remote aggregate + partition fallback |
+| CUDA RLCD training | tools/rlcd_cuda_train.py + artifacts/rlcd-cuda-v6 | 72 updates overfit confidence, no held-out accuracy gain |
+| Deterministic suite split | tools/build_suite_split.py | 34 train / 6 holdout tasks |
+| Expanded prompt pool | tools/build_prompt_pool.py | 78 prompts, 45 contrast rows |
+| CUDA candidate v7 | artifacts/rlcd-cuda-v7 | 41 updates, stable holdout, not promoted |
+| Live lineage A/B | tools/lineage_ab_check.py | v7 6/6 agreement, no accuracy gain, rejected |
+| Post-training calibration | tools/calibrate_checkpoint.py | T=2.67, confidence reduced, not promoted |
+| Real lineage HTTP identity | backend/worker checkpoint override + tools/real_lineage_http_check.py | en/ml/td distinct, 11/12 split |
+
+## Proven numbers
 
 | finding | value | source |
 |---|---|---|
