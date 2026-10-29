@@ -13,7 +13,7 @@ NPU) all voting in the same consensus quorum.
 
 | Component | Files | Status |
 |---|---|---|
-| Decision swarm (rootd + stemd) | rootd.py, stemd.py, backend.py, common.py | 2/2 tests, live smokes |
+| Decision swarm (rootd + stemd) | rootd.py, stemd.py, backend.py, common.py | quorum gating + real-HTTP e2e vote |
 | Capability probe + EU enumeration | graft.py | 3 EUs detected live |
 | Calibration layer (temperature scaling) | calibrate.py | math verified |
 | Signed self-replication (Spore) | spore.py | 3-hop chain, 0 failures |
