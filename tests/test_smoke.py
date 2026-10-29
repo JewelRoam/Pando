@@ -4287,6 +4287,131 @@ class TestActionSemanticsCheck(unittest.TestCase):
             tool.classify_goal_comparison(comparison),
             "semantic_selection_survives_lexical_control")
 
+    def test_interleaved_schedule_balances_adjacent_goal_calls(self):
+        from collections import Counter
+
+        tool = self._tool()
+        schedule = tool.interleaved_schedule(8)
+        self.assertEqual(len(schedule), 8 * len(tool.ARMS) * 2)
+        self.assertEqual(len({item[0] for item in schedule}), 8)
+        for offset in range(0, len(schedule), 2):
+            first, second = schedule[offset], schedule[offset + 1]
+            self.assertEqual(first[0], second[0])
+            self.assertEqual(first[2], second[2])
+            self.assertEqual({first[1], second[1]},
+                             {"literal", "causal"})
+        first_variant_counts = Counter()
+        for pair in range(8):
+            for arm in tool.ARMS:
+                indexes = [
+                    index for index, item in enumerate(schedule)
+                    if item[0] == pair and item[2] == arm
+                ]
+                self.assertEqual(indexes[1] - indexes[0], 1)
+                first_variant_counts[schedule[indexes[0]][1]] += 1
+        self.assertEqual(first_variant_counts, Counter({
+            "literal": 16,
+            "causal": 16,
+        }))
+
+    def test_interleaved_artifact_audit_checks_call_order_and_comparison(self):
+        tool = self._tool()
+        rows_by_variant = {"literal": [], "causal": []}
+        prompts_by_variant = {"literal": [], "causal": []}
+        for variant in ("literal", "causal"):
+            for pair in range(2):
+                seed = 3670 + pair
+                targets = tool.pair_targets(pair)
+                label_maps = {
+                    mode: {
+                        label: action for action, label in
+                        tool.menu_for_pair(
+                            pair, seed, opaque=(mode == "opaque"))[1].items()
+                    }
+                    for mode in ("named", "opaque")
+                }
+                texts = {}
+                hashes = {}
+                for position, arm in enumerate(tool.ARM_ORDERS[pair]):
+                    mode, arm_variant = arm.split("_", 1)
+                    target = targets[0 if arm_variant == "a" else 1]
+                    label = next(
+                        label for label, action in label_maps[mode].items()
+                        if action == target)
+                    raw = json.dumps({"action": label, "reason": "match"})
+                    text = f"prompt-{variant}-{pair}-{arm}-" + "x" * 20
+                    texts[arm] = text
+                    hashes[arm] = hashlib.sha256(
+                        text.encode("utf-8")).hexdigest()
+                    rows_by_variant[variant].append({
+                        "pair": pair,
+                        "arm": arm,
+                        "mode": mode,
+                        "variant": arm_variant,
+                        "goal_variant": variant,
+                        "position": position,
+                        "seed": seed,
+                        "target": target,
+                        "action": target,
+                        "label": label,
+                        "valid": True,
+                        "correct": True,
+                        "reason": "match",
+                        "raw": raw,
+                        "prompt_sha256": hashes[arm],
+                        "prompt_chars": len(text),
+                        "prompt_tokens": 100,
+                    })
+                prompts_by_variant[variant].append({
+                    "pair": pair,
+                    "target_a": targets[0],
+                    "target_b": targets[1],
+                    "text": texts,
+                    "sha256": hashes,
+                    "tokens": {arm: 100 for arm in tool.ARMS},
+                })
+
+        schedule = tool.interleaved_schedule(2)
+        stored_schedule = []
+        for sample_index, (pair, variant, arm) in enumerate(schedule):
+            row = next(
+                row for row in rows_by_variant[variant]
+                if row["pair"] == pair and row["arm"] == arm)
+            row["sample_index"] = sample_index
+            stored_schedule.append({
+                "sample_index": sample_index,
+                "pair": pair,
+                "goal_variant": variant,
+                "arm": arm,
+            })
+        artifacts = {}
+        for variant in ("literal", "causal"):
+            artifacts[variant] = {
+                "goal_variant": variant,
+                "pairs": 2,
+                "system": tool.SYSTEM_PROMPT,
+                "system_sha256": hashlib.sha256(
+                    tool.SYSTEM_PROMPT.encode("utf-8")).hexdigest(),
+                "prompts": prompts_by_variant[variant],
+                "rows": rows_by_variant[variant],
+                "summary": tool.summarise(rows_by_variant[variant], 2),
+            }
+        artifact = {
+            "schema": tool.INTERLEAVED_SCHEMA,
+            "pairs": 2,
+            "schedule": stored_schedule,
+            "variants": artifacts,
+            "comparison": tool.compare_artifacts(
+                artifacts["literal"], artifacts["causal"]),
+        }
+        audit = tool.audit_artifact(artifact)
+        self.assertTrue(audit["ok"], audit["checks"])
+        artifact["schedule"][0], artifact["schedule"][1] = (
+            artifact["schedule"][1], artifact["schedule"][0])
+        audit = tool.audit_artifact(artifact)
+        self.assertFalse(audit["checks"]["schedule_exact"])
+        self.assertFalse(audit["ok"])
+
     def test_parse_selection_uses_the_arm_label_mapping(self):
         tool = self._tool()
         label_to_action = {"k7": "seed.export", "m2": "seed.replicate"}

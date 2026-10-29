@@ -28,6 +28,11 @@ significant drop in opaque accuracy supports the lexical-shortcut explanation;
 high accuracy without such a drop weakens it, but still does not establish
 semantic understanding or collective intelligence.
 
+``--interleave-goal-variants`` collects literal and causal goals in one process
+and places the two calls for each pair/arm next to each other, alternating which
+variant goes first.  This removes the cross-run service drift in the earlier
+comparison while leaving the preregistered decision rule unchanged.
+
 This is a local mechanism check, not evidence of collective intelligence.
 """
 
@@ -142,6 +147,7 @@ ARM_ORDERS = (
 )
 ARMS = tuple(ARM_ORDERS[0])
 OPAQUE_LABELS = ("k7", "m2", "q9", "v4", "a8", "c3", "h6", "t1")
+INTERLEAVED_SCHEMA = "action-semantics-interleaved-v1"
 SYSTEM_PROMPT = """你是多主机殖民地的动作选择器。
 用户会给出一个唯一目标，以及一张候选动作表。表中每一项都有一个标识和说明。
 只根据目标和同一行的说明选择一个最匹配的动作；不要根据编号、位置、真实动作名或历史偏好猜测。
@@ -151,6 +157,17 @@ SYSTEM_PROMPT = """你是多主机殖民地的动作选择器。
 FINAL_INSTRUCTION = "请只输出一行 JSON。"
 PAD_MARKER = "\n【长度控制】"
 PAD_UNIT = "仅长度填充。"
+
+
+def interleaved_schedule(pairs: int) -> list[tuple[int, str, str]]:
+    """Return adjacent literal/causal calls with first position balanced."""
+    schedule = []
+    for pair in range(pairs):
+        for position, arm in enumerate(ARM_ORDERS[pair % len(ARM_ORDERS)]):
+            variants = (("literal", "causal") if (pair + position) % 2 == 0
+                        else ("causal", "literal"))
+            schedule.extend((pair, variant, arm) for variant in variants)
+    return schedule
 
 
 def lexical_audit() -> dict:
@@ -566,6 +583,8 @@ def summarise(rows: list[dict], pairs: int) -> dict:
 
 def audit_artifact(data: dict) -> dict:
     """Recompute the artifact's prompts, selections, and paired summary."""
+    if data.get("schema") == INTERLEAVED_SCHEMA:
+        return audit_interleaved_artifact(data)
     pairs = int(data.get("pairs") or 0)
     rows = data.get("rows") or []
     prompt_rows = data.get("prompts") or []
@@ -668,6 +687,68 @@ def audit_artifact(data: dict) -> dict:
     }
 
 
+def audit_interleaved_artifact(data: dict) -> dict:
+    """Audit both goal variants and the exact within-process call order."""
+    pairs = int(data.get("pairs") or 0)
+    variants = data.get("variants") or {}
+    checks = {
+        "variant_names_exact": set(variants) == {"literal", "causal"},
+    }
+    variant_audits = {}
+    for variant in ("literal", "causal"):
+        audit = audit_artifact(variants.get(variant) or {})
+        variant_audits[variant] = audit
+        checks[f"{variant}_artifact_valid"] = audit["ok"]
+
+    expected_schedule = [
+        {
+            "sample_index": sample_index,
+            "pair": pair,
+            "goal_variant": variant,
+            "arm": arm,
+        }
+        for sample_index, (pair, variant, arm) in enumerate(
+            interleaved_schedule(pairs))
+    ]
+    checks["schedule_exact"] = data.get("schedule") == expected_schedule
+
+    rows = []
+    for variant in ("literal", "causal"):
+        rows.extend((variants.get(variant) or {}).get("rows") or [])
+    by_sample_index = {
+        int(row.get("sample_index", -1)): row for row in rows
+    }
+    sample_indexes = {int(row.get("sample_index", -1)) for row in rows}
+    checks["sample_indexes_exact"] = sample_indexes == set(
+        range(len(expected_schedule)))
+    checks["schedule_rows_exact"] = len(by_sample_index) == len(rows) and all(
+        (by_sample_index.get(item["sample_index"]) or {}).get("pair")
+        == item["pair"]
+        and (by_sample_index[item["sample_index"]]).get("goal_variant")
+        == item["goal_variant"]
+        and by_sample_index[item["sample_index"]].get("arm") == item["arm"]
+        for item in expected_schedule
+    )
+
+    try:
+        expected_comparison = compare_artifacts(
+            variants.get("literal") or {}, variants.get("causal") or {})
+    except ValueError:
+        expected_comparison = None
+    checks["comparison_exact"] = (
+        expected_comparison is not None
+        and data.get("comparison") == expected_comparison)
+
+    return {
+        "ok": all(checks.values()),
+        "checks": checks,
+        "pairs": pairs,
+        "rows": len(rows),
+        "summary": (
+            (variants.get("causal") or {}).get("summary") or {}),
+    }
+
+
 def compare_artifacts(baseline: dict, candidate: dict) -> dict:
     """Audit and compare a literal-goal control with a causal-goal run."""
     baseline_audit = audit_artifact(baseline)
@@ -708,17 +789,21 @@ def compare_artifacts(baseline: dict, candidate: dict) -> dict:
     }
 
 
-def run(args) -> dict:
+def _prepare_run(args, variants: tuple[str, ...]):
     api_key = ""
     if args.api_key_file:
         api_key = Path(args.api_key_file).expanduser().read_text(encoding="utf-8").strip()
     tokenize_url = args.tokenize_url or _default_tokenize_url(args.base_url)
     tokenize = lambda text: tokenize_text(text, tokenize_url, api_key)
-    trials = []
-    for index in range(args.pairs):
-        trials.append(build_trial_prompts(
-            index, args.seed_base + index, tokenize,
-            goal_variant=args.goal_variant))
+    trials_by_variant = {
+        variant: [
+            build_trial_prompts(
+                index, args.seed_base + index, tokenize,
+                goal_variant=variant)
+            for index in range(args.pairs)
+        ]
+        for variant in variants
+    }
     proposer = OpenAIProposer(
         base_url=args.base_url,
         model=args.model,
@@ -727,44 +812,51 @@ def run(args) -> dict:
         temperature=args.temperature,
         timeout=args.timeout,
     )
-    if trials:
-        for arm in ARMS:
-            sample_once(proposer, trials[0]["texts"][arm], args.seed_base - 1,
-                        args.temperature, args.max_tokens)
+    for variant in variants:
+        trials = trials_by_variant[variant]
+        if trials:
+            for arm in ARMS:
+                sample_once(proposer, trials[0]["texts"][arm],
+                            args.seed_base - 1, args.temperature,
+                            args.max_tokens)
+    return trials_by_variant, proposer
 
-    rows = []
-    for trial in trials:
-        index = trial["pair"]
-        order = ARM_ORDERS[index % len(ARM_ORDERS)]
-        for position, arm in enumerate(order):
-            mode, variant = arm.split("_", 1)
-            text, usage, latency = sample_once(
-                proposer, trial["texts"][arm], trial["seed"],
-                args.temperature, args.max_tokens)
-            label_map = trial["label_to_action"][mode]
-            action, label, obj = parse_selection(text, label_map)
-            target = trial[f"target_{variant}"]
-            rows.append({
-                "pair": index,
-                "arm": arm,
-                "mode": mode,
-                "variant": variant,
-                "position": position,
-                "seed": trial["seed"],
-                "target": target,
-                "action": action,
-                "label": label,
-                "valid": action != "(invalid)",
-                "correct": action == target,
-                "reason": str((obj or {}).get("reason") or ""),
-                "raw": text,
-                "usage": usage,
-                "latency_ms": latency,
-                "prompt_sha256": trial["hashes"][arm],
-                "prompt_chars": trial["chars"][arm],
-                "prompt_tokens": trial["tokens"][arm],
-            })
 
+def _sample_row(proposer, trial: dict, arm: str, position: int,
+                args, sample_index: int) -> dict:
+    mode, variant = arm.split("_", 1)
+    text, usage, latency = sample_once(
+        proposer, trial["texts"][arm], trial["seed"],
+        args.temperature, args.max_tokens)
+    label_map = trial["label_to_action"][mode]
+    action, label, obj = parse_selection(text, label_map)
+    target = trial[f"target_{variant}"]
+    return {
+        "pair": trial["pair"],
+        "arm": arm,
+        "mode": mode,
+        "variant": variant,
+        "position": position,
+        "seed": trial["seed"],
+        "goal_variant": trial["goal_variant"],
+        "sample_index": sample_index,
+        "target": target,
+        "action": action,
+        "label": label,
+        "valid": action != "(invalid)",
+        "correct": action == target,
+        "reason": str((obj or {}).get("reason") or ""),
+        "raw": text,
+        "usage": usage,
+        "latency_ms": latency,
+        "prompt_sha256": trial["hashes"][arm],
+        "prompt_chars": trial["chars"][arm],
+        "prompt_tokens": trial["tokens"][arm],
+    }
+
+
+def artifact_for_run(args, trials: list[dict], rows: list[dict],
+                     goal_variant: str) -> dict:
     summary = summarise(rows, args.pairs)
     prompt_checks = {}
     for trial in trials:
@@ -785,10 +877,10 @@ def run(args) -> dict:
         "temperature": args.temperature,
         "pairs": args.pairs,
         "seed_base": args.seed_base,
-        "goal_variant": args.goal_variant,
-        "goal_texts": GOAL_VARIANTS[args.goal_variant],
+        "goal_variant": goal_variant,
+        "goal_texts": GOAL_VARIANTS[goal_variant],
         "causal_goal_lexical_audit": lexical_audit(),
-        "preregistration": (PREREGISTRATION if args.goal_variant == "causal" else None),
+        "preregistration": (PREREGISTRATION if goal_variant == "causal" else None),
         "system": SYSTEM_PROMPT,
         "system_sha256": _sha256(SYSTEM_PROMPT),
         "actions": [
@@ -825,6 +917,65 @@ def run(args) -> dict:
                 row["prompt_sha256"] for row in rows),
             "causal_goals_have_no_description_cues": lexical_audit()["ok"],
         },
+    }
+
+
+def run(args) -> dict:
+    trials_by_variant, proposer = _prepare_run(args, (args.goal_variant,))
+    trials = trials_by_variant[args.goal_variant]
+
+    rows = []
+    sample_index = 0
+    for trial in trials:
+        index = trial["pair"]
+        order = ARM_ORDERS[index % len(ARM_ORDERS)]
+        for position, arm in enumerate(order):
+            rows.append(_sample_row(
+                proposer, trial, arm, position, args, sample_index))
+            sample_index += 1
+    return artifact_for_run(args, trials, rows, args.goal_variant)
+
+
+def run_interleaved(args) -> dict:
+    variants = ("literal", "causal")
+    trials_by_variant, proposer = _prepare_run(args, variants)
+    trials_by_pair = {
+        variant: {trial["pair"]: trial for trial in trials}
+        for variant, trials in trials_by_variant.items()
+    }
+    schedule = interleaved_schedule(args.pairs)
+    rows_by_variant = {variant: [] for variant in variants}
+    stored_schedule = []
+    for sample_index, (pair, variant, arm) in enumerate(schedule):
+        trial = trials_by_pair[variant][pair]
+        position = ARM_ORDERS[pair % len(ARM_ORDERS)].index(arm)
+        rows_by_variant[variant].append(_sample_row(
+            proposer, trial, arm, position, args, sample_index))
+        stored_schedule.append({
+            "sample_index": sample_index,
+            "pair": pair,
+            "goal_variant": variant,
+            "arm": arm,
+        })
+
+    artifacts = {
+        variant: artifact_for_run(
+            args, trials_by_variant[variant], rows_by_variant[variant], variant)
+        for variant in variants
+    }
+    comparison = compare_artifacts(artifacts["literal"], artifacts["causal"])
+    return {
+        "schema": INTERLEAVED_SCHEMA,
+        "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "base_url": args.base_url,
+        "model": args.model,
+        "temperature": args.temperature,
+        "pairs": args.pairs,
+        "seed_base": args.seed_base,
+        "preregistration": PREREGISTRATION,
+        "schedule": stored_schedule,
+        "variants": artifacts,
+        "comparison": comparison,
     }
 
 
@@ -878,6 +1029,15 @@ def print_goal_comparison(result: dict) -> None:
     print(f"discordant={stats['discordant']} outcome={comparison['outcome']}")
 
 
+def print_interleaved_report(result: dict) -> None:
+    print(f"interleaved literal vs causal: pairs={result['pairs']} "
+          f"calls={len(result['schedule'])}")
+    for variant in ("literal", "causal"):
+        print(f"\n[{variant}]")
+        print_report(result["variants"][variant])
+    print_goal_comparison(result)
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://127.0.0.1:8087/v1")
@@ -891,6 +1051,8 @@ def main(argv=None) -> int:
     parser.add_argument("--timeout", type=float, default=180.0)
     parser.add_argument("--goal-variant", choices=tuple(GOAL_VARIANTS),
                         default="literal")
+    parser.add_argument("--interleave-goal-variants", action="store_true",
+                        help="sample literal and causal goals adjacently in one process")
     parser.add_argument("--output", default="")
     parser.add_argument("--audit-artifact", default="")
     parser.add_argument("--compare-artifact", default="")
@@ -900,10 +1062,19 @@ def main(argv=None) -> int:
         audit = audit_artifact(json.loads(path.read_text(encoding="utf-8")))
         print_audit(audit, path)
         return 0 if audit["ok"] else 1
-    result = run(args)
-    print_report(result)
-    comparison_ok = True
-    if args.compare_artifact:
+    if args.interleave_goal_variants:
+        if args.goal_variant != "causal":
+            parser.error("--interleave-goal-variants requires --goal-variant causal")
+        if args.compare_artifact:
+            parser.error("--interleave-goal-variants performs its own comparison")
+        result = run_interleaved(args)
+        print_interleaved_report(result)
+        comparison_ok = result["comparison"]["outcome"] != "inconclusive"
+    else:
+        result = run(args)
+        print_report(result)
+        comparison_ok = True
+    if not args.interleave_goal_variants and args.compare_artifact:
         baseline_path = Path(args.compare_artifact).expanduser()
         baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
         try:
