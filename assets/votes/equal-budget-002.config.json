@@ -132,6 +132,6 @@
   "artifacts_planned": {
     "raw": "assets/votes/equal-budget-002.raw.json",
     "report": "assets/votes/equal-budget-002.json",
-    "doc": "docs/EXPERIMENT-equal-budget-002.md"
+    "doc": "docs/evidence/experiments/equal-budget-002.md"
   }
 }

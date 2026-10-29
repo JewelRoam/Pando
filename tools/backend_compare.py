@@ -93,7 +93,7 @@ def main() -> None:
         "gpu_p50_ms": round(statistics.median([v["ms"] for v in gpu.values()]), 1),
     }
     print(json.dumps(report, indent=2))
-    out_path = ROOT / "docs/research/backend-compare.json"
+    out_path = ROOT / "docs/archive/research/backend-compare.json"
     out_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print("wrote", out_path)
 

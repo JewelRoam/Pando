@@ -15,7 +15,7 @@ the group's own past, not of an operator's menu.
 The design bet is not "bigger models". It is that many weak proposers + a
 shared memory + cheap recombination + outcome-conditioned selection add up to a
 search over strategies — a genetic algorithm over *what to do*, not a bigger
-brain. See docs/DESIGN-genesis.md.
+brain. See docs/design/specs/genesis.md.
 
 This module owns the mechanism and nothing about model quality: ``StubProposer``
 (deterministic, no model) proves the loop closes and that its behaviour is a
@@ -35,7 +35,7 @@ from .identity import verify as _verify_signature
 
 # The group's action space: the primitives the swarm actually controls.
 # A proposal is a composition and parameterisation of these. If an action is
-# not here it is unexecutable words, not a plan (docs/DESIGN-genesis.md §5).
+# not here it is unexecutable words, not a plan (docs/design/specs/genesis.md §5).
 # The set is small and enumerable today; that is the honest boundary.
 ACTION_SPACE: dict[str, str] = {
     "seed.export": "write a seed bundle for this member (identity + grants + state)",
@@ -113,7 +113,7 @@ class ScoreBoard:
     """Expected instrumental gain, from what similar actions did before.
 
     This is the gradient, and it is instrumental — not the axiom. Survival is a
-    telos, not a measurement (docs/DESIGN-genesis.md §6); what a loop can learn
+    telos, not a measurement (docs/design/specs/genesis.md §6); what a loop can learn
     from is the record: did this kind of action work last time. A Beta-style
     smoothing keeps an unseen action at the prior (0.5), so with no history
     every action ties and the tie-break decides.
@@ -365,7 +365,7 @@ class GenesisLoop:
 # GenesisLoop works on in-process Proposal objects. For the agenda to be the
 # *group's*, a proposal must travel between members and survive without a
 # trusted middleman, by the same rule as registration: the public key is the
-# claim, the node name is only a label (docs/IDENTITY-SPEC.md). These helpers
+# claim, the node name is only a label (docs/design/IDENTITY.md). These helpers
 # turn a Proposal into a record any transport can carry -- the mailbox today,
 # the S2 group log when it lands -- and back, with the signature checked on the
 # way in.

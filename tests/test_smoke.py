@@ -1512,7 +1512,7 @@ class TestSmoke(unittest.TestCase):
             self.assertEqual(auto_english["assent"], "english")
 
     def test_genesis_agenda_is_history_dependent(self):
-        """The group's own outcome record moves its next choice (docs/DESIGN-genesis.md)."""
+        """The group's own outcome record moves its next choice (docs/design/specs/genesis.md)."""
         from pando.genesis import GenesisLoop, NullScoreBoard, StubProposer
 
         candidates = ["recruit.invite", "reproduce.spawn", "resource.rebalance"]

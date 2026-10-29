@@ -1,6 +1,6 @@
 """Churn arena: run a live fleet under random membership churn.
 
-Bet A from docs/REFLECTIONS.md: the elastic fabric's unique claim must be shown
+Bet A from docs/evidence/reflections.md: the elastic fabric's unique claim must be shown
 under device join/leave/death with live traffic, not only in scripted one-shot
 scenarios. This launches one real coordinator plus N real worker OS processes over
 loopback HTTP, then runs a decision workload on a fixed cadence while randomly

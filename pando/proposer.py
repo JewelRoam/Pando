@@ -1,4 +1,4 @@
-"""proposer: the resident proposer — the part docs/DESIGN-genesis.md §7 says is missing.
+"""proposer: the resident proposer — the part docs/design/specs/genesis.md §7 says is missing.
 
 The Genesis layer closes mechanically (``pando/genesis.py``) and a signed
 proposal can travel (``pando/proposal_mail.py``), but the doc names the hole

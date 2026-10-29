@@ -2,7 +2,7 @@
 
 Produces accuracy per checkpoint, per-question-type breakdown, decision
 latency, and a 10-bin ECE over answer confidences. Results are written to
-docs/research/graft-report.json and printed as Markdown.
+docs/archive/research/graft-report.json and printed as Markdown.
 
 Usage: python tools/graft_eval.py
 """

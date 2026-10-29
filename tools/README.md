@@ -38,7 +38,7 @@ once with `git config core.hooksPath tools/githooks`.
 
 Everything else is an experiment write-up from a research round: each one
 builds a scenario, measures it, and prints numbers quoted in
-`docs/research/` and README. They are kept for reproducibility. Treat them
+`docs/archive/research/` and README. They are kept for reproducibility. Treat them
 as historical: do not copy their style into new operational code, and
 before deleting or moving one, grep the docs for its name (the README links
 most of them).

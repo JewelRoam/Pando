@@ -7,7 +7,7 @@ source. Once a blob is in a commit it is in every clone forever, and
 
 So the culture story keeps a hard line: git carries code, docs, corpora and
 *digests*; weight bytes move out-of-band (direct link / NAS / SD card), keyed
-by the digest that git records. `docs/SEED.md` states the rule; this script is
+by the digest that git records. `docs/operations/SEED.md` states the rule; this script is
 where it can actually be enforced.
 
     python3 tools/check_no_weights.py              # files git tracks now
@@ -200,7 +200,7 @@ def main(argv: list[str] | None = None) -> int:
     for name, why in bad:
         print(f"  {name}\n      {why}")
     print(
-        "\nRule (docs/SEED.md): weights do not go to GitHub. Move the bytes\n"
+        "\nRule (docs/operations/SEED.md): weights do not go to GitHub. Move the bytes\n"
         "out-of-band and record only the digest in git. To take a file back\n"
         "out of history you need a rewrite (filter-repo) + force push, which\n"
         "affects every clone - so the fix belongs before the commit, here."

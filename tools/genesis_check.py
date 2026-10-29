@@ -11,7 +11,7 @@ matters, and it is deliberately blind to model quality, in two scenarios:
   B. the candidates are other members' *signed* proposals, verified and pinned
      on the way in -- so the agenda is authored by the group, not by the loop.
 
-The falsifiable core (docs/DESIGN-genesis.md §7): the second round differs from
+The falsifiable core (docs/design/specs/genesis.md §7): the second round differs from
 the first *because of* the first round's outcome.
 
 Run:  .venv/bin/python tools/genesis_check.py

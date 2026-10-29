@@ -1,4 +1,4 @@
-"""Rebuild docs/research/INDEX.md from the round files themselves.
+"""Rebuild docs/archive/research/INDEX.md from the round files themselves.
 
 One row per file: the round number parsed from the file name and the title
 taken from the file's own first line. Titles are read, never inferred from

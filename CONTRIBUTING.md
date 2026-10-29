@@ -21,9 +21,9 @@ This is a research repository. The bar for a change is not "it runs" - it is
 
 - Fork or branch (`feat/`/`codex/` prefixes are fine); keep PRs small and
   single-idea.
-- Wire changes: update `docs/STEM-PROTOCOL.md` in the same PR.
-- Research work: add `docs/research/YYYY-MM-DD-roundNNN.md` and regenerate
-  `docs/research/INDEX.md` via `python tools/build_research_index.py`.
+- Wire changes: update `docs/design/PROTOCOL-stem.md` in the same PR.
+- Research work: add `docs/archive/research/YYYY-MM-DD-roundNNN.md` and regenerate
+  `docs/archive/research/INDEX.md` via `python tools/build_research_index.py`.
 - CI (`.github/workflows/ci.yml`) runs static analysis, the smoke suite,
   the demo, and distribution verification on every push - it must be green.
 

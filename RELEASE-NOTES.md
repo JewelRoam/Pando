@@ -41,5 +41,5 @@ python tools/demo.py                  # end-to-end consensus + dashboard
 
 ## Research archive
 
-48 rounds: docs/research/ (round 1-48, 2026-10-13 to 2026-10-14).
-Session backups: docs/session-logs/ (42 snapshots, sanitized).
+48 rounds: docs/archive/research/ (round 1-48, 2026-10-13 to 2026-10-14).
+Session backups: docs/archive/session-logs/ (42 snapshots, sanitized).

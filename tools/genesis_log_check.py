@@ -3,7 +3,7 @@
 GenesisLoop (pando/genesis.py) makes the agenda endogenous in-process. For the
 agenda to be the *group's*, a proposal must travel between members and be
 checked on arrival -- the same rule as registration: the public key is the
-claim, the node name is only a label (docs/IDENTITY-SPEC.md).
+claim, the node name is only a label (docs/design/IDENTITY.md).
 
 This drill is the negative-control set that proves the record is actually
 verified and not merely parsed: a clean record passes, every single-field

@@ -93,7 +93,7 @@ python tools/graft_eval.py
 ## 8. Cross-lineage divergence
 
 ```bash
-# See docs/research/lineage-divergence.json for the reference data
+# See docs/archive/research/lineage-divergence.json for the reference data
 # Expected: en-ml 32.5% divergence, en-td 10%, ml-td 27.5%
 # 14 contrast pairs (35% split rate)
 ```

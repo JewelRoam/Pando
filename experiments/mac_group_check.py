@@ -44,7 +44,7 @@ sys.path.insert(0, str(ROOT_DIR))
 
 MAC_ROOT = "http://192.168.31.41:8765"
 # Never hardcode pairing tokens: the old literal is still in git history and
-# must be rotated (see docs/GO-PUBLIC-PLAN.md). Export PANDOSI_MAC_TOKEN or
+# must be rotated (see docs/operations/GO-PUBLIC-PLAN.md). Export PANDOSI_MAC_TOKEN or
 # pass --mac-token instead.
 MAC_TOKEN = os.environ.get("PANDOSI_MAC_TOKEN", "")
 SAMPLE = {"state": "the build failed and the tests are red",

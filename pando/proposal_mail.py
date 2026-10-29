@@ -1,6 +1,6 @@
 """Carry a signed proposal over the mailbox: the group's log, today.
 
-``docs/DESIGN-genesis.md`` §7 left one hole open by name: the signed proposal
+``docs/design/specs/genesis.md`` §7 left one hole open by name: the signed proposal
 record is transport-agnostic, but *nothing carried it*. A live member could
 sign a proposal and no other member could receive it, so the agenda was the
 group's only inside one process.

@@ -6,7 +6,7 @@ on "archive vs delete vs index" chose **archive** (2/3 members, tier
 reversible reading of that mandate).
 
 These are historical experiment scripts. They work, they produced numbers
-quoted in `docs/research/*` and `docs/REFLECTIONS.md`, and they are NOT
+quoted in `docs/archive/research/*` and `docs/evidence/reflections.md`, and they are NOT
 part of the resident system: CI does not compile them and `pando/` does
 not import them.
 

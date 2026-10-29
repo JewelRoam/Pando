@@ -126,18 +126,40 @@ graph TB
 
 ## Docs
 
-- [Blueprint (zh-CN)](docs/BLUEPRINT.zh-CN.md) — architecture
-- [ADOPTION](docs/ADOPTION.md) — three-ring capability model, survival metrics
-- [Onboarding (zh-CN)](docs/ONBOARDING.zh-CN.md) — consent tiers, sandbox policy, product UX
-- [METRICS](docs/METRICS.md) — dashboard design
-- [ROADMAP](docs/ROADMAP.md) — phases with measurable gates
-- [Research notes](docs/research/) — 28 rounds of evidence-backed findings
-- [TERMUX.md](TERMUX.md) — Android TV box onboarding guide
-- [Swarm check](docs/SWARM-CHECK.md) — multi-process tokenized consensus and shrinkage
-- [RTX 3070 CUDA worker](docs/CUDA-3070.md) — non-OpenVINO HTTP integration
-- [Slow-stem check](tools/slow_stem_check.py) — timeout, cooldown, and retry proof
-- [Windows service check](docs/SERVICE-CHECK-WINDOWS.md) — real lifecycle validation record
-- [Linux CI service check](docs/SERVICE-CHECK-LINUX-CI.md) — user-syworker lifecycle validation record
+### Design — what the system is (stateless, current)
+
+- [Architecture (zh-CN)](docs/design/ARCHITECTURE.zh-CN.md) — the design blueprint
+- [Capability inventory](docs/design/CAPABILITIES.md) — every component, live-verified
+- [Stem wire protocol](docs/design/PROTOCOL-stem.md) — the 3-endpoint join contract
+- [Committee theory](docs/design/THEORY-committee.md) — machine-checked consensus predictions
+- [Identity](docs/design/IDENTITY.md) — four words, three invariants
+- [ADOPTION](docs/design/ADOPTION.md) — three-ring capability model, survival metrics
+
+### Operations — how to run it
+
+- [Onboarding (zh-CN)](docs/operations/ONBOARDING.zh-CN.md) — consent tiers, sandbox policy, product UX
+- [SEED](docs/operations/SEED.md) — what leaves the box for the civilization to survive it
+- [METRICS](docs/operations/METRICS.md) — dashboard design
+- [ROADMAP](docs/operations/ROADMAP.md) — phases with measurable gates
+- [TERMUX](docs/operations/TERMUX.md) — Android TV box onboarding guide
+
+### Evidence — what has been measured
+
+- [What works today](docs/WHAT-WORKS.md) — full verified capability list
+- [Research summary](docs/evidence/SUMMARY.md) — definitive findings
+- [Findings](docs/evidence/FINDINGS.md) — measured results by theme, append-only
+- [Reflections](docs/evidence/reflections.md) — running critical review log
+
+### For contributors
+
+- [Reproduce](REPRODUCE.md) — every number traces to a runnable experiment
+- [Contributing](CONTRIBUTING.md) — the bar is "the claim is traceable"
+
+### Archive — historical records, preserved as-is
+
+- [Research rounds](docs/archive/research/) — 190 dated experiment logs
+- [Session logs](docs/archive/session-logs/) — sanitized session backups
+- [Project state snapshot](docs/archive/PROJECT-STATE-2026-10.md) — the original research log
 
 ## Status
 

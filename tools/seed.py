@@ -3,7 +3,7 @@
 
 Genes and culture mostly live in git: the registry, the rollout corpus, the
 playbook example, the corpora. Weight *bytes* do not - weights stay off GitHub
-by rule (docs/SEED.md), and git carries their digests instead. What does NOT
+by rule (docs/operations/SEED.md), and git carries their digests instead. What does NOT
 live in git at all is the small, irreplaceable part:
 the member's secret key, the authorization ledger with its audit hash chain,
 the root's node_id -> pubkey bindings, and the group mailbox history. Today all

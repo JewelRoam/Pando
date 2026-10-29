@@ -76,7 +76,7 @@ All items verified on real hardware/software.
   `torch-cuda` checkpoint) votes in the same consensus as the OpenVINO/ONNX
   Runtime Intel stems and the ONNX Runtime CUDA stem — four workers, two
   ecosystems, one HTTP contract, tier `auto`. The contract itself is
-  documented with no framework named in it (`docs/STEM-PROTOCOL.md`).
+  documented with no framework named in it (`docs/design/PROTOCOL-stem.md`).
 - **Pipeline staging, measured**: `tools/stage_split.py` cuts the Laya graph
   at a node boundary (shared external weights, verified numerically exact
   per provider) and `tools/stage_pipeline_check.py` chains the halves over
@@ -84,13 +84,13 @@ All items verified on real hardware/software.
   hop ~1–2 ms, but staging still does **not** pay on one shared CPU, and
   offloading half the model to a slower device is 0.47x. Replicate-and-vote
   stays the default; stage only on disjoint devices with comparable
-  throughput (`docs/research/2026-10-14-round94.md`).
+  throughput (`docs/archive/research/2026-10-14-round94.md`).
 - **Ecosystem-independent votes**: the same Laya checkpoint run through ONNX
   Runtime (CPU) and native PyTorch (CUDA) agreed on **27/27** choice tasks
   with a 0.3% mean confidence gap and identical accuracy — heterogeneous
   replicas are interchangeable voters, and ensemble diversity must come from
   the checkpoint, not the runtime
-  (`tools/cross_ecosystem_check.py`, `docs/research/2026-10-14-round95.md`).
+  (`tools/cross_ecosystem_check.py`, `docs/archive/research/2026-10-14-round95.md`).
 - **Topology planner**: `pando/topology.py` decides replicate vs stage vs
   infeasible from measured device/link numbers, splitting work in proportion
   to device speed and enforcing `L < T`, memory fit, and a minimum gain over
@@ -98,14 +98,14 @@ All items verified on real hardware/software.
   measurements (in CI). It predicts that a speed-proportional split beats a
   synchronous quorum 8.7x where a 50/50 node split lost 0.47x — a
   model-based prediction, flagged as such
-  (`docs/research/2026-10-14-round96.md`).
+  (`docs/archive/research/2026-10-14-round96.md`).
 - **Staging tested, and it loses**: the speed-proportional split measured
   **0.66x / 0.74x** against quorum-1 replication on the 3070 — the round-96
   prediction is falsified and its 8.7x figure retracted (it compared against
   a forced quorum of 2). The ceiling is only 1.17x for a 5.9x-slower partner,
   and the loopback hop is 1.9–11.1 ms under load, not the 1.2 ms measured
   idle. The planner now prices the loaded hop and evaluates smaller quorums
-  as the replication baseline (`docs/research/2026-10-14-round97.md`).
+  as the replication baseline (`docs/archive/research/2026-10-14-round97.md`).
 - **Autonomy, honestly bounded**: Laya's built-in act head returns 1.0 for
   every state through *both* ecosystems, so the model cannot decide whether
   to engage — the observation and the question must come from outside.
@@ -113,13 +113,13 @@ All items verified on real hardware/software.
   (allowed tier **and** a minimum responder count), because the coordinator's
   `min(3, len(selected))` quorum lets a lone survivor report `auto` with
   agreement 1.0. `tools/autonomy_check.py` proves both behaviours end to end
-  (`docs/research/2026-10-14-round98.md`).
+  (`docs/archive/research/2026-10-14-round98.md`).
 - **The gate is worth having**: on the 27 labeled choice tasks the three
   lineages agree that well — `tier=auto` covers **51.8% of the work at 92.9%
   accuracy** against 51.8% undifferentiated, while cross-lineage splits are
   right only 16.7% of the time. Confidence separates cleanly (0.825 correct
   vs 0.427 wrong). The swarm knows when it is guessing, at no extra cost
-  (`tools/gating_check.py`, `docs/research/2026-10-14-round99.md`).
+  (`tools/gating_check.py`, `docs/archive/research/2026-10-14-round99.md`).
 - **Verified end to end**: with the production calibration applied, the gate
   covers **48.1% at 92.3%** locally — and a real `coordinator` with three real
   lineage stems over HTTP reproduces that **exactly** (delta 0.0000), with
@@ -128,7 +128,7 @@ All items verified on real hardware/software.
   optimal. Two defects surfaced on the way: calibration is selected by the
   checkpoint *name* (a misnamed stem silently changes the gate), and a naive
   sweep would have shipped a threshold that acts on a minority vote
-  (`docs/research/2026-10-14-round100.md`).
+  (`docs/archive/research/2026-10-14-round100.md`).
 - **A bet judged on evidence, and a loss remembered**: a growth is now
   judged on the *median* of three latency samples rather than one, a rollback
   refuses to remove a member the swarm depends on (the question is "can the
@@ -137,7 +137,7 @@ All items verified on real hardware/software.
   it. Running the loop long enough exposed the oscillation: rollback alone
   ended at 848.7 ms having grown into the same harm again; with the memory it
   ends at **144.1 ms** with 2 reproductions instead of 3
-  (`docs/research/2026-10-14-round116.md`).
+  (`docs/archive/research/2026-10-14-round116.md`).
 - **Growth that knows where it is going, and can undo itself**: the
   supervisor refuses to grow a lineage onto a host that already runs one
   (same compute, no new information), and treats a growth as a bet —
@@ -147,7 +147,7 @@ All items verified on real hardware/software.
   of two ending at 791.8 ms; and when the second growth is forced through, a
   rollback recovers from 882 ms to 124 ms within two rounds
   (`tools/elastic_growth_check.py`,
-  `docs/research/2026-10-14-round115.md`).
+  `docs/archive/research/2026-10-14-round115.md`).
 - **Growth through real reproduction, and where it stops helping**: the
   supervisor's `grow` action is wired to the real spore path (served
   artifact, declared lineage and digest, attestation, `reproduce` grant), and
@@ -158,7 +158,7 @@ All items verified on real hardware/software.
   host adds voters, not cores, and the supervisor's own signal then reports
   "a per-decision-cost problem, not a capacity one"
   (`tools/elastic_growth_check.py`,
-  `docs/research/2026-10-14-round114.md`).
+  `docs/archive/research/2026-10-14-round114.md`).
 - **The elasticity loop closes**: `GET /status` exposes the swarm's own
   signals (members, quorum size/floor/ceiling, latency target, decision
   EWMA) and `ElasticSupervisor` decides grow / retire / hold. It grows only
@@ -168,7 +168,7 @@ All items verified on real hardware/software.
   rounds of hold. A playbook category must now resolve to a real gating
   table, so a typo fails at load instead of silently yielding the permissive
   floor (`tools/elastic_loop_check.py`,
-  `docs/research/2026-10-14-round113.md`).
+  `docs/archive/research/2026-10-14-round113.md`).
 - **Category by declaration**: a playbook question declares
   `category = "security"`, so the quorum floor follows what the operator
   wrote down rather than a keyword scan of the question text. `risk_check`
@@ -176,7 +176,7 @@ All items verified on real hardware/software.
   under load where the keyword rule would have given it k=2, at a measured
   cost of 28% throughput. An unclassified question in a categorised playbook
   fails conservative, and keywords can still only raise the floor
-  (`docs/research/2026-10-14-round112.md`).
+  (`docs/archive/research/2026-10-14-round112.md`).
 - **The swarm's edge over its best member is real but small — and the
   members matter 13x more than the combiner**: over 480 labeled tasks (two
   independent 240-task splits) the weighted vote scores **89.6%** against
@@ -193,7 +193,7 @@ All items verified on real hardware/software.
   and it needs more diverse members rather than more tasks: at the observed
   5.6% discordance, resolving a 1-point difference takes ~3,900 tasks
   (`tools/build_large_suite.py`, `tools/ensemble_significance.py`,
-  `docs/research/2026-10-15-round118.md`).
+  `docs/archive/research/2026-10-15-round118.md`).
 - **Replication buys capacity, not accuracy — and an uncounted replica is
   worse than neutral**: the repository's one trained checkpoint
   (`artifacts/laya-rlcd-v7.onnx`, different weights by hash) makes
@@ -207,7 +207,7 @@ All items verified on real hardware/software.
   number of distinct checkpoints — the state an elastically replicated swarm
   converges to — the duplicate votes at full weight. Real diversity has to
   come from a different base or tokenizer, not from a descendant
-  (`docs/research/2026-10-15-round119.md`).
+  (`docs/archive/research/2026-10-15-round119.md`).
 - **Neither a better combiner nor a narrower ballot reaches the headroom**:
   re-asking the trio with only the disputed candidates on the ballot — what
   the verify tier would do in production — lifts the weighted vote on
@@ -215,7 +215,7 @@ All items verified on real hardware/software.
   78 rows, and where it manufactures unanimity (31 rows) the accuracy is
   *identical* to the first ballot (83.9%). Both routes to the 93.6% the trio
   holds on those rows are now closed by measurement; it is a members problem
-  (`docs/research/2026-10-15-round120.md`).
+  (`docs/archive/research/2026-10-15-round120.md`).
 - **The ensemble buys decorrelation, not accuracy**: adding a fourth voter
   from outside the neural family — a zero-shot keyword matcher at 95.0%, a
   naive Bayes at 93.75%, and a control that is 98.75% accurate but whose
@@ -226,7 +226,7 @@ All items verified on real hardware/software.
   95.0% at full coverage (trio: 88.75%); the most accurate voter of the
   three makes it *worse*. The premise needs members chosen for
   disagreement, not for solo accuracy (`tools/foreign_voter_check.py`,
-  `docs/research/2026-10-15-round122.md`).
+  `docs/archive/research/2026-10-15-round122.md`).
 - **On wording it has never seen, the swarm still beats its best member — and
   the diversity rule still holds**: the generated suite's two seeds turned
   out to share all 53 of their phrasings, so a genuinely held-out suite was
@@ -240,7 +240,7 @@ All items verified on real hardware/software.
   *bracket* the neural members: a 57.5%-accurate decorrelated voter is worth
   **+4.1 points** at matched coverage, while a 76.25%-accurate voter whose
   errors were aligned with an existing member is worth −2.5
-  (`docs/research/2026-10-15-round123.md`).
+  (`docs/archive/research/2026-10-15-round123.md`).
 - **Corroboration is now a policy you can require**: the lineage rule was
   verified over real HTTP — a 2:1 stem majority of one lineage over another
   is an `auto` today and a `verify` with the flag on — and the same harness
@@ -250,7 +250,7 @@ All items verified on real hardware/software.
   distinct lineages (default 1, so a single device still works alone), and
   the decision response now reports `lineages` and the floor
   (`tools/lineage_quorum_e2e_check.py`,
-  `docs/research/2026-10-15-round124.md`).
+  `docs/archive/research/2026-10-15-round124.md`).
 - **A device cannot mint independence from the model it holds**: reversing
   the ballot flips **0 of 240** answers, and the quantised sibling the
   project would ship to an NPU moves 20% of answers yet keeps the family's
@@ -261,7 +261,7 @@ All items verified on real hardware/software.
   that pays (+4.1 points). On wording none of them has seen the trio's own
   phi *rises* to +0.36..+0.82, so the family moves together exactly where
   the task gets hard (`tools/same_family_voter_check.py`,
-  `docs/research/2026-10-15-round125.md`).
+  `docs/archive/research/2026-10-15-round125.md`).
 - **The independent member is now shipped, and it found a bug in the
   aggregation rule**: `pando/textmodel.py` is a 19 KB naive Bayes
   (`worker --backend text`) that any device can serve, calibrated through the
@@ -272,7 +272,7 @@ All items verified on real hardware/software.
   the `verify` tier (a tie still can never auto-execute): the trio goes
   73.75% → **77.08%** at full coverage and the four-member swarm
   72.92% → **78.33%**, with the `auto` tier untouched
-  (`docs/research/2026-10-15-round126.md`, `…round127.md`).
+  (`docs/archive/research/2026-10-15-round126.md`, `…round127.md`).
 - **Scaling is a membership problem, not a head-count**: adding a *second*
   cheap independent member stops paying — four of them leave the swarm
   **11.6 points worse** than the trio (paired bootstrap, ahead in 0.1% of
@@ -284,7 +284,7 @@ All items verified on real hardware/software.
   constraint is error correlation, not member strength or member count: a
   device is worth a seat only if it diverges from the members already seated
   (`tools/member_portfolio_check.py`, `tools/scaling_curve_check.py`,
-  `docs/research/2026-10-15-round128.md`).
+  `docs/archive/research/2026-10-15-round128.md`).
 - **Count the opinions, not the devices**: a playbook now declares
   `[lineages] blocs`, groups whose errors move together, and each group
   votes once (`aggregate(blocs=)`; floors and `corroboration_floor` count
@@ -294,7 +294,7 @@ All items verified on real hardware/software.
   count not. A fleet can therefore grow with same-family devices for
   throughput at no cost to the decision, while growth for *intelligence*
   still needs a new opinion
-  (`docs/research/2026-10-15-round129.md`).
+  (`docs/archive/research/2026-10-15-round129.md`).
 - **One device, several compute units, one opinion — measured again under the
   new rules**: the same weights on the CPU (ONNX Runtime) and on the Intel
   iGPU (OpenVINO) give **identical choices on 240/240** held-out tasks with a
@@ -305,7 +305,7 @@ All items verified on real hardware/software.
   current OpenVINO vpux compiler rejects `node_MatMul_215` with unbounded
   dimensions, the op-level class of blocker rounds 52-54 solved twice
   (`tools/multi_eu_swarm_check.py`,
-  `docs/research/2026-10-15-round130.md`).
+  `docs/archive/research/2026-10-15-round130.md`).
 - **The NPU was a graph problem, not a hardware problem**: the current
   OpenVINO vpux compiler was rejecting `gnr1_gather_el` — a node produced by
   this repository's own GatherND repair for the *Intel GPU*. Handing it
@@ -317,7 +317,7 @@ All items verified on real hardware/software.
   its case is efficiency per watt). Five stems, three opinions: the extra
   silicon buys capacity, not information
   (`tools/multi_eu_swarm_check.py`,
-  `docs/research/2026-10-15-round131.md`).
+  `docs/archive/research/2026-10-15-round131.md`).
 - **Corroboration is paid for in throughput**: with one lineage on the three
   units (so every configuration answers identically), a units-by-quorum
   matrix under four concurrent clients gives 1u-k1 14.7 dec/s, **2u-k1
@@ -329,7 +329,7 @@ All items verified on real hardware/software.
   1 multiplies throughput 2.3x and halves p50 latency, and the answer does
   not change. Corroboration is a dial with a measured price
   (`tools/hetero_capacity_check.py`,
-  `docs/research/2026-10-15-round132.md`).
+  `docs/archive/research/2026-10-15-round132.md`).
 - **The host is the ceiling, and one host is noisy**: re-running the capacity
   matrix with the stems started the way production starts them — separate
   `worker` processes, own interpreter and session — changes nothing: 1 unit
@@ -342,7 +342,7 @@ All items verified on real hardware/software.
   single-host numbers carry 30-50% noise. The next doubling is another
   machine or less host work per request, not another unit
   (`tools/process_fleet_capacity_check.py`,
-  `docs/research/2026-10-15-round133.md`).
+  `docs/archive/research/2026-10-15-round133.md`).
 - **The CPU is the wrong silicon to vote with**: measured with each unit in
   true isolation and a host that is somebody's computer (eight cores burned by
   unrelated work), the CPU stem serves 16.8 decisions/s idle and **6.0/s
@@ -357,7 +357,7 @@ All items verified on real hardware/software.
   the loader had been repeating one task; per-unit attributions from rounds
   132-133 are withdrawn.)
   (`tools/idle_silicon_check.py`,
-  `docs/research/2026-10-15-round134.md`).
+  `docs/archive/research/2026-10-15-round134.md`).
 - **The accelerators drop out under concurrency — and the response now says
   so**: stems report their measured host cost per decision on every
   heartbeat, `pick_quorum` prefers the cheapest ten-fold cost band inside a
@@ -370,7 +370,7 @@ All items verified on real hardware/software.
   throughput and cost figures are **withdrawn** — they were dropouts counting
   as speed. The next fix is what `MockBackend.serialize` already models: a
   device should serve one decision at a time
-  (`docs/research/2026-10-15-round135.md`).
+  (`docs/archive/research/2026-10-15-round135.md`).
 - **A device serves one decision at a time — and the numbers come back**:
   stems now serialise `backend.decide` by default (`worker --parallel` to opt
   out). The accelerator dropouts went from 49-56 silent decisions per 120 to
@@ -380,7 +380,7 @@ All items verified on real hardware/software.
   53 → 35 ms at 36 ms, Intel NPU 112 → 109 ms at **4 ms** — a corrected cost
   ratio of 80-700x, and the accelerators do not degrade at all while the CPU
   stem loses 3.3x
-  (`docs/research/2026-10-15-round136.md`).
+  (`docs/archive/research/2026-10-15-round136.md`).
 - **Independence is the admission test; the rest is noise**: ten cheap
   members (three feature views × three smoothing strengths, plus a
   nearest-centroid classifier) were measured for accuracy, mean error
@@ -393,7 +393,7 @@ All items verified on real hardware/software.
   net rescues, with the whole spread inside 240-row sampling error. A fleet
   should admit on decorrelation and measure the rest after the fact
   (`tools/member_value_check.py`,
-  `docs/research/2026-10-15-round137.md`).
+  `docs/archive/research/2026-10-15-round137.md`).
 - **Reproduction costs about half a minute and buys nothing**: measured end
   to end against a running root, a new member's birth is **9.4 s to load**
   the artifact + **0.2 s to register** + **5.0 s to its first vote** (14.6 s,
@@ -403,7 +403,7 @@ All items verified on real hardware/software.
   from 26.1 to 13.5 decisions/s exactly as k predicts. A self-replicating
   swarm is cheap to grow and hard to make smarter, and both halves are now
   numbers (`tools/device_birth_check.py`,
-  `docs/research/2026-10-15-round138.md`).
+  `docs/archive/research/2026-10-15-round138.md`).
 - **A learned combiner beats every single member, and locates the rest of the
   gap**: treating the quorum's votes and calibrated confidences as features
   and fitting a regularised logistic regression on the dev split (l2 chosen
@@ -415,7 +415,7 @@ All items verified on real hardware/software.
   67.7% — the remaining headroom lives exactly where the swarm refuses to
   answer, and a fitted rule recovers about three-quarters of it there
   (`tools/learned_combiner_check.py`,
-  `docs/research/2026-10-15-round139.md`).
+  `docs/archive/research/2026-10-15-round139.md`).
 - **The combiner is now a shipped artifact, and it is advisory by
   construction**: `tools/train_combiner.py` writes a **4 KB**
   `assets/combiner.json` (fitted on the dev votes, l2 cross-validated on dev
@@ -427,7 +427,7 @@ All items verified on real hardware/software.
   could not: the model suggested a label outside the request's candidates, so
   a suggestion is now masked to the question's options like any member's vote
   (`pando/combiner.py`, `tools/combiner_artifact_check.py`,
-  `docs/research/2026-10-15-round140.md`).
+  `docs/archive/research/2026-10-15-round140.md`).
 - **Three disjoint wording sets, and a combiner that beats every member on
   unseen wording**: the generator now carries a third inventory
   (`--cues c`, 0 cue overlap with the other two), which separates the roles —
@@ -439,7 +439,7 @@ All items verified on real hardware/software.
   and an oracle of 71.43%. Votes alone carry most of it (58.44%), the text
   adds +3.9 points there
   (`tools/combiner_text_check.py`, `assets/heldout2_test.jsonl`,
-  `docs/research/2026-10-15-round141.md`).
+  `docs/archive/research/2026-10-15-round141.md`).
 - **The combiner artifact now carries its own text model (spec 2)**: the
   feature block appends the text model's posterior over the candidates and
   the artifact embeds that model, so one signed **35 KB** file ships both
@@ -449,7 +449,7 @@ All items verified on real hardware/software.
   and **62.34% on the 77 rows the gate declines**, with 0 of its 77
   suggestions landing on an auto row
   (`pando/combiner.py`, `tools/combiner_artifact_check.py`,
-  `docs/research/2026-10-15-round142.md`).
+  `docs/archive/research/2026-10-15-round142.md`).
 - **A portable combiner, and the smallest real fleet measured end to end**:
   spec 3 drops the per-lineage feature cells, which both makes the artifact
   membership-agnostic *and* raises held-out accuracy — **85.00%** full
@@ -460,7 +460,7 @@ All items verified on real hardware/software.
   **13 seconds**: 76 auto-executed at **97.37%**, 164 declined with combiner
   suggestions at 68.29%, a decided answer in **77.5%** of all rows
   (`tools/live_fleet_quality_check.py`,
-  `docs/research/2026-10-15-round144.md`).
+  `docs/archive/research/2026-10-15-round144.md`).
 - **The governance layer, verified through the file an operator writes**: the
   advisory combiner is now declared and digest-pinned in the playbook
   (`[combiner] path + sha256`, refused if it changed), and
@@ -471,7 +471,7 @@ All items verified on real hardware/software.
   `corroboration_floor=2` refuses auto-execution to **one opinion that agrees
   with itself at agreement 1.0**
   (`assets/playbook.example.toml`,
-  `docs/research/2026-10-15-round145.md`).
+  `docs/archive/research/2026-10-15-round145.md`).
 - **Growing and shrinking a fleet while it serves**: four live stages on the
   same labelled rows — one leaf (iGPU) auto-executes 50 of 60 rows at 0.800;
   adding **a new opinion** (the 19 KB text member) takes the quorum to two
@@ -481,7 +481,7 @@ All items verified on real hardware/software.
   changes nothing either. Trustworthy automation comes from opinions, and a
   copy contributes none
   (`tools/elastic_fleet_check.py`,
-  `docs/research/2026-10-15-round146.md`).
+  `docs/archive/research/2026-10-15-round146.md`).
 - **The cross-device path, verified on a real interface**: the session has run
   everything on loopback and reported cross-device as hardware-blocked — but
   "no second machine" is not "no second network path". With the operator's
@@ -493,7 +493,7 @@ All items verified on real hardware/software.
   token, read off the root's console, authorises joining. The only thing
   between this and a two-device fleet is the second device
   (`tools/lan_path_check.py`,
-  `docs/research/2026-10-15-round147.md`).
+  `docs/archive/research/2026-10-15-round147.md`).
 - **Calibration does not transfer, and the gate is tuned to it**: with 720
   labelled rows the swarm's calibration tables — fitted on 12-22 items — could
   finally be refitted, and the transform inverts exactly, so no model had to
@@ -505,7 +505,7 @@ All items verified on real hardware/software.
   at 0.908 → 0.860 accuracy. Calibration and gating are one system — the old
   tables' five-fold over-softening was quietly acting as a safety margin
   (`tools/refit_calibration_check.py`,
-  `docs/research/2026-10-15-round148.md`).
+  `docs/archive/research/2026-10-15-round148.md`).
 - **The shipped gate is at the optimum of its own grid — and that optimum is
   partly an accident**: tuning temperatures *and* thresholds on a deployment's
   own labelled rows (25/50/100 of them) does not beat shipping — at a 90%
@@ -519,7 +519,7 @@ All items verified on real hardware/software.
   **part of the shipped gate's safety comes from a calibration error acting as
   a margin**, which the playbook example now says beside the thresholds
   (`tools/tune_gate_check.py`,
-  `docs/research/2026-10-15-round149.md`).
+  `docs/archive/research/2026-10-15-round149.md`).
 - **The project can build the member it was missing**: with 720 labelled rows
   and the encoder **unfrozen**, one fine-tune of the `english` lineage on the
   3070 scores **0.9125 on a wording split it never saw** (its parent: 0.7333;
@@ -532,7 +532,7 @@ All items verified on real hardware/software.
   `TorchLayaBackend`, with 0 evaluation states in the training set. Caveat
   carried forward: its confidences are saturated at 1.0 and need their own
   calibration (`tools/build_finetune_data.py`,
-  `docs/research/2026-10-16-round150.md`).
+  `docs/archive/research/2026-10-16-round150.md`).
 - **The system, with the member the project trained itself, decides 90.83% of
   wording it has never seen**: the gate alone reaches 0.8833 at full coverage
   with 189 rows auto-executed at 0.9153, and the advisory combiner takes the
@@ -542,7 +542,7 @@ All items verified on real hardware/software.
   scores 8–10 points *worse* than the shipped file, which is the same "more
   rows, not more fitting" lesson as rounds 137/141 arriving from a new
   direction (`tools/improved_fleet_check.py`,
-  `docs/research/2026-10-16-round151.md`).
+  `docs/archive/research/2026-10-16-round151.md`).
 - **The training loop works; one run of it is not a measurement**: with a
   fourth wording split built so the evaluation never doubles as training data
   (`--cues d`, 0 overlap with A/A2/B/C), five fine-tunes across two corpora
@@ -555,7 +555,7 @@ All items verified on real hardware/software.
   **replication**, because a fine-tune that scored 0.83 may be the same recipe
   as one that scored 0.96
   (`tools/generation_curve_check.py`,
-  `docs/research/2026-10-16-round152.md`).
+  `docs/archive/research/2026-10-16-round152.md`).
 - **The admission rule, applied to real candidates**: all five fine-tunes on
   the fourth split clear all three floors — capability (0.83-0.975 against
   the 0.769 bar), independence (mean phi +0.04…+0.26, where a copied
@@ -565,7 +565,7 @@ All items verified on real hardware/software.
   gate+combiner were fitted on the weaker trio; and admitting a *run* is
   not selecting a *recipe* (sample means 0.9431 at 720 rows and 0.8959 at
   960; the weakest admitted draw, 0.8292, clears the floor by 2.6 points)
-  (`tools/admit_member_check.py`, `docs/research/2026-10-16-round153.md`).
+  (`tools/admit_member_check.py`, `docs/archive/research/2026-10-16-round153.md`).
 - **The fleet runs with the CPU left alone**: the iGPU and the NPU
   (OpenVINO, english lineage) plus the RTX 3070 carrying the project's own
   fine-tune `ft-v3` (torch/CUDA — the first live member from outside the
@@ -577,7 +577,7 @@ All items verified on real hardware/software.
   first run's "0.00 CPU-seconds for the CUDA stem" was a venv redirector
   being measured instead of the interpreter it spawns — caught, fixed, and
   kept in the log (`tools/cpu_free_fleet_check.py`,
-  `docs/research/2026-10-16-round153.md`).
+  `docs/archive/research/2026-10-16-round153.md`).
 - **The system outgrows its best member, on the same idle accelerators**:
   the live fleet's 0.8292 had a hidden ceiling — its two identical english
   stems are a permanent 2-of-3 majority, so the stronger distinct member
@@ -594,7 +594,7 @@ All items verified on real hardware/software.
   the digit. The member also got its temperature at last (T=6.56 fitted on
   split C: ECE 0.091 → 0.013, `uncalibrated_checkpoints` gone)
   (`tools/calibrated_gate_check.py`, `assets/calibration/ft-v3.json`,
-  `docs/research/2026-10-16-round154.md`).
+  `docs/archive/research/2026-10-16-round154.md`).
 - **The growth ladder, priced**: starting from one accelerator and growing
   live over 240 held-out rows — english alone decides 0.7417; adding an
   english replica changes **not one answer** and cuts throughput 56% (17.25
@@ -606,7 +606,7 @@ All items verified on real hardware/software.
   intelligence, stems in → latency, useless stems out → throughput — and
   all four stages were predicted from recorded votes to four decimals
   before the run (`tools/growth_ladder_check.py`,
-  `docs/research/2026-10-16-round155.md`).
+  `docs/archive/research/2026-10-16-round155.md`).
 - **The latency target buys the fast twin, and k stops buying replicas**:
   with a 100 ms target the adaptive fleet used to seat the NPU (cheapest
   per host-CPU-second, ~110 ms per decision) and settle at p50 115 ms —
@@ -619,7 +619,7 @@ All items verified on real hardware/software.
   target, 15.64 rows/s, decided 0.9750 with all 159 auto rows correct** —
   the configuration round 155 assembled by hand, reached by the loop
   itself (`tools/latency_pick_check.py`,
-  `docs/research/2026-10-16-round156.md`).
+  `docs/archive/research/2026-10-16-round156.md`).
 - **A Mac joins as one remote group — the first member outside the Laya
   family, the OS, and the architecture**: the MacBook (Apple silicon, LAN)
   keeps its own root and the repository's naive-Bayes worker; a Windows
@@ -633,7 +633,7 @@ All items verified on real hardware/software.
   answered at 0.4167 accuracy with median confidence 0.83 — confidence
   scales do not transfer across model families, and the answer is model
   tiers composed by the aggregation layer, not a herd of identical voters
-  (`experiments/mac_group_check.py`, `docs/research/2026-10-16-round157.md`).
+  (`experiments/mac_group_check.py`, `docs/archive/research/2026-10-16-round157.md`).
 - **The first real LLM tier — deployed, evaluated, and honestly not yet a
   win**: the Mac node (via the task mailbox) deployed Qwen3-4B-Instruct
   Q4_K_M on llama.cpp with Metal (~45 tok/s, OpenAI-compatible, key-guarded)
@@ -646,7 +646,7 @@ All items verified on real hardware/software.
   not the model tier — calibration (fit on C, evaluate on D) is the next
   dispatched experiment (`tools/llm_decision_check.py`,
   `metrics/lan-check/combine_llm_check.py`,
-  `docs/research/2026-10-16-round158.md`).
+  `docs/archive/research/2026-10-16-round158.md`).
 - **Reliability-aware gating — the tiered fleet beats its core**: dropping
   the JSON+confidence scaffold from the Mac LLM's prompt gains 7.9 points
   and 3.2× latency on split D (0.8167 @ 139 ms); and once the gate requires
@@ -657,7 +657,7 @@ All items verified on real hardware/software.
   the highest-accuracy member present is in the winning coalition; the gate
   routes disagreement to the advisor and lets the trusted member hold the
   veto (`metrics/lan-check/variant_matrix_check.py`,
-  `docs/research/2026-10-16-round159.md`).
+  `docs/archive/research/2026-10-16-round159.md`).
 - **Live, the three-tier fleet beats its core — the prediction held to the
   digit**: three tiers on two machines (Intel iGPU Laya floor + RTX 3070
   fine-tune + Mac Qwen3-4B over the LAN, Windows→Mac only), quorum 3/3,
@@ -666,7 +666,7 @@ All items verified on real hardware/software.
   reproduced it to the digit (5.60 rows/s, p50 181 ms). The offline matrix
   predicted 0.9833 before the run; the naive seating of the same LLM tier
   decided 0.9167 (`experiments/tiered_live_check.py`,
-  `docs/research/2026-10-16-round160.md`).
+  `docs/archive/research/2026-10-16-round160.md`).
 - **Fresh split E confirms the tier and exposes the fallback slot**: on a
   fifth wording inventory with zero overlap with A/A2/B/C/D, the three-tier
   fleet live-executed **227 rows auto, every one correct** (D: 195) at
@@ -675,7 +675,7 @@ All items verified on real hardware/software.
   (0.9833 vs 0.9417), the trusted member's veto wins on E (0.9917 vs
   0.9583) — so it becomes a declared, validation-chosen policy:
   `--assent-fallback advisor|veto` (Task 008)
-  (`docs/research/2026-10-16-round161.md`).
+  (`docs/archive/research/2026-10-16-round161.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
   folded into its lineage (`aggregate(count_lineages=True)`, `coordinator
   --lineage-quorum`), so counting stems no longer lets a copied lineage
@@ -685,7 +685,7 @@ All items verified on real hardware/software.
   member drags the quorum to 74.6%, replicating the *best* inflates it to
   90.0% — while the lineage-counted rule moves by **0.000** and is byte-identical
   on a quorum with no duplicates
-  (`tools/lineage_quorum_check.py`, `docs/research/2026-10-15-round121.md`).
+  (`tools/lineage_quorum_check.py`, `docs/archive/research/2026-10-15-round121.md`).
 - **Per-category quorum floors and retirement**: a playbook sets a
   `quorum_floor` per category, so under load an ordinary question gave up
   voters down to 2 while a security question stopped at 4 — twice the
@@ -695,7 +695,7 @@ All items verified on real hardware/software.
   of elasticity now exists: a slow member can be retired through the grant
   ledger, with the root blocking its re-registration so the removal is
   durable rather than a five-second deletion
-  (`tools/retirement_check.py`, `docs/research/2026-10-14-round111.md`).
+  (`tools/retirement_check.py`, `docs/archive/research/2026-10-14-round111.md`).
 - **A quorum that knows how busy it is**: `pick_quorum` now orders voters by
   in-flight load (then latency band, then rotation), and
   `coordinator --adaptive-quorum --latency-target-ms` lets the quorum size shrink
@@ -704,7 +704,7 @@ All items verified on real hardware/software.
   agreement while idle (k=5) and settled at k=3 under load, hitting its
   120 ms target at 71 req/s where static k=5 gave 23.5 req/s at 306 ms
   (`tools/scaling_law_check.py`,
-  `docs/research/2026-10-14-round110.md`).
+  `docs/archive/research/2026-10-14-round110.md`).
 - **What scales is the quorum, not the replica**: with a device-like
   serialized replica, going 1 → 6 replicas bought only 9% throughput while
   every voter was used on every decision. With `--quorum-k 2` fixed and
@@ -712,7 +712,7 @@ All items verified on real hardware/software.
   at concurrency 4), bounded by `N/k = 3` parallel decisions. Capacity is
   bought from agreement diversity, so "reproduce more" and "decide faster"
   are different instructions (`tools/scaling_law_check.py`,
-  `docs/research/2026-10-14-round109.md`).
+  `docs/archive/research/2026-10-14-round109.md`).
 - **Delta replication, end to end**: `coordinator --chunking cdc` serves
   content-defined manifests and `join --chunk-store` reuses what a replica
   already holds. Two real roots and two real joiners: the second device
@@ -721,7 +721,7 @@ All items verified on real hardware/software.
   append-only blob), which removed the wall-clock regression from the first
   cut: the delta leg is now 5.84 s versus 10.49 s for a full transfer
   (`tools/delta_replication_check.py`,
-  `docs/research/2026-10-14-round108.md`).
+  `docs/archive/research/2026-10-14-round108.md`).
 - **Delta replication**: content-defined chunking plus a content-addressed
   chunk store, so a replica fetches only the chunks it lacks. Replicating a
   fine-tune that shares 93.5% of its weights with its parent moved **105 MB
@@ -729,14 +729,14 @@ All items verified on real hardware/software.
   5.56 s**, with the reconstruction verified byte-identical. The wall clock
   is held back by the on-disk chunk store (4,870 small reads), which is
   recorded as the next fix (`tools/spore_delta_check.py`,
-  `docs/research/2026-10-14-round107.md`).
+  `docs/archive/research/2026-10-14-round107.md`).
 - **Batched replication**: spore chunks transfer 64 at a time over one
   keep-alive connection (`/spore/chunks/<name>/<start>/<count>`) while every
   chunk is still hash-verified, with a per-chunk fallback for a bad chunk.
   The 1.68 GB artifact went from ~125 s to **14.2 s** (8.8x, 113 MB/s,
   byte-identical); end-to-end replication from ~4.5 min to **59 s**
   (`tools/spore_transfer_check.py`,
-  `docs/research/2026-10-14-round106.md`).
+  `docs/archive/research/2026-10-14-round106.md`).
 - **Self-replication loop**: `pando/reproduce.py` orders the existing
   pieces — Spore transfer, artifact attestation, lineage admission, and an
   operator-approved `reproduce` grant — and refuses before anything moves.
@@ -744,7 +744,7 @@ All items verified on real hardware/software.
   endpoints, attested it, passed admission, and grew the quorum 1 → 2 with a
   signed lineage record. It also found four bugs that no check covered, the
   worst being that `pando.join` could not start at all
-  (`tools/reproduce_check.py`, `docs/research/2026-10-14-round105.md`).
+  (`tools/reproduce_check.py`, `docs/archive/research/2026-10-14-round105.md`).
 - **Signed playbooks**: a playbook's canonical bytes are covered by a
   detached Ed25519 signature, which includes the admitted lineages and their
   artifact digests — so the whole declaration chain is attributable.
@@ -752,13 +752,13 @@ All items verified on real hardware/software.
   signature is fatal at startup; without a pin the root logs that writing the
   file is enough to change what it admits. Tampering with `admit` invalidates
   the signature and the root refuses to start
-  (`tools/sign_playbook.py`, `docs/research/2026-10-14-round104.md`).
+  (`tools/sign_playbook.py`, `docs/archive/research/2026-10-14-round104.md`).
 - **Artifact attestation**: a stem reports the SHA-256 of the artifact it
   actually loaded — the graph *and* its external-data weight blob — and a
   playbook that declares `[lineages.artifacts]` refuses any stem that cannot
   match it. Verified end to end: the same honest stem registers when the
   declared digest is right and is refused when it is not
-  (`tools/attestation_check.py`, `docs/research/2026-10-14-round103.md`).
+  (`tools/attestation_check.py`, `docs/archive/research/2026-10-14-round103.md`).
 - **Declared lineage identity**: a playbook declares `[lineages].admit`,
   and the root refuses at registration any stem whose checkpoint is not
   declared — an id is admitted only if it is declared *and* ships a
@@ -766,14 +766,14 @@ All items verified on real hardware/software.
   declaration instead of three conventions, while a root with no
   declaration stays permissive for synthetic harnesses. A declaration is a
   claim, not proof: attestation against the Spore manifest is the next step
-  (`docs/research/2026-10-14-round102.md`).
+  (`docs/archive/research/2026-10-14-round102.md`).
 - **Calibration is enforced where the risk is**: `coordinator` warns at
   registration and reports `uncalibrated_checkpoints` in every decision;
   `AutonomyLoop(require_calibration=True)` refuses to act on them. Placing
   the hard rule in the coordinator instead broke every synthetic harness and
   two CI checks, which is recorded — the coordinator is shared by production
   and test rigs, so the rule belongs in the component that acts
-  (`docs/research/2026-10-14-round101.md`).
+  (`docs/archive/research/2026-10-14-round101.md`).
 - **Real lineage identity over HTTP**: en/ml/td ONNX stems now register as
   distinct checkpoints; twelve shared choice tasks produced 11 cross-lineage
   splits, making model diversity visible to the live quorum.

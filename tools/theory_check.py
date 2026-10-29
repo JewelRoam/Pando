@@ -4,7 +4,7 @@
 This tool loads every recorded vote file in assets/votes/, estimates member
 accuracies and error correlations (phi coefficient), simulates the three PandoSI
 voting policies (plain majority, assent gate, and veto witness fallback), and
-verifies the theoretical predictions derived in docs/THEORY-committee.md.
+verifies the theoretical predictions derived in docs/design/THEORY-committee.md.
 
 Standard library only. Fully offline. Runs on system Python 3.14.
 """
@@ -352,7 +352,7 @@ def main() -> int:
 
     # 3. Testable Predictions Verification
     print("\n" + "=" * 106)
-    print("THEORETICAL PREDICTIONS VERIFICATION (docs/THEORY-committee.md)")
+    print("THEORETICAL PREDICTIONS VERIFICATION (docs/design/THEORY-committee.md)")
     print("=" * 106)
 
     predictions = []

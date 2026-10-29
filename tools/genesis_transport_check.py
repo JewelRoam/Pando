@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Drill: does a signed proposal actually travel, and is adoption gated?
 
-Two claims are checked here, both of which docs/DESIGN-genesis.md §7 listed as
+Two claims are checked here, both of which docs/design/specs/genesis.md §7 listed as
 *not yet claimed*:
 
 1. **Transport.** ``pando/proposal_mail.py`` puts a signed proposal on the

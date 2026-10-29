@@ -15,7 +15,7 @@ the claim. It is deliberately blunt about what it is not:
 
 - **It is not a capability benchmark.** The rows come from the project's own
   generation pipeline. This is internally consistent and externally unanchored
-  (see docs/EXPERIMENT-equal-budget.md).
+  (see docs/evidence/experiments/equal-budget.md).
 - **It does not measure "resident memory" honestly by default.** On a box that
   is already swapping, the OS decides what stays resident, so measured
   footprint and weight bytes disagree wildly. Both numbers are reported; the
