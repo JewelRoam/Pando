@@ -37,8 +37,8 @@ sys.path.insert(0, str(ROOT))
 
 from pando.backend import MockBackend  # noqa: E402
 from pando.common import DecisionRequest  # noqa: E402
-from pando.rootd import Coordinator, Root  # noqa: E402
-from pando.stemd import Stem  # noqa: E402
+from pando.coordinator import Coordinator, Root  # noqa: E402
+from pando.worker import Stem  # noqa: E402
 
 QUESTION = "intent"
 CANDIDATES = ["approve", "reject"]

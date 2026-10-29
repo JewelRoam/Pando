@@ -2,7 +2,7 @@
 
 Bet A from docs/REFLECTIONS.md: the elastic fabric's unique claim must be shown
 under device join/leave/death with live traffic, not only in scripted one-shot
-scenarios. This launches one real rootd plus N real stemd OS processes over
+scenarios. This launches one real coordinator plus N real worker OS processes over
 loopback HTTP, then runs a decision workload on a fixed cadence while randomly
 killing and restarting stems. Every event lands in a JSONL trace; the summary
 reports availability, latency, and membership evolution.
@@ -165,7 +165,7 @@ def main() -> int:
     def spawn_stem(stem_id: str) -> None:
         checkpoint = CHECKPOINTS[stem_ids.index(stem_id) % len(CHECKPOINTS)]
         alive[stem_id] = subprocess.Popen(
-            [python, "-m", "pando.stemd", "--node-id", stem_id,
+            [python, "-m", "pando.worker", "--node-id", stem_id,
              "--checkpoint", checkpoint, "--root", root_url,
              "--pairing-token-file", str(token_file)],
             cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -181,7 +181,7 @@ def main() -> int:
         root_url = f"http://127.0.0.1:{root_port}"
 
         root_proc = subprocess.Popen(
-            [python, "-m", "pando.rootd", "--port", str(root_port),
+            [python, "-m", "pando.coordinator", "--port", str(root_port),
              "--pairing-token-file", str(token_file)],
             cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             creationflags=creationflags)

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Pi5 LLM member: serve Qwen3-1.7B Q4_K_M with llama.cpp (CPU, OpenAI-compatible)
-# and register a signed stemd member against the fabric root.
+# and register a signed worker member against the fabric root.
 #
 # Instructions live here and in docs/onboarding-raspberry-pi.md sections 7-8;
 # bytes (binaries, weights) stay out-of-band (direct transfer / NAS / SD card).
@@ -9,7 +9,7 @@
 #   - weights: ModelScope unsloth/Qwen3-1.7B-GGUF Qwen3-1.7B-Q4_K_M.gguf -> ~/models/
 #
 # Usage (on the pi5, as the member's user):
-#   bash tools/pi5_llm_member.sh serve     # llama-server (foreground; wrap in setsid/systemd)
+#   bash tools/pi5_llm_member.sh serve     # llama-server (foreground; wrap in setsid/syworker)
 #   bash tools/pi5_llm_member.sh stem      # the fabric member (foreground; needs a running serve)
 #
 # Overridables: PANDOSI_PI_LLAMA, PANDOSI_PI_MODEL, PANDOSI_PI_PORT, PANDOSI_ROOT,
@@ -36,7 +36,7 @@ case "${1:-}" in
     ;;
   stem)
     # An empty *string argument* disables auth; an empty *file* is rejected.
-    exec "$VENV_PY" -m pando.stemd --node-id "$NODE_ID" --backend openai \
+    exec "$VENV_PY" -m pando.worker --node-id "$NODE_ID" --backend openai \
       --openai-url "http://127.0.0.1:$PORT/v1" --openai-model qwen3-1.7b \
       --openai-key-file '' --checkpoint "$CHECKPOINT" --root "$ROOT" \
       --pairing-token-file "$TOKEN_FILE" --host 0.0.0.0 \

@@ -165,7 +165,7 @@ def run_member_cycle(seed, bundle: Path, work: Path, report: dict,
                      passphrase_file=None) -> None:
     """Rehydrate one bundle into `work` and ask the two membership questions."""
     from pando.identity import load_or_create
-    from pando.rootd import Coordinator, Root
+    from pando.coordinator import Coordinator, Root
 
     manifest, _src = seed.load_bundle(bundle)
     want = (manifest.get("source") or {}).get("node_fingerprint")

@@ -5,8 +5,8 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/swarm.yml"
-      - "pando/rootd.py"
-      - "pando/stemd.py"
+      - "pando/coordinator.py"
+      - "pando/worker.py"
       - "pando/backend.py"
       - "pando/common.py"
       - "pando/spore.py"

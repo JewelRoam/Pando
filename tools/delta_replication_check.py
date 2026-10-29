@@ -53,7 +53,7 @@ def wait_root(url: str, deadline: float = 30.0) -> None:
         except OSError:
             pass
         time.sleep(0.2)
-    raise SystemExit("rootd did not become ready")
+    raise SystemExit("coordinator did not become ready")
 
 
 def start_root(work: Path, payload: Path, lineage: str, digest: str,
@@ -73,9 +73,9 @@ def start_root(work: Path, payload: Path, lineage: str, digest: str,
     url = f"http://127.0.0.1:{port}"
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) \
         if sys.platform == "win32" else 0
-    log = (work / f"rootd-{lineage}.log").open("wb")
+    log = (work / f"coordinator-{lineage}.log").open("wb")
     process = subprocess.Popen(
-        [sys.executable, "-m", "pando.rootd", "--port", str(port),
+        [sys.executable, "-m", "pando.coordinator", "--port", str(port),
          "--playbook", str(playbook),
          "--playbook-key", key.verify_key.encode().hex(),
          "--pairing-token", token,
@@ -98,7 +98,7 @@ def main() -> int:
                                                / "laya-rlcd-v7.onnx"))
     args = parser.parse_args()
     if not args.yes:
-        parser.error("this starts real rootd/join processes; pass --yes")
+        parser.error("this starts real coordinator/join processes; pass --yes")
     parent, child = Path(args.parent), Path(args.child)
     for path in (parent, child):
         if not path.exists():

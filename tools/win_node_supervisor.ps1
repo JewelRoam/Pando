@@ -57,13 +57,13 @@ $llamaArgs = @('-m', 'D:\pando-models\gemma-4-12b-it-Q4_K_M.gguf', '-ngl', '99',
   '-c', '4096', '-fa', 'on', '-ctk', 'q8_0', '-ctv', 'q8_0', '--parallel', '1',
   '--jinja', '--reasoning', 'off', '--host', '0.0.0.0',
   '--port', '8086', '-t', '8', '--alias', 'gemma-4-12b-it-Q4_K_M')
-$gemmaArgs = @('-m', 'pando.stemd', '--node-id', 'win-gemma-12b', '--backend',
+$gemmaArgs = @('-m', 'pando.worker', '--node-id', 'win-gemma-12b', '--backend',
   'openai', '--openai-url', 'http://127.0.0.1:8086/v1', '--openai-model',
   'gemma-4-12b', '--openai-key-file', $dummyKey, '--checkpoint',
   'gemma-4-12b-q4km', '--root', 'http://127.0.0.1:8790',
   '--pairing-token-file', $token, '--host', '0.0.0.0', '--advertise-host',
   '192.168.31.100')
-$layaArgs = @('-m', 'pando.stemd', '--node-id', 'win-laya-int8', '--backend',
+$layaArgs = @('-m', 'pando.worker', '--node-id', 'win-laya-int8', '--backend',
   'onnx', '--onnx-path', 'D:\PandoSI\artifacts\laya-en.int8.onnx',
   '--checkpoint', 'laya-en', '--root', 'http://127.0.0.1:8790',
   '--pairing-token-file', $token, '--host', '0.0.0.0', '--advertise-host',
@@ -78,7 +78,7 @@ $mailboxArgs = @("$repo\tools\agent_mailbox.py", 'serve', '--port', '8778',
 # The resident proposer: the Windows node must initiate on its own, not only
 # answer polled work. Multi-mailbox: publish to both, read the union, so a
 # sleeping Mac-hosted mailbox can no longer silence the colony (2026-10-17).
-$thinkArgs = @('-m', 'pando.thinkd', '--node-id', 'win-gpu-proposer',
+$thinkArgs = @('-m', 'pando.proposer', '--node-id', 'win-gpu-proposer',
   '--base-url', 'http://127.0.0.1:8086/v1', '--model', 'gemma-4-12b-it-Q4_K_M',
   '--fallback-base-url', 'http://127.0.0.1:8087/v1',
   '--fallback-model', 'yi-1.5-9b-q4km',
@@ -94,13 +94,13 @@ $yiLlamaArgs = @('-m', 'D:\pando-models\Yi-1.5-9B-Chat-Q4_K_M.gguf',
   '-ngl', '0', '-c', '1024', '--parallel', '1', '--jinja',
   '--host', '127.0.0.1', '--port', '8087', '-t', '10',
   '--alias', 'yi-1.5-9b-q4km')
-$yiStemArgs = @('-m', 'pando.stemd', '--node-id', 'win-yi-9b', '--backend',
+$yiStemArgs = @('-m', 'pando.worker', '--node-id', 'win-yi-9b', '--backend',
   'openai', '--openai-url', 'http://127.0.0.1:8087/v1', '--openai-model',
   'yi-1.5-9b-q4km', '--openai-key-file', $dummyKey, '--checkpoint',
   'yi-1.5-9b-q4km', '--root', 'http://127.0.0.1:8790',
   '--pairing-token-file', $token, '--host', '0.0.0.0', '--advertise-host',
   '192.168.31.100')
-$yiThinkArgs = @('-m', 'pando.thinkd', '--node-id', 'win-cpu-proposer',
+$yiThinkArgs = @('-m', 'pando.proposer', '--node-id', 'win-cpu-proposer',
   '--base-url', 'http://127.0.0.1:8087/v1', '--model', 'yi-1.5-9b-q4km',
   '--mailbox', 'http://100.92.184.4:8776',
   '--mailbox-fallback', 'http://127.0.0.1:8778',
@@ -112,7 +112,7 @@ $observatoryArgs = @("$repo\tools\observatory.py", '--port', '8799')
 # Speaks only for openai stems registered on THIS root. Gemma and Yi answer
 # as win-gemma-12b and win-yi-9b once their stems expose /chat. It does not
 # answer for Pi or Mac members.
-$chatArgs = @('-m', 'pando.chatd',
+$chatArgs = @('-m', 'pando.messenger',
   '--root', 'http://127.0.0.1:8790',
   '--pairing-token-file', $token,
   '--mailbox', 'http://100.92.184.4:8776',
@@ -123,7 +123,7 @@ $chatArgs = @('-m', 'pando.chatd',
 # Asks only the decision models registered on THIS root for 赞同/搁置/反对,
 # so every proposal collects one reaction per local role. It never calls a
 # member that lives on another device.
-$reactArgs = @('-m', 'pando.reactd',
+$reactArgs = @('-m', 'pando.reactor',
   '--root', 'http://127.0.0.1:8790',
   '--pairing-token-file', $token,
   '--mailbox', 'http://100.92.184.4:8776',
@@ -134,7 +134,7 @@ $reactArgs = @('-m', 'pando.reactd',
 # The island root runs under the same logon supervisor as everything else:
 # before this entry it was a hand-started process that would not survive a
 # reboot (found 2026-10-18 when auditing auto-start paths).
-$rootArgs = @('-m', 'pando.rootd', '--port', '8790',
+$rootArgs = @('-m', 'pando.coordinator', '--port', '8790',
   '--pairing-token-file', "$repo\artifacts\lan-experiment\root-pairing.token",
   '--lan', '--require-identity', '--quorum-k', '3',
   '--stem-call-timeout', '120', '--initial-stem-timeout', '30')

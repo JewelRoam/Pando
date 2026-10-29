@@ -3,7 +3,7 @@
 CI is a second copy of this list, not the first time it runs. A red remote
 run means this command was skipped. It mirrors **all** the push-triggered
 workflows, not just ``ci.yml``: ``swarm.yml`` fires when a push touches
-``pando/rootd.py`` and runs nine checks that used to be invisible here, so a
+``pando/coordinator.py`` and runs nine checks that used to be invisible here, so a
 green gate could still be followed by a red run. Two steps go further than
 any runner:
 
@@ -143,7 +143,7 @@ CHECKS: list[tuple[str, list[str]]] = [
 ]
 
 # marker is a substring of one `run:` line in swarm.yml. These fire whenever a
-# push touches pando/rootd.py, pando/stemd.py and friends -- which is most
+# push touches pando/coordinator.py, pando/worker.py and friends -- which is most
 # pushes that touch the mesh. They were absent from this gate until
 # 2026-10-19, so the gate could pass and the push still go red.
 SWARM_CHECKS: list[tuple[str, list[str]]] = [

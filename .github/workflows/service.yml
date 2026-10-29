@@ -6,7 +6,7 @@ on:
     paths:
       - ".github/workflows/service.yml"
       - "pando/service.py"
-      - "pando/rootd.py"
+      - "pando/coordinator.py"
       - "pando/grants.py"
       - "tools/service_check.py"
   workflow_dispatch:

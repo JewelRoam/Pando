@@ -6,7 +6,7 @@ Wants=pandosi-llama.service
 [Service]
 Type=simple
 WorkingDirectory=/home/admin
-ExecStart=/home/admin/pando/bin/python -m pando.stemd --node-id pandosi-pi5-llm --backend openai --openai-url http://127.0.0.1:8085/v1 --openai-model qwen3-1.7b --openai-key-file "" --checkpoint qwen3-1.7b-q4km --root http://127.0.0.1:8791 --pairing-token-file /home/admin/.pando/root-pairing.token --host 0.0.0.0 --advertise-host 192.168.31.22
+ExecStart=/home/admin/pando/bin/python -m pando.worker --node-id pandosi-pi5-llm --backend openai --openai-url http://127.0.0.1:8085/v1 --openai-model qwen3-1.7b --openai-key-file "" --checkpoint qwen3-1.7b-q4km --root http://127.0.0.1:8791 --pairing-token-file /home/admin/.pando/root-pairing.token --host 0.0.0.0 --advertise-host 192.168.31.22
 Restart=always
 RestartSec=5
 

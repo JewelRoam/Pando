@@ -46,7 +46,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
-from pando.thinkd import (Ledger, OpenAIProposer, SYSTEM_PROMPT, extract_json,
+from pando.proposer import (Ledger, OpenAIProposer, SYSTEM_PROMPT, extract_json,
                           host_names_from, replicate_streak)
 
 INVALID = "(invalid)"
@@ -307,7 +307,7 @@ def build_prompts(ledger: Ledger, round_no: int, history_window: int,
                 "最近的提案里 seed.replicate 已经太多。这一轮不要再选它。",
             ])
         if host_names:
-            from pando.thinkd import destination_hint
+            from pando.proposer import destination_hint
             lines.extend([
                 "",
                 "【可以写进 destination 的主机】",
@@ -752,7 +752,7 @@ def run(args) -> dict:
     ledger = Ledger(ledger_path)
     round_no = len(ledger.tail(100_000)) + 1
     host_names = host_names_from(Path(args.hosts).expanduser())
-    from pando.thinkd import effective_action_space
+    from pando.proposer import effective_action_space
     action_space = effective_action_space()
     prompts = build_prompts(ledger, round_no, args.history_window,
                             host_names, action_space)

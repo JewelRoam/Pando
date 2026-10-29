@@ -40,7 +40,7 @@ from cpu_free_fleet_check import (STEMS, process_tree_cpu_seconds,  # noqa: E402
                                   stem_command)
 from pando.combiner import Combiner  # noqa: E402
 from pando.common import DecisionRequest  # noqa: E402
-from pando.rootd import Coordinator, Root  # noqa: E402
+from pando.coordinator import Coordinator, Root  # noqa: E402
 
 
 def main() -> int:

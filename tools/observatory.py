@@ -1420,7 +1420,7 @@ def collect_state(cfg: dict) -> dict:
         "reactions": [],
         "work": [],
         "work_counts": {"total": None, "open": None},
-        "thinkd": [],
+        "proposer": [],
     }
 
     # --- mailbox: health, then the feed -------------------------------
@@ -1633,7 +1633,7 @@ def collect_state(cfg: dict) -> dict:
             entries, err = read_remote_jsonl_tail(str(target), path, 3)
         else:
             entries, err = read_jsonl_tail(Path(path).expanduser(), 3), None
-        state["thinkd"].append({
+        state["proposer"].append({
             "host": name, "ledger": path, "rounds": len(entries),
             "via": f"ssh {target}" if target else "local file",
             "alive": bool(entries),
@@ -1659,7 +1659,7 @@ def collect_state(cfg: dict) -> dict:
     state["proposers"] = sorted(
         by_author.values(), key=lambda r: str(r["last_at"] or ""), reverse=True)
     state["people"] = build_people(
-        state["participants"], state["thinkd"], state["chat"],
+        state["participants"], state["proposer"], state["chat"],
         state["reactions"])
 
     # --- optional extra service probes (addresses stay in hosts.json) ---

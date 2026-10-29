@@ -10,7 +10,7 @@
 # supervisor respawn it from the same tree within 10 seconds -- one starter, so
 # there is never a second copy racing the supervisor.
 param(
-  [string]$Match = 'pando\.thinkd'
+  [string]$Match = 'pando\.proposer'
 )
 $ErrorActionPreference = 'Continue'
 Get-CimInstance Win32_Process -Filter "Name='python.exe'" |

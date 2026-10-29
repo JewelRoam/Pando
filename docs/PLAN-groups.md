@@ -39,10 +39,10 @@ pairing tokens, scoped grants, LAN + WAN via tunnels, the first third-party vote
 ## S1 status — shipped 2026-10-17
 - `pando/identity.py`: Ed25519 keypair at `~/.pando/identity.json` (`PANDOSI_IDENTITY`
   override), chmod 600; `node_fingerprint = sha256(pubkey)[:16]`; canonical-JSON signing.
-- rootd: `/register` verifies the signature and **binds node_id -> pubkey durably** (survives
+- coordinator: `/register` verifies the signature and **binds node_id -> pubkey durably** (survives
   the TTL'd registry); a token holder cannot re-register an existing id with a different key
   (403); `--require-identity` rejects unsigned registrations entirely.
-- stemd/join: load-or-create identity; every registration is signed (recomputed after the
+- worker/join: load-or-create identity; every registration is signed (recomputed after the
   capability refresh each beat).
 - Verified live: the pi5 re-joined with a signed registration; `/nodes` shows its pubkey;
   an unsigned registration returns 403; the signed member still casts a counted vote
@@ -50,5 +50,5 @@ pairing tokens, scoped grants, LAN + WAN via tunnels, the first third-party vote
 - The pairing token is now only the **invitation**; the key is the **membership**.
 
 ## Next PR (S2) scope
-files: `pando/group.py`; rootd endpoints `/group/log` + `/group/events`; decision-hash records
+files: `pando/group.py`; coordinator endpoints `/group/log` + `/group/events`; decision-hash records
 hooked into `/decide`; tests: chain verification, catch-up delta, tamper rejection.

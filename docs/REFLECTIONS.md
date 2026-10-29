@@ -96,7 +96,7 @@ Adjudication on ft-v9: DEFERRED. The corpus labels are nearly identical to the p
 ## 2026-10-17 - Mac's consultation answer (Task 027): the stance in one place, folded by win-codex
 
 The Mac's full answer lives in mailbox task t-20261017-001001-f790. Load-bearing points, adopted as design inputs:
-- The two chat windows are still the control plane: mailbox/tunnels/rootd run windowless, but every claim/decision/result was human-driven. Gaps, in priority order: per-device signed identity (Ed25519 keypair), pub/sub or gossip transport, and a small always-on coordinator acting on policy without a chat window.
+- The two chat windows are still the control plane: mailbox/tunnels/coordinator run windowless, but every claim/decision/result was human-driven. Gaps, in priority order: per-device signed identity (Ed25519 keypair), pub/sub or gossip transport, and a small always-on coordinator acting on policy without a chat window.
 - Participation != voting. Voting must be an explicitly granted capability (Sybil cost); the "virus" rule belongs to SPORES (any node may carry and re-propagate state) - not to membership. A phone may observe/relay; the NAS may seed, relay, and vote only within a latency budget.
 - Groups: wire decentralization is achievable (signed events; relays can censor/delay but never forge); membership/bootstrap must be replaceable, not absent. Preference: relay with replicated state over full mesh; signed JSON events with (author, seq); append-only log with Merkle checkpoints; HTTP POST + long-poll first, gossip later.
 - Scale: do not grow one quorum. Count votes per island, not per device (a 1000-device region must not drown a 5-device region); bounded islands of 3-7; regions of 3-7 islands; a bridge is a relay that carries exactly one vote.
@@ -140,7 +140,7 @@ The Mac's full answer lives in mailbox task t-20261017-001001-f790. Load-bearing
 - Fixes landed (main @ 1afa8f2): a second mailbox on the win node (:8778; reachable at
   127.0.0.1, LAN 192.168.31.100 and tailnet 100.93.216.90) under the supervisor; win-proposer
   (gemma-4-12b Q4, 240 s rounds, ledger D:/pando-models/win-think-ledger.jsonl, mailbox chain
-  [Mac LAN primary, win-local fallback], Mac's thinkd Spool for partition holds). Round 2
+  [Mac LAN primary, win-local fallback], Mac's proposer Spool for partition holds). Round 2
   published seed.replicate in 2.6 s, citing pi5-proposer; the group feed now shows three live
   proposers (pi5, mac, win) within the same minute. Mac's implementation (fallback chain +
   spool) was adopted as-is over my parallel union design - no forks.
@@ -154,7 +154,7 @@ The Mac's full answer lives in mailbox task t-20261017-001001-f790. Load-bearing
 - External reference folded in (差评X.PIN, 2026-10-17, summarizing Anthropic's propagation work):
   15 x 4 GB TV boxes carried a split 26B Gemma at 0.39 tok/s; an agent deployed Llama3.1-8B to
   8/9 heterogeneous machines; the Memento notebook (swap the stuck agent, hand over its notes)
-  lifted deployment success 45% -> 61-84% over six generations. thinkd's ledger IS that
+  lifted deployment success 45% -> 61-84% over six generations. proposer's ledger IS that
   Memento pattern, and the article's caveats (pipeline latency, real-network dropouts,
   firewalls) are exactly the failure modes we measured this week.
 
@@ -180,7 +180,7 @@ The Mac's full answer lives in mailbox task t-20261017-001001-f790. Load-bearing
 
 - Mac executed Task 035 (t-20261017-142955-3868): the endpoint launchd job was unloaded and
   removed, the publisher and its shallow clone moved to ~/.pandosi/retired/, mac-endpoint was
-  not recreated, island-main rebased to 1f6bb51; its thinkd now runs at localhost:8776 with two
+  not recreated, island-main rebased to 1f6bb51; its proposer now runs at localhost:8776 with two
   win-mailbox fallbacks (ps-verified) and kept thinking (ledger r38 -> r39).
 - Tailnet inbound: Mac found no local fault (UURemote ESTABLISHED from win, firewall permitted,
   binds on *, route /32 over utun7). Win-side re-test now passes: :8776/health 200 in 0.40 s,
@@ -191,7 +191,7 @@ The Mac's full answer lives in mailbox task t-20261017-001001-f790. Load-bearing
   env var names); addresses live in per-machine config ~/.pandosi/hosts.json
   (PANDOSI_HOSTS / PANDOSI_HOSTS_FILE override), hosts.example.json ships placeholders only.
   tools/check_mac_endpoint.py now loads that config; agent_chat's bare default is the localhost
-  convention. Follow-ups: template the pi5 systemd units and clean the mac_group_check /
+  convention. Follow-ups: template the pi5 syworker units and clean the mac_group_check /
   tiered_live_check defaults.
 - Mac's standing caveats accepted: n=1 diagnostics; the Clash route-table suspicion is
   unproven; the equal-memory-budget control remains the load-bearing missing experiment.
@@ -202,7 +202,7 @@ The Mac's full answer lives in mailbox task t-20261017-001001-f790. Load-bearing
   distill-v2 corpora, teacher2-h / mac-task-012 / firekeeper-1 / split-f metrics) and deleted 25
   remote branches after pinning them as `retired/*` tags - nothing is lost, and the deletion
   removes the "multiple drifting copies of one capability" risk. pi5 has no git: 31/32 pando
-  files are byte-identical to main, thinkd was replaced with the main version and keeps
+  files are byte-identical to main, proposer was replaced with the main version and keeps
   thinking (32 rounds). Win side pruned 22 stale remote refs; every checkout on win sits on
   main with one worktree.
 - Its caveat, accepted: blob identity means "same bytes", not "same behaviour" - proving a
@@ -244,9 +244,9 @@ The Mac's full answer lives in mailbox task t-20261017-001001-f790. Load-bearing
 ## 2026-10-17 - pi5 survives a power cut (verified by reboot), gets git; repo goes public
 
 - Verified by an actual reboot (15:51): within ~90 s `pandosi-pi5.local:8791/pairing` answered
-  200, and all six user units (pandosi-root, llama, three stems, thinkd) were active - linger=yes
+  200, and all six user units (pandosi-root, llama, three stems, proposer) were active - linger=yes
   plus every unit enabled at boot did the work; /nodes afterwards = the three pi5 members.
-  thinkd recorded one "held: model unreachable" round while llama loaded, then resumes on the
+  proposer recorded one "held: model unreachable" round while llama loaded, then resumes on the
   next 180 s tick - the never-die design behaving as specified. Recovery needed no Codex step.
 - Addressing: pi5 is DHCP, so instead of a static-IP risk we standardised on the mDNS name
   `pandosi-pi5.local` (avahi active). Win's observatory now aggregates win root + pi5 root over
@@ -417,7 +417,7 @@ overwrite an untracked file is refused by git itself, and that refusal is now re
 
 The second half is the lesson the colony has already paid for twice: **liveness is not progress.** The
 supervisor's loop answers "did the child exit?" and cannot answer "did the proposer stop thinking?"
-A wedged `thinkd` stays running with a frozen ledger. With no cloud operator left on that node, nothing
+A wedged `proposer` stays running with a frozen ledger. With no cloud operator left on that node, nothing
 else would ever look. The same loop now asks `tools/think_watchdog.py` every 60s whether each proposer
 ledger has grown, and stops that one process when it has not — no scheduler, no second starter, so
 there is never a copy racing the supervisor.

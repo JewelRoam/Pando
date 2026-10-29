@@ -39,7 +39,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
 
 from pando.common import DecisionRequest  # noqa: E402
-from pando.rootd import Coordinator, Root  # noqa: E402
+from pando.coordinator import Coordinator, Root  # noqa: E402
 
 UNITS = [
     ("en-cpu", "CPU", "artifacts/laya-en.onnx"),
@@ -92,7 +92,7 @@ def host_cpu_load() -> float:
 def spawn_unit(name: str, device: str, path: str, root_url: str,
                log_dir: Path) -> subprocess.Popen:
     command = [
-        sys.executable, "-m", "pando.stemd",
+        sys.executable, "-m", "pando.worker",
         "--node-id", name, "--checkpoint", "english",
         "--backend", "onnx", "--onnx-path", str(ROOT_DIR / path),
         "--repo", REPO, "--device", device, "--root", root_url,

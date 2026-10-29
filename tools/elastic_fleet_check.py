@@ -38,8 +38,8 @@ sys.path.insert(0, str(ROOT_DIR))
 from pando.backend import OnnxLayaBackend  # noqa: E402
 from pando.combiner import Combiner  # noqa: E402
 from pando.common import DecisionRequest  # noqa: E402
-from pando.rootd import Coordinator, Root  # noqa: E402
-from pando.stemd import Stem, heartbeat_loop  # noqa: E402
+from pando.coordinator import Coordinator, Root  # noqa: E402
+from pando.worker import Stem, heartbeat_loop  # noqa: E402
 from pando.textmodel import TextModel  # noqa: E402
 
 ACCEL = "artifacts/laya-en-static-fixed.onnx"

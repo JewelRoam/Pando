@@ -36,7 +36,7 @@ def load_island_url() -> str:
 def main() -> int:
     sys.path.insert(0, str(ROOT))
     from pando.common import DecisionRequest
-    from pando.rootd import Coordinator, Root
+    from pando.coordinator import Coordinator, Root
 
     island = load_island_url()
     token = (WORK / "mac-root.token").read_text(encoding="ascii").strip()

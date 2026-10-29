@@ -68,7 +68,7 @@ def wait_root(url: str, timeout: float = 30) -> None:
         if code == 200 and payload.get("required"):
             return
         time.sleep(0.2)
-    raise SystemExit("rootd did not become ready")
+    raise SystemExit("coordinator did not become ready")
 
 
 def wait_nodes(url: str, token: str, expected: set[str],
@@ -137,7 +137,7 @@ def main() -> int:
         token_file.write_text(token, encoding="utf-8")
         try:
             procs.append(subprocess.Popen(
-                [sys.executable, "-m", "pando.rootd",
+                [sys.executable, "-m", "pando.coordinator",
                  "--port", str(port),
                  "--pairing-token-file", str(token_file),
                  "--rollout-dir", str(work / "rollouts")],
@@ -146,7 +146,7 @@ def main() -> int:
             wait_root(root_url)
             for name, repo, onnx in LINEAGES:
                 procs.append(subprocess.Popen(
-                    [sys.executable, "-m", "pando.stemd",
+                    [sys.executable, "-m", "pando.worker",
                      "--node-id", name,
                      "--root", root_url,
                      "--pairing-token-file", str(token_file),

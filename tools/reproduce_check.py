@@ -1,6 +1,6 @@
 """End to end: a swarm reproduces onto a new device, or refuses to.
 
-Starts a real rootd from a generated playbook that declares one lineage and
+Starts a real coordinator from a generated playbook that declares one lineage and
 its artifact digest, then runs the reproduction controller three times:
 
 1. without the ``reproduce`` grant -> refused, nothing transferred;
@@ -58,7 +58,7 @@ def wait_root(url: str, deadline: float = 30.0) -> None:
         except OSError:
             pass
         time.sleep(0.2)
-    raise SystemExit("rootd did not become ready")
+    raise SystemExit("coordinator did not become ready")
 
 
 def child_command(root_url: str, token_file: Path, node_id: str,
@@ -78,7 +78,7 @@ def main() -> int:
                                                / "laya-en.onnx"))
     args = parser.parse_args()
     if not args.yes:
-        parser.error("this starts real rootd/join processes; pass --yes")
+        parser.error("this starts real coordinator/join processes; pass --yes")
     graph = Path(args.graph)
     if not graph.exists():
         raise SystemExit(f"missing graph: {graph}")
@@ -106,10 +106,10 @@ def main() -> int:
     root_url = f"http://127.0.0.1:{port}"
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) \
         if sys.platform == "win32" else 0
-    root_log = (work / "rootd.log").open("wb")
+    root_log = (work / "coordinator.log").open("wb")
     # One parent voter, so the swarm exists before it reproduces.
     parent = subprocess.Popen(
-        [sys.executable, "-m", "pando.stemd", "--node-id", "parent",
+        [sys.executable, "-m", "pando.worker", "--node-id", "parent",
          "--root", root_url, "--pairing-token-file", str(token_file),
          "--backend", "mock", "--checkpoint", "mock"],
         cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -117,7 +117,7 @@ def main() -> int:
     children: list[subprocess.Popen] = []
     try:
         subprocess.Popen(
-            [sys.executable, "-m", "pando.rootd", "--port", str(port),
+            [sys.executable, "-m", "pando.coordinator", "--port", str(port),
              "--playbook", str(playbook_path),
              "--playbook-key", key.verify_key.encode().hex(),
              "--pairing-token", token,

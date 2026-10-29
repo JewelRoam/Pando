@@ -46,7 +46,7 @@ from idle_silicon_check import host_cpu_load  # noqa: E402
 from pando.calibrate import load_calibration  # noqa: E402
 from pando.combiner import Combiner  # noqa: E402
 from pando.common import DecisionRequest  # noqa: E402
-from pando.rootd import Coordinator, Root  # noqa: E402
+from pando.coordinator import Coordinator, Root  # noqa: E402
 
 NEW = "ft-v3"
 

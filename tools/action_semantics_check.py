@@ -61,7 +61,7 @@ import urllib.request
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from pando.thinkd import OpenAIProposer, extract_json
+from pando.proposer import OpenAIProposer, extract_json
 
 ACTIONS = (
     ("seed.export", "制作可校验的本机种子包，包含身份、授权和状态",

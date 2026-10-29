@@ -36,9 +36,9 @@ from pando.backend import (MockBackend, OpenAIChoiceBackend,
                             parse_openai_choice)
 from pando.common import (DecisionRequest, Vote, aggregate,
                             canonical_question, mcnemar_test)
-from pando.rootd import (Coordinator, INITIAL_STEM_TIMEOUT,
+from pando.coordinator import (Coordinator, INITIAL_STEM_TIMEOUT,
                             Root, load_accuracy_registry)
-from pando.stemd import Stem
+from pando.worker import Stem
 from pando.onboard import build_plan
 from pando import graft
 from pando.grants import (audit_status, grant_status, require_grant,
@@ -47,7 +47,7 @@ from pando.service import build_service_plan, detect_platform
 
 
 class TestProposerSpool(unittest.TestCase):
-    """pando.thinkd.Spool - thought that survives a partition.
+    """pando.proposer.Spool - thought that survives a partition.
 
     The hole this closes was found by reading, not by a crash: the colony's
     mailbox lives on one host, and every proposer on every other device points
@@ -62,7 +62,7 @@ class TestProposerSpool(unittest.TestCase):
     def _thinker(self, answers, ledger_path, spool_path, published=None,
                  fallbacks=None):
         from pando.identity import Identity
-        from pando.thinkd import Ledger, Spool, Thinker
+        from pando.proposer import Ledger, Spool, Thinker
 
         class ScriptedProposer:
             def __init__(self, script):
@@ -130,7 +130,7 @@ class TestProposerSpool(unittest.TestCase):
         proposal_mail reports a dead host as data - {"error": "unreachable: ..."}
         - not as an exception. The first version of the spool only caught
         exceptions, so it would never have fired in the one scenario it exists
-        for. Caught by running thinkd against a dead port, not by reading.
+        for. Caught by running proposer against a dead port, not by reading.
         """
         def publish(proposal, identity, url, token):
             return {"error": "unreachable: <urlopen error [Errno 61] refused>"}
@@ -144,9 +144,9 @@ class TestProposerSpool(unittest.TestCase):
             self.assertIn("spooled for replay", round_.detail)
             self.assertEqual(thinker.spool.depth(), 1)
             # A 5xx is the same thing: the mailbox is up but nobody heard it.
-            self.assertTrue(__import__("pando.thinkd", fromlist=["x"]).delivery_failed(
+            self.assertTrue(__import__("pando.proposer", fromlist=["x"]).delivery_failed(
                 {"error": "HTTP 502"}))
-            self.assertFalse(__import__("pando.thinkd", fromlist=["x"]).delivery_failed(
+            self.assertFalse(__import__("pando.proposer", fromlist=["x"]).delivery_failed(
                 {"error": "HTTP 403"}))
 
     def test_a_refusal_is_dropped_not_replayed_forever(self):
@@ -167,7 +167,7 @@ class TestProposerSpool(unittest.TestCase):
             self.assertEqual(thinker.spool.depth(), 0)
 
     def test_mailbox_chain_is_ordered_and_deduplicated(self):
-        from pando.thinkd import mailbox_chain
+        from pando.proposer import mailbox_chain
         self.assertEqual(mailbox_chain("a", ["b", "a", "  ", "c"]),
                          ["a", "b", "c"])
         self.assertEqual(mailbox_chain("a"), ["a"])
@@ -235,7 +235,7 @@ class TestProposerSpool(unittest.TestCase):
             self.assertEqual(thinker.spool.depth(), 1)
 
     def test_a_week_behind_a_partition_does_not_fill_a_4gb_device(self):
-        from pando.thinkd import Proposal, Spool
+        from pando.proposer import Proposal, Spool
         with tempfile.TemporaryDirectory() as tmp:
             spool = Spool(Path(tmp) / "held.jsonl", cap=5)
             for i in range(40):
@@ -374,7 +374,7 @@ class TestReactions(unittest.TestCase):
         self.assertNotIn("reactions", messages[1])
 
     def test_a_remote_stem_is_not_this_machines_to_ask(self):
-        from pando.reactd import select_local_stems
+        from pando.reactor import select_local_stems
 
         nodes = {
             "mac-text": {"host": "127.0.0.1", "url": "http://127.0.0.1:8766",
@@ -392,7 +392,7 @@ class TestReactions(unittest.TestCase):
         The two jobs live on one device but not in one member, so the
         reactor has to read ``role`` and leave the proposer alone.
         """
-        from pando.reactd import select_local_stems
+        from pando.reactor import select_local_stems
 
         nodes = {
             "mac-text": {"host": "127.0.0.1", "url": "http://127.0.0.1:8766",
@@ -411,7 +411,7 @@ class TestReactions(unittest.TestCase):
         Absence is read off what the member can do, so nothing that used to
         vote silently stops voting just because the field is new.
         """
-        from pando.reactd import select_local_stems
+        from pando.reactor import select_local_stems
 
         nodes = {
             "mac-text": {"host": "127.0.0.1", "url": "http://127.0.0.1:8766",
@@ -426,7 +426,7 @@ class TestReactions(unittest.TestCase):
         A member that names its role keeps it; one that names none is read
         off what it can do, so the record is always explicit.
         """
-        from pando.rootd import Coordinator
+        from pando.coordinator import Coordinator
 
         coordinator = Coordinator(quorum_k=1)
         self.assertTrue(coordinator.register(
@@ -453,7 +453,7 @@ class TestReactions(unittest.TestCase):
         from types import SimpleNamespace
         from unittest import mock
         from pathlib import Path as _P
-        from pando import reactd
+        from pando import reactor
         from pando.identity import load_or_create
 
         stems = [
@@ -474,10 +474,10 @@ class TestReactions(unittest.TestCase):
             return {"claimed": True}
 
         with tempfile.TemporaryDirectory() as td, \
-                mock.patch.object(reactd, "ask_stem", fake_ask), \
-                mock.patch.object(reactd, "publish_reaction", fake_publish):
+                mock.patch.object(reactor, "ask_stem", fake_ask), \
+                mock.patch.object(reactor, "publish_reaction", fake_publish):
             identity = load_or_create(_P(td) / "identity.json")
-            report = reactd.react_once(proposals, stems, identity,
+            report = reactor.react_once(proposals, stems, identity,
                                        "http://mailbox", None,
                                        _P(td) / "ledger.jsonl", 5)
 
@@ -492,7 +492,7 @@ class TestReactions(unittest.TestCase):
     def test_reaction_delivery_uses_the_fallback_mailbox(self):
         """A dead primary must not turn a signed vote into a lost vote."""
         from unittest import mock
-        from pando import reactd
+        from pando import reactor
 
         calls = []
 
@@ -502,8 +502,8 @@ class TestReactions(unittest.TestCase):
                 return {"error": "unreachable: primary"}
             return {"task": {"id": "t1"}, "claimed": True}
 
-        with mock.patch.object(reactd, "publish_reaction", fake_publish):
-            sent = reactd.publish_reaction_any(
+        with mock.patch.object(reactor, "publish_reaction", fake_publish):
+            sent = reactor.publish_reaction_any(
                 {"payload": {"target_id": "p1"}}, "mac-text",
                 ["http://primary", "http://fallback"], None, 5)
 
@@ -640,7 +640,7 @@ class TestReactions(unittest.TestCase):
         from types import SimpleNamespace
         from unittest import mock
         from pathlib import Path as _P
-        from pando import reactd
+        from pando import reactor
         from pando.identity import load_or_create
 
         proposal = SimpleNamespace(proposal_id="p1", author="other",
@@ -660,13 +660,13 @@ class TestReactions(unittest.TestCase):
             return {"task": {"id": "r1"}, "claimed": True}
 
         with tempfile.TemporaryDirectory() as td, \
-                mock.patch.object(reactd, "ask_stem", fake_ask), \
-                mock.patch.object(reactd, "publish_reaction", fake_publish):
+                mock.patch.object(reactor, "ask_stem", fake_ask), \
+                mock.patch.object(reactor, "publish_reaction", fake_publish):
             identity = load_or_create(_P(td) / "identity.json")
             ledger = _P(td) / "ledger.jsonl"
-            first = reactd.react_once([proposal], stems, identity,
+            first = reactor.react_once([proposal], stems, identity,
                                       ["http://primary"], None, ledger, 5)
-            second = reactd.react_once([proposal], stems, identity,
+            second = reactor.react_once([proposal], stems, identity,
                                        ["http://primary"], None, ledger, 5)
 
         self.assertEqual(first["did"], "error")
@@ -689,7 +689,7 @@ class TestReactions(unittest.TestCase):
         from types import SimpleNamespace
         from unittest import mock
         from pathlib import Path as _P
-        from pando import reactd
+        from pando import reactor
         from pando.identity import load_or_create
 
         now = _t.time()
@@ -705,16 +705,16 @@ class TestReactions(unittest.TestCase):
             return {"stance": "赞同", "probability": None}
 
         with tempfile.TemporaryDirectory() as td, \
-                mock.patch.object(reactd, "ask_stem", fake_ask), \
-                mock.patch.object(reactd, "publish_reaction",
+                mock.patch.object(reactor, "ask_stem", fake_ask), \
+                mock.patch.object(reactor, "publish_reaction",
                                   lambda *a, **k: {"claimed": True}):
             identity = load_or_create(_P(td) / "identity.json")
             ledger = _P(td) / "ledger.jsonl"
             # A ledger with history, so the one-shot first-pass branch (which
             # skips everything but the newest) cannot be what is measured.
-            reactd.append_ledger(ledger, {"target_id": "already",
+            reactor.append_ledger(ledger, {"target_id": "already",
                                           "skip": True, "at": now})
-            report = reactd.react_once([stale, fresh], stems, identity,
+            report = reactor.react_once([stale, fresh], stems, identity,
                                        "http://mailbox", None, ledger, 5,
                                        max_age=3600)
             rows = [json.loads(line)
@@ -732,7 +732,7 @@ class TestReactions(unittest.TestCase):
         from types import SimpleNamespace
         from unittest import mock
         from pathlib import Path as _P
-        from pando import reactd
+        from pando import reactor
         from pando.identity import load_or_create
 
         now = _t.time()
@@ -748,14 +748,14 @@ class TestReactions(unittest.TestCase):
             return {"stance": "赞同", "probability": None}
 
         with tempfile.TemporaryDirectory() as td, \
-                mock.patch.object(reactd, "ask_stem", fake_ask), \
-                mock.patch.object(reactd, "publish_reaction",
+                mock.patch.object(reactor, "ask_stem", fake_ask), \
+                mock.patch.object(reactor, "publish_reaction",
                                   lambda *a, **k: {"claimed": True}):
             identity = load_or_create(_P(td) / "identity.json")
             ledger = _P(td) / "ledger.jsonl"
-            reactd.append_ledger(ledger, {"target_id": "already",
+            reactor.append_ledger(ledger, {"target_id": "already",
                                           "skip": True, "at": now})
-            reactd.react_once([seed, fresh], stems, identity,
+            reactor.react_once([seed, fresh], stems, identity,
                               "http://mailbox", None, ledger, 5,
                               max_age=3600)
             rows = [json.loads(line)
@@ -814,7 +814,7 @@ class TestReactions(unittest.TestCase):
     def test_a_bounded_poll_reads_the_newest_rows_only(self):
         """``max_items`` has to bound the work, not just the returned list.
 
-        reactd asked for the newest thirty rows and silently got every row
+        reactor asked for the newest thirty rows and silently got every row
         the mailbox ever held, which is thousands of signed-body GETs a pass.
         """
         from unittest import mock
@@ -862,7 +862,7 @@ class TestReactions(unittest.TestCase):
         import time as _t
         from unittest import mock
         from pathlib import Path as _P
-        from pando import reactd
+        from pando import reactor
 
         now = _t.time()
         old = f"p-old-r1-{int(now) - 7200}"
@@ -877,17 +877,17 @@ class TestReactions(unittest.TestCase):
             return {"tasks": rows}
 
         with tempfile.TemporaryDirectory() as td, \
-                mock.patch.object(reactd, "_request", fake_request):
+                mock.patch.object(reactor, "_request", fake_request):
             ledger = _P(td) / "ledger.jsonl"
-            seen = reactd.load_seen(ledger)
-            swept = reactd.sweep_stale(["http://mailbox"], None, seen, 3600.0,
+            seen = reactor.load_seen(ledger)
+            swept = reactor.sweep_stale(["http://mailbox"], None, seen, 3600.0,
                                        ledger, 5)
             rows_written = [json.loads(line)
                             for line in ledger.read_text().splitlines() if line]
 
         self.assertEqual(swept, 1)
         self.assertEqual(paths, [
-            f"/tasks?status=all&limit={reactd.STALE_SWEEP_FEED_LIMIT}"])
+            f"/tasks?status=all&limit={reactor.STALE_SWEEP_FEED_LIMIT}"])
         self.assertEqual([r["target_id"] for r in rows_written], [old])
         self.assertTrue(rows_written[0]["stale"])
         self.assertNotIn(new, seen)
@@ -897,18 +897,18 @@ class TestReactions(unittest.TestCase):
         import time as _t
         from unittest import mock
         from pathlib import Path as _P
-        from pando import reactd
+        from pando import reactor
 
         now = _t.time()
         old = f"p-old-r1-{int(now) - 7200}"
         rows = [{"id": "t1", "title": f"[proposal] {old} do.a by ann"}]
 
         with tempfile.TemporaryDirectory() as td, \
-                mock.patch.object(reactd, "_request",
+                mock.patch.object(reactor, "_request",
                                   lambda *a, **k: {"tasks": rows}):
             ledger = _P(td) / "ledger.jsonl"
-            seen = reactd.load_seen(ledger)
-            swept = reactd.sweep_stale(["http://mailbox"], None, seen, 0,
+            seen = reactor.load_seen(ledger)
+            swept = reactor.sweep_stale(["http://mailbox"], None, seen, 0,
                                        ledger, 5)
 
         self.assertEqual(swept, 0)
@@ -951,14 +951,14 @@ class TestChatMailboxPartition(unittest.TestCase):
 
     """A chat reply posted nowhere is not queued; it is gone.
 
-    chatd was the last writer in the colony with a single mailbox and no
+    messenger was the last writer in the colony with a single mailbox and no
     fallback: during a partition a present member looked exactly like a mute
     one. These pin the chain that closes that hole.
     """
 
     def test_a_reply_uses_the_fallback_mailbox_when_the_primary_is_deaf(self):
         from unittest import mock
-        from pando import chatd
+        from pando import messenger
 
         calls = []
 
@@ -970,8 +970,8 @@ class TestChatMailboxPartition(unittest.TestCase):
                 return {"task": {"id": "t1"}}
             return {"task": {"id": "t1"}}
 
-        with mock.patch.object(chatd, "_request", fake_request):
-            posted = chatd.publish_any(["http://primary", "http://fallback"],
+        with mock.patch.object(messenger, "_request", fake_request):
+            posted = messenger.publish_any(["http://primary", "http://fallback"],
                                        None, "mac-llm", "mac-codex", "在。", 5)
 
         self.assertEqual(posted["id"], "t1")
@@ -983,7 +983,7 @@ class TestChatMailboxPartition(unittest.TestCase):
     def test_a_refusal_is_final_and_not_retried_elsewhere(self):
         """A 4xx means the mailbox heard the reply and refused it."""
         from unittest import mock
-        from pando import chatd
+        from pando import messenger
 
         calls = []
 
@@ -991,8 +991,8 @@ class TestChatMailboxPartition(unittest.TestCase):
             calls.append(url)
             return {"error": "HTTP 403", "detail": "no"}
 
-        with mock.patch.object(chatd, "_request", fake_request):
-            posted = chatd.publish_any(["http://primary", "http://fallback"],
+        with mock.patch.object(messenger, "_request", fake_request):
+            posted = messenger.publish_any(["http://primary", "http://fallback"],
                                        None, "mac-llm", "mac-codex", "在。", 5)
 
         self.assertEqual(calls, ["http://primary/task"])
@@ -1000,7 +1000,7 @@ class TestChatMailboxPartition(unittest.TestCase):
 
     def test_reading_chat_falls_through_an_unreachable_primary(self):
         from unittest import mock
-        from pando import chatd
+        from pando import messenger
 
         seen = []
 
@@ -1010,15 +1010,15 @@ class TestChatMailboxPartition(unittest.TestCase):
                 return {"error": "unreachable: primary"}
             return {"tasks": [{"id": "t1", "title": "[chat] @mac-llm: hi"}]}
 
-        with mock.patch.object(chatd, "_request", fake_request):
-            rows, source, error = chatd.fetch_tasks_any(
+        with mock.patch.object(messenger, "_request", fake_request):
+            rows, source, error = messenger.fetch_tasks_any(
                 ["http://primary", "http://fallback"], None, 5)
 
         self.assertEqual(seen, [
             "http://primary/tasks?status=all&limit="
-            f"{chatd.CHAT_FEED_LIMIT}&kind=chat&kind=proposal",
+            f"{messenger.CHAT_FEED_LIMIT}&kind=chat&kind=proposal",
             "http://fallback/tasks?status=all&limit="
-            f"{chatd.CHAT_FEED_LIMIT}&kind=chat&kind=proposal",
+            f"{messenger.CHAT_FEED_LIMIT}&kind=chat&kind=proposal",
         ])
         self.assertEqual([row["id"] for row in rows], ["t1"])
         self.assertEqual(source, "http://fallback")
@@ -1026,7 +1026,7 @@ class TestChatMailboxPartition(unittest.TestCase):
 
     def test_a_caller_can_bound_the_chat_feed(self):
         from unittest import mock
-        from pando import chatd
+        from pando import messenger
 
         seen = []
 
@@ -1034,8 +1034,8 @@ class TestChatMailboxPartition(unittest.TestCase):
             seen.append(url)
             return {"tasks": [{"id": "t1", "title": "[chat] @mac-llm: hi"}]}
 
-        with mock.patch.object(chatd, "_request", fake_request):
-            rows, _, _ = chatd.fetch_tasks_any(
+        with mock.patch.object(messenger, "_request", fake_request):
+            rows, _, _ = messenger.fetch_tasks_any(
                 ["http://mailbox"], None, 5, limit=37)
 
         self.assertEqual(
@@ -1047,15 +1047,15 @@ class TestChatMailboxPartition(unittest.TestCase):
     def test_an_empty_fallback_is_healthy_even_if_primary_is_down(self):
         """This machine having nothing to say is idle, not a failed poll."""
         from unittest import mock
-        from pando import chatd
+        from pando import messenger
 
         def fake_request(url, token, method, payload, timeout):
             if url.startswith("http://primary"):
                 return {"error": "unreachable: primary"}
             return {"tasks": []}
 
-        with mock.patch.object(chatd, "_request", fake_request):
-            rows, source, error = chatd.fetch_tasks_any(
+        with mock.patch.object(messenger, "_request", fake_request):
+            rows, source, error = messenger.fetch_tasks_any(
                 ["http://primary", "http://fallback"], None, 5)
 
         self.assertEqual(rows, [])
@@ -1065,7 +1065,7 @@ class TestChatMailboxPartition(unittest.TestCase):
     def test_a_listing_from_the_replica_still_yields_a_body_from_the_chain(self):
         """The listing can land on the replica while the body fetch lags."""
         from unittest import mock
-        from pando import chatd
+        from pando import messenger
 
         def fake_request(url, token, method, payload, timeout):
             if url.startswith("http://primary") and "/task/t1" in url:
@@ -1074,15 +1074,15 @@ class TestChatMailboxPartition(unittest.TestCase):
                 return {"task": {"id": "t1", "body": "hello"}}
             return {"error": "unreachable: nope"}
 
-        with mock.patch.object(chatd, "_request", fake_request):
-            full = chatd.full_task_any(["http://primary", "http://fallback"],
+        with mock.patch.object(messenger, "_request", fake_request):
+            full = messenger.full_task_any(["http://primary", "http://fallback"],
                                        None, {"id": "t1", "body": ""}, 5)
 
         self.assertEqual(full["body"], "hello")
 
     def test_a_quiet_but_answered_feed_is_idle_not_an_error(self):
         from unittest import mock
-        from pando import chatd
+        from pando import messenger
 
         seen = []
 
@@ -1090,27 +1090,27 @@ class TestChatMailboxPartition(unittest.TestCase):
             seen.append(url)
             return {"tasks": []}
 
-        with mock.patch.object(chatd, "_request", fake_request):
-            report = chatd.pass_once(["http://mailbox"], None, [], set(), set(),
+        with mock.patch.object(messenger, "_request", fake_request):
+            report = messenger.pass_once(["http://mailbox"], None, [], set(), set(),
                                      {}, 5, True)
 
         self.assertEqual(report["did"], "idle")
         self.assertEqual(
             seen,
             ["http://mailbox/tasks?status=all&limit="
-             f"{chatd.CHAT_FEED_LIMIT}&kind=chat&kind=proposal"])
+             f"{messenger.CHAT_FEED_LIMIT}&kind=chat&kind=proposal"])
 
     def test_every_mailbox_down_is_an_error_not_a_silent_idle(self):
         """A partition must not look like a colony with nothing to say."""
         from unittest import mock
-        from pando import chatd
+        from pando import messenger
 
         def fake_request(url, token, method, payload, timeout):
             return {"error": "unreachable: nope"}
 
-        with mock.patch.object(chatd, "_request", fake_request):
+        with mock.patch.object(messenger, "_request", fake_request):
             with self.assertRaises(RuntimeError):
-                chatd.pass_once(["http://a", "http://b"], None, [], set(),
+                messenger.pass_once(["http://a", "http://b"], None, [], set(),
                                 set(), {}, 5, True)
 
     def test_hosts_json_may_name_a_chain_not_just_one_mailbox(self):
@@ -1121,7 +1121,7 @@ class TestChatMailboxPartition(unittest.TestCase):
         """
         import json as _json
         import tempfile
-        from pando import chatd
+        from pando import messenger
 
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "hosts.json"
@@ -1131,7 +1131,7 @@ class TestChatMailboxPartition(unittest.TestCase):
                               "http://192.168.31.100:8778"],
                 "roots": [],
             }), encoding="utf-8")
-            roots, chain = chatd.load_hosts(str(path))
+            roots, chain = messenger.load_hosts(str(path))
 
         self.assertEqual(chain, ["http://127.0.0.1:8776",
                                  "http://192.168.31.100:8778"])
@@ -1140,15 +1140,15 @@ class TestChatMailboxPartition(unittest.TestCase):
     def test_a_bootstrap_reports_which_mailbox_answered(self):
         """bootstrap must not shadow the mailbox source with a task id."""
         from unittest import mock
-        from pando import chatd
+        from pando import messenger
 
         def fake_request(url, token, method, payload, timeout):
             if url.startswith("http://primary"):
                 return {"error": "unreachable: primary"}
             return {"tasks": [{"id": "h1", "title": "[chat] @mac-llm: hi"}]}
 
-        with mock.patch.object(chatd, "_request", fake_request):
-            report = chatd.pass_once(["http://primary", "http://fallback"],
+        with mock.patch.object(messenger, "_request", fake_request):
+            report = messenger.pass_once(["http://primary", "http://fallback"],
                                      None, [], set(), set(), {}, 5, False)
 
         self.assertEqual(report["did"], "bootstrap")
@@ -1156,16 +1156,16 @@ class TestChatMailboxPartition(unittest.TestCase):
         self.assertEqual(report["read_from"], "http://fallback")
 
 
-    def test_an_idle_chatd_opens_a_row_a_peer_is_meant_to_answer(self):
+    def test_an_idle_messenger_opens_a_row_a_peer_is_meant_to_answer(self):
         """The row this writes is the one the colony never produced.
 
         It has to be a chat member on another host, by name, so the peer's own
-        chatd sees a member naming it and answers -- the same path a person's
+        messenger sees a member naming it and answers -- the same path a person's
         message takes. A failed attempt is recorded as well, or a wedged stem
         would be called every interval.
         """
         from unittest import mock
-        from pando import chatd
+        from pando import messenger
 
         posts = []
 
@@ -1184,9 +1184,9 @@ class TestChatMailboxPartition(unittest.TestCase):
                     "model": "qwen-test"}]
         known = {"mac-llm-8b-local", "win-gemma-12b"}
         ask = mock.Mock(return_value="win-gemma-12b，你那边 reproduce.spawn 跑通了吗？")
-        with mock.patch.object(chatd, "_request", fake_request), \
-                mock.patch.object(chatd, "ask_member", ask):
-            report = chatd.pass_once(["http://mailbox"], None, members, known,
+        with mock.patch.object(messenger, "_request", fake_request), \
+                mock.patch.object(messenger, "ask_member", ask):
+            report = messenger.pass_once(["http://mailbox"], None, members, known,
                                      set(), {}, 5, True, {}, 1000.0)
 
         self.assertEqual(report["did"], "opened")
@@ -1201,9 +1201,9 @@ class TestChatMailboxPartition(unittest.TestCase):
         # The same host does not open again inside the window.
         ask.reset_mock()
         posts.clear()
-        with mock.patch.object(chatd, "_request", fake_request), \
-                mock.patch.object(chatd, "ask_member", ask):
-            quiet = chatd.pass_once(["http://mailbox"], None, members, known,
+        with mock.patch.object(messenger, "_request", fake_request), \
+                mock.patch.object(messenger, "ask_member", ask):
+            quiet = messenger.pass_once(["http://mailbox"], None, members, known,
                                     set(), {}, 5, True,
                                     {("mac-llm-8b-local", "win-gemma-12b"): 1000.0},
                                     1000.0 + 60)
@@ -1214,7 +1214,7 @@ class TestChatMailboxPartition(unittest.TestCase):
     def test_a_stem_that_will_not_open_gets_a_grounded_sentence_not_silence(self):
         """An initiator that goes quiet whenever a model hiccups is no initiator."""
         from unittest import mock
-        from pando import chatd
+        from pando import messenger
 
         posts = []
 
@@ -1232,9 +1232,9 @@ class TestChatMailboxPartition(unittest.TestCase):
         members = [{"node_id": "mac-llm-8b-local", "url": "http://127.0.0.1:9",
                     "model": "qwen-test"}]
         boom = mock.Mock(side_effect=RuntimeError("empty reply from mac-llm"))
-        with mock.patch.object(chatd, "_request", fake_request), \
-                mock.patch.object(chatd, "ask_member", boom):
-            report = chatd.pass_once(["http://mailbox"], None, members,
+        with mock.patch.object(messenger, "_request", fake_request), \
+                mock.patch.object(messenger, "ask_member", boom):
+            report = messenger.pass_once(["http://mailbox"], None, members,
                                      {"mac-llm-8b-local", "win-gemma-12b"},
                                      set(), {}, 5, True, {}, 1000.0)
 
@@ -1246,7 +1246,7 @@ class TestChatMailboxPartition(unittest.TestCase):
     def test_an_opening_somewhere_else_never_hides_a_message_meant_for_us(self):
         """Openings are what happens when there is nothing to answer."""
         from unittest import mock
-        from pando import chatd
+        from pando import messenger
 
         posts = []
 
@@ -1262,9 +1262,9 @@ class TestChatMailboxPartition(unittest.TestCase):
 
         members = [{"node_id": "mac-llm-8b-local", "url": "http://127.0.0.1:9",
                     "model": "qwen-test"}]
-        with mock.patch.object(chatd, "_request", fake_request), \
-                mock.patch.object(chatd, "ask_member", mock.Mock(return_value="在")):
-            report = chatd.pass_once(["http://mailbox"], None, members,
+        with mock.patch.object(messenger, "_request", fake_request), \
+                mock.patch.object(messenger, "ask_member", mock.Mock(return_value="在")):
+            report = messenger.pass_once(["http://mailbox"], None, members,
                                      {"mac-llm-8b-local", "win-gemma-12b"},
                                      set(), {}, 5, True, {}, 1000.0)
         self.assertEqual(report["did"], "spoke")
@@ -1279,8 +1279,8 @@ class TestChat(unittest.TestCase):
         """An LLM speaks because its record has chat.model, not because of its name."""
         from pando.chat import (next_reply, normalize_chat, should_answer,
                                 title_addressee)
-        from pando import chatd
-        from pando.chatd import local_chat_members
+        from pando import messenger
+        from pando.messenger import local_chat_members
 
         self.assertEqual(normalize_chat({"model": "qwen-test", "url": "http://x"}),
                          {"model": "qwen-test"})
@@ -1317,7 +1317,7 @@ class TestChat(unittest.TestCase):
         self.assertEqual(known, {"mac-llm", "win-gemma"})
 
         # Windows registers its stems with --advertise-host 192.168.31.100,
-        # while chatd reaches the local root through 127.0.0.1.  Python on
+        # while messenger reaches the local root through 127.0.0.1.  Python on
         # Windows does not reliably enumerate that advertised address; a lone
         # loopback root is still authoritative for the members on this host.
         trusted, trusted_known = local_chat_members(
@@ -1325,8 +1325,8 @@ class TestChat(unittest.TestCase):
         self.assertEqual([item["node_id"] for item in trusted],
                          ["mac-llm", "win-gemma"])
         self.assertEqual(trusted_known, {"mac-llm", "win-gemma"})
-        self.assertTrue(chatd.root_is_loopback("http://127.0.0.1:8790"))
-        self.assertFalse(chatd.root_is_loopback("http://192.168.31.100:8790"))
+        self.assertTrue(messenger.root_is_loopback("http://127.0.0.1:8790"))
+        self.assertFalse(messenger.root_is_loopback("http://192.168.31.100:8790"))
 
         choice = next_reply(
             members, known,
@@ -1433,7 +1433,7 @@ class TestChat(unittest.TestCase):
         # The peer least recently addressed comes first, not the same one.
         self.assertNotEqual(later["to"], first["to"])
 
-        # No peer off this host, no opening: two members sharing one chatd
+        # No peer off this host, no opening: two members sharing one messenger
         # would satisfy the letter of member-to-member and change nothing.
         self.assertIsNone(next_opening(members, {"mac-llm-8b-local"}, {}, 1.0))
         # A decision model has no chat.model, so it is not in known at all.
@@ -1442,7 +1442,7 @@ class TestChat(unittest.TestCase):
     def test_a_previously_opened_peer_survives_a_root_outage(self):
         """A dark root must not erase the roster the ledger already proved.
 
-        On 2026-10-27 the win root timed out on every chatd pass. The mailbox
+        On 2026-10-27 the win root timed out on every messenger pass. The mailbox
         and the local model were healthy, but known contained only the local
         member, so the only participant who could initiate saw no peer. The
         opening ledger is evidence that this exact local member previously
@@ -1465,9 +1465,9 @@ class TestChat(unittest.TestCase):
         self.assertEqual(pick["to"], "win-gemma-12b")
 
     def test_a_dark_root_is_skipped_then_retried_with_bounded_backoff(self):
-        """One timed-out root must not consume every healthy chatd pass."""
+        """One timed-out root must not consume every healthy messenger pass."""
         from unittest import mock
-        from pando import chatd
+        from pando import messenger
 
         local = "http://127.0.0.1:8765"
         remote = "http://100.93.216.90:8790"
@@ -1482,9 +1482,9 @@ class TestChat(unittest.TestCase):
                 raise TimeoutError("timed out")
             return {url: {"host": "test"}}
 
-        backoff = chatd.RootProbeBackoff(base=30, cap=45)
-        with mock.patch.object(chatd, "fetch_nodes", fetch):
-            nodes, events = chatd.probe_roots(roots, 180, backoff, now=100)
+        backoff = messenger.RootProbeBackoff(base=30, cap=45)
+        with mock.patch.object(messenger, "fetch_nodes", fetch):
+            nodes, events = messenger.probe_roots(roots, 180, backoff, now=100)
             self.assertEqual({url for url, _ in calls}, {local, remote})
             self.assertEqual(calls, [(local, 8), (remote, 8)])
             self.assertEqual(nodes, {local: {"host": "test"}})
@@ -1492,46 +1492,46 @@ class TestChat(unittest.TestCase):
                                   if row["url"] == remote)["retry_in"], 30)
 
             calls.clear()
-            chatd.probe_roots(roots, 180, backoff, now=110)
+            messenger.probe_roots(roots, 180, backoff, now=110)
             self.assertEqual(calls, [(local, 8)])
 
             calls.clear()
-            _, events = chatd.probe_roots(roots, 180, backoff, now=130)
+            _, events = messenger.probe_roots(roots, 180, backoff, now=130)
             self.assertEqual(calls, [(local, 8), (remote, 8)])
             self.assertEqual(next(row for row in events
                                   if row["url"] == remote)["retry_in"], 45)
 
             calls.clear()
-            chatd.probe_roots(roots, 180, backoff, now=174.9)
+            messenger.probe_roots(roots, 180, backoff, now=174.9)
             self.assertEqual(calls, [(local, 8)])
 
             calls.clear()
             state["down"] = False
-            nodes, _ = chatd.probe_roots(roots, 180, backoff, now=175)
+            nodes, _ = messenger.probe_roots(roots, 180, backoff, now=175)
             self.assertEqual(calls, [(local, 8), (remote, 8)])
             self.assertEqual(set(nodes), {local, remote})
 
             # Success clears the deferred state: the next pass probes again.
             calls.clear()
-            chatd.probe_roots(roots, 180, backoff, now=176)
+            messenger.probe_roots(roots, 180, backoff, now=176)
             self.assertEqual(calls, [(local, 8), (remote, 8)])
 
     def test_root_backoff_starts_when_the_failed_probe_ends(self):
         """A timeout must not consume the cooling-off window it just earned."""
         from unittest import mock
-        from pando import chatd
+        from pando import messenger
 
         remote = "http://100.93.216.90:8790"
         roots = [{"name": "win", "url": remote, "token": None}]
-        backoff = chatd.RootProbeBackoff(base=30, cap=30)
+        backoff = messenger.RootProbeBackoff(base=30, cap=30)
         times = iter([100.0, 108.0])
 
         def fetch(url, token, timeout):
             raise TimeoutError("timed out")
 
-        with mock.patch.object(chatd, "fetch_nodes", fetch), \
-                mock.patch.object(chatd.time, "monotonic", side_effect=lambda: next(times)):
-            _, events = chatd.probe_roots(roots, 180, backoff)
+        with mock.patch.object(messenger, "fetch_nodes", fetch), \
+                mock.patch.object(messenger.time, "monotonic", side_effect=lambda: next(times)):
+            _, events = messenger.probe_roots(roots, 180, backoff)
 
         self.assertEqual(events[0]["retry_in"], 30)
         self.assertFalse(backoff.due(remote, 137.9))
@@ -1554,7 +1554,7 @@ class TestChat(unittest.TestCase):
 
     def test_only_a_reply_or_live_membership_refreshes_peer_evidence(self):
         """Retrying a dark address must not refresh the stale-peer deadline."""
-        from pando.chatd import load_peer_evidence
+        from pando.messenger import load_peer_evidence
 
         key = ("mac-llm-8b-local", "win-yi-9b")
         rows = [
@@ -1584,7 +1584,7 @@ class TestChat(unittest.TestCase):
         that from having an opinion, so the members read a rule about actions
         as a rule about thoughts, and the conversation died at the first turn.
         """
-        from pando.chatd import system_prompt
+        from pando.messenger import system_prompt
 
         prompt = system_prompt("win-gemma-12b", "gemma-4-12b-q4km")
         self.assertIn("不能执行命令", prompt)

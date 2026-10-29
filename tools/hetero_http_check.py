@@ -185,8 +185,8 @@ def main() -> int:
         token = secrets.token_urlsafe(24)
         token_file = work / "pairing.token"
         token_file.write_text(token, encoding="utf-8")
-        root_out = work / "rootd.out"
-        root_err = work / "rootd.err"
+        root_out = work / "coordinator.out"
+        root_err = work / "coordinator.err"
         procs: list[tuple[str, subprocess.Popen, Path, Path]] = []
         root_proc: subprocess.Popen | None = None
 
@@ -207,7 +207,7 @@ def main() -> int:
         try:
             with root_out.open("wb") as out, root_err.open("wb") as err:
                 root_proc = subprocess.Popen(
-                    [str(host_python), "-m", "pando.rootd",
+                    [str(host_python), "-m", "pando.coordinator",
                      "--port", str(root_port),
                      "--pairing-token-file", str(token_file)],
                     cwd=ROOT, stdout=out, stderr=err, env=base_env,
@@ -229,7 +229,7 @@ def main() -> int:
                 err_path = work / f"{worker['node_id']}.err"
                 with out_path.open("wb") as out, err_path.open("wb") as err:
                     proc = subprocess.Popen(
-                        [str(worker["python"]), "-m", "pando.stemd",
+                        [str(worker["python"]), "-m", "pando.worker",
                          "--node-id", worker["node_id"],
                          "--root", root_url,
                          "--pairing-token-file", str(token_file),

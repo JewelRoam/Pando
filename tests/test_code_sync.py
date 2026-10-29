@@ -36,9 +36,9 @@ from pando.backend import (MockBackend, OpenAIChoiceBackend,
                             parse_openai_choice)
 from pando.common import (DecisionRequest, Vote, aggregate,
                             canonical_question, mcnemar_test)
-from pando.rootd import (Coordinator, INITIAL_STEM_TIMEOUT,
+from pando.coordinator import (Coordinator, INITIAL_STEM_TIMEOUT,
                             Root, load_accuracy_registry)
-from pando.stemd import Stem
+from pando.worker import Stem
 from pando.onboard import build_plan
 from pando import graft
 from pando.grants import (audit_status, grant_status, require_grant,
@@ -354,7 +354,7 @@ class TestCodeSync(unittest.TestCase):
             self.assertIn("pandosi-stem-laya.service", sync.SAFE_UNITS)
             self.assertIn("pandosi-stem-text.service", sync.SAFE_UNITS)
             self.assertIn("pandosi-stem-llm.service", sync.SAFE_UNITS)
-            # rootd holds the live member registry; it is not auto-restarted.
+            # coordinator holds the live member registry; it is not auto-restarted.
             self.assertNotIn("pandosi-root.service", sync.SAFE_UNITS)
             peer = sync.sync_repo(root / "missing", peer=str(bare))
             self.assertEqual(peer["reason"], "no-git")
@@ -779,7 +779,7 @@ class TestCodeSync(unittest.TestCase):
                 json.dumps([{"ProcessId": os.getpid(),
                              "CommandLine": "python tools/node_code_watch.py"},
                             {"ProcessId": 11,
-                             "CommandLine": "python -m pando.stemd"}]), "")
+                             "CommandLine": "python -m pando.worker"}]), "")
 
         out = sync._restart_windows(["proc"], run=run)
         self.assertEqual(out["reason"], "restarted")
@@ -1347,7 +1347,7 @@ class TestCodeSync(unittest.TestCase):
         for row in sync.CLIENT_UNITS.values():
             for handle in row.values():
                 self.assertNotIn("llama", handle)
-                self.assertNotIn("rootd", handle)
+                self.assertNotIn("coordinator", handle)
 
         # The dialects are interchangeable *on purpose*: pi5's unit file
         # names must work when the same code runs on the Mac, and vice versa.
@@ -1356,7 +1356,7 @@ class TestCodeSync(unittest.TestCase):
             "darwin")
         self.assertEqual(refused, [])
         self.assertEqual(handles, ["launchd:com.jewelroam.pandosi-think",
-                                   "proc:pando.stemd"])
+                                   "proc:pando.worker"])
         self.assertEqual(sync.resolve_units(["pandosi-stem-laya.service"],
                                             "linux")[0],
                          ["pandosi-stem-laya.service"])
@@ -1389,9 +1389,9 @@ class TestCodeSync(unittest.TestCase):
                             for call in darwin_calls))
 
         listing = json.dumps([
-            {"ProcessId": 5, "CommandLine": "python.exe -m pando.thinkd --x"},
+            {"ProcessId": 5, "CommandLine": "python.exe -m pando.proposer --x"},
             {"ProcessId": 6, "CommandLine": "llama-server.exe --model m.gguf"},
-            {"ProcessId": 7, "CommandLine": "python.exe -m pando.rootd"},
+            {"ProcessId": 7, "CommandLine": "python.exe -m pando.coordinator"},
             {"ProcessId": 8, "CommandLine": "python.exe tools/other.py"},
         ])
         windows_calls = []
@@ -2204,8 +2204,8 @@ class TestPi5UnitTemplates(unittest.TestCase):
         """
         units = self._units()
         writers = [name for name, text in units.items()
-                   if "pando.reactd" in text or "pando.thinkd" in text
-                   or "pando.chatd" in text]
+                   if "pando.reactor" in text or "pando.proposer" in text
+                   or "pando.messenger" in text]
         self.assertTrue(writers, "no pi5 writer units at all")
         for name in writers:
             self.assertIn("--mailbox-fallback", units[name],

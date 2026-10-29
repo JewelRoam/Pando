@@ -103,10 +103,10 @@ def decide_lineage(rows: list[dict], stem_members: list[str],
                    temperatures: dict[str, float],
                    combiner: Combiner | None,
                    combiner_sees_opinions: bool) -> dict:
-    """Mirror rootd's lineage-counted path exactly.
+    """Mirror coordinator's lineage-counted path exactly.
 
     The quorum counts opinions (same-lineage stems collapse to one vote),
-    but rootd hands the *combiner* either everything it heard (today's
+    but coordinator hands the *combiner* either everything it heard (today's
     behaviour, replicated lineages included) or the collapsed opinion set -
     the difference this function exists to measure.
     """
@@ -209,7 +209,7 @@ def main() -> int:
         ("english x2 + ft-v3 (calibrated)", ["english", "english", NEW],
          live_calibrated),
         # Same three devices, quorum counted over opinions instead of stems
-        # (rootd --lineage-quorum): the duplicated english lineage becomes
+        # (coordinator --lineage-quorum): the duplicated english lineage becomes
         # one vote, so the distinct member can actually move the answer.
         ("english x2 + ft-v3, lineage-counted", ["english", NEW], {}),
         ("english x2 + ft-v3, lineage-counted (cal)", ["english", NEW],

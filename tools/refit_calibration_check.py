@@ -3,7 +3,7 @@
 The calibration tables the swarm runs on were fitted on tiny samples - 14
 items for `english`, 14 for `multilingual`, 12 for `typed-decisions` - because
 that is all the labelled data that existed when they were written. PROJECT-
-STATE has carried "rootd calibration from a held-out set" as *blocked for want
+STATE has carried "coordinator calibration from a held-out set" as *blocked for want
 of labelled data* since round 100. There are now 720 labelled rows across
 three wording splits.
 

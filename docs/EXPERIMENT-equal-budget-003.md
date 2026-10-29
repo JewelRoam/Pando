@@ -54,7 +54,7 @@ llama-server -m ~/.pandosi/models/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M.gguf \
   --alias qwen3-8b-q4km-instruct --jinja \
   --chat-template-kwargs '{"enable_thinking": false}' \
   -ngl 99 -c 4096 --parallel 1 --temp 0 --metrics
-.venv/bin/python -m pando.stemd --node-id bracket-8b-q4 --checkpoint mac-llm-8b-q4 \
+.venv/bin/python -m pando.worker --node-id bracket-8b-q4 --checkpoint mac-llm-8b-q4 \
   --backend openai --openai-url http://127.0.0.1:8084/v1 \
   --openai-key-file ~/.pandosi/llm-api-8b.token \
   --openai-model qwen3-8b-q4km-instruct --host 127.0.0.1 --port 8771
@@ -173,7 +173,7 @@ this model family — under a bracket that tilts the budget both ways.
 - **运维代价（含人类审批次数）.** 0 new launchd jobs, 0 new timers, 0 new
   grants, **0 human approvals**. Cost paid: the resident 8B-Q6 member
   (`mac-llm-8b-local`, role=proposal, so no quorum is affected) was offline for
-  ~15 minutes; thinkd degraded to its 4B fallback on `:8080` for that window;
+  ~15 minutes; proposer degraded to its 4B fallback on `:8080` for that window;
   the arm A′ server had to be started outside the supervision tree, so a crash
   would have silently produced a short harvest rather than a loud one — the
   360/360 row counters were checked because of exactly that.

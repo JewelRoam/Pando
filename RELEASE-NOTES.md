@@ -10,7 +10,7 @@
 | Heterogeneous dual-EU consensus (iGPU + CPU, different backends) | round 35, FINAL INTEGRATION OK |
 | iGPU 4x speedup via GatherND graph surgery | round 34, 42ms vs 106ms |
 | Signed self-replication (SPROUT/VERIFY/LIVE, 571MB real weights) | round 17/33, sandbox-gated |
-| Playbook governance (TOML -> hash chain -> rootd gate -> consensus) | round 20/27/44 |
+| Playbook governance (TOML -> hash chain -> coordinator gate -> consensus) | round 20/27/44 |
 | RLCD data path (swarm -> rollouts -> contrast pairs -> trainer) | round 38/47, format-compatible |
 | 40-task graft acceptance suite (3 lineages measured) | round 23/44, score anomaly found+closed |
 

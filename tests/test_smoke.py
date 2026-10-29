@@ -36,9 +36,9 @@ from pando.backend import (MockBackend, OpenAIChoiceBackend,
                             parse_openai_choice)
 from pando.common import (DecisionRequest, Vote, aggregate,
                             canonical_question, mcnemar_test)
-from pando.rootd import (Coordinator, INITIAL_STEM_TIMEOUT,
+from pando.coordinator import (Coordinator, INITIAL_STEM_TIMEOUT,
                             Root, load_accuracy_registry)
-from pando.stemd import Stem
+from pando.worker import Stem
 from pando.onboard import build_plan
 from pando import graft
 from pando.grants import (audit_status, grant_status, require_grant,
@@ -662,7 +662,7 @@ class TestSmoke(unittest.TestCase):
     def test_identity_bindings_survive_restart(self):
         import tempfile
         from pathlib import Path as _P
-        from pando.rootd import Coordinator
+        from pando.coordinator import Coordinator
         with tempfile.TemporaryDirectory() as td:
             store = _P(td) / "identity-bindings.json"
             first = Coordinator(identity_store=store)
@@ -855,7 +855,7 @@ class TestSmoke(unittest.TestCase):
         (round 111). The floor is binding even when the latency target is
         not reachable.
         """
-        from pando.rootd import Coordinator
+        from pando.coordinator import Coordinator
 
         from pando.playbook import load_playbook
 
@@ -1378,7 +1378,7 @@ class TestSmoke(unittest.TestCase):
         target configured the operator has said latency outranks host cost;
         without one, cost leads (round 134).
         """
-        from pando.rootd import Coordinator
+        from pando.coordinator import Coordinator
 
         def coordinator(target):
             coord = Coordinator(quorum_k=1, latency_target_ms=target)
@@ -1406,7 +1406,7 @@ class TestSmoke(unittest.TestCase):
         replica the lineage had already cast. The ceiling is the number of
         opinions, so the dial stops at 2.
         """
-        from pando.rootd import Coordinator
+        from pando.coordinator import Coordinator
 
         coord = Coordinator(adaptive_quorum=True, quorum_floor=2,
                             quorum_k=3, latency_target_ms=100.0,

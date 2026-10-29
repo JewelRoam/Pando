@@ -24,7 +24,7 @@ Step 1  单机价值       tools/demo.py：本机 root + 多 stem/多 EU 共识
 Step 2  本机加速       用户选择安装 onnxruntime/openvino；仍无需管理员
 Step 3  显式入群       LAN 授权 + root 地址 + pairing token，stem 只服务该 root
 Step 4  沙箱实验室     Docker/Podman/WSL 中运行 Spore 复制实验
-Step 5  常驻服务       systemd --user / Windows 计划任务 / Termux sv，显式开启
+Step 5  常驻服务       syworker --user / Windows 计划任务 / Termux sv，显式开启
 ```
 
 当前仓库已有 Step 0/1/3/4 的最小实现；Step 5 已有 Windows/Linux/Termux
@@ -74,7 +74,7 @@ python -m pando.service --role root --json
 | 平台 | 默认无特权路径 | 需要授权的扩展 |
 |---|---|---|
 | Windows AI PC | Python + pip + CPU/iGPU | OpenVINO/NPU 驱动、Docker Desktop、防火墙 |
-| Linux/SBC | pipx + CPU + systemd --user | 包管理器、firewalld/ufw、Podman/Docker |
+| Linux/SBC | pipx + CPU + syworker --user | 包管理器、firewalld/ufw、Podman/Docker |
 | macOS | Python + CPU/Metal | Container/VM 运行时、辅助工具授权 |
 | Android/Termux | Termux + pip + CPU | termux-services、存储/电池白名单 |
 
@@ -108,7 +108,7 @@ observer，但禁止繁殖/执行载荷。
 1. [x] `doctor --json` 已包含 `plan`；另有只读的 `doctor --plan`。
 2. [x] `pando/onboard.py --dry-run` 已实现；明确拒绝安装/提权/改授权。
 3. [x] root pairing token 已覆盖注册、节点、决策、playbook 和 root Spore 面。
-4. [x] `grants.toml` 读写、过期检查、hash-chain 审计已接入 join/rootd/lab。
+4. [x] `grants.toml` 读写、过期检查、hash-chain 审计已接入 join/coordinator/lab。
 5. [x] `pando.service plan` 已生成 Windows/Linux/Termux 方案；安装保持手动。
-6. [x] Windows 用户级 Startup 生命周期已实机验收；Linux `systemd --user` 已接入 CI 生命周期检查；Termux 仍待真机。
+6. [x] Windows 用户级 Startup 生命周期已实机验收；Linux `syworker --user` 已接入 CI 生命周期检查；Termux 仍待真机。
 7. 发布前先补 `pip install pando`/PyPI 或 `pipx install git+...` 验收。

@@ -1,6 +1,6 @@
 """End-to-end check of the observe -> decide -> act loop.
 
-Starts a real rootd and real stemd workers (the project's deterministic
+Starts a real coordinator and real worker workers (the project's deterministic
 mock backend, no protocol faking), then drives the autonomous loop twice:
 with a full quorum, where the swarm says `auto` and the loop acts, and after
 a worker is lost, where the swarm falls back to `escalate` and the loop must
@@ -57,7 +57,7 @@ def wait_root(url: str, deadline: float = 30.0) -> None:
         except OSError:
             pass
         time.sleep(0.2)
-    raise SystemExit("rootd did not start")
+    raise SystemExit("coordinator did not start")
 
 
 def wait_nodes(url: str, token: str, expected: int,
@@ -76,7 +76,7 @@ def main() -> int:
     parser.add_argument("--yes", action="store_true")
     args = parser.parse_args()
     if not args.yes:
-        parser.error("this starts real rootd/stemd processes; pass --yes")
+        parser.error("this starts real coordinator/worker processes; pass --yes")
 
     port = free_port()
     root_url = f"http://127.0.0.1:{port}"
@@ -102,7 +102,7 @@ def main() -> int:
 
         def start_stem(node_id: str, checkpoint: str) -> subprocess.Popen:
             proc = subprocess.Popen(
-                [sys.executable, "-m", "pando.stemd",
+                [sys.executable, "-m", "pando.worker",
                  "--node-id", node_id,
                  "--root", root_url,
                  "--pairing-token-file", str(token_file),
@@ -115,7 +115,7 @@ def main() -> int:
 
         try:
             root_proc = subprocess.Popen(
-                [sys.executable, "-m", "pando.rootd",
+                [sys.executable, "-m", "pando.coordinator",
                  "--port", str(port),
                  "--pairing-token-file", str(token_file),
                  "--rollout-dir", str(work / "rollouts")],

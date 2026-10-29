@@ -10,7 +10,7 @@
 	<array>
 		<string>/Users/zhengenrong/Downloads/PandoSI-island/.venv/bin/python</string>
 		<string>-m</string>
-		<string>pando.reactd</string>
+		<string>pando.reactor</string>
 		<string>--root</string>
 		<string>http://127.0.0.1:8765</string>
 		<string>--pairing-token-file</string>

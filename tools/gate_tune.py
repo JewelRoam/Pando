@@ -1,7 +1,7 @@
 """Pick gate thresholds from recorded decisions, for a target accuracy.
 
 Reads the rows written by tools/gating_check.py - which are calibrated
-exactly as rootd calibrates a live vote - and sweeps the two gating
+exactly as coordinator calibrates a live vote - and sweeps the two gating
 thresholds the playbook exposes:
 
     auto_min_agreement

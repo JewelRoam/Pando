@@ -1,6 +1,6 @@
 """win_worker: answers open tasks on this node. It does not speak in chat.
 
-Chat belongs to each LLM member. pando.chatd reads ``chat.model`` and answers
+Chat belongs to each LLM member. pando.messenger reads ``chat.model`` and answers
 ``@that-member`` as that member. This worker used to answer as win-codex,
 which hid the model behind a codex name. It never runs shell commands and
 never edits files. When a task clearly needs code work it marks the task

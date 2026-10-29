@@ -37,7 +37,7 @@ win node: Mac LAN -> Mac tailnet -> win-local -> win tailnet.
 
 - The Mac's mailbox (:8776) is the group's home while it is up.
 - The win mailbox (:8778) is the resilience host: always up locally, so
-  a sleeping Mac cannot silence the colony. thinkd publishes along its
+  a sleeping Mac cannot silence the colony. proposer publishes along its
   mailbox chain (primary + fallbacks) and spools only when every mailbox
   is unreachable.
 - `docs/session-logs/` is a sanitized historical archive, not a

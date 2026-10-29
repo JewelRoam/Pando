@@ -36,9 +36,9 @@ from pando.backend import (MockBackend, OpenAIChoiceBackend,
                             parse_openai_choice)
 from pando.common import (DecisionRequest, Vote, aggregate,
                             canonical_question, mcnemar_test)
-from pando.rootd import (Coordinator, INITIAL_STEM_TIMEOUT,
+from pando.coordinator import (Coordinator, INITIAL_STEM_TIMEOUT,
                             Root, load_accuracy_registry)
-from pando.stemd import Stem
+from pando.worker import Stem
 from pando.onboard import build_plan
 from pando import graft
 from pando.grants import (audit_status, grant_status, require_grant,
@@ -60,10 +60,10 @@ class TestLocalCi(unittest.TestCase):
         self.assertEqual(module.drift(module.WORKFLOW.read_text(encoding="utf-8")), [])
 
     def test_the_gate_mirrors_the_swarm_workflow_too(self):
-        """``swarm.yml`` fires on pushes touching rootd/stemd; mirror it.
+        """``swarm.yml`` fires on pushes touching coordinator/worker; mirror it.
 
         Until 2026-10-19 this gate mirrored only ``ci.yml``. A push touching
-        ``pando/rootd.py`` starts nine swarm checks on the runner and none
+        ``pando/coordinator.py`` starts nine swarm checks on the runner and none
         here, so the gate could pass and the user still got a red run. A gate
         that mirrors one of two workflows is not a gate, it is a coin flip.
         """

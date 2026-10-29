@@ -3,7 +3,7 @@
 A member can speak in the group only when its record has ``chat.model``.
 Decision-only members (a text model, an ONNX voter) do not have that field,
 so they are not given a chat identity by a list somewhere else. The stem
-serves ``POST /chat`` for its own model. Each machine's chatd answers only
+serves ``POST /chat`` for its own model. Each machine's messenger answers only
 for members whose host is itself.
 """
 
@@ -157,7 +157,7 @@ def next_opening(members: list[dict], known: set[str],
     of members who can only answer is a panel of respondents, not a group.
 
     Peers are the chat members that are *not* on this host. A member talking
-    to a sibling it shares a chatd with is one process talking to itself, and
+    to a sibling it shares a messenger with is one process talking to itself, and
     it would satisfy the letter of "member-to-member" while leaving the
     colony exactly as silent as before.
 

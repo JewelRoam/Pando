@@ -21,7 +21,7 @@
 
 ## Phase 1 ' + chr(8212) + ' Standstill Prototype (target: 2-3 weeks)
 
-> Progress 2026-10-13: pando package scaffolded (common/backend/graft/stemd/rootd).
+> Progress 2026-10-13: pando package scaffolded (common/backend/graft/worker/coordinator).
 > 6/6 unittests pass incl. real-HTTP e2e; multi-process smoke OK (root + 2 stems,
 > heartbeat registration, fan-out vote, conservative escalate when quorum < 3).
 > MockBackend stands in for Laya; checkpoint diversity enforced in quorum picking.
@@ -32,9 +32,9 @@
 > x 3 checkpoints), statically validated.
 Goal: consensus decision service on heterogeneous devices, no replication yet.
 
-- [x] `stemd`: single-binary worker serving Laya via ONNX Runtime (x86 verified;
+- [x] `worker`: single-binary worker serving Laya via ONNX Runtime (x86 verified;
       ARM/Termux path documented, needs hardware)
-- [x] `rootd`: coordinator — fan-out, k-replica voting, confidence gating,
+- [x] `coordinator`: coordinator — fan-out, k-replica voting, confidence gating,
       calibration layer (blueprint 3.2.1), playbook question enforcement
 - [x] `graft`: capability probe + EU enumeration + role assignment
 - [x] Dashboard v2: static render with lineage votes, playbook attribution,

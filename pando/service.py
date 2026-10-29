@@ -44,12 +44,12 @@ def _process_argv(role: str, platform: str, *, port: int, lan: bool,
                   root_url: str, node_id: str, token: Path,
                   working_dir: Path) -> list[str]:
     if role == "root":
-        argv = [sys.executable, "-m", "pando.rootd",
+        argv = [sys.executable, "-m", "pando.coordinator",
                 "--port", str(port), "--pairing-token-file", str(token)]
         if lan:
             argv.append("--lan")
         return argv
-    return [sys.executable, "-m", "pando.stemd", "--node-id", node_id,
+    return [sys.executable, "-m", "pando.worker", "--node-id", node_id,
             "--root", root_url, "--pairing-token-file", str(token)]
 
 

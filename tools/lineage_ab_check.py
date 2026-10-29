@@ -114,7 +114,7 @@ def main() -> int:
 
         try:
             processes.append(subprocess.Popen(
-                [sys.executable, "-m", "pando.rootd",
+                [sys.executable, "-m", "pando.coordinator",
                  "--port", str(root_port),
                  "--pairing-token-file", str(token_file)],
                 cwd=ROOT, stdout=subprocess.DEVNULL,
@@ -123,7 +123,7 @@ def main() -> int:
             wait_root(root_url)
 
             processes.append(subprocess.Popen(
-                [sys.executable, "-m", "pando.stemd",
+                [sys.executable, "-m", "pando.worker",
                  "--node-id", "baseline-english",
                  "--checkpoint", "english",
                  "--backend", "onnx",
@@ -135,7 +135,7 @@ def main() -> int:
                 stderr=subprocess.DEVNULL,
                 creationflags=creationflags))
             processes.append(subprocess.Popen(
-                [sys.executable, "-m", "pando.stemd",
+                [sys.executable, "-m", "pando.worker",
                  "--node-id", "candidate-rlcd-v7",
                  "--checkpoint", "rlcd-v7",
                  "--backend", "onnx",

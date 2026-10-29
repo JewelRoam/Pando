@@ -90,7 +90,7 @@ def checks() -> list[dict]:
     pb_hist = Path("assets/playbook-history.jsonl")
     add("ok" if pb_hist.exists() else "miss", "playbook history chain",
         "" if pb_hist.exists() else
-        "auto-created on first rootd --playbook start")
+        "auto-created on first coordinator --playbook start")
 
     cap = capability()
     role = assign_role(cap)

@@ -10,7 +10,7 @@
 	<array>
 		<string>/Users/zhengenrong/Downloads/PandoSI-island/.venv/bin/python</string>
 		<string>-m</string>
-		<string>pando.chatd</string>
+		<string>pando.messenger</string>
 		<string>--hosts</string>
 		<string>/Users/zhengenrong/.pandosi/hosts.json</string>
 		<string>--token-file</string>

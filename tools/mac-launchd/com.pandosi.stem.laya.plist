@@ -27,7 +27,7 @@
   <key>Label</key><string>com.pandosi.stem.laya</string>
   <key>ProgramArguments</key><array>
     <string>/Users/zhengenrong/Downloads/PandoSI-island/.venv/bin/python</string>
-    <string>-m</string><string>pando.stemd</string>
+    <string>-m</string><string>pando.worker</string>
     <string>--node-id</string><string>mac-laya-int8</string>
     <string>--checkpoint</string><string>laya-en</string>
     <string>--backend</string><string>onnx</string>

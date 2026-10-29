@@ -29,16 +29,16 @@ def start(args):
 
 def main() -> None:
     print("PandoSI demo: root + 3 mock stems + 3 consensus votes", flush=True)
-    procs = [start(["-m", "pando.rootd", "--port", PORT,
+    procs = [start(["-m", "pando.coordinator", "--port", PORT,
                     "--pairing-token", TOKEN]),
-             start(["-m", "pando.stemd", "--node-id", "stem0",
+             start(["-m", "pando.worker", "--node-id", "stem0",
                     "--root", f"http://127.0.0.1:{PORT}",
                     "--pairing-token", TOKEN]),
-             start(["-m", "pando.stemd", "--node-id", "stem1",
+             start(["-m", "pando.worker", "--node-id", "stem1",
                     "--checkpoint", "multilingual",
                     "--root", f"http://127.0.0.1:{PORT}",
                     "--pairing-token", TOKEN]),
-             start(["-m", "pando.stemd", "--node-id", "stem2",
+             start(["-m", "pando.worker", "--node-id", "stem2",
                     "--checkpoint", "typed-decisions",
                     "--root", f"http://127.0.0.1:{PORT}",
                     "--pairing-token", TOKEN])]

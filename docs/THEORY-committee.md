@@ -101,7 +101,7 @@ $$P_{\text{plain}}^{\text{corr}} = \Phi\left( \frac{\sum_{i=1}^k p_i - k/2}{\sqr
 ### 3.3 Policy (b): Majority + Assent Gate
 
 Policy (b) formalizes PandoSI's autonomous execution tier (`tier = "auto"`).
-In `pando/rootd.py` and `reproduce_headlines.py`:
+In `pando/coordinator.py` and `reproduce_headlines.py`:
 1. Agreement threshold: $\frac{\text{top count}}{k} \ge 0.60$.
 2. Confidence threshold: $\bar{q}_{\text{top}} \ge 0.60$.
 3. **Assent Requirement**: The registered domain expert (designated *witness* $w = \operatorname{argmax}_i p_i$) must assent to the decision ($V_w = V_{\text{majority}}$). If $V_w \neq V_{\text{majority}}$, the decision is demoted from `auto` to `verify`.
@@ -286,7 +286,7 @@ The empirical predictions were verified against all recorded vote files in `asse
 While the mathematical model accurately reflects offline recorded votes, operational deployment encounters several physical constraints:
 
 1. **Finite Sample Discretization**: Recorded suites contain 120 to 240 rows (and 91 rows on G-holdout). A single flip on Suite F represents $\approx 0.0083$ (0.83%), which bounds empirical resolution.
-2. **Asynchronous Wire Protocol vs Offline Synchrony**: In live execution (`pando/rootd.py`), stems operate under network jitter and learned EWMA latency deadlines. Slow or degraded stems are dropped into cooldown and excluded from the quorum, meaning the operational quorum dynamically fluctuates between $k_{\text{floor}}$ and $k_{\text{ceiling}}$.
+2. **Asynchronous Wire Protocol vs Offline Synchrony**: In live execution (`pando/coordinator.py`), stems operate under network jitter and learned EWMA latency deadlines. Slow or degraded stems are dropped into cooldown and excluded from the quorum, meaning the operational quorum dynamically fluctuates between $k_{\text{floor}}$ and $k_{\text{ceiling}}$.
 3. **Zero-Error Variance Truncation**: When fine-tuned models achieve saturation (as on G-holdout), error correlation metrics collapse, preventing standard portfolio optimization without hard probe sets.
 4. **Silicon Co-Residency**: Running multiple local neural stems on a single machine (e.g. CPU + iGPU + GPU) introduces memory bandwidth contention. The marginal information gain from adding a weak local stem must always be weighed against the latency penalty it imposes on the critical path.
 

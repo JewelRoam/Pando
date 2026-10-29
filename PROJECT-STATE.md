@@ -13,12 +13,12 @@ NPU) all voting in the same consensus quorum.
 
 | Component | Files | Status |
 |---|---|---|
-| Decision swarm (rootd + stemd) | rootd.py, stemd.py, backend.py, common.py | quorum gating + real-HTTP e2e vote |
+| Decision swarm (coordinator + worker) | coordinator.py, worker.py, backend.py, common.py | quorum gating + real-HTTP e2e vote |
 | Capability probe + EU enumeration | graft.py | 3 EUs detected live |
 | Calibration layer (temperature scaling) | calibrate.py | math verified |
 | Signed self-replication (Spore) | spore.py | 3-hop chain, 0 failures |
 | Sandbox gate (Ring 2) | lab.py | refusal + attested paths |
-| Playbook governance (5 layers) | playbook.py + rootd integration | 6/6 E2E |
+| Playbook governance (5 layers) | playbook.py + coordinator integration | 6/6 E2E |
 | RLCD evolution data path | rollout.py + export | trainer-compatible |
 | 40-task graft suite | assets/graft_suite.jsonl + graft_eval.py | 3 lineages measured |
 | NPU-compatible graph | postprocess_onnx.py + IsNaN removal | GPU compile OK |
@@ -26,7 +26,7 @@ NPU) all voting in the same consensus quorum.
 | Dashboard v2 | tools/dashboard.py | lineage + attribution + disagreements |
 | CUDA worker | backend.py CUDA branch + tools/cuda_bench.py | RTX 3070 live |
 | Heterogeneous HTTP check | tools/hetero_http_check.py | CPU+iGPU+NPU+CUDA live |
-| PyTorch (non-OpenVINO) stem | backend.py TorchLayaBackend + stemd --backend laya | torch-cuda votes in the same quorum |
+| PyTorch (non-OpenVINO) stem | backend.py TorchLayaBackend + worker --backend laya | torch-cuda votes in the same quorum |
 | Stem wire contract | docs/STEM-PROTOCOL.md | framework-free join spec (3 endpoints) |
 | Stage graph splitter | tools/stage_split.py | node-boundary cut, shared external weights |
 | Pipeline measurement | tools/stage_pipeline_check.py | real HTTP 2-stage chain, latency + throughput |
@@ -36,9 +36,9 @@ NPU) all voting in the same consensus quorum.
 | Gate risk-coverage | tools/gating_check.py | auto 51.8% coverage at 92.9% accuracy |
 | Gate threshold tuning | tools/gate_tune.py | shipped 0.6/0.6 already optimal |
 | Gate live verification | tools/gate_e2e_check.py | live == offline, delta 0.0000 |
-| Adaptive stem timeouts | rootd.py per-stem EWMA | 5s cold -> 0.7-1.0s learned |
+| Adaptive stem timeouts | coordinator.py per-stem EWMA | 5s cold -> 0.7-1.0s learned |
 | Slow-node isolation | tools/slow_stem_check.py | 4->3 quorum, 24ms cooldown skip |
-| LAN-interface HTTP | tools/lan_http_check.py + stemd advertise host | same-host protocol path verified |
+| LAN-interface HTTP | tools/lan_http_check.py + worker advertise host | same-host protocol path verified |
 | Remote-link degradation | tools/remote_latency_check.py | timeout -> skip -> recovery verified |
 | Runtime elastic membership | tools/swarm_check.py | live 3 -> 5 -> 4 transitions |
 | CUDA hot-plug | tools/hetero_http_check.py --hotplug-cuda | Intel 3 -> +RTX 3070 |
@@ -49,7 +49,7 @@ NPU) all voting in the same consensus quorum.
 | CUDA candidate v7 | artifacts/rlcd-cuda-v7 | 41 updates, stable holdout, not promoted |
 | Live lineage A/B | tools/lineage_ab_check.py | v7 6/6 agreement, no accuracy gain, rejected |
 | Post-training calibration | tools/calibrate_checkpoint.py | T=2.67, confidence reduced, not promoted |
-| Real lineage HTTP identity | backend/stemd checkpoint override + tools/real_lineage_http_check.py | en/ml/td distinct, 11/12 split |
+| Real lineage HTTP identity | backend/worker checkpoint override + tools/real_lineage_http_check.py | en/ml/td distinct, 11/12 split |
 
 ## What is proven (key numbers)
 
@@ -99,7 +99,7 @@ NPU) all voting in the same consensus quorum.
 | Re-ask on disagreements | weighted vote 75.6% -> 76.9%; answer moves on 12/78 rows | round 120 |
 | Re-ask unanimity as a signal | 31/78 settle, accuracy identical to the first ballot (83.9%) | round 120 |
 | Routes to the split headroom | combiner <=1.0 pt, narrower ballot +1.3 pt, of 18 available | round 118/120 |
-| Lineage-counted quorum | `aggregate(count_lineages=)` + `rootd --lineage-quorum` | round 121 |
+| Lineage-counted quorum | `aggregate(count_lineages=)` + `coordinator --lineage-quorum` | round 121 |
 | Invariance under replication | shipped drifts up to 14.6 pt by copy pattern; collapsed drifts 0.000 | round 121 |
 | Replica of the weakest member | quorum falls toward that member (0.746 vs 0.892) | round 121 |
 | Near-duplicate under a new name | still admitted at full weight - needs an admission-time divergence test | round 121 |
@@ -119,7 +119,7 @@ NPU) all voting in the same consensus quorum.
 | Quantised sibling (int8 vs fp32 english) | 48/240 flips, but phi +0.413; no ensemble gain | round 125 |
 | Same-family diversity spectrum | monotone in phi: 1.000 (descendant/ballot) -> 0.41 (int8) -> 0.07 (outside family, +4.1 pt) | round 125 |
 | Trio correlation on unseen wording | phi +0.36..+0.82 (dev: +0.21..+0.53) - harder wording correlates them more | round 125 |
-| Text member (naive Bayes) | pando/textmodel.py, 19 KB artifact, stemd --backend text | round 126 |
+| Text member (naive Bayes) | pando/textmodel.py, 19 KB artifact, worker --backend text | round 126 |
 | 4-member swarm, over real HTTP | trio 73.75% / +text 72.92% at full coverage - a loss | round 126 |
 | Heartbeat TTL | an un-heartbeating stem is dropped after 15 s; a check must heartbeat | round 126 |
 | Tied quorum answers | 2-2 splits ranked by confidence at verify, never auto | round 127 |
@@ -147,7 +147,7 @@ NPU) all voting in the same consensus quorum.
 | Units add capacity at k=1 | 1 unit 14.7/s -> 2 units 27.1/s = the sum of their solo rates | round 132 |
 | One host, not three servers | the 3rd unit (NPU) adds little or subtracts; all stems share the host CPU | round 132 |
 | Elastic dial, measured | k=3 -> k=1 at 3 units: 2.3x throughput, half the p50 latency | round 132 |
-| Process-shaped fleet | separate stemd processes behave the same: 1u 26.5, 2u 25.0, 3u 26.0 /s | round 133 |
+| Process-shaped fleet | separate worker processes behave the same: 1u 26.5, 2u 25.0, 3u 26.0 /s | round 133 |
 | k is reproducible, units are not | k=3 costs 2-3x in both process shapes; units add nothing | round 133 |
 | Unit rank depends on load | at 4 clients: NPU 33.2/s > CPU 24.9 > iGPU 24.0 (sequential: NPU last) | round 133 |
 | Single-host variance | the same cell measured 16.8/s and 34.1/s in two runs - 30-50% noise | round 133 |
@@ -161,7 +161,7 @@ NPU) all voting in the same consensus quorum.
 | Accelerator dropout | under 4 concurrent clients the iGPU/NPU stems fail ~half their calls; the CPU stem never does | round 135 |
 | Round 134 accelerator numbers | **withdrawn** - the dropouts masqueraded as throughput | round 135 |
 | Device should serialise | the `serialize` model (one decision at a time) is the next fix | round 135 |
-| Stems serialise by default | lock around `backend.decide`; `stemd --parallel` to opt out | round 136 |
+| Stems serialise by default | lock around `backend.decide`; `worker --parallel` to opt out | round 136 |
 | Dropouts fixed | silent decisions 49-56/120 -> **0**; the fleet routes to the accelerators | round 136 |
 | Unit table (serialised, loaded host) | CPU service 94->309 ms at 2856 ms host CPU/decision; iGPU 53->35 ms at 36; NPU 112->109 ms at **4** | round 136 |
 | Cost ratio, corrected | 80-700x between the NPU and the CPU per decision | round 136 |
@@ -261,10 +261,10 @@ NPU) all voting in the same consensus quorum.
 | Prompt scaffold on D | candidate-only 0.8167 @ 139 ms vs JSON 0.7375 @ 442 ms (+7.9 pp, 3.2x faster) | round 159 |
 | Assent gating (offline) | auto requires the strongest member's choice: trio auto 199 @ 1.0000, decided 0.9833 | round 159 |
 | Tiered composition, first win | trio+B+assent 0.9833 > pair 0.9750, at 40 more auto rows, all correct | round 159 |
-| Next | implement --assent-checkpoint in rootd (Task 005, dispatched) + live three-tier run | round 159 |
+| Next | implement --assent-checkpoint in coordinator (Task 005, dispatched) + live three-tier run | round 159 |
 | Assent gating shipped | Coordinator/CLI/status + collapsed lookup + 3-stem test; cherry-picked to main, 22/22 smoke on both machines | round 159 |
-| Next (dispatched) | Task 006: stemd --backend openai (B-prompt, LAN API); then live three-tier run with --assent-checkpoint ft-v3 | round 159 |
-| OpenAI backend shipped | stemd --backend openai (B-prompt, LAN API), parse tests; cherry-picked to main, 23/23 smoke both machines | round 160 |
+| Next (dispatched) | Task 006: worker --backend openai (B-prompt, LAN API); then live three-tier run with --assent-checkpoint ft-v3 | round 159 |
+| OpenAI backend shipped | worker --backend openai (B-prompt, LAN API), parse tests; cherry-picked to main, 23/23 smoke both machines | round 160 |
 | Live three-tier, run 1 | auto 195 @ 1.0000, decided 0.9833 (core 0.9750), p50 182 ms | round 160 |
 | Live three-tier, replicated | run 2 identical to the digit (195 @ 1.0000, 0.9833, p50 181 ms, 5.60 rows/s) | round 160 |
 | Prediction matched live | offline 0.9833 predicted (round 159) and delivered; auto 195 vs 199 explained by max_tokens 16 vs 64 | round 160 |
@@ -273,7 +273,7 @@ NPU) all voting in the same consensus quorum.
 | Assent on fresh E | live auto 227 @ 1.0000, decided 0.9583 (advisor fallback), p50 181 ms; offline prediction matched | round 161 |
 | Fallback flips by split | D: advisor 0.9833 > veto 0.9417; E: veto 0.9917 > advisor 0.9583; near-tied over 480 rows | round 161 |
 | Next (dispatched) | Task 008: --assent-fallback advisor|veto as a declared policy slot + tests | round 161 |
-| Fallback slot landed | --assent-fallback advisor|veto (rootd + CLI + /status + veto field), tests 23/23 | round 161 |
+| Fallback slot landed | --assent-fallback advisor|veto (coordinator + CLI + /status + veto field), tests 23/23 | round 161 |
 | Veto live on E | auto 227 @ 1.0000, decided 0.9750 (advisor live 0.9583; offline veto 0.9917) | round 161 |
 | assent=auto landed | assets/registry/accuracies.json + runtime resolution among present voters; /status assent_resolved; 24/24 smoke | round 161 |
 | auto live on E | registry resolved to ft-v3; auto 227 @ 1.0000, decided 0.9750 - identical to explicit ft-v3 | round 161 |
@@ -287,7 +287,7 @@ NPU) all voting in the same consensus quorum.
 | Live gap root-caused | 21 declined rows bypassed the witness (13 dragged by constant p=0.5 mean, 8 unsuggested); veto covered only its own 5 dissent rows | round 164 |
 | Next (dispatched) | Task 015: veto = witness answers every non-auto row (veto-all-declined) | round 164 |
 | Cross-NAT link live | mac-endpoint control plane (URLs matched user-provided, char-for-char); mailbox + both LLM APIs 200 over quick tunnels | round 164 |
-| veto-all-declined merged | cherry-picked (rootd +24, tests +64), 28/28 smoke | round 164 |
+| veto-all-declined merged | cherry-picked (coordinator +24, tests +64), 28/28 smoke | round 164 |
 | Live F verdict | auto 94 @ 0.9894, decided **118/120 = 0.9833** - matches offline to the digit; morning's 0.8083 gap closed | round 164 |
 | Tunnel latency cost | p50 329 ms (LAN) -> 1205 ms (quick tunnel); Tailscale documented for when it matters | round 164 |
 | Neutral-channel measured | excluding choice-only (p=0.5) votes from mean: auto D +2 / E +2 / F +5, precision flat | round 165 |
@@ -338,7 +338,7 @@ NPU) all voting in the same consensus quorum.
 | Gate with production calibration | 48.1% coverage at 92.3%; held set 14.3% accurate | round 100 |
 | Live vs offline gate | identical to 4dp over real HTTP stems | round 100 |
 | Calibration keying defect | temperature selected by checkpoint name string | round 100 |
-| Calibration enforcement | report in rootd, enforce in AutonomyLoop | round 101 |
+| Calibration enforcement | report in coordinator, enforce in AutonomyLoop | round 101 |
 | Declared lineage admission | playbook [lineages].admit + /register 403 | round 102 |
 | Artifact attestation | artifact_digest + [lineages.artifacts] + 403 | round 103 |
 | Signed playbooks | sign_playbook.py + --playbook-key pin | round 104 |
@@ -346,10 +346,10 @@ NPU) all voting in the same consensus quorum.
 | Batched spore transfer | /spore/chunks/<name>/<start>/<count> + keep-alive | 1.68 GB in 14.2 s (8.8x) |
 | Delta replication | build_manifest_cdc + ChunkStore + /spore/blobs | 1610 MB -> 105 MB (15.3x) |
 | Packed chunk store | ChunkStore (chunks.bin + index) | delta leg 5.84 s vs 10.49 s cold |
-| Delta in the live path | rootd --chunking cdc + join --chunk-store | end-to-end 105 MB vs 1610 MB |
+| Delta in the live path | coordinator --chunking cdc + join --chunk-store | end-to-end 105 MB vs 1610 MB |
 | rlcd-v7 calibration | assets/calibration/rlcd-v7.json | T=2.6704 from round 81 |
 | Scaling law of the quorum | tools/scaling_law_check.py | replicas alone +9%; fixed k + rotation 1.9x |
-| Configurable quorum size | rootd --quorum-k + per-decision rotation | scaling unit is the quorum |
+| Configurable quorum size | coordinator --quorum-k + per-decision rotation | scaling unit is the quorum |
 | Load-aware quorum picking | Coordinator in-flight ordering | 16-24% over blind rotation |
 | Adaptive quorum size | --adaptive-quorum/--latency-target-ms | holds k=5 idle, k=3 under load |
 | Per-category quorum floors | playbook gating quorum_floor | security k=4 vs ordinary k=2 under load |

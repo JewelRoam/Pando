@@ -7,7 +7,7 @@ question decides whether an elastic policy should add replicas for capacity
 or only to replace slow members - so it is measured rather than assumed.
 
 Replicas are deterministic mock stems with a simulated per-decision delay
-(``stemd --delay-ms``), because a real 1.7 GB model per replica would make
+(``worker --delay-ms``), because a real 1.7 GB model per replica would make
 the sweep take hours and would measure model loading rather than the
 architecture.
 
@@ -51,7 +51,7 @@ def wait_root(url: str, deadline: float = 30.0) -> None:
         except OSError:
             pass
         time.sleep(0.2)
-    raise SystemExit("rootd did not become ready")
+    raise SystemExit("coordinator did not become ready")
 
 
 def wait_nodes(url: str, token: str, expected: int,
@@ -116,7 +116,7 @@ def main() -> int:
     parser.add_argument("--replicas", default="1,2,3,5")
     parser.add_argument("--concurrency", default="1,2,4,8")
     parser.add_argument("--quorum-k", type=int, default=None,
-                        help="voters per decision (rootd --quorum-k); leave "
+                        help="voters per decision (coordinator --quorum-k); leave "
                              "unset to let the quorum grow with membership")
     parser.add_argument("--label", default=None,
                         help="recorded in the report so sweeps can be compared")
@@ -135,7 +135,7 @@ def main() -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
     if not args.yes:
-        parser.error("this starts real rootd/stemd processes; pass --yes")
+        parser.error("this starts real coordinator/worker processes; pass --yes")
 
     replica_counts = [int(v) for v in args.replicas.split(",") if v.strip()]
     concurrencies = [int(v) for v in args.concurrency.split(",") if v.strip()]
@@ -152,7 +152,7 @@ def main() -> int:
     rows: list[dict] = []
     try:
         procs.append(subprocess.Popen(
-            [sys.executable, "-m", "pando.rootd", "--port", str(port),
+            [sys.executable, "-m", "pando.coordinator", "--port", str(port),
              "--pairing-token-file", str(token_file),
              "--rollout-dir", str(work / "rollouts"),
              *(["--quorum-k", str(args.quorum_k)]
@@ -171,7 +171,7 @@ def main() -> int:
         for target in replica_counts:
             while started < target:
                 procs.append(subprocess.Popen(
-                    [sys.executable, "-m", "pando.stemd",
+                    [sys.executable, "-m", "pando.worker",
                      "--node-id", f"replica-{started}",
                      "--root", url,
                      "--pairing-token-file", str(token_file),

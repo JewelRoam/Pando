@@ -10,7 +10,7 @@ the "weak tier keeps the group alive" story is a HEARTBEAT_TTL artifact, not a f
 - /decide returns choice=null, responded=0 for 6-11 s until HEARTBEAT_TTL=15 s evicts the corpse.
 - A live weak node is registered the whole time; it is simply never tried within the same decision.
 
-## Current mechanics (pando/rootd.py)
+## Current mechanics (pando/coordinator.py)
 - decide() picks the quorum via pick_quorum(quorum_k) over live_nodes() (TTL-filtered registry).
 - Fan-out to all picked members in parallel; a _call_stem failure returns None
   ("dead node: shrink quorum, never block the vote").

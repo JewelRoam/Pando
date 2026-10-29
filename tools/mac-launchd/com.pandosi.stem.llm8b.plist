@@ -4,7 +4,7 @@
   <key>Label</key><string>com.pandosi.stem.llm8b</string>
   <key>ProgramArguments</key><array>
     <string>/Users/zhengenrong/Downloads/PandoSI-island/.venv/bin/python</string>
-    <string>-m</string><string>pando.stemd</string>
+    <string>-m</string><string>pando.worker</string>
     <string>--node-id</string><string>mac-llm-8b-local</string>
     <string>--checkpoint</string><string>mac-llm-8b-q6</string>
     <string>--backend</string><string>openai</string>

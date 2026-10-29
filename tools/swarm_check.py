@@ -1,6 +1,6 @@
 """Run an isolated multi-process PandoSI swarm and verify elastic shrinkage.
 
-This exercises the production CLI path: independent rootd and stemd OS
+This exercises the production CLI path: independent coordinator and worker OS
 processes, token-file pairing, protected root endpoints, real HTTP votes,
 heartbeat expiry, and quorum shrinkage after one worker dies.
 """
@@ -159,11 +159,11 @@ def main() -> int:
                     proc.kill()
 
         try:
-            root_out = work / "rootd.out"
-            root_err = work / "rootd.err"
+            root_out = work / "coordinator.out"
+            root_err = work / "coordinator.err"
             with root_out.open("wb") as out, root_err.open("wb") as err:
                 root_proc = subprocess.Popen(
-                    [python, "-m", "pando.rootd", "--port",
+                    [python, "-m", "pando.coordinator", "--port",
                      str(root_port), "--pairing-token-file",
                      str(token_file)],
                     cwd=ROOT, stdout=out, stderr=err,
@@ -183,7 +183,7 @@ def main() -> int:
             initial_checkpoints = checkpoints[:args.initial_stems]
             for stem_id, checkpoint in zip(initial_ids, initial_checkpoints):
                 stem_procs.append(subprocess.Popen(
-                    [python, "-m", "pando.stemd", "--node-id", stem_id,
+                    [python, "-m", "pando.worker", "--node-id", stem_id,
                      "--checkpoint", checkpoint, "--root", root_url,
                      "--pairing-token-file", str(token_file)],
                     cwd=ROOT, stdout=subprocess.DEVNULL,
@@ -213,7 +213,7 @@ def main() -> int:
                     stem_ids[args.initial_stems:],
                     checkpoints[args.initial_stems:]):
                 stem_procs.append(subprocess.Popen(
-                    [python, "-m", "pando.stemd", "--node-id", stem_id,
+                    [python, "-m", "pando.worker", "--node-id", stem_id,
                      "--checkpoint", checkpoint, "--root", root_url,
                      "--pairing-token-file", str(token_file)],
                     cwd=ROOT, stdout=subprocess.DEVNULL,

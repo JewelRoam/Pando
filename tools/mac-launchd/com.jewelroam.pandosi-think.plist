@@ -10,7 +10,7 @@
 	<array>
 		<string>/Users/zhengenrong/Downloads/PandoSI-island/.venv/bin/python</string>
 		<string>-m</string>
-		<string>pando.thinkd</string>
+		<string>pando.proposer</string>
 		<string>--node-id</string>
 		<string>mac-proposer</string>
 		<string>--base-url</string>

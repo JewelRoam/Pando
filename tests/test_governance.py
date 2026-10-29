@@ -36,9 +36,9 @@ from pando.backend import (MockBackend, OpenAIChoiceBackend,
                             parse_openai_choice)
 from pando.common import (DecisionRequest, Vote, aggregate,
                             canonical_question, mcnemar_test)
-from pando.rootd import (Coordinator, INITIAL_STEM_TIMEOUT,
+from pando.coordinator import (Coordinator, INITIAL_STEM_TIMEOUT,
                             Root, load_accuracy_registry)
-from pando.stemd import Stem
+from pando.worker import Stem
 from pando.onboard import build_plan
 from pando import graft
 from pando.grants import (audit_status, grant_status, require_grant,
@@ -64,11 +64,11 @@ class TestMemoryAblationCheck(unittest.TestCase):
         return mod
 
     def test_single_factor_arms_isolate_history_counts_and_last_action(self):
-        from pando.thinkd import Ledger
+        from pando.proposer import Ledger
         tool = self._tool()
         with tempfile.TemporaryDirectory() as tmp:
             ledger = Ledger(Path(tmp) / "think.jsonl")
-            from pando.thinkd import Round, Proposal
+            from pando.proposer import Round, Proposal
             for number, action in ((1, "adaptive.governance"),
                                    (2, "dynamic.threshold.adjustment")):
                 row = Round(number, number, proposal=Proposal(
@@ -143,7 +143,7 @@ class TestMemoryAblationCheck(unittest.TestCase):
             )
 
     def test_goal_counterfactual_changes_polarity_not_layout(self):
-        from pando.thinkd import Ledger, Proposal, Round
+        from pando.proposer import Ledger, Proposal, Round
         tool = self._tool()
         with tempfile.TemporaryDirectory() as tmp:
             ledger = Ledger(Path(tmp) / "think.jsonl")
@@ -181,7 +181,7 @@ class TestMemoryAblationCheck(unittest.TestCase):
                          [0.03, 0.06, 0.06])
 
     def test_prompt_artifact_contains_replayable_system_and_arm_text(self):
-        from pando.thinkd import Ledger, Proposal, Round
+        from pando.proposer import Ledger, Proposal, Round
         tool = self._tool()
         with tempfile.TemporaryDirectory() as tmp:
             ledger = Ledger(Path(tmp) / "think.jsonl")

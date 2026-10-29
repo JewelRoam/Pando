@@ -22,7 +22,7 @@ import json
 import time
 from pathlib import Path
 
-from pando.thinkd import OpenAIProposer, extract_json
+from pando.proposer import OpenAIProposer, extract_json
 
 ROOT = Path(__file__).resolve().parents[1]
 BLIND_PATH = ROOT / "tools" / "historical_action_blind_review.py"

@@ -27,7 +27,7 @@ from .graft import assign_role, capability, enumerate_execution_units
 from .grants import require_grant
 from .identity import load_or_create
 from .resources import asset_path
-from .rootd import Coordinator
+from .coordinator import Coordinator
 
 SERVICE_TYPE = "_pando._tcp.local."
 ARTIFACT_CANDIDATES = [
@@ -199,8 +199,8 @@ def main() -> None:
     root_info = {"ip": args.root.split("//")[1].split(":")[0],
                  "port": int(args.root.rsplit(":", 1)[1])} if args.root \
         else (discover_root() if args.lan else None)
-    from .rootd import Coordinator, Root
-    from .stemd import Stem, heartbeat_loop
+    from .coordinator import Coordinator, Root
+    from .worker import Stem, heartbeat_loop
 
     if root_info:
         root_url = f"http://{root_info['ip']}:{root_info['port']}"
@@ -236,10 +236,10 @@ def main() -> None:
         root_url = root.url()
         if args.lan:
             advertise_root(root.port)
-            print(f"rootd listening on {root_url} "
+            print(f"coordinator listening on {root_url} "
                   "(advertised via mDNS)", flush=True)
         else:
-            print(f"rootd listening on {root_url} (loopback only)", flush=True)
+            print(f"coordinator listening on {root_url} (loopback only)", flush=True)
         print(f"stem pairing token: {args.pairing_token}", flush=True)
         print("other stems must pass the same --pairing-token", flush=True)
 
@@ -456,7 +456,7 @@ def main() -> None:
             print(f"register attempt failed: {exc}", flush=True)
             time.sleep(2)
 
-    # Registration IS the heartbeat: rootd expires stems after 15s without
+    # Registration IS the heartbeat: coordinator expires stems after 15s without
     # a /register refresh, so keep re-registering for the process lifetime.
     def heartbeat():
         while True:

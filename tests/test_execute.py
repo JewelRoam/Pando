@@ -36,9 +36,9 @@ from pando.backend import (MockBackend, OpenAIChoiceBackend,
                             parse_openai_choice)
 from pando.common import (DecisionRequest, Vote, aggregate,
                             canonical_question, mcnemar_test)
-from pando.rootd import (Coordinator, INITIAL_STEM_TIMEOUT,
+from pando.coordinator import (Coordinator, INITIAL_STEM_TIMEOUT,
                             Root, load_accuracy_registry)
-from pando.stemd import Stem
+from pando.worker import Stem
 from pando.onboard import build_plan
 from pando import graft
 from pando.grants import (audit_status, grant_status, require_grant,
@@ -2214,7 +2214,7 @@ class TestExecution(unittest.TestCase):
 
         Written after reading the live tree (2026-10-19): ``merge_action_space``
         had no caller outside the tests. The gate resolved an installed verb, but
-        ``pando/thinkd.py`` handed the model the hard-coded ``ACTION_SPACE`` and
+        ``pando/proposer.py`` handed the model the hard-coded ``ACTION_SPACE`` and
         refused every answer outside it, so an installed verb could never appear
         in a proposal -- and ``next_installed`` only stages proposals that name
         one. An install nobody can propose is the empty shell this action exists
@@ -2225,7 +2225,7 @@ class TestExecution(unittest.TestCase):
         from pando.identity import Identity
         from pando.invite import validate as invite_validate
         from pando.operators import install
-        from pando.thinkd import (SYSTEM_PROMPT, effective_action_space,
+        from pando.proposer import (SYSTEM_PROMPT, effective_action_space,
                                   extra_action_block, proposal_from_obj)
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -2288,7 +2288,7 @@ class TestExecution(unittest.TestCase):
         """
         import tempfile
         from pando.genesis import ACTION_SPACE
-        from pando.thinkd import effective_action_space
+        from pando.proposer import effective_action_space
 
         with tempfile.TemporaryDirectory() as tmp:
             installs = Path(tmp) / "operators"
@@ -3569,7 +3569,7 @@ class TestSeedReceive(unittest.TestCase):
                 author="mac-proposer")), 0)
             outbox = root / "outbox"
             from pando.execute import offer_replication, pull_destinations
-            from pando.thinkd import host_names_from
+            from pando.proposer import host_names_from
             offered = offer_replication("repl-1", "pi5", bundle=bundle, outbox=outbox)
             self.assertEqual(offered["skipped"], "offered")
             self.assertFalse(seed.receive_bundle(plain, outbox, name="repl-plain")["copied"])
@@ -3963,7 +3963,7 @@ class TestWindowsSeedPull(unittest.TestCase):
         think_restart = (root / "tools" / "win_restart_think.ps1").read_text(
             encoding="utf-8")
         self.assertIn("param(", think_restart)
-        self.assertIn("pando\\.thinkd", think_restart)
+        self.assertIn("pando\\.proposer", think_restart)
         self.assertNotIn("New-ScheduledTask", supervisor)
         self.assertNotIn("New-ScheduledTask", think_restart)
 

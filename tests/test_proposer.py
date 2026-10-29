@@ -36,9 +36,9 @@ from pando.backend import (MockBackend, OpenAIChoiceBackend,
                             parse_openai_choice)
 from pando.common import (DecisionRequest, Vote, aggregate,
                             canonical_question, mcnemar_test)
-from pando.rootd import (Coordinator, INITIAL_STEM_TIMEOUT,
+from pando.coordinator import (Coordinator, INITIAL_STEM_TIMEOUT,
                             Root, load_accuracy_registry)
-from pando.stemd import Stem
+from pando.worker import Stem
 from pando.onboard import build_plan
 from pando import graft
 from pando.grants import (audit_status, grant_status, require_grant,
@@ -47,7 +47,7 @@ from pando.service import build_service_plan, detect_platform
 
 
 class TestResidentThinker(unittest.TestCase):
-    """pando.thinkd - the proposer that has to keep running when nobody asks.
+    """pando.proposer - the proposer that has to keep running when nobody asks.
 
     The measured failure this guards (2026-10-17): one agent process died and
     the colony produced nothing for 7h47m, because every other device was a
@@ -57,7 +57,7 @@ class TestResidentThinker(unittest.TestCase):
 
     def _thinker(self, answers, ledger_path, published=None, **kw):
         from pando.identity import Identity
-        from pando.thinkd import Ledger, Thinker
+        from pando.proposer import Ledger, Thinker
 
         class ScriptedProposer:
             """Hands back canned answers; raises when the script says to."""
@@ -92,9 +92,9 @@ class TestResidentThinker(unittest.TestCase):
             publish=(publish if published is None else published), **defaults)
         return thinker, proposer, sent
 
-    def test_thinkd_pulls_json_out_of_a_chatty_answer(self):
+    def test_proposer_pulls_json_out_of_a_chatty_answer(self):
         """A 4B model wraps its JSON in prose; that must not be a lost round."""
-        from pando.thinkd import extract_json
+        from pando.proposer import extract_json
 
         text = ('Sure! Here is my proposal:\n'
                 '```json\n'
@@ -106,18 +106,18 @@ class TestResidentThinker(unittest.TestCase):
         self.assertEqual(obj["nested"]["b"], [2, 3])
         self.assertIsNone(extract_json("no json at all here"))
 
-    def test_thinkd_accepts_a_comma_joined_cites_string(self):
+    def test_proposer_accepts_a_comma_joined_cites_string(self):
         """Measured: qwen3-4b-instruct-2507 returns cites as one string."""
-        from pando.thinkd import _as_cites
+        from pando.proposer import _as_cites
 
         self.assertEqual(_as_cites("r1:seed.export, r2:recruit.invite"),
                          ["r1:seed.export", "r2:recruit.invite"])
         self.assertEqual(_as_cites(["a", " b "]), ["a", "b"])
         self.assertEqual(_as_cites(None), [])
 
-    def test_thinkd_refuses_an_action_outside_the_space(self):
+    def test_proposer_refuses_an_action_outside_the_space(self):
         """The model proposes; it does not get to widen its own action space."""
-        from pando.thinkd import proposal_from_obj
+        from pando.proposer import proposal_from_obj
 
         proposal, why = proposal_from_obj(
             {"action": "overthrow.the.operator", "goal": "take over the machine"},
@@ -142,7 +142,7 @@ class TestResidentThinker(unittest.TestCase):
         self.assertIsNone(proposal)
         self.assertIn("not a host name", why)
 
-    def test_thinkd_requires_valid_signed_params_for_policy_set(self):
+    def test_proposer_requires_valid_signed_params_for_policy_set(self):
         """The proposer and executor must agree on the one typed action intent.
 
         A ``policy.set`` with prose but no valid params is not a rule change;
@@ -150,7 +150,7 @@ class TestResidentThinker(unittest.TestCase):
         validator is used here and by the executor, so the intent shape cannot
         drift between the two.
         """
-        from pando.thinkd import proposal_from_obj
+        from pando.proposer import proposal_from_obj
 
         proposal, why = proposal_from_obj(
             {"action": "policy.set", "goal": "raise the adoption floor",
@@ -184,7 +184,7 @@ class TestResidentThinker(unittest.TestCase):
         than none: the model would copy it faithfully and still be refused.
         """
         from pando.policy import validate as validate_policy
-        from pando.thinkd import policy_skeleton
+        from pando.proposer import policy_skeleton
 
         skeleton = policy_skeleton()
         checked, why = validate_policy(skeleton)
@@ -241,7 +241,7 @@ class TestResidentThinker(unittest.TestCase):
         than none: the model would echo it faithfully and still be refused.
         """
         from pando.operators import validate as validate_operator
-        from pando.thinkd import operator_skeleton
+        from pando.proposer import operator_skeleton
 
         skeleton = operator_skeleton()
         checked, why = validate_operator(skeleton)
@@ -279,7 +279,7 @@ class TestResidentThinker(unittest.TestCase):
             self.assertEqual(round_.proposal.params["operator"], "vote.weighted")
             self.assertEqual(proposer.calls, 2)
             # The retry must carry the shape, not just repeat the prose.
-            from pando.thinkd import operator_skeleton as skeleton_of
+            from pando.proposer import operator_skeleton as skeleton_of
             self.assertIn('"operator"', proposer.users[1])
             self.assertIn(skeleton_of()["operator"], proposer.users[1])
 
@@ -309,7 +309,7 @@ class TestResidentThinker(unittest.TestCase):
         """The one action whose payload ends up being code keeps the rule the
         actuator enforces: labels and prose, never an executable surface.
         """
-        from pando.thinkd import proposal_from_obj
+        from pando.proposer import proposal_from_obj
 
         for raw in ({"code": "import os"}, {"path": "/tmp/x"}, {"url": "http://x"},
                     {"operator": ""}, {"operator": "   "}, {"operator": 7},
@@ -337,7 +337,7 @@ class TestResidentThinker(unittest.TestCase):
         """
         from pando.identity import Identity
         from pando.operators import stage as stage_operator
-        from pando.thinkd import proposal_from_obj
+        from pando.proposer import proposal_from_obj
 
         proposal, why = proposal_from_obj(
             {"action": "meta.propose", "goal": "ask for a new operator",
@@ -359,7 +359,7 @@ class TestResidentThinker(unittest.TestCase):
         self.assertTrue([r for r in spec["refusals"] if "no implementation" in r])
         self.assertFalse(spec["installed"])
 
-    def test_thinkd_requires_valid_signed_params_for_culture_refine(self):
+    def test_proposer_requires_valid_signed_params_for_culture_refine(self):
         """The proposer and executor share one culture.refine intent shape.
 
         A ``culture.refine`` whose params are not ``{"playbook": <full
@@ -367,7 +367,7 @@ class TestResidentThinker(unittest.TestCase):
         unexecutable loop entry. Both sides call ``pando.culture.validate``, so
         the shape the model is asked for cannot drift from what runs.
         """
-        from pando.thinkd import proposal_from_obj
+        from pando.proposer import proposal_from_obj
 
         good = {"meta": {"name": "loop", "version": 2},
                 "gating": {"quorum_floor": 3}}
@@ -399,7 +399,7 @@ class TestResidentThinker(unittest.TestCase):
         another failed attempt to think rather than a broken prompt.
         """
         from pando.culture import validate as validate_culture
-        from pando.thinkd import culture_skeleton
+        from pando.proposer import culture_skeleton
 
         skeleton = culture_skeleton()
         checked, why = validate_culture({"playbook": skeleton})
@@ -415,7 +415,7 @@ class TestResidentThinker(unittest.TestCase):
         looser validator, because the validator is what stops prose from being
         signed as a culture artifact.
         """
-        from pando.thinkd import culture_skeleton
+        from pando.proposer import culture_skeleton
 
         with tempfile.TemporaryDirectory() as tmp:
             skeleton = culture_skeleton()
@@ -456,7 +456,7 @@ class TestResidentThinker(unittest.TestCase):
             self.assertEqual(proposer.calls, 2)
             self.assertEqual(sent, [])
 
-    def test_thinkd_keeps_thinking_through_model_and_mailbox_failures(self):
+    def test_proposer_keeps_thinking_through_model_and_mailbox_failures(self):
         """A dead model, dead mailbox, or bad JSON is a recorded round, not an end."""
         with tempfile.TemporaryDirectory() as tmp:
             ledger = Path(tmp) / "think.jsonl"
@@ -481,7 +481,7 @@ class TestResidentThinker(unittest.TestCase):
             # whole point: nothing here is allowed to end the process.
             self.assertEqual([r["round"] for r in rows], [1, 2, 3, 4])
 
-    def test_thinkd_retries_one_dropped_model_call(self):
+    def test_proposer_retries_one_dropped_model_call(self):
         """A respawned server should not cost the whole round."""
         with tempfile.TemporaryDirectory() as tmp:
             ledger = Path(tmp) / "think.jsonl"
@@ -518,7 +518,7 @@ class TestResidentThinker(unittest.TestCase):
             self.assertEqual(proposer.calls, 4)
             self.assertEqual(len(sent), 2)
 
-    def test_thinkd_repairs_a_repeat_and_records_that_it_had_to(self):
+    def test_proposer_repairs_a_repeat_and_records_that_it_had_to(self):
         """Self-repetition is repaired once, and the repair is visible."""
         with tempfile.TemporaryDirectory() as tmp:
             ledger = Path(tmp) / "think.jsonl"
@@ -548,7 +548,7 @@ class TestResidentThinker(unittest.TestCase):
             self.assertEqual([p.action for p in sent],
                              ["culture.refine", "resource.rebalance"])
 
-    def test_thinkd_marks_an_unrepaired_repeat_instead_of_dressing_it_up(self):
+    def test_proposer_marks_an_unrepaired_repeat_instead_of_dressing_it_up(self):
         """Measured 2026-10-17: the model rewords the goal and keeps the verb.
 
         A reworded goal is not a new step. When the repair fails, the round must
@@ -573,9 +573,9 @@ class TestResidentThinker(unittest.TestCase):
             self.assertTrue(second.novelty_forced)  # and the record says so
             self.assertEqual(second.proposal.action, "seed.export")
 
-    def test_thinkd_falls_over_to_the_surviving_endpoint(self):
+    def test_proposer_falls_over_to_the_surviving_endpoint(self):
         """The 8B is reaped first under memory pressure; the 4B must take over."""
-        from pando.thinkd import FailoverProposer, OpenAIProposer
+        from pando.proposer import FailoverProposer, OpenAIProposer
 
         class Endpoint(OpenAIProposer):
             def __init__(self, model, answer):
@@ -605,7 +605,7 @@ class TestResidentThinker(unittest.TestCase):
         with self.assertRaises(OSError):
             dead.complete("s", "u")
 
-    def test_thinkd_refreshes_the_outcome_feed_on_a_stride(self):
+    def test_proposer_refreshes_the_outcome_feed_on_a_stride(self):
         """The mailbox listing is O(tasks): asking every round would be suicide."""
         with tempfile.TemporaryDirectory() as tmp:
             calls = []
@@ -627,10 +627,10 @@ class TestResidentThinker(unittest.TestCase):
             self.assertEqual(len(thinker.rounds), 8)
             self.assertEqual(len(calls), 2)  # 8 rounds, stride 4
 
-    def test_thinkd_reads_bounded_final_outcomes_not_the_full_message_feed(self):
+    def test_proposer_reads_bounded_final_outcomes_not_the_full_message_feed(self):
         """Reaction traffic must not turn a trend read into a 9 MB poll."""
         from unittest import mock
-        from pando import thinkd
+        from pando import proposer
 
         with tempfile.TemporaryDirectory() as tmp:
             thinker, _, _ = self._thinker(
@@ -664,13 +664,13 @@ class TestResidentThinker(unittest.TestCase):
                 activity = thinker._fetch_group_activity()
 
         self.assertEqual(calls, [
-            f"/tasks?status={status}&limit={thinkd.ACTIVITY_FEED_LIMIT}"
-            for status in thinkd.ACTIVITY_STATUSES])
+            f"/tasks?status={status}&limit={proposer.ACTIVITY_FEED_LIMIT}"
+            for status in proposer.ACTIVITY_STATUSES])
         self.assertNotIn("/tasks?status=all", calls)
         self.assertEqual([row["title"] for row in activity],
                          ["attempt that failed", "[alarm] root offline"])
 
-    def test_thinkd_never_publishes_an_unreachable_mailbox(self):
+    def test_proposer_never_publishes_an_unreachable_mailbox(self):
         """Transport failure is held, recorded, and survived - not raised."""
         def publish(proposal, identity, url, token):
             raise OSError("mailbox down")
@@ -688,7 +688,7 @@ class TestResidentThinker(unittest.TestCase):
 
     def test_a_destination_is_kept_on_the_round_and_in_the_spool(self):
         from pando.genesis import Proposal
-        from pando.thinkd import Round, Spool, destination_hint, proposal_from_spool
+        from pando.proposer import Round, Spool, destination_hint, proposal_from_spool
         bare = Round(1, 0.0)
         self.assertNotIn("destination", bare.as_dict())
         bare.proposal = Proposal("p", "mac", "carry", "seed.replicate", destination="win")
@@ -736,11 +736,11 @@ class TestResidentThinker(unittest.TestCase):
             self.assertEqual(sent[-1].destination, "")
 
     def test_one_host_named_only_in_the_goal_is_labeled_as_such(self):
-        from pando.thinkd import named_host
+        from pando.proposer import named_host
         self.assertEqual(named_host("在 win 主机上", ["mac", "win"]), "win")
         self.assertEqual(named_host("在 mac 和 win 上", ["mac", "win"]), "")
         self.assertEqual(named_host("window", ["win"]), "")
-        from pando.thinkd import Round, replicate_streak
+        from pando.proposer import Round, replicate_streak
         from pando.genesis import Proposal
         self.assertFalse(replicate_streak([{"action": "seed.replicate"}]))
         self.assertFalse(replicate_streak([
@@ -760,7 +760,7 @@ class TestResidentThinker(unittest.TestCase):
 
             # A repeat the model would not change does not inherit a host
             # from the sentence.
-            from pando.thinkd import Round
+            from pando.proposer import Round
             from pando.genesis import Proposal
             prior = Round(1, 0.0)
             prior.proposal = Proposal("p", "mac", "old", "seed.replicate", destination="mac")
@@ -804,7 +804,7 @@ class TestResidentThinker(unittest.TestCase):
 
     def test_a_replicate_streak_is_named_before_the_model_answers(self):
         from pando.genesis import Proposal
-        from pando.thinkd import Round
+        from pando.proposer import Round
         with tempfile.TemporaryDirectory() as tmp:
             thinker, _, _ = self._thinker(
                 [{"action": "culture.refine", "goal": "x"}],
@@ -820,7 +820,7 @@ class TestResidentThinker(unittest.TestCase):
 
     def test_a_destination_retry_cannot_walk_back_onto_the_action_just_left(self):
         from pando.genesis import Proposal
-        from pando.thinkd import Round
+        from pando.proposer import Round
         with tempfile.TemporaryDirectory() as tmp:
             thinker, _proposer, sent = self._thinker(
                 [{"action": "culture.refine", "goal": "again",

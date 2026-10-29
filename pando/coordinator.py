@@ -1,4 +1,4 @@
-"""rootd: the PandoSI consensus coordinator.
+"""coordinator: the PandoSI consensus coordinator.
 
 Maintains a registry of stems (lazy expiry), fans decisions out concurrently
 to a checkpoint-diverse quorum, and aggregates votes via common.aggregate.
@@ -1496,7 +1496,7 @@ def main() -> None:
               f"hash={pb_hash[:16]} "
               f"gating={root.playbook.gating}", flush=True)
     root.start()
-    print(f"rootd listening on {root.url()}")
+    print(f"coordinator listening on {root.url()}")
     try:
         while True:
             time.sleep(3600)

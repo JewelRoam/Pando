@@ -121,8 +121,8 @@ def main() -> int:
         }
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) \
             if sys.platform == "win32" else 0
-        root_out = work / "rootd.out"
-        root_err = work / "rootd.err"
+        root_out = work / "coordinator.out"
+        root_err = work / "coordinator.err"
 
         def cleanup() -> None:
             for process in processes:
@@ -137,7 +137,7 @@ def main() -> int:
         try:
             with root_out.open("wb") as out, root_err.open("wb") as err:
                 processes.append(subprocess.Popen(
-                    [sys.executable, "-m", "pando.rootd",
+                    [sys.executable, "-m", "pando.coordinator",
                      "--port", str(root_port), "--lan",
                      "--pairing-token-file", str(token_file)],
                     cwd=ROOT, stdout=out, stderr=err, env=env,
@@ -145,7 +145,7 @@ def main() -> int:
             wait_root(root_loopback)
 
             loop_process = subprocess.Popen(
-                [sys.executable, "-m", "pando.stemd",
+                [sys.executable, "-m", "pando.worker",
                  "--node-id", "loopback-stem",
                  "--checkpoint", "loopback",
                  "--root", root_loopback,
@@ -155,7 +155,7 @@ def main() -> int:
                 creationflags=creationflags)
             processes.append(loop_process)
             lan_process = subprocess.Popen(
-                [sys.executable, "-m", "pando.stemd",
+                [sys.executable, "-m", "pando.worker",
                  "--node-id", "lan-stem",
                  "--checkpoint", "lan",
                  "--host", "0.0.0.0",

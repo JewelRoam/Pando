@@ -5,7 +5,7 @@ Goal: the Pi joins a LAN fabric as a real, honest member with one visible comman
 The fabric never scans or commandeers anything: enrollment is an invitation the device accepts.
 
 ## 1. Flash
-Recommended image: **Raspberry Pi OS Lite (64-bit, Bookworm)** - headless, systemd, Python 3.11, apt.
+Recommended image: **Raspberry Pi OS Lite (64-bit, Bookworm)** - headless, syworker, Python 3.11, apt.
 - Alternatives: Ubuntu Server 24.04 LTS (arm64) - Python 3.12, familiar tooling; DietPi - ultra-light,
   good for an always-on seed. 64-bit is required (arm64 wheels; 32-bit caps per-process memory).
 - Raspberry Pi Imager advanced settings: hostname `pandosi-pi5`; enable SSH (public key); user and
@@ -50,7 +50,7 @@ On the Pi:
   and it is an independent lineage (the decorrelation anchor; see docs/POWER-AND-COMPETENCE.md).
 - `--lan` refuses to bind without the active `lan_listen` grant (scope + expiry enforced).
 - mDNS discovery: omit `--root` and the device searches the local network for a root (zeroconf).
-- Later, wrap it in `systemd --user` (Step 5 of docs/ONBOARDING.zh-CN.md) once the run is repeatable.
+- Later, wrap it in `syworker --user` (Step 5 of docs/ONBOARDING.zh-CN.md) once the run is repeatable.
 
 ## 5. Verify from the root (evidence, not vibes)
 - `GET /nodes` shows the Pi's node id, checkpoint, and heartbeat.
@@ -75,7 +75,7 @@ The pi5 runs the project's native decision model (Laya ONNX int8, 571 MB) alongs
   (`rl_agent_config.json`, `tokenizer/{tokenizer.json,tokenizer_config.json}`, `encoder/config.json`)
   into `~/models/laya-repo/`, and pass `--repo ~/models/laya-repo` so nothing touches HuggingFace.
 - Start:
-  `python -m pando.stemd --node-id <host>-laya --backend onnx --onnx-path ~/models/laya-en.int8.onnx`
+  `python -m pando.worker --node-id <host>-laya --backend onnx --onnx-path ~/models/laya-en.int8.onnx`
   ` --repo ~/models/laya-repo --checkpoint laya-en --root http://<root>:8790`
   ` --pairing-token-file ~/.pando/pairing.token --host 0.0.0.0 --advertise-host <ip>`
 - Measured on the pi5: model load ~40 s; RAM after load ~1.2 GB used / 2.8 GB available;
@@ -98,7 +98,7 @@ The pi5 runs the project's native decision model (Laya ONNX int8, 571 MB) alongs
   (upstream now deprecates the kwargs path in favor of `--reasoning off`). Load ~13 s from SD;
   `/v1/models` OK; bind loopback only - the stem is the network-facing part.
 - Member:
-  `stemd --backend openai --openai-url http://127.0.0.1:8085/v1 --openai-model qwen3-1.7b
+  `worker --backend openai --openai-url http://127.0.0.1:8085/v1 --openai-model qwen3-1.7b
   --openai-key-file '' --checkpoint qwen3-1.7b-q4km ...`
   An *empty string argument* disables auth; pointing at an empty *file* is rejected
   (`secret file is empty`).

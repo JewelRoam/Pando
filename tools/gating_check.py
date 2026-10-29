@@ -2,7 +2,7 @@
 
 Round 98 left "knows when it is guessing" as "partly". This measures it:
 run the three exported lineages (en/ml/td) over the 27 labeled choice tasks,
-aggregate them exactly as rootd does, and report how accuracy changes as the
+aggregate them exactly as coordinator does, and report how accuracy changes as the
 gate is allowed to cover less of the suite.
 
 Answers the operational question: if the autonomy loop acts only when the
@@ -66,7 +66,7 @@ def main() -> int:
                                   question=task["question"],
                                   candidates=task["candidates"])
         votes = [backend.decide(request) for backend in backends]
-        # Mirror rootd: temperature-scale every vote before aggregation, or
+        # Mirror coordinator: temperature-scale every vote before aggregation, or
         # the offline curve describes a gate the live swarm does not run.
         calibrated = []
         temperatures = []

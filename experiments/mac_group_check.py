@@ -141,7 +141,7 @@ def main() -> int:
 
     print("2. the Windows root and its local member", flush=True)
     spawn("win-root", [
-        sys.executable, "-m", "pando.rootd", "--port", str(port),
+        sys.executable, "-m", "pando.coordinator", "--port", str(port),
         "--pairing-token-file", str(token_file),
         "--playbook", str(playbook),
         "--quorum-k", "2",
@@ -149,7 +149,7 @@ def main() -> int:
     wait_until(lambda: request(f"{local_root}/pairing", timeout=2)[0] == 200,
                30, "the Windows root")
     spawn("win-igpu", [
-        sys.executable, "-m", "pando.stemd",
+        sys.executable, "-m", "pando.worker",
         "--node-id", "win-igpu", "--checkpoint", "english",
         "--backend", "onnx",
         "--onnx-path", "artifacts/laya-en-static-fixed.onnx",

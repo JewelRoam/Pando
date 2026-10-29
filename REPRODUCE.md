@@ -64,7 +64,7 @@ python tools/postprocess_onnx.py --in artifacts/laya-en-static-fixed.onnx \
 
 ```bash
 # Terminal 1: root with playbook
-python -m pando.rootd --port 8098 --playbook assets/playbook.example.toml
+python -m pando.coordinator --port 8098 --playbook assets/playbook.example.toml
 
 # Terminal 2: join with multi-EU
 python -m pando.join --node-id aipc --multi-eu --backend onnx \

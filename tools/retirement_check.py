@@ -54,7 +54,7 @@ def wait_root(url: str, deadline: float = 30.0) -> None:
         except OSError:
             pass
         time.sleep(0.2)
-    raise SystemExit("rootd did not become ready")
+    raise SystemExit("coordinator did not become ready")
 
 
 def wait_nodes(url: str, token: str, expected: int,
@@ -93,7 +93,7 @@ def main() -> int:
     parser.add_argument("--yes", action="store_true")
     args = parser.parse_args()
     if not args.yes:
-        parser.error("this starts real rootd/stemd processes; pass --yes")
+        parser.error("this starts real coordinator/worker processes; pass --yes")
 
     work = Path(tempfile.mkdtemp(prefix="pando-retire-"))
     token = secrets.token_urlsafe(18)
@@ -108,7 +108,7 @@ def main() -> int:
     procs: list[subprocess.Popen] = []
     try:
         procs.append(subprocess.Popen(
-            [sys.executable, "-m", "pando.rootd", "--port", str(port),
+            [sys.executable, "-m", "pando.coordinator", "--port", str(port),
              "--pairing-token-file", str(token_file),
              "--rollout-dir", str(work / "rollouts")],
             cwd=ROOT, stdout=subprocess.DEVNULL,
@@ -116,7 +116,7 @@ def main() -> int:
         wait_root(url)
         for index, delay in enumerate([FAST_MS, FAST_MS, FAST_MS, SLOW_MS]):
             procs.append(subprocess.Popen(
-                [sys.executable, "-m", "pando.stemd",
+                [sys.executable, "-m", "pando.worker",
                  "--node-id", f"member-{index}",
                  "--root", url,
                  "--pairing-token-file", str(token_file),

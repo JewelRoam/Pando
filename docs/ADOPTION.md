@@ -65,7 +65,7 @@ construction:
 | Platform | Ring 0 path | Notes |
 |---|---|---|
 | Windows x86 (AI PC) | native | richest: OpenVINO EU enumeration, NPU |
-| Linux x86 / SBC | native | systemd autostart is Ring 1 |
+| Linux x86 / SBC | native | syworker autostart is Ring 1 |
 | macOS (Apple Silicon) | native | Metal EU; no NPU abstraction yet |
 | Android TV box | Termux guide | `pkg install python` + pip; guided, not silent |
 

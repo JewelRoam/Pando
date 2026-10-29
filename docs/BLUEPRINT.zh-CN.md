@@ -92,7 +92,7 @@ Payload = { 权重(~800MB), playbook(签名), harness(二进制/脚本) }。
 - 失败任意步 → 记录原因到 playbook 诊断日志，下个周期重试或放弃。
 
 - 安全门（v0.3）
-- 密钥管理 (v0.8): rootd 密钥持久化; join --spore TOFU 钉扎 + 变更硬拒绝：借鉴 laya-guard 两层结构——确定性规则
+- 密钥管理 (v0.8): worker 密钥持久化; join --spore TOFU 钉扎 + 变更硬拒绝：借鉴 laya-guard 两层结构——确定性规则
   先行（白名单/黑名单/资源限制），灰区问题才进决策
   模型共识，仍灰则拒绝并上报。guard 服务不可用时
   fail-closed（拒绝而非放行）。
@@ -130,7 +130,7 @@ Payload = { 权重(~800MB), playbook(签名), harness(二进制/脚本) }。
 **Android 接入默认走 Termux 路线（v0.4 确认可行）**：Termux 的
 python-onnxruntime 包已被社区验证可用（issue #31634，仅有 import 警告）。
 TV 盒子接入即：Termux + `pip install onnxruntime zeroconf` + pando/ 即可运行
-stemd，无需安卓原生应用打包；原生 AAR 包装留作 Phase 2+ 优化。
+worker，无需安卓原生应用打包；原生 AAR 包装留作 Phase 2+ 优化。
 RK3588 类设备可选 RKNN NPU 加速（rknn-toolkit2 转换，需验证编码器
 模型的算子支持与 opset 版本）；Amlogic S905 无可用 NPU，走 CPU 路线。
 
@@ -206,7 +206,7 @@ decode 门槛不适用，换成**单决策延迟预算**
 
 ## 代理免疫 (v0.8)
 
-join/rootd/stemd 均自动设置 NO_PROXY={localhost,127.0.0.1,LAN_IP} - Windows urllib 遵循系统代理会黑洼回环/LAN 地址（实战发现，round 36）。
+join/worker/worker 均自动设置 NO_PROXY={localhost,127.0.0.1,LAN_IP} - Windows urllib 遵循系统代理会黑洼回环/LAN 地址（实战发现，round 36）。
 
 - 所有自复制实验仅在封闭沙箱（防火墙 VPC / 独立物理网段）进行。
 - 开源发布以防御研究（blue-team）框架呈现，附检测特征说明。

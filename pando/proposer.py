@@ -1,4 +1,4 @@
-"""thinkd: the resident proposer — the part docs/DESIGN-genesis.md §7 says is missing.
+"""proposer: the resident proposer — the part docs/DESIGN-genesis.md §7 says is missing.
 
 The Genesis layer closes mechanically (``pando/genesis.py``) and a signed
 proposal can travel (``pando/proposal_mail.py``), but the doc names the hole
@@ -182,7 +182,7 @@ def culture_skeleton() -> dict:
                        "criteria": ["refund", "greeting"]}],
         "actions": [{"when": "intent == refund", "do": "log_only"}],
     }
-    parse_playbook(skeleton, source_path="<thinkd culture skeleton>")
+    parse_playbook(skeleton, source_path="<proposer culture skeleton>")
     return skeleton
 
 
@@ -1430,7 +1430,7 @@ def _read_secret(path: str | None) -> str:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="pando.thinkd",
+        prog="pando.proposer",
         description="Resident proposer: one never-stopping thought loop per device.")
     parser.add_argument("--node-id", required=True,
                         help="who this thinker speaks as (proposals are signed)")
@@ -1500,13 +1500,13 @@ def main(argv: list[str] | None = None) -> int:
         dry_run=args.dry_run, explore_every=args.explore_every,
         activity_every=args.activity_every,
         host_names=host_names_from(Path(args.hosts).expanduser()))
-    print(f"thinkd: {args.node_id} thinking via {args.model} at {args.base_url}, "
+    print(f"proposer: {args.node_id} thinking via {args.model} at {args.base_url}, "
           f"round every {args.interval:.0f}s, ledger {args.ledger}, "
           f"hosts {','.join(thinker.host_names) or '-'}", flush=True)
     try:
         thinker.run_forever(max_rounds=args.max_rounds)
     except KeyboardInterrupt:
-        print("thinkd: interrupted", flush=True)
+        print("proposer: interrupted", flush=True)
     return 0
 
 

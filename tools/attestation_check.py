@@ -1,6 +1,6 @@
 """End-to-end: a root that declares an artifact accepts only matching stems.
 
-Starts a real rootd from a generated playbook and one real ONNX lineage stem,
+Starts a real coordinator from a generated playbook and one real ONNX lineage stem,
 twice:
 
 1. the playbook declares the digest of the graph actually on disk -> the
@@ -76,9 +76,9 @@ def attempt(work: Path, digest: str, expect_registered: bool,
     url = f"http://127.0.0.1:{port}"
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) \
         if sys.platform == "win32" else 0
-    log = (work / f"rootd-{digest[:8]}.log").open("wb")
+    log = (work / f"coordinator-{digest[:8]}.log").open("wb")
     procs = [subprocess.Popen(
-        [sys.executable, "-m", "pando.rootd", "--port", str(port),
+        [sys.executable, "-m", "pando.coordinator", "--port", str(port),
          "--playbook", str(playbook), "--pairing-token", token],
         cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
         creationflags=creationflags)]
@@ -94,7 +94,7 @@ def attempt(work: Path, digest: str, expect_registered: bool,
                 time.sleep(0.2)
 
         procs.append(subprocess.Popen(
-            [sys.executable, "-m", "pando.stemd",
+            [sys.executable, "-m", "pando.worker",
              "--node-id", "honest", "--root", url,
              "--pairing-token-file", str(token_file),
              "--backend", "onnx", "--onnx-path", str(GRAPH),

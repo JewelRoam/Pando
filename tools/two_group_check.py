@@ -127,11 +127,11 @@ def main() -> int:
 
         try:
             root_a_proc = spawn(
-                [sys.executable, "-m", "pando.rootd",
+                [sys.executable, "-m", "pando.coordinator",
                  "--port", str(port_a),
                  "--pairing-token-file", str(token_a_file)])
             root_b_proc = spawn(
-                [sys.executable, "-m", "pando.rootd",
+                [sys.executable, "-m", "pando.coordinator",
                  "--port", str(port_b),
                  "--pairing-token-file", str(token_b_file)])
             wait_root(root_a)
@@ -147,7 +147,7 @@ def main() -> int:
                     node_id = f"group-{group}-stem-{index}"
                     ids.append(node_id)
                     spawn([
-                        sys.executable, "-m", "pando.stemd",
+                        sys.executable, "-m", "pando.worker",
                         "--node-id", node_id,
                         "--checkpoint", checkpoint,
                         "--root", root_url,

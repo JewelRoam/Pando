@@ -602,7 +602,7 @@ A rigorous review of the open-source landscape reveals four foundational archite
 * **The Missing System:** There is no dedicated open-source distributed engine designed for **fast, classification/decision-head consensus**. 
   * In a decision fabric (like PandoSI's Laya), the output is not a 500-token stream; it is a single forward pass producing a calibrated discrete action choice and confidence distribution.
   * Existing engines force users to spin up massive Python/CUDA runtimes just to evaluate a 400MB encoder-classifier, incurring gigabytes of VRAM overhead and hundreds of milliseconds of framework latency.
-* **PandoSI Requirement:** A minimal, lightweight worker daemon (`stemd`) that serves sub-4B models with microsecond local overhead and emits structured JSON decision votes directly into a voting quorum.
+* **PandoSI Requirement:** A minimal, lightweight worker daemon (`worker`) that serves sub-4B models with microsecond local overhead and emits structured JSON decision votes directly into a voting quorum.
 
 ---
 

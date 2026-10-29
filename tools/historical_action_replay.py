@@ -29,7 +29,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Callable
 
-from pando.thinkd import OpenAIProposer
+from pando.proposer import OpenAIProposer
 
 ROOT = Path(__file__).resolve().parents[1]
 SEMANTICS_PATH = Path(__file__).with_name("action_semantics_check.py")

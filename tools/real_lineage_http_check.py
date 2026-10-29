@@ -128,8 +128,8 @@ def main() -> int:
         rollout_dir = work / "rollouts"
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) \
             if sys.platform == "win32" else 0
-        root_out = work / "rootd.out"
-        root_err = work / "rootd.err"
+        root_out = work / "coordinator.out"
+        root_err = work / "coordinator.err"
 
         def cleanup() -> None:
             for process in processes:
@@ -144,7 +144,7 @@ def main() -> int:
         try:
             with root_out.open("wb") as out, root_err.open("wb") as err:
                 processes.append(subprocess.Popen(
-                    [sys.executable, "-m", "pando.rootd",
+                    [sys.executable, "-m", "pando.coordinator",
                      "--port", str(root_port),
                      "--pairing-token-file", str(token_file),
                      "--rollout-dir", str(rollout_dir)],
@@ -154,7 +154,7 @@ def main() -> int:
 
             for checkpoint, graph in graphs:
                 processes.append(subprocess.Popen(
-                    [sys.executable, "-m", "pando.stemd",
+                    [sys.executable, "-m", "pando.worker",
                      "--node-id", f"lineage-{checkpoint}",
                      "--checkpoint", checkpoint,
                      "--backend", "onnx",

@@ -1,7 +1,7 @@
 # PandoSI Metrics — dashboard design (v0.1)
 
 The dashboard is the project's public face: every claim in the README should be
-reproducible from a dashboard screenshot. Metrics are emitted by rootd/stemd as
+reproducible from a dashboard screenshot. Metrics are emitted by coordinator/worker as
 JSON lines to `metrics/` and rendered by a single-file static viewer (no server
 dependency beyond reading the directory).
 

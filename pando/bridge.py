@@ -16,7 +16,7 @@ import urllib.request
 
 from .common import (DecisionRequest, Vote, bypass_proxy_for_lan,
                      read_secret_file)
-from .stemd import Stem, heartbeat_loop
+from .worker import Stem, heartbeat_loop
 
 
 class RemoteRootBackend:

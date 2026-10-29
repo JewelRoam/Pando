@@ -1,7 +1,7 @@
-"""stemd: a PandoSI decision worker node.
+"""worker: a PandoSI decision worker node.
 
 Runs an HTTP service exposing /decide, /health, /graft. Registers with a
-rootd coordinator and heartbeats periodically.
+coordinator coordinator and heartbeats periodically.
 """
 
 from __future__ import annotations
@@ -284,7 +284,7 @@ def main() -> None:
                         help="interface to bind; use 0.0.0.0 for LAN")
     parser.add_argument("--advertise-host", default=None,
                         help="address reported to root (defaults to --host)")
-    parser.add_argument("--root", default=None, help="rootd URL to register with")
+    parser.add_argument("--root", default=None, help="coordinator URL to register with")
     parser.add_argument("--pairing-token", default=None,
                         help="secret required by a pairing-enabled root")
     parser.add_argument("--pairing-token-file", default=None,
@@ -393,7 +393,7 @@ def main() -> None:
                 advertise_host=args.advertise_host,
                 serialize=not args.parallel)
     stem.start()
-    print(f"stemd {args.node_id} listening on {stem.url()} "
+    print(f"worker {args.node_id} listening on {stem.url()} "
           f"(checkpoint={backend.checkpoint})")
     if args.root:
         threading.Thread(target=heartbeat_loop,

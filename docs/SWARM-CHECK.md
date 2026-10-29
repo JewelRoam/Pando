@@ -10,8 +10,8 @@ python tools/swarm_check.py --yes
 
 The checker starts independent OS processes, not in-process test doubles:
 
-- one `pando.rootd` HTTP coordinator;
-- five `pando.stemd` workers with checkpoint diversity;
+- one `pando.coordinator` HTTP coordinator;
+- five `pando.worker` workers with checkpoint diversity;
 - pairing secret read from a temporary token file;
 - root protected by the same pairing token;
 - real loopback HTTP requests for registration and consensus.
@@ -47,7 +47,7 @@ the result to verification instead of claiming high confidence.
 
 ## Ring 0 dependency fix
 
-`stemd --backend mock` previously imported `backend.py`, whose top-level
+`worker --backend mock` previously imported `backend.py`, whose top-level
 `import numpy` made the advertised dependency-free mock path fail on a clean
 host. NumPy is now optional: `MockBackend` remains dependency-free, while the
 ONNX backend explicitly reports that NumPy and ONNX Runtime are required.

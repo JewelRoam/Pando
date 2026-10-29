@@ -1,4 +1,4 @@
-"""Smoke-test rootd's spore serving surface over real HTTP.
+"""Smoke-test coordinator's spore serving surface over real HTTP.
 
 Verifies the routes a joiner depends on against a live root process:
   /spore/pubkey            root verify key
@@ -6,7 +6,7 @@ Verifies the routes a joiner depends on against a live root process:
   /spore/manifests/<hash>  a manifest by content hash (round 91 peer fetch)
   auth gate                a wrong pairing token is refused
 
-No mocks: a real rootd subprocess serves a real payload file.
+No mocks: a real coordinator subprocess serves a real payload file.
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ def wait_ready(url: str, deadline: float = 20.0) -> None:
         except OSError:
             pass
         time.sleep(0.2)
-    raise SystemExit("rootd did not become ready")
+    raise SystemExit("coordinator did not become ready")
 
 
 def main() -> int:
@@ -70,7 +70,7 @@ def main() -> int:
         payload = tmp / "payload.onnx"
         payload.write_bytes(secrets.token_bytes(300 * 1024))
         proc = subprocess.Popen(
-            [sys.executable, "-m", "pando.rootd",
+            [sys.executable, "-m", "pando.coordinator",
              "--port", str(port),
              "--serve-spore", str(payload),
              "--pairing-token", TOKEN,

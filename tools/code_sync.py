@@ -55,12 +55,12 @@ from pathlib import Path
 # 16:42 -- so every one of them reported ``code_head: None``, because
 # ``10f5043`` added that key to ``graft.capability()`` and the running process
 # was holding the previous module in memory. Restarting a stem re-registers it
-# with rootd; it does not reload a model and costs no memory.
+# with coordinator; it does not reload a model and costs no memory.
 #
 # ``pandosi-llama`` is the exception the boundary is really about: restarting
 # it would reload a 2.33 GB model on a 4 GB board.
 #
-# ``rootd`` is deliberately absent: it registers members at startup only and
+# ``coordinator`` is deliberately absent: it registers members at startup only and
 # restarting it would drop the live registry for every local stem.
 #: The clients, named once, with a handle for each service manager that may
 #: be hosting them. A name is what a human and a ledger row say; a handle is
@@ -78,9 +78,9 @@ from pathlib import Path
 #: A model server appears in no handle anywhere: not ``pandosi-llama.service``
 #: on Linux, not ``com.jewelroam.pandosi-llm8b`` on macOS, not
 #: ``llama-server.exe`` on Windows. The Windows roster is the one place this
-#: list is *wider* than Linux's -- ``pando.rootd`` is stopped there because the
+#: list is *wider* than Linux's -- ``pando.coordinator`` is stopped there because the
 #: supervisor's comment records the measurement that a half-registered
-#: registry is worse than a rebuilt one -- so the Mac's ``rootd`` is left
+#: registry is worse than a rebuilt one -- so the Mac's ``coordinator`` is left
 #: alone here: it is started by ``mac-node.sh`` and restarting it would drop
 #: the live registry for every local stem, which is the Linux rule too.
 CLIENT_UNITS: dict[str, dict[str, str]] = {
@@ -112,20 +112,20 @@ CLIENT_UNITS: dict[str, dict[str, str]] = {
     # One pattern for all three stems on macOS: the Mac's text stem is
     # respawned by ``mac-node.sh`` and its two model stems by launchd
     # ``KeepAlive``, so the driver that works for one works for all three, and
-    # ``rootd`` -- which is a different process -- is not matched.
+    # ``coordinator`` -- which is a different process -- is not matched.
     "stem-text": {
         "linux": "pandosi-stem-text.service",
-        "darwin": "proc:pando.stemd",
+        "darwin": "proc:pando.worker",
         "windows": "proc",
     },
     "stem-laya": {
         "linux": "pandosi-stem-laya.service",
-        "darwin": "proc:pando.stemd",
+        "darwin": "proc:pando.worker",
         "windows": "proc",
     },
     "stem-llm": {
         "linux": "pandosi-stem-llm.service",
-        "darwin": "proc:pando.stemd",
+        "darwin": "proc:pando.worker",
         "windows": "proc",
     },
 }
@@ -141,8 +141,8 @@ SAFE_UNITS = frozenset(handles["linux"] for handles in CLIENT_UNITS.values())
 #: node, so the script now delegates to ``--restart-clients`` instead and
 #: there is nothing left to compare.
 WINDOWS_CLIENT_PATTERN = (
-    r"pando\.stemd|win_worker|agent_mailbox|pando\.thinkd|observatory\.py"
-    r"|pando\.chatd|pando\.reactd|execute_loop\.py|pando\.rootd"
+    r"pando\.worker|win_worker|agent_mailbox|pando\.proposer|observatory\.py"
+    r"|pando\.messenger|pando\.reactor|execute_loop\.py|pando\.coordinator"
     r"|seed_pull\.py|node_code_watch\.py"
 )
 
@@ -737,7 +737,7 @@ UNIT_SUFFIXES = (".service", ".timer")
 #: or a tunnel, and no updater may restart either.
 #:
 #: ``com.pandosi.stem.llm8b`` is the one that looks like a model and is not:
-#: it runs ``pando.stemd``, the client that *calls* the 8B server, which is
+#: it runs ``pando.worker``, the client that *calls* the 8B server, which is
 #: why its name carries the model it talks to.
 DARWIN_CLIENT_AGENTS = frozenset({
     "com.jewelroam.pandosi-think",

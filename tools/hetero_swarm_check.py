@@ -32,8 +32,8 @@ sys.path.insert(0, str(ROOT))
 
 from pando.backend import OnnxLayaBackend  # noqa: E402
 from pando.common import DecisionRequest  # noqa: E402
-from pando.rootd import Coordinator, Root  # noqa: E402
-from pando.stemd import Stem, heartbeat_loop  # noqa: E402
+from pando.coordinator import Coordinator, Root  # noqa: E402
+from pando.worker import Stem, heartbeat_loop  # noqa: E402
 from pando.textmodel import TextModel  # noqa: E402
 
 NEURAL = [
@@ -68,7 +68,7 @@ def register(root: Root, stems: list[Stem]) -> list[threading.Thread]:
     `HEARTBEAT_TTL` is 15 seconds: a stem that registers once and goes quiet
     is dropped, the quorum becomes empty, and every decision escalates -
     silently, because the response reports a quorum of zero as neatly as a
-    real one. The production path (`stemd --root`) runs this loop; a check
+    real one. The production path (`worker --root`) runs this loop; a check
     that skips it measures the TTL, not the swarm.
     """
     threads = []

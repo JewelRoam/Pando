@@ -624,7 +624,7 @@ To achieve immediate operational reliability while charting an evolutionary path
 ### 5.2 The Data and Quorum Plane (Votes, Heartbeats, Assent Gating)
 * **What it Carries:** Low-latency STEM wire contract execution (`GET /health`, `GET /graft`, `POST /decide`), committee heartbeats, and assent/veto tokens.
 * **TODAY (Immediate & Battle-Tested):**
-  * **Transport:** Direct STEM JSON-over-HTTP (`pando/rootd.py` and `pando/stemd.py`) routed over a **Tailscale / WireGuard virtual mesh overlay** (or self-hosted Headscale / NetBird).
+  * **Transport:** Direct STEM JSON-over-HTTP (`pando/coordinator.py` and `pando/worker.py`) routed over a **Tailscale / WireGuard virtual mesh overlay** (or self-hosted Headscale / NetBird).
   * **Mechanism:** Eliminates 100% of custom NAT hole-punching bugs. All devices communicate over stable virtual IPs (`100.x.y.z`). Direct peer-to-peer UDP connections are established automatically for >90% of node pairs, delivering sub-millisecond local latency and raw wire speed WAN throughput with zero application-level encryption overhead.
 * **LATER (Autonomous Decentralization):**
   * **Technology:** **Zenoh-Python (`zenoh`)**.

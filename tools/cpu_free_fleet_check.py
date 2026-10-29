@@ -45,7 +45,7 @@ sys.path.insert(0, str(ROOT_DIR / "tools"))
 from idle_silicon_check import host_cpu_load, process_cpu_seconds  # noqa: E402
 from pando.combiner import Combiner  # noqa: E402
 from pando.common import DecisionRequest  # noqa: E402
-from pando.rootd import Coordinator, Root  # noqa: E402
+from pando.coordinator import Coordinator, Root  # noqa: E402
 
 VENV_CUDA_PYTHON = ROOT_DIR / ".venv-cuda" / "Scripts" / "python.exe"
 REPO = "convaiinnovations/laya"
@@ -123,7 +123,7 @@ STEMS = {
 def stem_command(name: str, spec: dict, root_url: str) -> list[str]:
     interpreter = (sys.executable if spec["backend"] == "onnx"
                    else str(VENV_CUDA_PYTHON))
-    command = [interpreter, "-m", "pando.stemd",
+    command = [interpreter, "-m", "pando.worker",
                "--node-id", name, "--checkpoint", spec["checkpoint"],
                "--backend", spec["backend"],
                "--device", spec["device"], "--root", root_url]

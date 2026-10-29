@@ -12,7 +12,7 @@ New backends register a factory once, at module import::
         return MyBackend(node_id, **cfg)
 
 and are reachable from the ``--backend`` flag without touching the dispatch
-sites in :mod:`pando.stemd` or :mod:`pando.join`.  That keeps the if/elif
+sites in :mod:`pando.worker` or :mod:`pando.join`.  That keeps the if/elif
 chains from multiplying every time a new runtime is wired in — the same
 regression vLLM hit when adding platform backends ad hoc.
 """
@@ -275,7 +275,7 @@ def _openai_completion_text(response: dict) -> str:
 class OpenAIChoiceBackend:
     """Decision backend for an OpenAI-compatible chat-completions endpoint.
 
-    This is the bridge for a Windows-hosted stemd to use a Mac LLM worker over
+    This is the bridge for a Windows-hosted worker to use a Mac LLM worker over
     LAN: the process runs on Windows, the request goes to the Mac API. The
     prompt is Task 004's variant B, validated on the held-out suite: ask for
     the candidate word only, no JSON and no confidence, which cut latency and

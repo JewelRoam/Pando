@@ -37,7 +37,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
 
 from pando.common import DecisionRequest  # noqa: E402
-from pando.stemd import Stem, heartbeat_loop  # noqa: E402
+from pando.worker import Stem, heartbeat_loop  # noqa: E402
 
 
 def free_port() -> int:

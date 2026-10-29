@@ -12,7 +12,7 @@ docs/REFLECTIONS.md (what moves value), docs/SURVEY-decentralized-comms.md (libr
 - The published milestone: one experiment with dozens (ideally hundreds) of devices, with numbers.
 
 ## 2. Where we stand today (honest)
-- Vote traffic is already protocol, not chat: rootd/stemd HTTP + the STEM vote contract.
+- Vote traffic is already protocol, not chat: coordinator/worker HTTP + the STEM vote contract.
 - The task mailbox (HTTP + bearer token, currently reached through trycloudflare tunnels) is a real
   cross-NAT control channel, already carrying work both directions.
 - Git is the durable log: votes, evidence, provenance, session logs (the user's verbatim messages reach

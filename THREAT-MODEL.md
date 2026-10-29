@@ -17,7 +17,7 @@ software on third-party machines.
    guard unavailability blocks execution rather than permitting it.
 4. **No stealth**: all nodes announce themselves via mDNS and write local
    metrics logs. The system is deliberately loud, unlike malware.
-5. **Human kill-switch**: rootd exposes /shutdown (authenticated) and stems
+5. **Human kill-switch**: coordinator exposes /shutdown (authenticated) and stems
    honor a signed revocation list of playbook versions.
 6. **Tokenized root surface**: CLI roots generate a pairing token;
    `/register`, `/nodes`, `/decide`, playbook reads, and root-served
@@ -33,7 +33,7 @@ software on third-party machines.
    services and refuse cross-host generation to avoid embedding wrong paths.
    Windows uses user Startup files rather than an administrator-only logon
    task, and an explicit checker removes its temporary lifecycle artifacts.
-10. **Secret-aware logging**: redirected rootd logs print only a pairing
+10. **Secret-aware logging**: redirected coordinator logs print only a pairing
     token fingerprint; the full token appears on an interactive TTY or with
     an explicit reveal flag.
 

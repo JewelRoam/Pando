@@ -9,7 +9,7 @@ Usage:
     # make a key and sign, pinning that key on the root
     python tools/sign_playbook.py --playbook assets/playbook.example.toml \
         --generate-key
-    python -m pando.rootd --playbook assets/playbook.example.toml \
+    python -m pando.coordinator --playbook assets/playbook.example.toml \
         --playbook-key <pubkey hex>
 
 The private key is printed once and never written unless --key-out is given.

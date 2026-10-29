@@ -28,7 +28,7 @@ import json
 import time
 from pathlib import Path
 
-from pando.thinkd import OpenAIProposer
+from pando.proposer import OpenAIProposer
 
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_PATH = ROOT / "tools" / "historical_action_model_review.py"

@@ -53,7 +53,7 @@ in the same consensus quorum, governed by the same signed playbook.
 ```
 playbook.toml (strategy, authored offline)
   → pb_history chain (audit trail)
-    → rootd (governance: question enforcement + gating + chain verification)
+    → coordinator (governance: question enforcement + gating + chain verification)
       → fan-out to 3+ stems (checkpoint-diverse, EU-diverse)
         → consensus (majority vote + tier gating)
           → rollout recording (playbook_hash attribution)

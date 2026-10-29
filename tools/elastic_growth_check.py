@@ -64,7 +64,7 @@ def wait_root(url: str, deadline: float = 60.0) -> None:
         except OSError:
             pass
         time.sleep(0.3)
-    raise SystemExit("rootd did not become ready")
+    raise SystemExit("coordinator did not become ready")
 
 
 def wait_nodes(url: str, token: str, expected: int,
@@ -123,7 +123,7 @@ def main() -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
     if not args.yes:
-        parser.error("this starts real rootd/stemd/join processes; pass --yes")
+        parser.error("this starts real coordinator/worker/join processes; pass --yes")
     payload = Path(args.payload)
     if not payload.exists():
         raise SystemExit(f"missing payload: {payload}")
@@ -164,7 +164,7 @@ def main() -> int:
     trajectory: list[dict] = []
     try:
         procs.append(subprocess.Popen(
-            [sys.executable, "-m", "pando.rootd", "--port", str(port),
+            [sys.executable, "-m", "pando.coordinator", "--port", str(port),
              "--pairing-token-file", str(token_file),
              "--playbook", str(playbook_path),
              "--playbook-key", key.verify_key.encode().hex(),
@@ -177,7 +177,7 @@ def main() -> int:
         wait_root(url)
         for index in range(REPLICAS):
             procs.append(subprocess.Popen(
-                [sys.executable, "-m", "pando.stemd",
+                [sys.executable, "-m", "pando.worker",
                  "--node-id", f"slow-{index}", "--root", url,
                  "--pairing-token-file", str(token_file),
                  "--backend", "mock", "--checkpoint", "mock",

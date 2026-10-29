@@ -127,8 +127,8 @@ def main() -> int:
         token_file.write_text(token, encoding="utf-8")
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) \
             if sys.platform == "win32" else 0
-        root_out = work / "rootd.out"
-        root_err = work / "rootd.err"
+        root_out = work / "coordinator.out"
+        root_err = work / "coordinator.err"
 
         def cleanup() -> None:
             for process in processes:
@@ -144,7 +144,7 @@ def main() -> int:
         try:
             with root_out.open("wb") as out, root_err.open("wb") as err:
                 root_process = subprocess.Popen(
-                    [sys.executable, "-m", "pando.rootd",
+                    [sys.executable, "-m", "pando.coordinator",
                      "--port", str(root_port),
                      "--pairing-token-file", str(token_file),
                      "--initial-stem-timeout", "0.25",
@@ -155,7 +155,7 @@ def main() -> int:
             wait_root(root_url)
             for index, checkpoint in enumerate(("en", "ml", "td")):
                 processes.append(subprocess.Popen(
-                    [sys.executable, "-m", "pando.stemd",
+                    [sys.executable, "-m", "pando.worker",
                      "--node-id", f"fast-{index}",
                      "--checkpoint", checkpoint,
                      "--root", root_url,

@@ -3,9 +3,9 @@
 Reads ``chat.model`` off the live node table (or the stem's ``/health`` when
 an older root has not stored the field yet). A member is answered here only
 when its host address is this machine. Remote models stay remote: their own
-chatd speaks for them.
+messenger speaks for them.
 
-    python -m pando.chatd --hosts ~/.pandosi/hosts.json \
+    python -m pando.messenger --hosts ~/.pandosi/hosts.json \
         --token-file ~/.pandosi/mailbox.token
 """
 
@@ -28,7 +28,7 @@ from .net import (LOOPBACK, local_addresses, open_url, response_json,
 from .proposal_mail import delivery_failed, mailbox_chain
 
 
-# chatd polls every few seconds while the mailbox retains the whole colony
+# messenger polls every few seconds while the mailbox retains the whole colony
 # history. Only the newest slice can participate in a conversation; fetching
 # 35k summary rows on every pass makes a healthy chat loop pay for all memory.
 CHAT_FEED_LIMIT = 500
@@ -392,7 +392,7 @@ def _open_conversation(urls, token: str | None, members: list[dict],
 
     The row this writes is the thing the colony never had: ``from`` a chat
     member, addressed by name to a chat member on another host. Everything
-    downstream already works -- the peer's chatd sees a chat member naming it
+    downstream already works -- the peer's messenger sees a chat member naming it
     and answers, and PEER_CAP stops the exchange after two replies each way.
     """
     pick = next_opening(members, known, opened, now, cooldown, peer_evidence)
@@ -521,7 +521,7 @@ def list_tasks(mailbox: str, token: str | None, timeout: float,
 
 
 def chat_feed_path(limit: int | None = CHAT_FEED_LIMIT) -> str:
-    """The bounded mailbox query chatd needs, filter-first."""
+    """The bounded mailbox query messenger needs, filter-first."""
     params = [("status", "all")]
     if limit is not None:
         params.append(("limit", str(int(limit))))
@@ -731,7 +731,7 @@ def main() -> int:
             # A lone loopback root is the authoritative membership table for
             # this host. Do not let an advertised LAN address that Python
             # cannot enumerate hide every local speaker (seen on Windows:
-            # stems and /chat were healthy, chatd reported members=[]).
+            # stems and /chat were healthy, messenger reported members=[]).
             trust_local_root = len(roots) == 1 and root_is_loopback(roots[0]["url"])
             members, known = local_chat_members(
                 nodes, addresses, trust_local_root=trust_local_root,

@@ -168,7 +168,7 @@ above is recomputed offline from the recorded votes in `assets/votes/` by
   vs 0.427 wrong). The swarm knows when it is guessing, at no extra cost
   (`tools/gating_check.py`, `docs/research/2026-10-14-round99.md`).
 - **Verified end to end**: with the production calibration applied, the gate
-  covers **48.1% at 92.3%** locally — and a real `rootd` with three real
+  covers **48.1% at 92.3%** locally — and a real `coordinator` with three real
   lineage stems over HTTP reproduces that **exactly** (delta 0.0000), with
   the held set only 14.3% accurate (2/14). Threshold tuning
   (`tools/gate_tune.py`) finds the shipped `0.6/0.6` default already
@@ -311,7 +311,7 @@ above is recomputed offline from the recorded votes in `assets/votes/` by
   `docs/research/2026-10-15-round125.md`).
 - **The independent member is now shipped, and it found a bug in the
   aggregation rule**: `pando/textmodel.py` is a 19 KB naive Bayes
-  (`stemd --backend text`) that any device can serve, calibrated through the
+  (`worker --backend text`) that any device can serve, calibrated through the
   project's own mechanism. Added as a fourth live HTTP stem it made the swarm
   *worse* — because three members cannot tie and four can, and the shipped
   gate answered a 2-2 split with silence, discarding exactly the information
@@ -379,7 +379,7 @@ above is recomputed offline from the recorded votes in `assets/votes/` by
   `docs/research/2026-10-15-round132.md`).
 - **The host is the ceiling, and one host is noisy**: re-running the capacity
   matrix with the stems started the way production starts them — separate
-  `stemd` processes, own interpreter and session — changes nothing: 1 unit
+  `worker` processes, own interpreter and session — changes nothing: 1 unit
   26.5 / 2 units 25.0 / 3 units 26.0 dec/s at k=1, while **k=3 costs 2-3x**
   (9.6 dec/s, p50 383 ms). Adding accelerators buys nothing because a single
   stem already saturates the host's per-request work (tokenisation, JSON,
@@ -419,7 +419,7 @@ above is recomputed offline from the recorded votes in `assets/votes/` by
   device should serve one decision at a time
   (`docs/research/2026-10-15-round135.md`).
 - **A device serves one decision at a time — and the numbers come back**:
-  stems now serialise `backend.decide` by default (`stemd --parallel` to opt
+  stems now serialise `backend.decide` by default (`worker --parallel` to opt
   out). The accelerator dropouts went from 49-56 silent decisions per 120 to
   **zero**, and the fleet now serves entirely from the accelerators, leaving
   the CPU for the user. Re-measured service times on a loaded host: CPU
@@ -466,7 +466,7 @@ above is recomputed offline from the recorded votes in `assets/votes/` by
 - **The combiner is now a shipped artifact, and it is advisory by
   construction**: `tools/train_combiner.py` writes a **4 KB**
   `assets/combiner.json` (fitted on the dev votes, l2 cross-validated on dev
-  alone) and `rootd --combiner <path>` attaches its answer as
+  alone) and `coordinator --combiner <path>` attaches its answer as
   `suggested_choice` **only where the gate does not auto-execute** — replayed
   over the held-out rows it reproduces 80.42% full coverage and **54.41% on
   the 68 rows the gate declines**, with 0 of its 68 suggestions landing on an
@@ -724,7 +724,7 @@ above is recomputed offline from the recorded votes in `assets/votes/` by
   `--assent-fallback advisor|veto` (Task 008)
   (`docs/research/2026-10-16-round161.md`).
 - **The quorum is now invariant under replication**: a same-lineage vote is
-  folded into its lineage (`aggregate(count_lineages=True)`, `rootd
+  folded into its lineage (`aggregate(count_lineages=True)`, `coordinator
   --lineage-quorum`), so counting stems no longer lets a copied lineage
   outvote a distinct one. Replaying the recorded decisions with replicas
   added: the shipped rule moves by up to **14.6 points** of accuracy
@@ -745,7 +745,7 @@ above is recomputed offline from the recorded votes in `assets/votes/` by
   (`tools/retirement_check.py`, `docs/research/2026-10-14-round111.md`).
 - **A quorum that knows how busy it is**: `pick_quorum` now orders voters by
   in-flight load (then latency band, then rotation), and
-  `rootd --adaptive-quorum --latency-target-ms` lets the quorum size shrink
+  `coordinator --adaptive-quorum --latency-target-ms` lets the quorum size shrink
   under latency pressure and recover when idle. Load-aware selection beat
   blind rotation by 16–24% with lower latency; the adaptive root held full
   agreement while idle (k=5) and settled at k=3 under load, hitting its
@@ -760,7 +760,7 @@ above is recomputed offline from the recorded votes in `assets/votes/` by
   bought from agreement diversity, so "reproduce more" and "decide faster"
   are different instructions (`tools/scaling_law_check.py`,
   `docs/research/2026-10-14-round109.md`).
-- **Delta replication, end to end**: `rootd --chunking cdc` serves
+- **Delta replication, end to end**: `coordinator --chunking cdc` serves
   content-defined manifests and `join --chunk-store` reuses what a replica
   already holds. Two real roots and two real joiners: the second device
   replicated a different lineage for **105 MB instead of 1610 MB (15.3x)**,
@@ -795,7 +795,7 @@ above is recomputed offline from the recorded votes in `assets/votes/` by
 - **Signed playbooks**: a playbook's canonical bytes are covered by a
   detached Ed25519 signature, which includes the admitted lineages and their
   artifact digests — so the whole declaration chain is attributable.
-  `rootd --playbook-key <hex>` pins the signer, and a missing or invalid
+  `coordinator --playbook-key <hex>` pins the signer, and a missing or invalid
   signature is fatal at startup; without a pin the root logs that writing the
   file is enough to change what it admits. Tampering with `admit` invalidates
   the signature and the root refuses to start
@@ -814,7 +814,7 @@ above is recomputed offline from the recorded votes in `assets/votes/` by
   declaration stays permissive for synthetic harnesses. A declaration is a
   claim, not proof: attestation against the Spore manifest is the next step
   (`docs/research/2026-10-14-round102.md`).
-- **Calibration is enforced where the risk is**: `rootd` warns at
+- **Calibration is enforced where the risk is**: `coordinator` warns at
   registration and reports `uncalibrated_checkpoints` in every decision;
   `AutonomyLoop(require_calibration=True)` refuses to act on them. Placing
   the hard rule in the coordinator instead broke every synthetic harness and
@@ -846,7 +846,7 @@ graph TB
         PH[pb_history.jsonl<br/>hash chain]
     end
 
-    subgraph root[rootd - governance]
+    subgraph root[coordinator - governance]
         QV[question enforcement]
         GT[confidence gating<br/>playbook thresholds]
         RC[RolloutRecorder<br/>full vote matrix]
@@ -877,7 +877,7 @@ graph TB
 ### Data flow
 
 1. **Playbook** (TOML) defines: question schemas, confidence gating, action bindings
-2. **rootd** validates: question in playbook, thresholds from [gating]
+2. **coordinator** validates: question in playbook, thresholds from [gating]
 3. **Fan-out**: request sent to k stems with checkpoint diversity
 4. **Votes collected**: each stem runs Laya inference, returns {choice, probability}
 5. **Aggregation**: majority vote + tier assignment (auto/verify/escalate)
@@ -957,10 +957,10 @@ On a native host, verify the full lifecycle without leaving artifacts:
 python tools/service_check.py --yes
 ```
 
-CI also runs this check for Linux `systemd --user`; Termux still needs a
+CI also runs this check for Linux `syworker --user`; Termux still needs a
 real Android host.
 
-Adapters cover Windows user Startup files, Linux `systemd --user`, and
+Adapters cover Windows user Startup files, Linux `syworker --user`, and
 Termux `sv`. Tokens are read from a file, never embedded in argv; the planner
 does not install, start, or uninstall anything.
 
@@ -971,7 +971,7 @@ LAN roots generate a pairing token and protect registration, `/nodes`, `/decide`
 For an additional stem, pass the token printed by the root:
 
 ```bash
-python -m pando.stemd --node-id stem-2 --root http://ROOT_IP:8080 \
+python -m pando.worker --node-id stem-2 --root http://ROOT_IP:8080 \
   --pairing-token TOKEN_FROM_ROOT
 ```
 
@@ -989,7 +989,7 @@ python -m pando.stemd --node-id stem-2 --root http://ROOT_IP:8080 \
 - [RTX 3070 CUDA worker](docs/CUDA-3070.md) — non-OpenVINO HTTP integration
 - [Slow-stem check](tools/slow_stem_check.py) — timeout, cooldown, and retry proof
 - [Windows service check](docs/SERVICE-CHECK-WINDOWS.md) — real lifecycle validation record
-- [Linux CI service check](docs/SERVICE-CHECK-LINUX-CI.md) — user-systemd lifecycle validation record
+- [Linux CI service check](docs/SERVICE-CHECK-LINUX-CI.md) — user-syworker lifecycle validation record
 
 ## Status
 

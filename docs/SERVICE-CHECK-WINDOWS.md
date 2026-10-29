@@ -18,7 +18,7 @@ The checker:
 
 1. creates a temporary 15-minute `service_autostart` grant and token file;
 2. writes reviewable Startup and PowerShell runner files under a temp config;
-3. starts `pando.rootd` on a free high port;
+3. starts `pando.coordinator` on a free high port;
 4. polls `/pairing` and requires `{"required": true}`;
 5. reads process status through the generated PID file;
 6. stops and verifies the endpoint is gone;
@@ -64,5 +64,5 @@ not request administrator or Task Scheduler logon-trigger privileges.
 
 ## Remaining platform checks
 
-- Linux `systemd --user`: needs a real Linux desktop/server session.
+- Linux `syworker --user`: needs a real Linux desktop/server session.
 - Termux `sv`: needs a real Termux host.

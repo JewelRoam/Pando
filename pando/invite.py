@@ -8,7 +8,7 @@ staged invitation into a member stays a deployment step — write the token into
 the root's ``--pairing-token-file`` and restart it — the same way a staged
 ``culture.refine`` candidate stays inactive until a human applies it.
 
-The invitation is a *bearer* token: ``pando/rootd.py`` matches a secret, not a
+The invitation is a *bearer* token: ``pando/coordinator.py`` matches a secret, not a
 person. A ``candidate`` label may travel with it, but the running root does not
 enforce that label, and the manifest records the label without pretending
 otherwise.

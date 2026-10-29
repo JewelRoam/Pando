@@ -6,8 +6,8 @@ whatever runtime it already has — OpenVINO, ONNX Runtime, native PyTorch,
 a shell script, anything that can serve HTTP. Nothing in the contract
 mentions a model, a framework, or an accelerator.
 
-Everything below is implemented by `pando/stemd.py` (worker) and
-`pando/rootd.py` (coordinator). Every field and semantic is cited as
+Everything below is implemented by `pando/worker.py` (worker) and
+`pando/coordinator.py` (coordinator). Every field and semantic is cited as
 `file:line` against the commit this document was written from; when the
 two disagree, the code wins and this document is the bug.
 
@@ -19,10 +19,10 @@ single quorum.
 
 - **root** — one coordinator. Owns the quorum, gating, calibration,
   playbook policy, rollout evidence, and the Spore signing key
-  (`pando/rootd.py:170-256`).
+  (`pando/coordinator.py:170-256`).
 - **stem** — any number of workers. Each is an independent HTTP server
   that answers one typed question at a time. The root never assumes two
-  stems share a runtime (`pando/stemd.py:101-126`).
+  stems share a runtime (`pando/worker.py:101-126`).
 
 The root holds the only shared secret. Stems hold no shared state with
 each other.
@@ -30,7 +30,7 @@ each other.
 ## 2. Stem API (what a worker must serve)
 
 All three routes are served unauthenticated on the stem's own port; the
-root is the only caller (`pando/stemd.py:48-97`).
+root is the only caller (`pando/worker.py:48-97`).
 
 ### `GET /health` -> 200
 
@@ -44,11 +44,11 @@ root is the only caller (`pando/stemd.py:48-97`).
 
 | Field | Type | Meaning | Source |
 | --- | --- | --- | --- |
-| `ok` | bool | Always `true` on a live stem. | `pando/stemd.py:60` |
-| `node_id` | str | Stable id this stem registered under. | `pando/stemd.py:60` |
-| `checkpoint` | str | **Lineage identity** — the string the root records in every vote and uses for quorum diversity. Two different builds must not claim the same checkpoint. | `pando/stemd.py:61` |
-| `decisions` | int | Decisions this process has actually served (round 156: stem-side is the only place "who served" is answerable under a lineage-counted quorum). | `pando/stemd.py:67-68` |
-| `host_ms_per_decision` | float\|null | Host CPU the whole process spent per served decision, `1000 * (process_time - started) / decisions`, `null` before any decision. | `pando/stemd.py:31-36`, `:69-70` |
+| `ok` | bool | Always `true` on a live stem. | `pando/worker.py:60` |
+| `node_id` | str | Stable id this stem registered under. | `pando/worker.py:60` |
+| `checkpoint` | str | **Lineage identity** — the string the root records in every vote and uses for quorum diversity. Two different builds must not claim the same checkpoint. | `pando/worker.py:61` |
+| `decisions` | int | Decisions this process has actually served (round 156: stem-side is the only place "who served" is answerable under a lineage-counted quorum). | `pando/worker.py:67-68` |
+| `host_ms_per_decision` | float\|null | Host CPU the whole process spent per served decision, `1000 * (process_time - started) / decisions`, `null` before any decision. | `pando/worker.py:31-36`, `:69-70` |
 
 ### `GET /graft` -> 200
 
@@ -61,9 +61,9 @@ root is the only caller (`pando/stemd.py:48-97`).
 
 | Field | Type | Meaning | Source |
 | --- | --- | --- | --- |
-| `node_id` | str | Same id as `/health`. | `pando/stemd.py:73` |
-| `capability` | object | Best-effort probe: `arch`, `platform`, `python`, `cpu_count`, `ram_gb`. Not a GPU/NPU claim. | `pando/graft.py:38-47`, `stemd.py:72-74` |
-| `role` | str | `worker` if `ram_gb >= 3.5` and `cpu_count >= 2`, else `observer`. | `pando/graft.py:50-56`, `stemd.py:73-74` |
+| `node_id` | str | Same id as `/health`. | `pando/worker.py:73` |
+| `capability` | object | Best-effort probe: `arch`, `platform`, `python`, `cpu_count`, `ram_gb`. Not a GPU/NPU claim. | `pando/graft.py:38-47`, `worker.py:72-74` |
+| `role` | str | `worker` if `ram_gb >= 3.5` and `cpu_count >= 2`, else `observer`. | `pando/graft.py:50-56`, `worker.py:73-74` |
 
 Optional to implement, but a worker that omits it will not be considered
 for role-specific work.
@@ -114,14 +114,14 @@ Rules:
   no-op flag); `--parallel` opts into concurrency only for a backend
   proven thread-safe. Round 135 measured the OpenVINO path failing about
   half its calls at four concurrent clients while the ONNX CPU path
-  never failed (`pando/stemd.py:102-126`).
+  never failed (`pando/worker.py:102-126`).
 - A backend exception becomes HTTP 500 with `{"error": ...}`; the root
-  treats that as an unanswered stem, not a vote (`pando/stemd.py:90-97`).
+  treats that as an unanswered stem, not a vote (`pando/worker.py:90-97`).
 
 ### Heartbeat / registration payload (stem -> root)
 
 Every 5 s the stem re-posts this to the root's `/register`
-(`pando/stemd.py:144-181`):
+(`pando/worker.py:144-181`):
 
 ```json
 {"node_id": "mac-llm-8b",
@@ -135,12 +135,12 @@ Every 5 s the stem re-posts this to the root's `/register`
 
 | Field | Type | Required | Meaning | Source |
 | --- | --- | --- | --- | --- |
-| `node_id` | str | yes | Voter id. | `pando/stemd.py:146-147` |
-| `url` | str | yes | Where the root calls the stem back. Must be reachable from the root. | `pando/stemd.py:146-147`, `:117` |
-| `checkpoint` | str | yes | Lineage identity. | `pando/stemd.py:148` |
-| `capability` | object | no | Base probe plus `host_ms_per_decision`, refreshed every beat so a root can prefer a cheap member (round 134). | `pando/stemd.py:149`, `:165-172` |
-| `artifact_sha256` | str | no | Present only when the loaded artifact has a digest; lets a root that declares an expected artifact refuse a mislabeled stem (round 102). | `pando/stemd.py:150-156` |
-| `pairing_token` | str | no | Admission secret when the root has one. Also mirrored into `Authorization: Bearer`. | `pando/stemd.py:157-160` |
+| `node_id` | str | yes | Voter id. | `pando/worker.py:146-147` |
+| `url` | str | yes | Where the root calls the stem back. Must be reachable from the root. | `pando/worker.py:146-147`, `:117` |
+| `checkpoint` | str | yes | Lineage identity. | `pando/worker.py:148` |
+| `capability` | object | no | Base probe plus `host_ms_per_decision`, refreshed every beat so a root can prefer a cheap member (round 134). | `pando/worker.py:149`, `:165-172` |
+| `artifact_sha256` | str | no | Present only when the loaded artifact has a digest; lets a root that declares an expected artifact refuse a mislabeled stem (round 102). | `pando/worker.py:150-156` |
+| `pairing_token` | str | no | Admission secret when the root has one. Also mirrored into `Authorization: Bearer`. | `pando/worker.py:157-160` |
 
 The token may also be sent as `Authorization: Bearer <token>`.
 
@@ -154,7 +154,7 @@ The token may also be sent as `Authorization: Bearer <token>`.
 
 The only unauthenticated route. Everything else returns `403` without the
 token, or `404` for an unknown path
-(`pando/rootd.py:888-893`).
+(`pando/coordinator.py:888-893`).
 
 ### `POST /register` -> 200 | 400 | 403
 
@@ -164,7 +164,7 @@ token, or `404` for an unknown path
  "artifact_sha256": "…", "pairing_token": "…"}
 ```
 
-Admission order (`pando/rootd.py:993-1027`):
+Admission order (`pando/coordinator.py:993-1027`):
 
 1. `pairing_token` is compared with `hmac.compare_digest`; mismatch -> 403.
 2. `checkpoint` must be in the playbook's admitted lineages when the
@@ -179,7 +179,7 @@ the root can reach (bind/advertise accordingly). Workers re-register on
 an interval; the root drops a node after `HEARTBEAT_TTL` (15 s) without a
 heartbeat, so a dead device leaves the quorum on its own and a returning
 one rejoins on its own. There is no join or leave handshake to get wrong
-(`pando/rootd.py:297-310`, `HEARTBEAT_TTL` at `:35`).
+(`pando/coordinator.py:297-310`, `HEARTBEAT_TTL` at `:35`).
 
 ### `GET /nodes` -> 200
 
@@ -195,14 +195,14 @@ one rejoins on its own. There is no join or leave handshake to get wrong
 ```
 
 Live membership plus per-node call statistics. `stats` starts from
-`_empty_stem_stats()` (`pando/rootd.py:151-161`) and gains
-`cooldown_remaining_s` on read (`pando/rootd.py:302-306`). Only nodes
+`_empty_stem_stats()` (`pando/coordinator.py:151-161`) and gains
+`cooldown_remaining_s` on read (`pando/coordinator.py:302-306`). Only nodes
 seen within `HEARTBEAT_TTL` appear.
 
 ### `GET /status` -> 200
 
 One read for an elastic supervisor: how much checking is left to spend
-and how slow decisions actually are (`pando/rootd.py:898-915`).
+and how slow decisions actually are (`pando/coordinator.py:898-915`).
 
 ```json
 {"members": 4, "blocked": ["retired-node"],
@@ -216,22 +216,22 @@ and how slow decisions actually are (`pando/rootd.py:898-915`).
 
 | Field | Meaning | Source |
 | --- | --- | --- |
-| `members` | Live node count. | `pando/rootd.py:899` |
-| `blocked` | Sorted retired node ids. | `pando/rootd.py:900` |
-| `quorum_k`, `quorum_floor`, `quorum_ceiling` | Configured quorum bounds. | `pando/rootd.py:901-903` |
-| `adaptive` | Whether adaptive quorum is on. | `pando/rootd.py:904` |
-| `latency_target_ms` | Adaptive target, or `null`. | `pando/rootd.py:905` |
-| `decision_ewma_ms` | End-to-end decision EWMA, or `null` before the first decision. | `pando/rootd.py:906` |
-| `question_categories` | Playbook question -> category map. | `pando/rootd.py:907` |
-| `assent_checkpoint`, `assent_fallback` | Configured assent policy. | `pando/rootd.py:908-909` |
-| `assent_resolved` | Last checkpoint auto-resolution chose, or `null`. Not a per-request value. | `pando/rootd.py:910`, `:761` |
+| `members` | Live node count. | `pando/coordinator.py:899` |
+| `blocked` | Sorted retired node ids. | `pando/coordinator.py:900` |
+| `quorum_k`, `quorum_floor`, `quorum_ceiling` | Configured quorum bounds. | `pando/coordinator.py:901-903` |
+| `adaptive` | Whether adaptive quorum is on. | `pando/coordinator.py:904` |
+| `latency_target_ms` | Adaptive target, or `null`. | `pando/coordinator.py:905` |
+| `decision_ewma_ms` | End-to-end decision EWMA, or `null` before the first decision. | `pando/coordinator.py:906` |
+| `question_categories` | Playbook question -> category map. | `pando/coordinator.py:907` |
+| `assent_checkpoint`, `assent_fallback` | Configured assent policy. | `pando/coordinator.py:908-909` |
+| `assent_resolved` | Last checkpoint auto-resolution chose, or `null`. Not a per-request value. | `pando/coordinator.py:910`, `:761` |
 
 ### `POST /decide` -> 200 | 400 | 403 | 503
 
 The request body is the `DecisionRequest` above. The result starts as
 `DecisionResult.__dict__` (`choice`, `agreement`, `mean_probability`,
 `tier`, `votes`) and gains the fields the coordinator actually computed
-(`pando/rootd.py:828-860`).
+(`pando/coordinator.py:828-860`).
 
 ```json
 {"choice": "retry", "agreement": 0.75, "mean_probability": 0.71,
@@ -254,29 +254,29 @@ The request body is the `DecisionRequest` above. The result starts as
 | `mean_probability` | float | always | Mean probability of the **backing non-neutral** votes, `0.0` if a choice is backed only by neutral votes. | `pando/common.py:122-128` |
 | `tier` | str | always | `auto` (majority + healthy confidence), `verify` (majority but weak, tie, or demoted), `escalate` (quorum not met -> `choice` is `null`). | `pando/common.py:89-92`, `:155-161` |
 | `votes` | list | always | The votes aggregation saw — the collapsed set under lineage/bloc counting. | `pando/common.py:76`, `:180-200` |
-| `quorum_size` | int | always | Stems actually selected, not stems that answered. | `pando/rootd.py:809` |
-| `veto` | str | only when a veto fired | The checkpoint whose choice replaced the answer. | `pando/rootd.py:810-811`, `:766-798` |
-| `lineages` | int | only when collapsing or flooring | Distinct checkpoints among selected stems. | `pando/rootd.py:814-818`, `:731` |
-| `opinions` | int | only when collapsing or flooring | Distinct opinions (blocs when declared). | `pando/rootd.py:814-818`, `:732-733` |
-| `blocs` | int | only when blocs declared | Opinion count under bloc mapping. | `pando/rootd.py:819-820` |
-| `corroboration_floor` | int | only when `> 1` | Policy floor that can demote a lone opinion from `auto`. | `pando/rootd.py:821-822` |
-| `responded` | int | always | Votes actually received. | `pando/rootd.py:823` |
-| `unanswered` | list[str] | only when non-empty | Selected nodes that returned nothing (timeout/error), so an escalate is readable. | `pando/rootd.py:824-827` |
-| `suggested_choice` | str | combiner + non-auto + votes | Fitted-combiner advice where the gate declined; never changes the tier or an auto choice. | `pando/rootd.py:828-849` |
-| `suggested_probability` | float | same | The combiner's confidence. | `pando/rootd.py:849` |
-| `assent_family` | str\|null | only when `--assent-checkpoint auto` | Evidence family used to resolve the witness. | `pando/rootd.py:850-853` |
-| `assent` | str | only when a witness resolved | The resolved witness checkpoint. | `pando/rootd.py:852-853` |
-| `fanout_ms` | float | always | Wall time of the parallel fan-out to the selected stems. | `pando/rootd.py:854` |
-| `uncalibrated_checkpoints` | list[str] | only when non-empty | Voters whose probability had no calibration entry; reported, not silently acted on. | `pando/rootd.py:855-859` |
+| `quorum_size` | int | always | Stems actually selected, not stems that answered. | `pando/coordinator.py:809` |
+| `veto` | str | only when a veto fired | The checkpoint whose choice replaced the answer. | `pando/coordinator.py:810-811`, `:766-798` |
+| `lineages` | int | only when collapsing or flooring | Distinct checkpoints among selected stems. | `pando/coordinator.py:814-818`, `:731` |
+| `opinions` | int | only when collapsing or flooring | Distinct opinions (blocs when declared). | `pando/coordinator.py:814-818`, `:732-733` |
+| `blocs` | int | only when blocs declared | Opinion count under bloc mapping. | `pando/coordinator.py:819-820` |
+| `corroboration_floor` | int | only when `> 1` | Policy floor that can demote a lone opinion from `auto`. | `pando/coordinator.py:821-822` |
+| `responded` | int | always | Votes actually received. | `pando/coordinator.py:823` |
+| `unanswered` | list[str] | only when non-empty | Selected nodes that returned nothing (timeout/error), so an escalate is readable. | `pando/coordinator.py:824-827` |
+| `suggested_choice` | str | combiner + non-auto + votes | Fitted-combiner advice where the gate declined; never changes the tier or an auto choice. | `pando/coordinator.py:828-849` |
+| `suggested_probability` | float | same | The combiner's confidence. | `pando/coordinator.py:849` |
+| `assent_family` | str\|null | only when `--assent-checkpoint auto` | Evidence family used to resolve the witness. | `pando/coordinator.py:850-853` |
+| `assent` | str | only when a witness resolved | The resolved witness checkpoint. | `pando/coordinator.py:852-853` |
+| `fanout_ms` | float | always | Wall time of the parallel fan-out to the selected stems. | `pando/coordinator.py:854` |
+| `uncalibrated_checkpoints` | list[str] | only when non-empty | Voters whose probability had no calibration entry; reported, not silently acted on. | `pando/coordinator.py:855-859` |
 
 An unknown question against a loaded playbook returns early without
 touching the quorum: `{"error": ..., "responded": 0, "quorum_size": 0}`
-(`pando/rootd.py:658-663`).
+(`pando/coordinator.py:658-663`).
 
 The root fans out in parallel and gives each stem a timeout learned from
 that stem's own EWMA latency; a slow stem is skipped, put in cooldown, and
 named in `unanswered`, without failing the decision
-(`pando/rootd.py:629-656`, `:658-697`).
+(`pando/coordinator.py:629-656`, `:658-697`).
 
 ## 4. Semantics: assent, veto, advisor, neutral
 
@@ -303,30 +303,30 @@ A `neutral` vote carries a choice but no confidence
 The OpenAI-compatible backend declares itself neutral: the upstream chat
 API returns a choice, not a calibrated probability, so the wire
 probability is a constant and the vote is marked `neutral=True`
-(`pando/stemd.py:268-280`, `pando/backend.py:278`, `:365`; default `--openai-probability 0.5`).
+(`pando/worker.py:268-280`, `pando/backend.py:278`, `:365`; default `--openai-probability 0.5`).
 
 ### Assent, advisor, veto
 
 Assent is an opt-in second opinion (`--assent-checkpoint`). A named
 checkpoint — or, with `auto`, the present checkpoint with the highest mean
 measured accuracy in `assets/registry/accuracies.json` — is the **witness**
-(`pando/rootd.py:375-395`, `:751-761`).
+(`pando/coordinator.py:375-395`, `:751-761`).
 
 - If the vote is `auto` and the witness disagrees, the result is demoted
-  to `verify` (`pando/rootd.py:776-782`).
+  to `verify` (`pando/coordinator.py:776-782`).
 - `--assent-fallback advisor` (default) keeps the aggregated choice.
 - `--assent-fallback veto` returns the witness's choice instead, and names
-  the witness in the `veto` field (`pando/rootd.py:777-782`).
+  the witness in the `veto` field (`pando/coordinator.py:777-782`).
 - Round 165 extended veto to answer **every non-auto row**, not only the
   rows where the witness disagreed with an auto verdict. When a witness is
   resolved and present, its choice becomes the answer on any non-auto
   tier; `agreement`, `mean_probability` and `tier` are left untouched, so
   nothing is fabricated and the witness is still named in `veto` for audit
-  (`pando/rootd.py:783-798`, comment `:784-793`).
+  (`pando/coordinator.py:783-798`, comment `:784-793`).
 - Family resolution: an explicit `family` on the request wins; otherwise a
   playbook category is honoured only when it names a family actually
   present in the registry; otherwise `known`
-  (`pando/rootd.py:341-364`, default `:56`).
+  (`pando/coordinator.py:341-364`, default `:56`).
 
 ### Round 165 / 166 identities (project-recorded measurements)
 
@@ -348,7 +348,7 @@ Cited so the numbers are not confused with the contract above.
 
 Per-checkpoint, per-family measured accuracy. The resolver averages the
 splits inside the family it is asked for; no value is inferred
-(`pando/rootd.py:71-140`).
+(`pando/coordinator.py:71-140`).
 
 ```json
 {
@@ -374,16 +374,16 @@ splits inside the family it is asked for; no value is inferred
 ```
 
 Shape: `checkpoint -> family -> split -> accuracy`
-(`pando/rootd.py:74-80`). Only finite numeric accuracies survive the
-parse; booleans are rejected (`pando/rootd.py:59-68`). A v1 record (or a
+(`pando/coordinator.py:74-80`). Only finite numeric accuracies survive the
+parse; booleans are rejected (`pando/coordinator.py:59-68`). A v1 record (or a
 compact `{"english": {"D": 0.7292}}` mapping) with no `families` key is
 migrated **in memory** into the `known` family so an old registry stays
-readable (`pando/rootd.py:117-133`). Missing, malformed, and empty
+readable (`pando/coordinator.py:117-133`). Missing, malformed, and empty
 registries all become an empty mapping rather than a guess
-(`pando/rootd.py:104-107`). The default path is
+(`pando/coordinator.py:104-107`). The default path is
 `assets/registry/accuracies.json`, overridable with the
 `PANDOSI_ASSENT_REGISTRY` environment variable
-(`pando/rootd.py:52-53`, `:90-98`).
+(`pando/coordinator.py:52-53`, `:90-98`).
 
 Current members: `english`, `ft-v3`, `mac-llm`, `mac-llm-8b`, each with
 `known` and `general` families (`assets/registry/accuracies.json`).
@@ -421,7 +421,7 @@ Lookup order: a checkpoint directory's `rl_agent_config.json` /
 
 ## 6. CLI
 
-### `rootd` key flags (`pando/rootd.py:1174-1243`)
+### `coordinator` key flags (`pando/coordinator.py:1174-1243`)
 
 | Flag | Default | Purpose | Line |
 | --- | --- | --- | --- |
@@ -449,7 +449,7 @@ Lookup order: a checkpoint directory's `rl_agent_config.json` /
 | `--lan` | off | Bind `0.0.0.0`; requires an active `lan_listen` grant. | `1234-1235` |
 | `--reveal-pairing-token` | off | Print the full token even when stdout is not a TTY. | `1236-1238` |
 
-### `stemd` key flags (`pando/stemd.py:184-234`)
+### `worker` key flags (`pando/worker.py:184-234`)
 
 | Flag | Default | Purpose | Line |
 | --- | --- | --- | --- |
@@ -458,7 +458,7 @@ Lookup order: a checkpoint directory's `rl_agent_config.json` /
 | `--port` | `0` | Listen port; `0` picks an ephemeral one. | `189` |
 | `--host` | `127.0.0.1` | Bind interface; `0.0.0.0` for LAN. | `190-191` |
 | `--advertise-host` | `--host` | Address reported to the root. | `192-193` |
-| `--root` | `None` | rootd URL to register with; no registration when omitted. | `194` |
+| `--root` | `None` | coordinator URL to register with; no registration when omitted. | `194` |
 | `--pairing-token` / `--pairing-token-file` | `None` | Admission secret, or read it from a user-owned file. Mutually exclusive. | `195-198` |
 | `--backend {mock,onnx,laya,text,openai}` | `mock` | Decision backend. | `199-203` |
 | `--onnx-path` | `artifacts/laya-en.int8.onnx` | ONNX/OpenVINO model path. | `204` |
@@ -520,12 +520,12 @@ Both CLI surfaces above are also checkable without starting a node. The
 flag lists in section 6 are exactly what these print:
 
 ```console
-$ PYTHONPATH=. .venv/bin/python -m pando.rootd --help
-usage: python -m pando.rootd [-h] [--port PORT] [--serve-spore SERVE_SPORE]
+$ PYTHONPATH=. .venv/bin/python -m pando.coordinator --help
+usage: python -m pando.coordinator [-h] [--port PORT] [--serve-spore SERVE_SPORE]
                                [--chunking {fixed,cdc}] [--playbook PLAYBOOK]
                                ...
-$ PYTHONPATH=. .venv/bin/python -m pando.stemd --help
-usage: python -m pando.stemd [-h] --node-id NODE_ID
+$ PYTHONPATH=. .venv/bin/python -m pando.worker --help
+usage: python -m pando.worker [-h] --node-id NODE_ID
                                [--checkpoint CHECKPOINT] [--port PORT]
                                ...
 ```
@@ -541,7 +541,7 @@ usage: python -m pando.stemd [-h] --node-id NODE_ID
 ## 9. Spore (replication) routes
 
 Served by the root when started with `--serve-spore`
-(`pando/rootd.py:932-985`):
+(`pando/coordinator.py:932-985`):
 
 ```text
 GET /spore/pubkey             -> {"pubkey": "<ed25519 verify key hex>"}
@@ -559,5 +559,5 @@ gate and `docs/research/` rounds 90-91 for lineage verification.
 There is no SDK and no required import. A conforming stem in any language
 is: bind a port, serve `POST /decide`, and re-post your own
 `{node_id, url, checkpoint, pairing_token}` to the root's `/register`
-every few seconds. The reference implementations are `pando/stemd.py`
+every few seconds. The reference implementations are `pando/worker.py`
 and the backends in `pando/backend.py`.
