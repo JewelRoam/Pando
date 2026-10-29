@@ -21,6 +21,13 @@ The primary measurements are therefore:
    opaque labels stay fixed;
 3. how often both goals select their respective correct action.
 
+``--goal-variant causal`` swaps every literal goal for a causal/responsibility
+paraphrase whose target description cues have been mechanically removed.  The
+fixed preregistration is embedded in the artifact before collection starts.  A
+significant drop in opaque accuracy supports the lexical-shortcut explanation;
+high accuracy without such a drop weakens it, but still does not establish
+semantic understanding or collective intelligence.
+
 This is a local mechanism check, not evidence of collective intelligence.
 """
 
@@ -59,6 +66,74 @@ ACTIONS = (
 )
 ACTION_IDS = tuple(item[0] for item in ACTIONS)
 ACTION_INFO = {action: (description, goal) for action, description, goal in ACTIONS}
+LITERAL_GOALS = {action: goal for action, _, goal in ACTIONS}
+CAUSAL_GOALS = {
+    "seed.export": (
+        "如果这台机器今晚彻底失联，新的接管者需要一份由当前机器生成、"
+        "离开这里也能验证的来源凭据；现在把它整理好，并留下可用于比对的长串指纹。"
+    ),
+    "seed.replicate": (
+        "远处那台机器已经答应接班，但接班所需的同一份凭据目前只在这里有一份；"
+        "把它送过去，并确认两边拿到的东西完全一致。"
+    ),
+    "recruit.invite": (
+        "有一名外部对象已经表示愿意承担责任，但它还不在名册里；"
+        "把入口交给它，并确保今后调度能找到它。"
+    ),
+    "reproduce.spawn": (
+        "当前唯一的执行体如果崩溃，工作将无人接手；机器还有余量，"
+        "照着现有执行体再做一个可自行启动的第二份。"
+    ),
+    "policy.set": (
+        "按现在的表决方式，少数否决长期使任何决定都过不了；"
+        "在限定范围内调整这条裁决办法，并留下变更前的证据。"
+    ),
+    "culture.refine": (
+        "同类差错反复出现，因为大家手上的做法没有告知何时才算完成；"
+        "改写这份共同约定，让每个人按同样步骤收尾。"
+    ),
+    "resource.rebalance": (
+        "一台机器的余量快用完了，而另一台仍然空闲；把正在做的工作和负责它的执行体"
+        "挪到空处，同时保留撤回办法。"
+    ),
+    "meta.propose": (
+        "反复遇到一种现有清单无法命名的需求；先写出一个新的可选做法，"
+        "等别人独立检查后再真正落地。"
+    ),
+}
+GOAL_VARIANTS = {
+    "literal": LITERAL_GOALS,
+    "causal": CAUSAL_GOALS,
+}
+
+# These are explicit content cues from each action description, not generic
+# function words.  The causal goals must contain none of the cues for any
+# action, so a correct answer cannot be explained by a copied target phrase.
+ACTION_LEXICAL_CUES = {
+    "seed.export": ("本机", "种子包", "身份", "授权", "状态", "校验", "制作", "摘要"),
+    "seed.replicate": ("种子包", "另一台主机", "主机", "摘要", "核对", "送到", "传"),
+    "recruit.invite": ("邀请", "候选成员", "成员", "加入", "群体", "记录"),
+    "reproduce.spawn": ("成员", "复制", "进程副本", "独立运行", "冗余", "副本"),
+    "policy.set": ("投票", "规则", "门槛", "提案", "修改", "旧值"),
+    "culture.refine": ("修订", "共享", "操作手册", "执行流程", "流程", "验收步骤", "分发"),
+    "resource.rebalance": ("内存", "主机", "计算任务", "迁移", "回退"),
+    "meta.propose": ("动作空间", "提案", "评审", "实现", "新的提案动作"),
+}
+PREREGISTRATION = {
+    "control_goal_variant": "literal",
+    "candidate_goal_variant": "causal",
+    "primary_arms": ["opaque_a", "opaque_b"],
+    "lexical_shortcut_supported_if": {
+        "minimum_absolute_accuracy_drop": 0.15,
+        "directional_exact_mcnemar_alpha": 0.05,
+    },
+    "lexical_explanation_weakened_if": {
+        "minimum_causal_opaque_accuracy": 0.90,
+        "wilson_95_lower_bound_above_chance": True,
+        "directional_exact_mcnemar_alpha": 0.05,
+    },
+    "otherwise": "inconclusive",
+}
 ARM_ORDERS = (
     ("named_a", "opaque_a", "named_b", "opaque_b"),
     ("opaque_a", "named_b", "opaque_b", "named_a"),
@@ -76,6 +151,26 @@ SYSTEM_PROMPT = """你是多主机殖民地的动作选择器。
 FINAL_INSTRUCTION = "请只输出一行 JSON。"
 PAD_MARKER = "\n【长度控制】"
 PAD_UNIT = "仅长度填充。"
+
+
+def lexical_audit() -> dict:
+    """Show that causal goals do not copy any action-description cue."""
+    overlaps = {}
+    for action, goal in CAUSAL_GOALS.items():
+        hits = sorted({
+            cue
+            for cues in ACTION_LEXICAL_CUES.values()
+            for cue in cues
+            if cue in goal
+        })
+        if hits:
+            overlaps[action] = hits
+    return {
+        "ok": not overlaps,
+        "cue_source": "hand-listed content words from action descriptions",
+        "goals_checked": len(CAUSAL_GOALS),
+        "overlaps": overlaps,
+    }
 
 
 def _sha256(text: str) -> str:
@@ -178,7 +273,11 @@ def pad_to_tokens(build, target: int, tokenize) -> tuple[str, int, str]:
     raise RuntimeError(f"could not token-match prompt to {target} tokens")
 
 
-def build_trial_prompts(index: int, seed: int, tokenize) -> dict:
+def build_trial_prompts(index: int, seed: int, tokenize,
+                        goal_variant: str = "literal") -> dict:
+    if goal_variant not in GOAL_VARIANTS:
+        raise ValueError(f"unknown goal variant: {goal_variant}")
+    goals = GOAL_VARIANTS[goal_variant]
     target_a, target_b = pair_targets(index)
     order, named_labels = menu_for_pair(index, seed, opaque=False)
     _, opaque_labels = menu_for_pair(index, seed, opaque=True)
@@ -187,7 +286,7 @@ def build_trial_prompts(index: int, seed: int, tokenize) -> dict:
     builds = {}
     for arm in ARMS:
         mode, variant = arm.split("_", 1)
-        goal = ACTION_INFO[target_a if variant == "a" else target_b][1]
+        goal = goals[target_a if variant == "a" else target_b]
         label_of = (named_labels if mode == "named" else opaque_labels)
         builds[arm] = lambda pad, g=goal, o=order, m=label_of: build_prompt(
             g, o, m, pad)
@@ -201,6 +300,7 @@ def build_trial_prompts(index: int, seed: int, tokenize) -> dict:
     return {
         "pair": index,
         "seed": seed,
+        "goal_variant": goal_variant,
         "target_a": target_a,
         "target_b": target_b,
         "target_tokens": target_tokens,
@@ -265,6 +365,92 @@ def binomial_two_sided(k: int, n: int, p: float) -> float:
     ]
     observed = probabilities[k]
     return min(1.0, sum(prob for prob in probabilities if prob <= observed + 1e-15))
+
+
+def binomial_one_sided_at_least(k: int, n: int, p: float = 0.5) -> float:
+    """P[X >= k] for X ~ Binomial(n, p)."""
+    if n <= 0:
+        return 1.0
+    return min(1.0, sum(
+        math.comb(n, x) * (p ** x) * ((1 - p) ** (n - x))
+        for x in range(k, n + 1)
+    ))
+
+
+def paired_binary_comparison(baseline_rows: list[dict], candidate_rows: list[dict],
+                             arms: tuple[str, ...] = ("opaque_a", "opaque_b")) -> dict:
+    """Compare two runs by pair/arm, using only observations valid in both."""
+    baseline = {(int(row["pair"]), str(row["arm"])): row for row in baseline_rows}
+    candidate = {(int(row["pair"]), str(row["arm"])): row for row in candidate_rows}
+    keys = sorted({
+        key for key in baseline
+        if key[1] in arms
+    } | {
+        key for key in candidate
+        if key[1] in arms
+    })
+    counts = Counter()
+    for key in keys:
+        left = baseline.get(key) or {}
+        right = candidate.get(key) or {}
+        if not left.get("valid") or not right.get("valid"):
+            counts["invalid"] += 1
+            continue
+        left_correct = bool(left.get("correct"))
+        right_correct = bool(right.get("correct"))
+        if left_correct and right_correct:
+            counts["both_correct"] += 1
+        elif left_correct:
+            counts["baseline_only"] += 1
+        elif right_correct:
+            counts["candidate_only"] += 1
+        else:
+            counts["neither_correct"] += 1
+
+    n = counts["both_correct"] + counts["baseline_only"] + counts["candidate_only"] + counts["neither_correct"]
+    baseline_correct = counts["both_correct"] + counts["baseline_only"]
+    candidate_correct = counts["both_correct"] + counts["candidate_only"]
+    baseline_accuracy = baseline_correct / n if n else 0.0
+    candidate_accuracy = candidate_correct / n if n else 0.0
+    discordant = counts["baseline_only"] + counts["candidate_only"]
+    low, high = wilson_interval(candidate_correct, n)
+    return {
+        "arms": list(arms),
+        "n_observations": len(keys),
+        "n_valid_pairs": n,
+        "discordant": dict(counts),
+        "baseline_correct": baseline_correct,
+        "candidate_correct": candidate_correct,
+        "baseline_accuracy": baseline_accuracy,
+        "candidate_accuracy": candidate_accuracy,
+        "absolute_accuracy_change": candidate_accuracy - baseline_accuracy,
+        "candidate_wilson_95": [low, high],
+        "baseline_better_exact_one_sided_p": binomial_one_sided_at_least(
+            counts["baseline_only"], discordant, 0.5),
+        "mcnemar_exact_two_sided_p": binomial_two_sided(
+            counts["baseline_only"], discordant, 0.5),
+    }
+
+
+def classify_goal_comparison(comparison: dict) -> str:
+    """Apply the fixed preregistered decision rule."""
+    n = int(comparison.get("n_valid_pairs") or 0)
+    if not n:
+        return "inconclusive"
+    drop = -float(comparison.get("absolute_accuracy_change") or 0.0)
+    baseline_better_p = float(comparison.get("baseline_better_exact_one_sided_p", 1.0))
+    collapse_rule = PREREGISTRATION["lexical_shortcut_supported_if"]
+    if (drop >= collapse_rule["minimum_absolute_accuracy_drop"]
+            and baseline_better_p < collapse_rule["directional_exact_mcnemar_alpha"]):
+        return "lexical_shortcut_supported"
+    preserve_rule = PREREGISTRATION["lexical_explanation_weakened_if"]
+    accuracy = float(comparison.get("candidate_accuracy") or 0.0)
+    lower = float((comparison.get("candidate_wilson_95") or [0.0, 0.0])[0])
+    if (accuracy >= preserve_rule["minimum_causal_opaque_accuracy"]
+            and lower > 1.0 / len(ACTION_IDS)
+            and baseline_better_p >= preserve_rule["directional_exact_mcnemar_alpha"]):
+        return "semantic_selection_survives_lexical_control"
+    return "inconclusive"
 
 
 def summarise(rows: list[dict], pairs: int) -> dict:
@@ -482,6 +668,46 @@ def audit_artifact(data: dict) -> dict:
     }
 
 
+def compare_artifacts(baseline: dict, candidate: dict) -> dict:
+    """Audit and compare a literal-goal control with a causal-goal run."""
+    baseline_audit = audit_artifact(baseline)
+    candidate_audit = audit_artifact(candidate)
+    baseline_variant = baseline.get("goal_variant", "literal")
+    candidate_variant = candidate.get("goal_variant", "literal")
+    if not baseline_audit["ok"] or not candidate_audit["ok"]:
+        raise ValueError("cannot compare an artifact that failed audit")
+    if baseline_variant != "literal" or candidate_variant != "causal":
+        raise ValueError(
+            f"expected literal vs causal artifacts, got {baseline_variant} vs {candidate_variant}")
+    if baseline.get("pairs") != candidate.get("pairs"):
+        raise ValueError("artifact pair counts differ")
+
+    baseline_meta = {
+        int(row["pair"]): (str(row["target"]), int(row["seed"]))
+        for row in baseline.get("rows") or []
+        if str(row.get("arm")) == "opaque_a"
+    }
+    candidate_meta = {
+        int(row["pair"]): (str(row["target"]), int(row["seed"]))
+        for row in candidate.get("rows") or []
+        if str(row.get("arm")) == "opaque_a"
+    }
+    if baseline_meta != candidate_meta:
+        raise ValueError("pair targets or seeds differ between artifacts")
+
+    comparison = paired_binary_comparison(
+        baseline.get("rows") or [], candidate.get("rows") or [],
+        tuple(PREREGISTRATION["primary_arms"]))
+    return {
+        "baseline_audit_ok": baseline_audit["ok"],
+        "candidate_audit_ok": candidate_audit["ok"],
+        "goal_variant_pair": [baseline_variant, candidate_variant],
+        "preregistration": PREREGISTRATION,
+        "comparison": comparison,
+        "outcome": classify_goal_comparison(comparison),
+    }
+
+
 def run(args) -> dict:
     api_key = ""
     if args.api_key_file:
@@ -490,7 +716,9 @@ def run(args) -> dict:
     tokenize = lambda text: tokenize_text(text, tokenize_url, api_key)
     trials = []
     for index in range(args.pairs):
-        trials.append(build_trial_prompts(index, args.seed_base + index, tokenize))
+        trials.append(build_trial_prompts(
+            index, args.seed_base + index, tokenize,
+            goal_variant=args.goal_variant))
     proposer = OpenAIProposer(
         base_url=args.base_url,
         model=args.model,
@@ -557,11 +785,20 @@ def run(args) -> dict:
         "temperature": args.temperature,
         "pairs": args.pairs,
         "seed_base": args.seed_base,
+        "goal_variant": args.goal_variant,
+        "goal_texts": GOAL_VARIANTS[args.goal_variant],
+        "causal_goal_lexical_audit": lexical_audit(),
+        "preregistration": (PREREGISTRATION if args.goal_variant == "causal" else None),
         "system": SYSTEM_PROMPT,
         "system_sha256": _sha256(SYSTEM_PROMPT),
         "actions": [
-            {"action": action, "description": description, "goal": goal}
-            for action, description, goal in ACTIONS
+            {
+                "action": action,
+                "description": description,
+                "literal_goal": LITERAL_GOALS[action],
+                "causal_goal": CAUSAL_GOALS[action],
+            }
+            for action, description, _ in ACTIONS
         ],
         "prompt_checks": prompt_checks,
         "prompts": [
@@ -586,6 +823,7 @@ def run(args) -> dict:
                 for pair in range(args.pairs)),
             "all_prompts_have_hashes": all(
                 row["prompt_sha256"] for row in rows),
+            "causal_goals_have_no_description_cues": lexical_audit()["ok"],
         },
     }
 
@@ -627,6 +865,19 @@ def print_audit(result: dict, path: Path) -> None:
               f"mcnemar_p={comparison['mcnemar_exact_two_sided_p']:.4g}")
 
 
+def print_goal_comparison(result: dict) -> None:
+    comparison = result["comparison"]
+    stats = comparison["comparison"]
+    print("\nliteral vs causal goals (opaque)")
+    print(f"literal={stats['baseline_correct']}/{stats['n_valid_pairs']} "
+          f"causal={stats['candidate_correct']}/{stats['n_valid_pairs']} "
+          f"delta={stats['absolute_accuracy_change']:+.3f} "
+          f"causal_wilson95=[{stats['candidate_wilson_95'][0]:.3f},"
+          f"{stats['candidate_wilson_95'][1]:.3f}] "
+          f"one_sided_p={stats['baseline_better_exact_one_sided_p']:.4g}")
+    print(f"discordant={stats['discordant']} outcome={comparison['outcome']}")
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://127.0.0.1:8087/v1")
@@ -638,8 +889,11 @@ def main(argv=None) -> int:
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--max-tokens", type=int, default=120)
     parser.add_argument("--timeout", type=float, default=180.0)
+    parser.add_argument("--goal-variant", choices=tuple(GOAL_VARIANTS),
+                        default="literal")
     parser.add_argument("--output", default="")
     parser.add_argument("--audit-artifact", default="")
+    parser.add_argument("--compare-artifact", default="")
     args = parser.parse_args(argv)
     if args.audit_artifact:
         path = Path(args.audit_artifact).expanduser()
@@ -648,13 +902,24 @@ def main(argv=None) -> int:
         return 0 if audit["ok"] else 1
     result = run(args)
     print_report(result)
+    comparison_ok = True
+    if args.compare_artifact:
+        baseline_path = Path(args.compare_artifact).expanduser()
+        baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+        try:
+            result["comparison"] = compare_artifacts(baseline, result)
+        except ValueError as exc:
+            parser.error(str(exc))
+        result["comparison"]["baseline_artifact"] = str(baseline_path)
+        print_goal_comparison(result)
+        comparison_ok = result["comparison"]["outcome"] != "inconclusive"
     if args.output:
         path = Path(args.output).expanduser()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n",
                         encoding="utf-8")
         print(f"\nwrote {path}")
-    return 0 if all(result["artifact_checks"].values()) else 1
+    return 0 if all(result["artifact_checks"].values()) and comparison_ok else 1
 
 
 if __name__ == "__main__":

@@ -4242,6 +4242,51 @@ class TestActionSemanticsCheck(unittest.TestCase):
                 label not in tool.ACTION_IDS
                 for label in opaque_labels.values()))
 
+    def test_causal_goal_variant_removes_all_description_cues(self):
+        tool = self._tool()
+        audit = tool.lexical_audit()
+        self.assertTrue(audit["ok"], audit)
+        self.assertEqual(audit["goals_checked"], len(tool.ACTION_IDS))
+        self.assertEqual(set(tool.CAUSAL_GOALS), set(tool.ACTION_IDS))
+        self.assertEqual(set(tool.LITERAL_GOALS), set(tool.ACTION_IDS))
+        self.assertTrue(all(
+            tool.CAUSAL_GOALS[action] != tool.LITERAL_GOALS[action]
+            for action in tool.ACTION_IDS))
+
+    def test_preregistered_goal_comparison_rules_are_directional(self):
+        tool = self._tool()
+
+        def rows(correct: set[int]):
+            return [
+                {
+                    "pair": pair,
+                    "arm": arm,
+                    "valid": True,
+                    "correct": pair in correct,
+                }
+                for pair in range(10)
+                for arm in ("opaque_a", "opaque_b")
+            ]
+
+        baseline = rows(set(range(10)))
+        weak_candidate = rows(set(range(5, 10)))
+        comparison = tool.paired_binary_comparison(
+            baseline, weak_candidate)
+        self.assertEqual(comparison["discordant"]["baseline_only"], 10)
+        self.assertEqual(comparison["absolute_accuracy_change"], -0.5)
+        self.assertEqual(
+            tool.classify_goal_comparison(comparison),
+            "lexical_shortcut_supported")
+
+        preserve_candidate = rows(set(range(9)))
+        comparison = tool.paired_binary_comparison(
+            baseline, preserve_candidate)
+        self.assertEqual(comparison["discordant"]["baseline_only"], 2)
+        self.assertEqual(comparison["candidate_accuracy"], 0.9)
+        self.assertEqual(
+            tool.classify_goal_comparison(comparison),
+            "semantic_selection_survives_lexical_control")
+
     def test_parse_selection_uses_the_arm_label_mapping(self):
         tool = self._tool()
         label_to_action = {"k7": "seed.export", "m2": "seed.replicate"}
