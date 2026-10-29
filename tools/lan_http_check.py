@@ -26,8 +26,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pando.common import bypass_proxy_for_lan
 from pando.grants import save_grant
+from pando.net import open_url
 from pando.join import lan_ip
 
 
@@ -44,7 +44,7 @@ def request(url: str, *, method: str = "GET", payload: dict | None = None,
         headers["Authorization"] = f"Bearer {token}"
     body = None if payload is None else json.dumps(payload).encode()
     try:
-        with urllib.request.urlopen(
+        with open_url(
                 urllib.request.Request(url, data=body, headers=headers,
                                        method=method),
                 timeout=timeout) as response:
@@ -92,7 +92,6 @@ def main() -> int:
     lan_address = lan_ip()
     if lan_address == "127.0.0.1":
         raise SystemExit("no non-loopback LAN address detected")
-    bypass_proxy_for_lan()
     root_port = free_port()
     root_loopback = f"http://127.0.0.1:{root_port}"
     root_lan = f"http://{lan_address}:{root_port}"

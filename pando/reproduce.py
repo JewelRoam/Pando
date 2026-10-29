@@ -22,8 +22,8 @@ import urllib.request
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from .common import bypass_proxy_for_lan
 from .grants import require_grant
+from .net import open_url
 from .spore import artifact_digest
 
 
@@ -105,7 +105,7 @@ def _wait_for(url: str, token: str | None, node_id: str,
         if process is not None and process.poll() is not None:
             return False           # the child died: do not wait out the clock
         try:
-            with urllib.request.urlopen(
+            with open_url(
                     urllib.request.Request(f"{url}/nodes", headers=headers),
                     timeout=5) as resp:
                 if node_id in json.loads(resp.read()).get("nodes", {}):
@@ -133,9 +133,6 @@ def reproduce(payload: Path, lineage: str, target: Target, root_url: str,
     Returns the outcome and the child process (None when refused or when
     ``launch`` is False), so a caller can supervise or terminate it.
     """
-    bypass_proxy_for_lan()
-    urllib.request.install_opener(
-        urllib.request.build_opener(urllib.request.ProxyHandler({})))
 
     outcome = plan_reproduction(
         payload, lineage, target, declared_lineages=declared_lineages,
@@ -181,7 +178,7 @@ def reproduce(payload: Path, lineage: str, target: Target, root_url: str,
 def _count_voters(root_url: str, token: str | None) -> int:
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     try:
-        with urllib.request.urlopen(
+        with open_url(
                 urllib.request.Request(f"{root_url}/nodes", headers=headers),
                 timeout=5) as resp:
             return len(json.loads(resp.read()).get("nodes", {}))

@@ -100,6 +100,11 @@ class LayaBackend:
                     result.choice, float(result.probability))
 
 
+#: Default checkpoint labels per device; anything else derives from the
+#: device name (``onnx-gpu``, ``onnx-npu``, ...).
+_DEVICE_CHECKPOINTS = {"CPU": "onnx", "CUDA": "onnx-cuda"}
+
+
 class OnnxLayaBackend:
     """Real Laya decisions via the official ONNXAgent.
 
@@ -123,9 +128,8 @@ class OnnxLayaBackend:
 
         self.node_id = node_id
         normalized_device = device.strip().upper()
-        default_checkpoint = "onnx" if normalized_device == "CPU" else (
-            "onnx-cuda" if normalized_device == "CUDA"
-            else f"onnx-{normalized_device.lower()}")
+        default_checkpoint = _DEVICE_CHECKPOINTS.get(
+            normalized_device, f"onnx-{normalized_device.lower()}")
         self.checkpoint = checkpoint or default_checkpoint
         self._agent = ONNXAgent(repo, onnx_path=onnx_path)
         if normalized_device == "CUDA":

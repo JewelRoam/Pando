@@ -28,8 +28,10 @@ class _PandoHTTPServer(ThreadingHTTPServer):
 from contextlib import nullcontext
 
 from . import backend as _backend_mod
-from .common import DECIDING_ROLE, DecisionRequest, PROPOSING_ROLE, ROLES
+from .common import (DECIDING_ROLE, DecisionRequest, PROPOSING_ROLE, ROLES,
+                     wait_for_shutdown)
 from .graft import assign_role, capability
+from .net import open_url
 from .resources import asset_path
 
 
@@ -260,15 +262,97 @@ def heartbeat_loop(stem: Stem, root_url: str,
             registration["capability"] = dict(cap,
                                               host_ms_per_decision=measured)
         try:
-            with urllib.request.urlopen(
+            with open_url(
                 urllib.request.Request(f"{root_url}/register",
                                        data=signed_payload(),
                                        headers=headers),
                 timeout=3) as resp:
                 resp.read()
         except Exception:
-            pass  # root may be down; retry next interval
+            # Root may be down; retry next interval. Log at debug level so a
+            # persistently unreachable root is diagnosable, not invisible.
+            import logging
+            logging.getLogger(__name__).debug(
+                "heartbeat to %s failed", root_url, exc_info=True)
         time.sleep(interval)
+
+
+def _build_onnx_backend(args):
+    print(f"loading ONNX Laya from {args.onnx_path} ...", flush=True)
+    from pathlib import Path
+    from .spore import artifact_digest
+    digest = None
+    onnx_file = Path(args.onnx_path)
+    if onnx_file.exists():
+        digest = artifact_digest(onnx_file)
+        print(f"artifact sha256 {digest}", flush=True)
+    pad_to = args.pad_to if args.pad_to is not None \
+        else (256 if args.device != "CPU" else None)
+    backend = _backend_mod.create_backend(
+        "onnx", args.node_id, onnx_path=args.onnx_path,
+        repo=args.repo, device=args.device, pad_to=pad_to,
+        checkpoint=args.checkpoint)
+    backend.artifact_digest = digest
+    print("model loaded", flush=True)
+    return backend
+
+
+def _build_torch_backend(args):
+    print(f"loading torch Laya from {args.model} on {args.device} ...",
+          flush=True)
+    backend = _backend_mod.create_backend(
+        "torch", args.node_id, model=args.model, device=args.device,
+        checkpoint=args.checkpoint)
+    print("model loaded", flush=True)
+    return backend
+
+
+def _build_openai_backend(args):
+    from .common import read_secret_file
+    api_key = ""
+    if args.openai_key_file:
+        try:
+            api_key = read_secret_file(args.openai_key_file)
+        except ValueError as exc:
+            raise SystemExit(str(exc))
+    backend = _backend_mod.create_backend(
+        "openai", args.node_id, base_url=args.openai_url, api_key=api_key,
+        model=args.openai_model, checkpoint=args.checkpoint or "openai",
+        prompt_variant="b", timeout=60.0,
+        probability=args.openai_probability)
+    print(f"openai backend ready: {args.openai_url} "
+          f"model={args.openai_model}", flush=True)
+    return backend
+
+
+def _build_text_backend(args):
+    # The cheap, independent member (rounds 122-125): stdlib only, so a
+    # device that cannot hold a neural graph can still contribute a vote
+    # whose errors do not travel with the family's.
+    print(f"loading text model from {args.text_model} ...", flush=True)
+    backend = _backend_mod.create_backend(
+        "text", args.node_id, text_model=args.text_model,
+        checkpoint=args.checkpoint)
+    print(f"text model loaded: {backend.summary()}", flush=True)
+    return backend
+
+
+def _build_mock_backend(args):
+    return _backend_mod.create_backend(
+        "mock", args.node_id, checkpoint=args.checkpoint or "mock",
+        delay_ms=args.delay_ms, serialize=args.serialize)
+
+
+#: CLI backend name -> builder. Adding a backend means registering a factory
+#: in pando.backend plus one row here (how its CLI args become kwargs).
+BACKEND_BUILDERS = {
+    "mock": _build_mock_backend,
+    "onnx": _build_onnx_backend,
+    "laya": _build_torch_backend,
+    "torch": _build_torch_backend,
+    "text": _build_text_backend,
+    "openai": _build_openai_backend,
+}
 
 
 def main() -> None:
@@ -290,9 +374,9 @@ def main() -> None:
     parser.add_argument("--pairing-token-file", default=None,
                         help="read the pairing token from a user-owned file")
     parser.add_argument("--backend", default="mock",
-                        choices=["mock", "onnx", "laya", "text", "openai"],
+                        choices=sorted(BACKEND_BUILDERS),
                         help="mock | onnx (ONNX Runtime/OpenVINO) | "
-                             "laya (native PyTorch) | text (naive Bayes) | "
+                             "laya/torch (native PyTorch) | text (naive Bayes) | "
                              "openai (OpenAI-compatible chat API)")
     parser.add_argument("--onnx-path", default="artifacts/laya-en.int8.onnx")
     parser.add_argument("--repo", default="convaiinnovations/laya")
@@ -334,61 +418,9 @@ def main() -> None:
         except ValueError as exc:
             raise SystemExit(str(exc))
 
-    # Dispatch through the backend registry so a new backend only
-    # registers a factory in pando.backend; this if/elif stays the size
-    # of "how does this CLI name its arguments", not "what backends exist".
-    if args.backend == "onnx":
-        print(f"loading ONNX Laya from {args.onnx_path} ...", flush=True)
-        from .spore import artifact_digest
-        from pathlib import Path as _Path
-        digest = None
-        onnx_file = _Path(args.onnx_path)
-        if onnx_file.exists():
-            digest = artifact_digest(onnx_file)
-            print(f"artifact sha256 {digest}", flush=True)
-        pad_to = args.pad_to if args.pad_to is not None \
-            else (256 if args.device != "CPU" else None)
-        backend = _backend_mod.create_backend(
-            "onnx", args.node_id, onnx_path=args.onnx_path,
-            repo=args.repo, device=args.device, pad_to=pad_to,
-            checkpoint=args.checkpoint)
-        backend.artifact_digest = digest
-        print("model loaded", flush=True)
-    elif args.backend == "laya" or args.backend == "torch":
-        print(f"loading torch Laya from {args.model} on {args.device} ...",
-              flush=True)
-        backend = _backend_mod.create_backend(
-            "torch", args.node_id, model=args.model, device=args.device,
-            checkpoint=args.checkpoint)
-        print("model loaded", flush=True)
-    elif args.backend == "openai":
-        from .common import read_secret_file
-        api_key = ""
-        if args.openai_key_file:
-            try:
-                api_key = read_secret_file(args.openai_key_file)
-            except ValueError as exc:
-                raise SystemExit(str(exc))
-        backend = _backend_mod.create_backend(
-            "openai", args.node_id, base_url=args.openai_url, api_key=api_key,
-            model=args.openai_model, checkpoint=args.checkpoint or "openai",
-            prompt_variant="b", timeout=60.0,
-            probability=args.openai_probability)
-        print(f"openai backend ready: {args.openai_url} "
-              f"model={args.openai_model}", flush=True)
-    elif args.backend == "text":
-        # The cheap, independent member (rounds 122-125): stdlib only, so a
-        # device that cannot hold a neural graph can still contribute a vote
-        # whose errors do not travel with the family's.
-        print(f"loading text model from {args.text_model} ...", flush=True)
-        backend = _backend_mod.create_backend(
-            "text", args.node_id, text_model=args.text_model,
-            checkpoint=args.checkpoint)
-        print(f"text model loaded: {backend.summary()}", flush=True)
-    else:
-        backend = _backend_mod.create_backend(
-            "mock", args.node_id, checkpoint=args.checkpoint or "mock",
-            delay_ms=args.delay_ms, serialize=args.serialize)
+    # Table-driven: argparse choices already restrict args.backend to
+    # BACKEND_BUILDERS keys, so this lookup cannot fail.
+    backend = BACKEND_BUILDERS[args.backend](args)
     stem = Stem(args.node_id, backend, host=args.host, port=args.port,
                 advertise_host=args.advertise_host,
                 serialize=not args.parallel)
@@ -403,9 +435,8 @@ def main() -> None:
         print(f"registering with root at {args.root} "
               f"(role={args.role or stem_role(backend)})")
     try:
-        while True:
-            time.sleep(3600)
-    except KeyboardInterrupt:
+        wait_for_shutdown()
+    finally:
         stem.stop()
 
 

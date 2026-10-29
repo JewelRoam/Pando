@@ -20,6 +20,8 @@ from pathlib import Path
 
 import nacl.signing
 
+from .net import open_url
+
 CHUNK_SIZE = 64 * 1024
 
 
@@ -946,7 +948,7 @@ def fetch_manifest(base_url: str, digest: str,
     headers = ({"Authorization": f"Bearer {auth_token}"}
                if auth_token else {})
     url = f"{base_url}/spore/manifests/{digest}"
-    with urllib.request.urlopen(
+    with open_url(
             urllib.request.Request(url, headers=headers),
             timeout=timeout) as resp:
         return json.loads(resp.read())

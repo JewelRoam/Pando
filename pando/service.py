@@ -14,7 +14,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .common import bypass_proxy_for_lan
 from .grants import (append_audit_entry, default_audit_path, grant_status,
                      default_path as default_grants_path)
 
@@ -389,7 +388,6 @@ def main() -> None:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
-    bypass_proxy_for_lan()
     try:
         plan = build_service_plan(
             args.role, platform=args.platform, lan=args.lan, port=args.port,

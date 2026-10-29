@@ -22,12 +22,13 @@ import time
 import urllib.request
 from pathlib import Path
 
-from .common import bypass_proxy_for_lan
+from .common import wait_for_shutdown
 from .graft import assign_role, capability, enumerate_execution_units
 from .grants import require_grant
 from .identity import load_or_create
 from .resources import asset_path
 from .coordinator import Coordinator
+from .net import open_url
 
 SERVICE_TYPE = "_pando._tcp.local."
 ARTIFACT_CANDIDATES = [
@@ -108,7 +109,8 @@ def advertise_root(port: int) -> threading.Event:
 def pairing_required(root_url: str) -> bool:
     """Ask a root whether it requires a token without exposing the secret."""
     try:
-        with urllib.request.urlopen(f"{root_url}/pairing", timeout=2) as resp:
+        with open_url(urllib.request.Request(f"{root_url}/pairing"),
+                      timeout=2) as resp:
             return bool(json.loads(resp.read()).get("required"))
     except Exception:
         return False
@@ -169,7 +171,6 @@ def main() -> None:
                         help="bind/advertise beyond loopback; requires an "
                              "active lan_listen grant")
     args = parser.parse_args()
-    bypass_proxy_for_lan()
 
     if args.lan:
         try:
@@ -254,7 +255,7 @@ def main() -> None:
         #    --spore (root mode): fetch from the root, pin on first use.
         #    --spore-url (explicit seed): must come from PANDOSI_SEED_PUBKEY.
         if args.spore:
-            with urllib.request.urlopen(urllib.request.Request(
+            with open_url(urllib.request.Request(
                     f"{args.spore_url}/spore/pubkey",
                     headers=auth_headers(args.pairing_token)),
                     timeout=15) as resp:
@@ -281,7 +282,7 @@ def main() -> None:
         verify_key = nacl.signing.VerifyKey(bytes.fromhex(seed_pub_hex))
 
         # 2) Fetch and verify the manifest, then pull with per-chunk checks.
-        with urllib.request.urlopen(urllib.request.Request(
+        with open_url(urllib.request.Request(
                 f"{args.spore_url}/spore/manifest",
                 headers=auth_headers(args.pairing_token)),
                 timeout=60) as resp:
@@ -442,7 +443,7 @@ def main() -> None:
         try:
             for reg in registrations:
                 payload = signed_reg(reg)
-                urllib.request.urlopen(
+                open_url(
                     urllib.request.Request(f"{root_url}/register",
                                            data=payload,
                                            headers=auth_headers(
@@ -463,7 +464,7 @@ def main() -> None:
             try:
                 for reg in registrations:
                     payload = signed_reg(reg)
-                    urllib.request.urlopen(
+                    open_url(
                         urllib.request.Request(
                             f"{root_url}/register", data=payload,
                             headers=auth_headers(args.pairing_token)),
@@ -484,9 +485,8 @@ def main() -> None:
           f'-d "{{\\"state\\":\\"test\\",\\"question\\":\\"ok?\\",'
           f'\\"candidates\\":[\\"yes\\",\\"no\\"]}}"', flush=True)
     try:
-        while True:
-            time.sleep(3600)
-    except KeyboardInterrupt:
+        wait_for_shutdown()
+    finally:
         if root:
             root.stop()
         stem.stop()

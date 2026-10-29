@@ -13,6 +13,7 @@ read the round began with.
 import argparse
 import json
 from pathlib import Path
+from typing import Callable, NamedTuple
 
 from ..culture import DEFAULT_OUTBOX as DEFAULT_CULTURE_OUTBOX
 from ..culture import CultureError
@@ -61,6 +62,94 @@ from .seed_export import (addressed_replications, done_ids,
                           replication_skip, write_status)
 from .selectors import (execution_selectors, executor_mailboxes, local_authors,
                         rows_for_execution)
+
+
+class _Stager(NamedTuple):
+    """One one-per-round actuator: pick at most one proposal, stage it, record.
+
+    A refused action has no ``skipped`` state: it is retried next round and
+    refused again, and the reason travels in the ledger row, so an action
+    that can never be staged stays visible instead of looking handled.
+    """
+
+    action: str
+    pick: Callable    # (proposals, reactions, done_ids, signer, knobs)
+    stage: Callable     # (picked, args, identity, reactions) -> dict
+    error: type         # domain refusal; anything else is recorded generically
+    carried: tuple      # staged keys copied into the ledger row
+
+
+def _stage_policy_set(picked, args, identity, reactions) -> dict:
+    # Applied after the export and before the replicate bookkeeping, so this
+    # round's own ledger row is already in ``done_ids`` when the later passes
+    # look for unactuated work.
+    adopters = len(tally(picked, reactions)[ADOPT])
+    return apply_policy(
+        picked, getattr(args, "policy_path", DEFAULT_POLICY_PATH),
+        adopters=adopters)
+
+
+def _stage_culture_refine(picked, args, identity, reactions) -> dict:
+    # Staging is one-way and inert: it writes a signed, validated candidate
+    # into the outbox for later review and never loads it, so it cannot
+    # rewrite this round's rules.
+    return stage_culture(
+        picked, identity=identity,
+        outbox=getattr(args, "culture_outbox", DEFAULT_CULTURE_OUTBOX))
+
+
+def _stage_recruit_invite(picked, args, identity, reactions) -> dict:
+    # Inert: the token is written 0600 into a local outbox with
+    # ``applied: false``. Nothing installs it into a root, so adopting a
+    # recruit can never admit a member in the same breath.
+    return stage_invite(
+        picked, identity=identity,
+        outbox=getattr(args, "invite_outbox", DEFAULT_INVITE_OUTBOX))
+
+
+def _stage_reproduce_spawn(picked, args, identity, reactions) -> dict:
+    # Inert by construction: the plan names what would be copied and where,
+    # and lists every reason the parent still refuses. Nothing is copied, no
+    # process starts, and this module never calls ``pando.reproduce.reproduce``.
+    return stage_spawn(
+        picked, identity=identity,
+        outbox=getattr(args, "spawn_outbox", DEFAULT_SPAWN_OUTBOX))
+
+
+def _stage_resource_rebalance(picked, args, identity, reactions) -> dict:
+    # Inert: the plan names the member and the target host and lists every
+    # precondition. No member is stopped, none is started, no state directory
+    # is touched.
+    return stage_rebalance(
+        picked, identity=identity,
+        outbox=getattr(args, "rebalance_outbox", DEFAULT_REBALANCE_OUTBOX))
+
+
+def _stage_meta_propose(picked, args, identity, reactions) -> dict:
+    # The one artifact in this file that must never become code: the spec
+    # carries a label and prose, and the implementation is what the gate
+    # supplies.
+    return stage_operator(
+        picked, identity=identity,
+        outbox=getattr(args, "operator_outbox", DEFAULT_OPERATOR_OUTBOX))
+
+
+#: The one-per-round actuators, in round order. Adding one is a row here plus
+#: its selector/actuator modules; the loop in ``run_once`` does not change.
+_STAGERS: tuple = (
+    _Stager("policy.set", next_policy_set, _stage_policy_set, PolicyError,
+            ("applied",)),
+    _Stager("culture.refine", next_culture_refine, _stage_culture_refine,
+            CultureError, ("playbook_hash", "directory")),
+    _Stager("recruit.invite", next_recruit_invite, _stage_recruit_invite,
+            InviteError, ("invite_hash", "expires_at", "directory")),
+    _Stager("reproduce.spawn", next_reproduce_spawn, _stage_reproduce_spawn,
+            SpawnError, ("plan_hash", "refusals", "directory")),
+    _Stager("resource.rebalance", next_rebalance, _stage_resource_rebalance,
+            RebalanceError, ("plan_hash", "refusals", "directory")),
+    _Stager("meta.propose", next_meta_propose, _stage_meta_propose,
+            OperatorError, ("spec_hash", "refusals", "directory")),
+)
 
 def local_unacted(proposals: list[Proposal], reactions: list[dict],
                   done: set[str], signer: str,
@@ -223,160 +312,27 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
             # actuator would be indistinguishable from an idle one.
             record["failed"] = failure or "export wrote no manifest"
         record_row(record)
-    # A rule change is applied after the export and before the replicate
-    # bookkeeping, so this round's own ledger row is already in ``done_ids``
-    # when the later passes look for unactuated work.
-    change = next_policy_set(proposals, reactions, done_ids(ledger), signer,
-                             knobs)
-    if change is not None:
-        adopters = len(tally(change, reactions)[ADOPT])
-        record = {"proposal_id": change.proposal_id, "action": "policy.set"}
+    # The one-per-round actuators run in table order, after the export and
+    # before the replicate bookkeeping, so each round's own ledger row is
+    # already in ``done_ids`` when the later passes look for unactuated work.
+    for spec in _STAGERS:
+        picked = spec.pick(proposals, reactions, done_ids(ledger), signer,
+                           knobs)
+        if picked is None:
+            continue
+        record = {"proposal_id": picked.proposal_id, "action": spec.action}
         try:
-            outcome = apply_policy(
-                change, getattr(args, "policy_path", DEFAULT_POLICY_PATH),
-                adopters=adopters)
-        except PolicyError as exc:
-            # No ``skipped``: a refused change is retried next round and
-            # refused again, and the reason travels, so a change that can never
-            # be applied stays visible instead of looking handled.
+            staged = spec.stage(picked, args, identity, reactions)
+        except spec.error as exc:
             record["executed"] = False
-            record["failed"] = f"PolicyError: {exc}"
+            record["failed"] = f"{spec.error.__name__}: {exc}"
         except Exception as exc:  # noqa: BLE001 - one action must not end the loop
             record["executed"] = False
             record["failed"] = f"{type(exc).__name__}: {exc}"
         else:
             record["executed"] = True
-            record["applied"] = outcome["applied"]
-        record_row(record)
-    # A culture change is staged after the export and rule change. Staging is
-    # one-way and inert: it writes a signed, validated candidate into the
-    # outbox for later review and never loads it, so it cannot rewrite the
-    # rules this round.
-    refine = next_culture_refine(proposals, reactions, done_ids(ledger),
-                                 signer, knobs)
-    if refine is not None:
-        record = {"proposal_id": refine.proposal_id, "action": "culture.refine"}
-        try:
-            staged = stage_culture(
-                refine, identity=identity,
-                outbox=getattr(args, "culture_outbox", DEFAULT_CULTURE_OUTBOX))
-        except CultureError as exc:
-            # No ``skipped``: a refused candidate is retried next round and
-            # refused again, and the reason travels, so a candidate that can
-            # never be staged stays visible instead of looking handled.
-            record["executed"] = False
-            record["failed"] = f"CultureError: {exc}"
-        except Exception as exc:  # noqa: BLE001 - one action must not end the loop
-            record["executed"] = False
-            record["failed"] = f"{type(exc).__name__}: {exc}"
-        else:
-            record["executed"] = True
-            record["playbook_hash"] = staged["playbook_hash"]
-            record["directory"] = staged["directory"]
-        record_row(record)
-    # An invitation is minted last and is inert: the token is written 0600 into
-    # a local outbox with ``applied: false``. Nothing installs it into a root,
-    # so adopting a recruit can never admit a member in the same breath.
-    invite = next_recruit_invite(proposals, reactions, done_ids(ledger),
-                                 signer, knobs)
-    if invite is not None:
-        record = {"proposal_id": invite.proposal_id,
-                  "action": "recruit.invite"}
-        try:
-            staged = stage_invite(
-                invite, identity=identity,
-                outbox=getattr(args, "invite_outbox", DEFAULT_INVITE_OUTBOX))
-        except InviteError as exc:
-            # No ``skipped``: a refused invitation is retried next round and
-            # refused again, so one that can never be staged stays visible.
-            record["executed"] = False
-            record["failed"] = f"InviteError: {exc}"
-        except Exception as exc:  # noqa: BLE001 - one action must not end the loop
-            record["executed"] = False
-            record["failed"] = f"{type(exc).__name__}: {exc}"
-        else:
-            record["executed"] = True
-            record["invite_hash"] = staged["invite_hash"]
-            record["expires_at"] = staged["expires_at"]
-            record["directory"] = staged["directory"]
-        record_row(record)
-    # A reproduction is drafted last and is inert by construction: the plan
-    # names what would be copied and where, and lists every reason the parent
-    # still refuses. Nothing is copied, no process starts, and this module
-    # never calls ``pando.reproduce.reproduce``.
-    spawn = next_reproduce_spawn(proposals, reactions, done_ids(ledger),
-                                 signer, knobs)
-    if spawn is not None:
-        record = {"proposal_id": spawn.proposal_id, "action": "reproduce.spawn"}
-        try:
-            staged = stage_spawn(
-                spawn, identity=identity,
-                outbox=getattr(args, "spawn_outbox", DEFAULT_SPAWN_OUTBOX))
-        except SpawnError as exc:
-            # No ``skipped``: a refused draft is retried next round and refused
-            # again, so a plan that can never be staged stays visible.
-            record["executed"] = False
-            record["failed"] = f"SpawnError: {exc}"
-        except Exception as exc:  # noqa: BLE001 - one action must not end the loop
-            record["executed"] = False
-            record["failed"] = f"{type(exc).__name__}: {exc}"
-        else:
-            record["executed"] = True
-            record["plan_hash"] = staged["plan_hash"]
-            record["refusals"] = staged["refusals"]
-            record["directory"] = staged["directory"]
-        record_row(record)
-    # A member move is drafted next, and it is inert: the plan names the
-    # member and the target host and lists every precondition. No member is
-    # stopped, none is started, no state directory is touched.
-    move = next_rebalance(proposals, reactions, done_ids(ledger), signer, knobs)
-    if move is not None:
-        record = {"proposal_id": move.proposal_id,
-                  "action": "resource.rebalance"}
-        try:
-            staged = stage_rebalance(
-                move, identity=identity,
-                outbox=getattr(args, "rebalance_outbox",
-                               DEFAULT_REBALANCE_OUTBOX))
-        except RebalanceError as exc:
-            # No ``skipped``: a refused draft is retried next round and refused
-            # again, so a move that can never be staged stays visible.
-            record["executed"] = False
-            record["failed"] = f"RebalanceError: {exc}"
-        except Exception as exc:  # noqa: BLE001 - one action must not end the loop
-            record["executed"] = False
-            record["failed"] = f"{type(exc).__name__}: {exc}"
-        else:
-            record["executed"] = True
-            record["plan_hash"] = staged["plan_hash"]
-            record["refusals"] = staged["refusals"]
-            record["directory"] = staged["directory"]
-        record_row(record)
-    # A proposal for a *new operator* is drafted last of all. It is the one
-    # artifact in this file that must never become code: the spec carries a
-    # label and prose, and the implementation is what the gate supplies.
-    meta = next_meta_propose(proposals, reactions, done_ids(ledger), signer,
-                             knobs)
-    if meta is not None:
-        record = {"proposal_id": meta.proposal_id, "action": "meta.propose"}
-        try:
-            staged = stage_operator(
-                meta, identity=identity,
-                outbox=getattr(args, "operator_outbox",
-                               DEFAULT_OPERATOR_OUTBOX))
-        except OperatorError as exc:
-            # No ``skipped``: a refused draft is retried next round and refused
-            # again, so a spec that can never be staged stays visible.
-            record["executed"] = False
-            record["failed"] = f"OperatorError: {exc}"
-        except Exception as exc:  # noqa: BLE001 - one action must not end the loop
-            record["executed"] = False
-            record["failed"] = f"{type(exc).__name__}: {exc}"
-        else:
-            record["executed"] = True
-            record["spec_hash"] = staged["spec_hash"]
-            record["refusals"] = staged["refusals"]
-            record["directory"] = staged["directory"]
+            for key in spec.carried:
+                record[key] = staged[key]
         record_row(record)
     # Once the spec is staged, the fixed catalogue may deploy it without a
     # per-proposal human review. The standing grant authorizes the deployment
@@ -433,166 +389,133 @@ def run_once(proposals: list[Proposal], reactions: list[dict], args) -> int:
                     record[key] = value
             record_row(record)
     # An export must not crowd out a replicate. Both are recorded.
-    if True:
-        seen = done_ids(ledger) | left_ids(ledger)
-        foreign = foreign_adopted_seeds(proposals, reactions, seen, signer,
+    seen = done_ids(ledger) | left_ids(ledger)
+    foreign = foreign_adopted_seeds(proposals, reactions, seen, signer,
+                                    knobs)
+    replicates = local_replications(proposals, reactions, seen, signer,
+                                    knobs)
+    addressed = addressed_replications(proposals, reactions, seen, signer,
+                                       knobs)
+    hosts = getattr(args, "hosts", None)
+    foreign_repl = foreign_replications(proposals, reactions, seen, signer,
                                         knobs)
-        replicates = local_replications(proposals, reactions, seen, signer,
-                                        knobs)
-        addressed = addressed_replications(proposals, reactions, seen, signer,
-                                           knobs)
-        hosts = getattr(args, "hosts", None)
-        foreign_repl = foreign_replications(proposals, reactions, seen, signer,
-                                            knobs)
-        foreign_policy = foreign_policy_sets(proposals, reactions, seen, signer,
-                                             knobs)
-        foreign_culture = foreign_culture_refines(proposals, reactions, seen,
-                                                  signer, knobs)
-        foreign_invites = foreign_recruit_invites(proposals, reactions, seen,
-                                                  signer, knobs)
-        foreign_spawns = foreign_reproduce_spawns(proposals, reactions, seen,
-                                                  signer, knobs)
-        foreign_moves = foreign_rebalances(proposals, reactions, seen, signer,
-                                           knobs)
-        foreign_meta = foreign_meta_proposes(proposals, reactions, seen, signer,
-                                             knobs)
-        unacted = local_unacted(proposals, reactions, seen, signer, knobs,
-                                installed_operators)
-        pulls = getattr(args, "pull", None) or set()
-        outbox = getattr(args, "outbox", "~/.pandosi/outbox")
-        acks = received_acks(ledger, outbox)
-        if (foreign or replicates or addressed or unacted or foreign_repl
-                or foreign_policy or foreign_culture or foreign_invites
-                or foreign_spawns or foreign_moves or foreign_meta
-                or acks):
-            ledger.parent.mkdir(parents=True, exist_ok=True)
-            with ledger.open("a", encoding="utf-8") as handle:
-                for proposal_id in foreign:
-                    handle.write(json.dumps({
-                        "proposal_id": proposal_id,
-                        "action": "seed.export",
-                        "executed": False,
-                        "skipped": "other-host",
-                    }, sort_keys=True) + "\n")
-                for proposal_id in replicates:
-                    handle.write(json.dumps({
+    foreign_policy = foreign_policy_sets(proposals, reactions, seen, signer,
+                                         knobs)
+    foreign_culture = foreign_culture_refines(proposals, reactions, seen,
+                                              signer, knobs)
+    foreign_invites = foreign_recruit_invites(proposals, reactions, seen,
+                                              signer, knobs)
+    foreign_spawns = foreign_reproduce_spawns(proposals, reactions, seen,
+                                              signer, knobs)
+    foreign_moves = foreign_rebalances(proposals, reactions, seen, signer,
+                                       knobs)
+    foreign_meta = foreign_meta_proposes(proposals, reactions, seen, signer,
+                                         knobs)
+    unacted = local_unacted(proposals, reactions, seen, signer, knobs,
+                            installed_operators)
+    pulls = getattr(args, "pull", None) or set()
+    outbox = getattr(args, "outbox", "~/.pandosi/outbox")
+    acks = received_acks(ledger, outbox)
+    if (foreign or replicates or addressed or unacted or foreign_repl
+            or foreign_policy or foreign_culture or foreign_invites
+            or foreign_spawns or foreign_moves or foreign_meta
+            or acks):
+        ledger.parent.mkdir(parents=True, exist_ok=True)
+        with ledger.open("a", encoding="utf-8") as handle:
+            for proposal_id in foreign:
+                handle.write(json.dumps({
+                    "proposal_id": proposal_id,
+                    "action": "seed.export",
+                    "executed": False,
+                    "skipped": "other-host",
+                }, sort_keys=True) + "\n")
+            for proposal_id in replicates:
+                handle.write(json.dumps({
+                    "proposal_id": proposal_id,
+                    "action": "seed.replicate",
+                    "executed": False,
+                    "skipped": "no-destination",
+                }, sort_keys=True) + "\n")
+            bundle = latest_sealed(args.out_root) if pulls else None
+            for proposal_id, destination in addressed:
+                # A pull host is recorded whether or not the offer landed:
+                # ``offer_replication`` returns the reason it did not
+                # (``no-bundle`` when nothing is sealed yet). Dropping that
+                # row made a failed copy read exactly like one that was
+                # never attempted -- which is how win sat at zero received
+                # seeds for 35 rounds without leaving a trace.
+                if destination in pulls:
+                    record = offer_replication(
+                        proposal_id, destination, bundle=bundle, outbox=outbox)
+                else:
+                    record = {
                         "proposal_id": proposal_id,
                         "action": "seed.replicate",
+                        "destination": destination,
                         "executed": False,
-                        "skipped": "no-destination",
-                    }, sort_keys=True) + "\n")
-                bundle = latest_sealed(args.out_root) if pulls else None
-                for proposal_id, destination in addressed:
-                    # A pull host is recorded whether or not the offer landed:
-                    # ``offer_replication`` returns the reason it did not
-                    # (``no-bundle`` when nothing is sealed yet). Dropping that
-                    # row made a failed copy read exactly like one that was
-                    # never attempted -- which is how win sat at zero received
-                    # seeds for 35 rounds without leaving a trace.
-                    if destination in pulls:
-                        record = offer_replication(
-                            proposal_id, destination, bundle=bundle, outbox=outbox)
-                    else:
-                        record = {
-                            "proposal_id": proposal_id,
-                            "action": "seed.replicate",
-                            "destination": destination,
-                            "executed": False,
-                            "skipped": replication_skip(destination, hosts),
-                        }
-                    handle.write(json.dumps(record, sort_keys=True) + "\n")
-                for record in received_acks(ledger, outbox):
-                    handle.write(json.dumps(record, sort_keys=True) + "\n")
-                for proposal_id in foreign_repl:
+                        "skipped": replication_skip(destination, hosts),
+                    }
+                handle.write(json.dumps(record, sort_keys=True) + "\n")
+            for record in received_acks(ledger, outbox):
+                handle.write(json.dumps(record, sort_keys=True) + "\n")
+            # Foreign adoptions of every other action: seen here, acted on
+            # elsewhere, recorded with the same "other-host" skip.
+            for ids, skip_action in (
+                    (foreign_repl, "seed.replicate"),
+                    (foreign_policy, "policy.set"),
+                    (foreign_culture, "culture.refine"),
+                    (foreign_invites, "recruit.invite"),
+                    (foreign_spawns, "reproduce.spawn"),
+                    (foreign_moves, "resource.rebalance"),
+                    (foreign_meta, "meta.propose")):
+                for proposal_id in ids:
                     handle.write(json.dumps({
                         "proposal_id": proposal_id,
-                        "action": "seed.replicate",
+                        "action": skip_action,
                         "executed": False,
                         "skipped": "other-host",
                     }, sort_keys=True) + "\n")
-                for proposal_id in foreign_policy:
-                    handle.write(json.dumps({
-                        "proposal_id": proposal_id,
-                        "action": "policy.set",
-                        "executed": False,
-                        "skipped": "other-host",
-                    }, sort_keys=True) + "\n")
-                for proposal_id in foreign_culture:
-                    handle.write(json.dumps({
-                        "proposal_id": proposal_id,
-                        "action": "culture.refine",
-                        "executed": False,
-                        "skipped": "other-host",
-                    }, sort_keys=True) + "\n")
-                for proposal_id in foreign_invites:
-                    handle.write(json.dumps({
-                        "proposal_id": proposal_id,
-                        "action": "recruit.invite",
-                        "executed": False,
-                        "skipped": "other-host",
-                    }, sort_keys=True) + "\n")
-                for proposal_id in foreign_spawns:
-                    handle.write(json.dumps({
-                        "proposal_id": proposal_id,
-                        "action": "reproduce.spawn",
-                        "executed": False,
-                        "skipped": "other-host",
-                    }, sort_keys=True) + "\n")
-                for proposal_id in foreign_moves:
-                    handle.write(json.dumps({
-                        "proposal_id": proposal_id,
-                        "action": "resource.rebalance",
-                        "executed": False,
-                        "skipped": "other-host",
-                    }, sort_keys=True) + "\n")
-                for proposal_id in foreign_meta:
-                    handle.write(json.dumps({
-                        "proposal_id": proposal_id,
-                        "action": "meta.propose",
-                        "executed": False,
-                        "skipped": "other-host",
-                    }, sort_keys=True) + "\n")
-                for proposal_id, action in unacted:
-                    handle.write(json.dumps({
-                        "proposal_id": proposal_id,
-                        "action": action,
-                        "executed": False,
-                        "skipped": "no-actuator",
-                    }, sort_keys=True) + "\n")
-        payload = {"did": "idle", "read_from": getattr(args, "read_from", ""),
-                   "mailbox_tried": list(getattr(args, "mailbox_chain", []) or []),
-                   "foreign_seed_exports": foreign,
-                   "seed_export_deferred": ("no-passphrase"
-                                            if deferred_export else None),
-                   "replication_without_destination": replicates,
-                   "replication_not_sent": [item[0] for item in addressed],
-                   "foreign_replications": foreign_repl,
-                   "foreign_policy_sets": foreign_policy,
-                   "foreign_culture_refines": foreign_culture,
-                   "foreign_recruit_invites": foreign_invites,
-                   "foreign_reproduce_spawns": foreign_spawns,
-                   "foreign_rebalances": foreign_moves,
-                   "foreign_meta_proposes": foreign_meta,
-                   "installed_operators": sorted(installed_operators),
-                   "installed_operators_error": installed_error,
-                   "operator_deployments": deployment_attempts,
-                   "no_actuator": [item[0] for item in unacted]}
-        print(json.dumps(payload, ensure_ascii=False), flush=True)
-        write_status(ledger.with_name("execute-status.json"), payload)
-        if sealed is None:
-            return 0
-        offered = [item[0] for item in addressed
-                   if item[1] in (getattr(args, "pull", None) or set())]
-        done = {"did": "executed", "proposal_id": chosen.proposal_id,
-                "executed": bool(sealed), "offered": offered,
-                "read_from": getattr(args, "read_from", ""),
-                "mailbox_tried": list(getattr(args, "mailbox_chain", []) or []),
-                "seed_export_deferred": ("no-passphrase"
-                                         if deferred_export else None),
-                "operator_deployments": deployment_attempts}
-        print(json.dumps(done, sort_keys=True), flush=True)
-        write_status(ledger.with_name("execute-status.json"), done)
-        return 0 if sealed else 1
+            for proposal_id, action in unacted:
+                handle.write(json.dumps({
+                    "proposal_id": proposal_id,
+                    "action": action,
+                    "executed": False,
+                    "skipped": "no-actuator",
+                }, sort_keys=True) + "\n")
+    payload = {"did": "idle", "read_from": getattr(args, "read_from", ""),
+               "mailbox_tried": list(getattr(args, "mailbox_chain", []) or []),
+               "foreign_seed_exports": foreign,
+               "seed_export_deferred": ("no-passphrase"
+                                        if deferred_export else None),
+               "replication_without_destination": replicates,
+               "replication_not_sent": [item[0] for item in addressed],
+               "foreign_replications": foreign_repl,
+               "foreign_policy_sets": foreign_policy,
+               "foreign_culture_refines": foreign_culture,
+               "foreign_recruit_invites": foreign_invites,
+               "foreign_reproduce_spawns": foreign_spawns,
+               "foreign_rebalances": foreign_moves,
+               "foreign_meta_proposes": foreign_meta,
+               "installed_operators": sorted(installed_operators),
+               "installed_operators_error": installed_error,
+               "operator_deployments": deployment_attempts,
+               "no_actuator": [item[0] for item in unacted]}
+    print(json.dumps(payload, ensure_ascii=False), flush=True)
+    write_status(ledger.with_name("execute-status.json"), payload)
+    if sealed is None:
+        return 0
+    offered = [item[0] for item in addressed
+               if item[1] in (getattr(args, "pull", None) or set())]
+    done = {"did": "executed", "proposal_id": chosen.proposal_id,
+            "executed": bool(sealed), "offered": offered,
+            "read_from": getattr(args, "read_from", ""),
+            "mailbox_tried": list(getattr(args, "mailbox_chain", []) or []),
+            "seed_export_deferred": ("no-passphrase"
+                                     if deferred_export else None),
+            "operator_deployments": deployment_attempts}
+    print(json.dumps(done, sort_keys=True), flush=True)
+    write_status(ledger.with_name("execute-status.json"), done)
+    return 0 if sealed else 1
 
 
 def build_parser() -> argparse.ArgumentParser:

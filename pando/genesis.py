@@ -31,6 +31,7 @@ from pathlib import Path
 
 from .gate import TierPolicy
 from .identity import verify as _verify_signature
+from .net import open_url
 
 
 # The group's action space: the primitives the swarm actually controls.
@@ -521,11 +522,7 @@ class SwarmProposalDecider:
 
     def __init__(self, root_url: str, pairing_token: str | None = None,
                  timeout: float = 120, max_menu: int = 8):
-        from .common import bypass_proxy_for_lan
 
-        bypass_proxy_for_lan()
-        urllib.request.install_opener(
-            urllib.request.build_opener(urllib.request.ProxyHandler({})))
         self.root_url = root_url.rstrip("/")
         self.timeout = timeout
         self.max_menu = max(1, int(max_menu))
@@ -553,5 +550,5 @@ class SwarmProposalDecider:
         request = urllib.request.Request(
             f"{self.root_url}/decide", data=body.encode("utf-8"),
             headers=self._headers, method="POST")
-        with urllib.request.urlopen(request, timeout=self.timeout) as resp:
+        with open_url(request, timeout=self.timeout) as resp:
             return json.loads(resp.read())

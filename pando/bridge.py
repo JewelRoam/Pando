@@ -11,11 +11,11 @@ from __future__ import annotations
 import argparse
 import json
 import threading
-import time
 import urllib.request
 
-from .common import (DecisionRequest, Vote, bypass_proxy_for_lan,
-                     read_secret_file)
+from .common import (DecisionRequest, Vote, read_secret_file,
+                     wait_for_shutdown)
+from .net import open_url
 from .worker import Stem, heartbeat_loop
 
 
@@ -37,7 +37,7 @@ class RemoteRootBackend:
             f"{self.upstream_root}/decide", data=req.to_json(),
             headers=headers)
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as resp:
+            with open_url(request, timeout=self.timeout) as resp:
                 payload = json.loads(resp.read())
         except Exception as exc:
             raise RuntimeError(f"upstream root unavailable: {exc}") from exc
@@ -86,7 +86,6 @@ def main() -> None:
     local_token = _token(args.local_pairing_token,
                          args.local_pairing_token_file, "local")
     checkpoint = args.checkpoint or f"bridge-{args.node_id}"
-    bypass_proxy_for_lan()
     backend = RemoteRootBackend(
         args.node_id, args.upstream_root, upstream_token, checkpoint,
         args.upstream_timeout)
@@ -100,9 +99,8 @@ def main() -> None:
         args=(stem, args.local_root, local_token),
         daemon=True).start()
     try:
-        while True:
-            time.sleep(3600)
-    except KeyboardInterrupt:
+        wait_for_shutdown()
+    finally:
         stem.stop()
 
 

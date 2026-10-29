@@ -27,8 +27,8 @@ import urllib.request
 from dataclasses import dataclass, field
 
 from .autonomy import Outcome, Journal
-from .common import bypass_proxy_for_lan
 from .grants import require_grant
+from .net import open_url
 
 
 @dataclass
@@ -100,9 +100,6 @@ class Retirer:
     def __init__(self, root_url: str, pairing_token: str | None = None,
                  grants_path=None, journal: Journal | None = None,
                  timeout: float = 30):
-        bypass_proxy_for_lan()
-        urllib.request.install_opener(
-            urllib.request.build_opener(urllib.request.ProxyHandler({})))
         self.root_url = root_url.rstrip("/")
         self.pairing_token = pairing_token
         self.grants_path = grants_path
@@ -114,7 +111,7 @@ class Retirer:
             if self.pairing_token else {}
         request = urllib.request.Request(f"{self.root_url}/nodes",
                                          headers=headers)
-        with urllib.request.urlopen(request, timeout=self.timeout) as resp:
+        with open_url(request, timeout=self.timeout) as resp:
             payload = json.loads(resp.read())
         return [Member(node_id, info.get("checkpoint", "?"),
                        info.get("stats", {}).get("latency_ewma_ms"),
@@ -153,7 +150,7 @@ class Retirer:
         request = urllib.request.Request(f"{self.root_url}/retire", data=body,
                                          headers=headers)
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as resp:
+            with open_url(request, timeout=self.timeout) as resp:
                 payload = json.loads(resp.read())
             outcome.acted = bool(payload.get("ok"))
             outcome.reason = (f"retired {node_id}: {reason}; "
@@ -278,7 +275,7 @@ class ElasticSupervisor:
             if self.pairing_token else {}
         request = urllib.request.Request(f"{self.root_url}{path}",
                                          headers=headers)
-        with urllib.request.urlopen(request, timeout=self.timeout) as resp:
+        with open_url(request, timeout=self.timeout) as resp:
             return json.loads(resp.read())
 
     def status(self) -> dict:

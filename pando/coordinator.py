@@ -29,11 +29,13 @@ class _PandoHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = True
 
 from .common import (DECIDING_ROLE, DecisionRequest, DecisionResult,
-                     PROPOSING_ROLE, Vote, aggregate, collapse_lineages)
+                     PROPOSING_ROLE, Vote, aggregate, collapse_lineages,
+                     wait_for_shutdown)
 from .spore import build_manifest, generate_signing_key
 from .rollout import RolloutRecorder
 from .calibrate import Calibrator
 from .identity import verify as verify_identity
+from .net import open_url
 
 HEARTBEAT_TTL = 15.0
 QUORUM_K = 5
@@ -166,7 +168,7 @@ def _empty_stem_stats() -> dict:
 def http_transport(url: str, payload: bytes, timeout: float) -> bytes:
     req = urllib.request.Request(url, data=payload,
                                  headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with open_url(req, timeout=timeout) as resp:
         return resp.read()
 
 
@@ -1353,8 +1355,6 @@ def main() -> None:
             args.pairing_token = read_secret_file(args.pairing_token_file)
         except ValueError as exc:
             raise SystemExit(str(exc))
-    from .common import bypass_proxy_for_lan
-    bypass_proxy_for_lan()
     spore_files = None
     if args.serve_spore:
         from pathlib import Path as _P
@@ -1498,9 +1498,8 @@ def main() -> None:
     root.start()
     print(f"coordinator listening on {root.url()}")
     try:
-        while True:
-            time.sleep(3600)
-    except KeyboardInterrupt:
+        wait_for_shutdown()
+    finally:
         root.stop()
 
 

@@ -32,13 +32,7 @@ os.environ.setdefault("HF_HOME", str(ROOT / ".hf-cache"))
 
 from tools.stage_split import split_graph  # noqa: E402
 
-from pando.common import bypass_proxy_for_lan  # noqa: E402
-
-bypass_proxy_for_lan()  # Windows registry proxies black-hole loopback
-
-# Never route the stage hop through a system/env proxy.
-OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-urllib.request.install_opener(OPENER)
+from pando.net import open_url  # noqa: E402
 
 
 def encode(header: dict, arrays: list) -> bytes:
@@ -283,13 +277,13 @@ def main() -> int:
 
             request.data = activation_body(activation)
             started = time.perf_counter()
-            with urllib.request.urlopen(request, timeout=60) as resp:
+            with open_url(request, timeout=60) as resp:
                 resp.read()
                 server_ms.append(float(resp.headers["X-Compute-Ms"]))
             round_ms.append((time.perf_counter() - started) * 1000)
 
             started = time.perf_counter()
-            with urllib.request.urlopen(ping, timeout=60) as resp:
+            with open_url(ping, timeout=60) as resp:
                 resp.read()
             link_rtt_ms.append((time.perf_counter() - started) * 1000)
 
@@ -305,7 +299,7 @@ def main() -> int:
             post = urllib.request.Request(
                 f"{server.url()}/forward", data=activation_body(act),
                 headers={"Content-Type": "application/octet-stream"})
-            with urllib.request.urlopen(post, timeout=120) as resp:
+            with open_url(post, timeout=120) as resp:
                 resp.read()
 
         baseline = {}

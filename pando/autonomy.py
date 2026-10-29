@@ -20,8 +20,8 @@ import urllib.request
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from .common import bypass_proxy_for_lan
 from .gate import TierPolicy
+from .net import open_url
 
 
 @dataclass
@@ -54,9 +54,6 @@ class RootDecider:
 
     def __init__(self, root_url: str, pairing_token: str | None = None,
                  timeout: float = 120):
-        bypass_proxy_for_lan()
-        urllib.request.install_opener(
-            urllib.request.build_opener(urllib.request.ProxyHandler({})))
         self.root_url = root_url.rstrip("/")
         self._headers = {"Content-Type": "application/json"}
         if pairing_token:
@@ -71,7 +68,7 @@ class RootDecider:
         request = urllib.request.Request(
             f"{self.root_url}/decide", data=body.encode("utf-8"),
             headers=self._headers, method="POST")
-        with urllib.request.urlopen(request, timeout=self.timeout) as resp:
+        with open_url(request, timeout=self.timeout) as resp:
             return json.loads(resp.read())
 
 

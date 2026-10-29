@@ -12,8 +12,24 @@ ROLES = (DECIDING_ROLE, PROPOSING_ROLE)
 
 import json
 import hashlib
+import signal
+import threading
 import uuid
 from dataclasses import asdict, dataclass, field
+
+
+def wait_for_shutdown() -> None:
+    """Block until SIGINT or SIGTERM, then return so the caller can clean up.
+
+    Service managers (systemd, launchd) stop daemons with SIGTERM, which a
+    ``while True: time.sleep(3600)`` loop only survives as an abrupt kill
+    mid-request. Installs handlers, so it must run on the main thread; every
+    caller is a module ``main()``.
+    """
+    stop = threading.Event()
+    signal.signal(signal.SIGINT, lambda *_: stop.set())
+    signal.signal(signal.SIGTERM, lambda *_: stop.set())
+    stop.wait()
 
 
 def canonical_question(question: str,
@@ -255,22 +271,3 @@ def read_secret_file(path: str | Path) -> str:
     return value
 
 
-def bypass_proxy_for_lan() -> None:
-    """All PandoRSI traffic is LAN-local; a system/env proxy must never route
-    it. urllib on Windows honours registry proxies, which black-hole
-    loopback/LAN addresses (observed: register POSTs retrying forever)."""
-    import os
-    import socket
-
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        lan_ip = s.getsockname()[0]
-        s.close()
-    except OSError:
-        lan_ip = "127.0.0.1"
-    bypass = {"localhost", "127.0.0.1", lan_ip}
-    for var in ("NO_PROXY", "no_proxy"):
-        current = os.environ.get(var, "")
-        merged = ",".join(sorted(set(filter(None, current.split(","))) | bypass))
-        os.environ[var] = merged
