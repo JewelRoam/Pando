@@ -346,8 +346,9 @@ def pad_to_tokens(build, target: int, tokenize) -> tuple[str, int, str]:
         count = tokenize(text)
         if count == target:
             return text, count, pad
-        if count > target:
-            break
+        # Character length is not a perfectly monotone proxy for token count
+        # (a longer suffix can tokenize one token shorter), so do not stop at
+        # the first overshoot.
     raise RuntimeError(f"could not token-match prompt to {target} tokens")
 
 
