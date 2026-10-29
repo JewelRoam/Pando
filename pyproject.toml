@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pandosi"
-version = "0.2.0"
+version = "0.3.0"
 description = "Elastically scalable, heterogeneous, self-replicating unified intelligence (defensive research)"
 readme = "README.md"
 requires-python = ">=3.11"
