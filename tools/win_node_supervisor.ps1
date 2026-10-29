@@ -1,10 +1,10 @@
 # Win node supervisor: keeps the 3070 LLM server, the two fabric members and
 # the local worker alive on this Windows node. Started at logon by the
-# Startup\PandoSI-Node.vbs wrapper (no admin required); restarts any child
+# Startup\PandoRSI-Node.vbs wrapper (no admin required); restarts any child
 # that exits. Written for Windows PowerShell 5.1 compatibility.
 $ErrorActionPreference = 'Continue'
 $env:HF_HUB_OFFLINE = '1'   # the ONNX member resolves repo files from local cache
-$repo = 'D:\PandoSI'
+$repo = 'D:\PandoRSI'
 $logs = 'D:\pando-models\logs'
 $stateDir = Join-Path $env:USERPROFILE '.pandosi'
 New-Item -ItemType Directory -Force -Path $logs | Out-Null
@@ -64,7 +64,7 @@ $gemmaArgs = @('-m', 'pando.worker', '--node-id', 'win-gemma-12b', '--backend',
   '--pairing-token-file', $token, '--host', '0.0.0.0', '--advertise-host',
   '192.168.31.100')
 $layaArgs = @('-m', 'pando.worker', '--node-id', 'win-laya-int8', '--backend',
-  'onnx', '--onnx-path', 'D:\PandoSI\artifacts\laya-en.int8.onnx',
+  'onnx', '--onnx-path', 'D:\PandoRSI\artifacts\laya-en.int8.onnx',
   '--checkpoint', 'laya-en', '--root', 'http://127.0.0.1:8790',
   '--pairing-token-file', $token, '--host', '0.0.0.0', '--advertise-host',
   '192.168.31.100')

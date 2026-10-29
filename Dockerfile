@@ -1,4 +1,4 @@
-# PandoSI lab image (Ring 2): runs replication experiments inside a
+# PandoRSI lab image (Ring 2): runs replication experiments inside a
 # disposable container. The lab gate detects /.dockerenv automatically.
 #
 # Build:  docker build -t pando-lab .

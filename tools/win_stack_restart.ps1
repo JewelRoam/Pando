@@ -1,7 +1,7 @@
 # Restart the resident Windows stack: supervisor + all children.
 # Safe to re-run: stops every matching process, then relaunches the
 # supervisor hidden. Verification stays outside the script.
-$repo = 'D:\PandoSI'
+$repo = 'D:\PandoRSI'
 Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
   Where-Object { $_.CommandLine -match 'win_node_supervisor' } |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force }

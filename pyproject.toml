@@ -28,8 +28,8 @@ runtime = [
 pando = "pando.cli:main"
 
 [project.urls]
-Repository = "https://github.com/JewelRoam/PandoRSI"
-"Research log" = "https://github.com/JewelRoam/PandoRSI/blob/main/docs/research/INDEX.md"
+Repository = "https://github.com/JewelRoam/Pando"
+"Research log" = "https://github.com/JewelRoam/Pando/blob/main/docs/evidence/LOG.md"
 
 [tool.setuptools]
 packages = ["pando"]

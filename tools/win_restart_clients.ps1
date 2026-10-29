@@ -11,7 +11,7 @@
 # live in exactly one place (tools/code_sync.py, CLIENT_UNITS), and this script
 # is one line of delegation to it. Keep it that way.
 $ErrorActionPreference = 'Continue'
-$repo = 'D:\PandoSI'
+$repo = 'D:\PandoRSI'
 $python = (Get-Command python).Source
 $log = 'D:\pando-models\logs\restart-clients.log'
 New-Item -ItemType Directory -Force -Path (Split-Path $log) | Out-Null
