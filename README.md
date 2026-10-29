@@ -78,7 +78,7 @@ on real hardware.
 
 ## Architecture
 
-\\mermaid
+```mermaid
 graph TB
     subgraph playbook[Playbook - strategy layer]
         PB[playbook.toml<br/>authored offline]
@@ -112,7 +112,8 @@ graph TB
     S1 & S2 & S3 & S4 -->|votes| RC
     MS --> CH --> SB
     SB -.->|lab only| stems
-\
+```
+
 ### Data flow
 
 1. **Playbook** (TOML) defines: question schemas, confidence gating, action bindings
