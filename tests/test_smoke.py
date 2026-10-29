@@ -4197,6 +4197,167 @@ class TestMemoryAblationCheck(unittest.TestCase):
         self.assertFalse(audit["ok"])
 
 
+class TestActionSemanticsCheck(unittest.TestCase):
+    """tools/action_semantics_check.py - label semantics vs goal selection.
+
+    The eight real action names are themselves strong hints. The opaque menu
+    keeps the descriptions and goal fixed while replacing those hints with
+    arbitrary identifiers, so a named-only win is evidence for the shortcut
+    rather than evidence that the goal was ignored.
+    """
+
+    def _tool(self):
+        import importlib.util
+        path = (Path(__file__).resolve().parents[1]
+                / "tools" / "action_semantics_check.py")
+        spec = importlib.util.spec_from_file_location(
+            "action_semantics_check", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_pair_targets_are_distinct_and_cover_the_action_space(self):
+        from collections import Counter
+        tool = self._tool()
+        pairs = [tool.pair_targets(index) for index in range(32)]
+        self.assertTrue(all(left != right for left, right in pairs))
+        self.assertEqual(
+            Counter(action for pair in pairs for action in pair),
+            Counter({action: 8 for action in tool.ACTION_IDS}))
+
+    def test_opaque_menu_changes_only_identifiers(self):
+        tool = self._tool()
+        for index, seed in enumerate((3670, 3679, 9001)):
+            named_order, named_labels = tool.menu_for_pair(
+                index, seed, opaque=False)
+            opaque_order, opaque_labels = tool.menu_for_pair(
+                index, seed, opaque=True)
+            self.assertEqual(named_order, opaque_order)
+            self.assertEqual(named_labels, {
+                action: action for action in named_order})
+            self.assertEqual(set(opaque_labels), set(named_order))
+            self.assertEqual(set(opaque_labels.values()),
+                             set(tool.OPAQUE_LABELS))
+            self.assertTrue(all(
+                label not in tool.ACTION_IDS
+                for label in opaque_labels.values()))
+
+    def test_parse_selection_uses_the_arm_label_mapping(self):
+        tool = self._tool()
+        label_to_action = {"k7": "seed.export", "m2": "seed.replicate"}
+        action, label, obj = tool.parse_selection(
+            'noise {"action":"k7","reason":"matches"} tail',
+            label_to_action)
+        self.assertEqual(action, "seed.export")
+        self.assertEqual(label, "k7")
+        self.assertEqual(obj["reason"], "matches")
+        action, label, obj = tool.parse_selection(
+            '{"action":"seed.export"}', label_to_action)
+        self.assertEqual(action, "(invalid)")
+        self.assertEqual(label, "seed.export")
+        self.assertEqual(obj["action"], "seed.export")
+
+    def test_summary_separates_goal_sensitivity_from_named_advantage(self):
+        tool = self._tool()
+        rows = []
+        for pair in range(2):
+            for position, arm in enumerate(tool.ARM_ORDERS[pair]):
+                mode, variant = arm.split("_", 1)
+                target = tool.ACTION_IDS[(pair * 2 + (variant == "b")) % 8]
+                correct = not (pair == 1 and mode == "opaque")
+                rows.append({
+                    "pair": pair,
+                    "arm": arm,
+                    "mode": mode,
+                    "variant": variant,
+                    "position": position,
+                    "target": target,
+                    "action": target if correct else "(invalid)",
+                    "valid": correct,
+                    "correct": correct,
+                })
+        summary = tool.summarise(rows, pairs=2)
+        named = summary["goal_sensitivity"]["named"]
+        opaque = summary["goal_sensitivity"]["opaque"]
+        self.assertEqual(named["comparable_pairs"], 2)
+        self.assertEqual(named["both_correct"], 2)
+        self.assertEqual(named["goal_changed_action"], 2)
+        self.assertEqual(opaque["comparable_pairs"], 1)
+        self.assertEqual(opaque["both_correct"], 1)
+        self.assertEqual(opaque["goal_changed_action"], 1)
+        self.assertEqual(summary["named_vs_opaque"]["named_correct"], 4)
+        self.assertEqual(summary["named_vs_opaque"]["opaque_correct"], 2)
+
+    def test_artifact_audit_recomputes_opaque_selections_and_summary(self):
+        tool = self._tool()
+        pairs = 2
+        rows = []
+        prompts = []
+        for pair in range(pairs):
+            seed = 3670 + pair
+            targets = tool.pair_targets(pair)
+            label_maps = {
+                mode: {
+                    label: action for action, label in
+                    tool.menu_for_pair(
+                        pair, seed, opaque=(mode == "opaque"))[1].items()
+                }
+                for mode in ("named", "opaque")
+            }
+            texts = {}
+            hashes = {}
+            for position, arm in enumerate(tool.ARM_ORDERS[pair]):
+                mode, variant = arm.split("_", 1)
+                target = targets[0 if variant == "a" else 1]
+                label = next(label for label, action in label_maps[mode].items()
+                             if action == target)
+                raw = json.dumps({"action": label, "reason": "match"})
+                text = f"prompt-{pair}-{arm}-" + "x" * 20
+                texts[arm] = text
+                hashes[arm] = hashlib.sha256(text.encode("utf-8")).hexdigest()
+                rows.append({
+                    "pair": pair,
+                    "arm": arm,
+                    "mode": mode,
+                    "variant": variant,
+                    "position": position,
+                    "seed": seed,
+                    "target": target,
+                    "action": target,
+                    "label": label,
+                    "valid": True,
+                    "correct": True,
+                    "reason": "match",
+                    "raw": raw,
+                    "prompt_sha256": hashes[arm],
+                    "prompt_chars": len(text),
+                    "prompt_tokens": 100,
+                })
+            prompts.append({
+                "pair": pair,
+                "target_a": targets[0],
+                "target_b": targets[1],
+                "text": texts,
+                "sha256": hashes,
+                "tokens": {arm: 100 for arm in tool.ARMS},
+            })
+        artifact = {
+            "pairs": pairs,
+            "system": tool.SYSTEM_PROMPT,
+            "system_sha256": hashlib.sha256(
+                tool.SYSTEM_PROMPT.encode("utf-8")).hexdigest(),
+            "prompts": prompts,
+            "rows": rows,
+            "summary": tool.summarise(rows, pairs),
+        }
+        audit = tool.audit_artifact(artifact)
+        self.assertTrue(audit["ok"], audit["checks"])
+        rows[0]["raw"] = json.dumps({"action": "wrong", "reason": "tampered"})
+        audit = tool.audit_artifact(artifact)
+        self.assertFalse(audit["checks"]["raw_selections_recompute_exactly"])
+        self.assertFalse(audit["ok"])
+
+
 class TestProposerSpool(unittest.TestCase):
     """pando.thinkd.Spool - thought that survives a partition.
 
