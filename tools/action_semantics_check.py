@@ -106,9 +106,48 @@ CAUSAL_GOALS = {
         "等别人独立检查后再真正落地。"
     ),
 }
+STRUCTURAL_GOALS = {
+    "seed.export": (
+        "凌晨两点，仓库外的雨停了，值班表上还有一项没勾掉。打印机缺纸，"
+        "走廊的灯也在闪，但这些都与决定无关。当前机器若今夜下线，下一班"
+        "既看不到这里，也无法确认原始凭据出自这里；先让下一班拿到一份能"
+        "从这里带走、仍可验证来源的凭据，再附上一串可用于比对的指纹。"
+    ),
+    "seed.replicate": (
+        "傍晚的列车晚点四十分钟，候车室的钟还慢了两分钟，这些都不影响交接。"
+        "远处的接班方已经答应接手，而它接班所需的同一份凭据仍只在这里；"
+        "现在完成这次移交，并确认两边拿到的东西完全相同。"
+    ),
+    "recruit.invite": (
+        "收件箱里躺着一封与决定无关的天气消息。已知一名外部对象愿意承担责任，"
+        "但名册里还没有它；把入口交给它，并确保之后的调度能找到它。"
+    ),
+    "reproduce.spawn": (
+        "监控屏右上角的曲线没有变化，那条曲线与当前决定无关。现在只有一套执行体，"
+        "一旦它停止，工作就没有人接；机器仍有空闲，照着现有执行体再做一套，"
+        "使新的那一套能够自行启动。"
+    ),
+    "policy.set": (
+        "昨天会议纪要里夹着一张无用的座位表。当前的表决条件使一项待决事项一直"
+        "无法通过；在许可范围内调整该条件，并在变更前后各留一份对照样本。"
+    ),
+    "culture.refine": (
+        "窗台上的植物该浇水了，但这与下面的事无关。反复失败来自大家共同遵循的"
+        "文档缺少最后一道检查；把那份文档补好，再让每个执行者拿到同一版本。"
+    ),
+    "resource.rebalance": (
+        "天气转凉，机房的噪声也比平时低。A 处的余量快耗尽，B 处还有空位；"
+        "把正在做的工作连同负责它的执行体挪到 B 处，并预先写明什么情况下挪回来。"
+    ),
+    "meta.propose": (
+        "茶杯旁放着一张无关的购物清单。反复出现一种现有清单无法命名的需求；"
+        "先写下一个新的可选做法，等别人独立检查后再真正落地。"
+    ),
+}
 GOAL_VARIANTS = {
     "literal": LITERAL_GOALS,
     "causal": CAUSAL_GOALS,
+    "structural": STRUCTURAL_GOALS,
 }
 
 # These are explicit content cues from each action description, not generic
@@ -139,6 +178,25 @@ PREREGISTRATION = {
     },
     "otherwise": "inconclusive",
 }
+STRUCTURAL_PREREGISTRATION = {
+    "control_goal_variant": "causal",
+    "candidate_goal_variant": "structural",
+    "primary_arms": ["opaque_a", "opaque_b"],
+    "perturbation": (
+        "same decision content, rewritten into a short narrative with one or more "
+        "explicitly irrelevant details and a changed clause order"
+    ),
+    "structural_fragility_supported_if": {
+        "minimum_absolute_accuracy_drop": 0.15,
+        "directional_exact_mcnemar_alpha": 0.05,
+    },
+    "structural_robustness_supported_if": {
+        "minimum_candidate_opaque_accuracy": 0.90,
+        "wilson_95_lower_bound_above_chance": True,
+        "directional_exact_mcnemar_alpha": 0.05,
+    },
+    "otherwise": "inconclusive",
+}
 ARM_ORDERS = (
     ("named_a", "opaque_a", "named_b", "opaque_b"),
     ("opaque_a", "named_b", "opaque_b", "named_a"),
@@ -148,6 +206,7 @@ ARM_ORDERS = (
 ARMS = tuple(ARM_ORDERS[0])
 OPAQUE_LABELS = ("k7", "m2", "q9", "v4", "a8", "c3", "h6", "t1")
 INTERLEAVED_SCHEMA = "action-semantics-interleaved-v1"
+STRUCTURAL_INTERLEAVED_SCHEMA = "action-semantics-structural-interleaved-v1"
 SYSTEM_PROMPT = """你是多主机殖民地的动作选择器。
 用户会给出一个唯一目标，以及一张候选动作表。表中每一项都有一个标识和说明。
 只根据目标和同一行的说明选择一个最匹配的动作；不要根据编号、位置、真实动作名或历史偏好猜测。
@@ -159,21 +218,23 @@ PAD_MARKER = "\n【长度控制】"
 PAD_UNIT = "仅长度填充。"
 
 
-def interleaved_schedule(pairs: int) -> list[tuple[int, str, str]]:
-    """Return adjacent literal/causal calls with first position balanced."""
+def interleaved_schedule(pairs: int, control: str = "literal",
+                         candidate: str = "causal") -> list[tuple[int, str, str]]:
+    """Return adjacent control/candidate calls with first position balanced."""
     schedule = []
     for pair in range(pairs):
         for position, arm in enumerate(ARM_ORDERS[pair % len(ARM_ORDERS)]):
-            variants = (("literal", "causal") if (pair + position) % 2 == 0
-                        else ("causal", "literal"))
+            variants = ((control, candidate) if (pair + position) % 2 == 0
+                        else (candidate, control))
             schedule.extend((pair, variant, arm) for variant in variants)
     return schedule
 
 
-def lexical_audit() -> dict:
-    """Show that causal goals do not copy any action-description cue."""
+def lexical_audit(goals: dict[str, str] | None = None) -> dict:
+    """Show that a goal variant does not copy any action-description cue."""
+    goals = goals or CAUSAL_GOALS
     overlaps = {}
-    for action, goal in CAUSAL_GOALS.items():
+    for action, goal in goals.items():
         hits = sorted({
             cue
             for cues in ACTION_LEXICAL_CUES.values()
@@ -185,7 +246,7 @@ def lexical_audit() -> dict:
     return {
         "ok": not overlaps,
         "cue_source": "hand-listed content words from action descriptions",
-        "goals_checked": len(CAUSAL_GOALS),
+        "goals_checked": len(goals),
         "overlaps": overlaps,
     }
 
@@ -291,7 +352,8 @@ def pad_to_tokens(build, target: int, tokenize) -> tuple[str, int, str]:
 
 
 def build_trial_prompts(index: int, seed: int, tokenize,
-                        goal_variant: str = "literal") -> dict:
+                        goal_variant: str = "literal",
+                        target_tokens: int | None = None) -> dict:
     if goal_variant not in GOAL_VARIANTS:
         raise ValueError(f"unknown goal variant: {goal_variant}")
     goals = GOAL_VARIANTS[goal_variant]
@@ -309,7 +371,10 @@ def build_trial_prompts(index: int, seed: int, tokenize,
             g, o, m, pad)
     raw_text = {arm: builds[arm]("") for arm in ARMS}
     raw_tokens = {arm: tokenize(raw_text[arm]) for arm in ARMS}
-    target_tokens = max(raw_tokens.values())
+    if target_tokens is None:
+        target_tokens = max(raw_tokens.values())
+    elif target_tokens < max(raw_tokens.values()):
+        raise ValueError("target token count is shorter than an unpadded prompt")
     texts, token_counts, pads = {}, {}, {}
     for arm in ARMS:
         texts[arm], token_counts[arm], pads[arm] = pad_to_tokens(
@@ -470,6 +535,32 @@ def classify_goal_comparison(comparison: dict) -> str:
     return "inconclusive"
 
 
+def classify_structural_comparison(comparison: dict) -> str:
+    """Apply the fixed preregistered structural-perturbation decision rule."""
+    n = int(comparison.get("n_valid_pairs") or 0)
+    if not n:
+        return "inconclusive"
+    drop = -float(comparison.get("absolute_accuracy_change") or 0.0)
+    baseline_better_p = float(
+        comparison.get("baseline_better_exact_one_sided_p", 1.0))
+    collapse_rule = STRUCTURAL_PREREGISTRATION[
+        "structural_fragility_supported_if"]
+    if (drop >= collapse_rule["minimum_absolute_accuracy_drop"]
+            and baseline_better_p
+            < collapse_rule["directional_exact_mcnemar_alpha"]):
+        return "structural_fragility_supported"
+    preserve_rule = STRUCTURAL_PREREGISTRATION[
+        "structural_robustness_supported_if"]
+    accuracy = float(comparison.get("candidate_accuracy") or 0.0)
+    lower = float((comparison.get("candidate_wilson_95") or [0.0, 0.0])[0])
+    if (accuracy >= preserve_rule["minimum_candidate_opaque_accuracy"]
+            and lower > 1.0 / len(ACTION_IDS)
+            and baseline_better_p
+            >= preserve_rule["directional_exact_mcnemar_alpha"]):
+        return "structural_robustness_supported"
+    return "inconclusive"
+
+
 def summarise(rows: list[dict], pairs: int) -> dict:
     by_arm = defaultdict(list)
     by_pair_mode = defaultdict(dict)
@@ -583,7 +674,7 @@ def summarise(rows: list[dict], pairs: int) -> dict:
 
 def audit_artifact(data: dict) -> dict:
     """Recompute the artifact's prompts, selections, and paired summary."""
-    if data.get("schema") == INTERLEAVED_SCHEMA:
+    if data.get("schema") in (INTERLEAVED_SCHEMA, STRUCTURAL_INTERLEAVED_SCHEMA):
         return audit_interleaved_artifact(data)
     pairs = int(data.get("pairs") or 0)
     rows = data.get("rows") or []
@@ -691,11 +782,15 @@ def audit_interleaved_artifact(data: dict) -> dict:
     """Audit both goal variants and the exact within-process call order."""
     pairs = int(data.get("pairs") or 0)
     variants = data.get("variants") or {}
+    preregistration = data.get("preregistration") or {}
+    control = str(preregistration.get("control_goal_variant") or "literal")
+    candidate = str(preregistration.get("candidate_goal_variant") or "causal")
+    variant_names = (control, candidate)
     checks = {
-        "variant_names_exact": set(variants) == {"literal", "causal"},
+        "variant_names_exact": set(variants) == set(variant_names),
     }
     variant_audits = {}
-    for variant in ("literal", "causal"):
+    for variant in variant_names:
         audit = audit_artifact(variants.get(variant) or {})
         variant_audits[variant] = audit
         checks[f"{variant}_artifact_valid"] = audit["ok"]
@@ -708,12 +803,12 @@ def audit_interleaved_artifact(data: dict) -> dict:
             "arm": arm,
         }
         for sample_index, (pair, variant, arm) in enumerate(
-            interleaved_schedule(pairs))
+            interleaved_schedule(pairs, control, candidate))
     ]
     checks["schedule_exact"] = data.get("schedule") == expected_schedule
 
     rows = []
-    for variant in ("literal", "causal"):
+    for variant in variant_names:
         rows.extend((variants.get(variant) or {}).get("rows") or [])
     by_sample_index = {
         int(row.get("sample_index", -1)): row for row in rows
@@ -732,7 +827,8 @@ def audit_interleaved_artifact(data: dict) -> dict:
 
     try:
         expected_comparison = compare_artifacts(
-            variants.get("literal") or {}, variants.get("causal") or {})
+            variants.get(control) or {}, variants.get(candidate) or {},
+            preregistration=preregistration)
     except ValueError:
         expected_comparison = None
     checks["comparison_exact"] = (
@@ -745,21 +841,28 @@ def audit_interleaved_artifact(data: dict) -> dict:
         "pairs": pairs,
         "rows": len(rows),
         "summary": (
-            (variants.get("causal") or {}).get("summary") or {}),
+            (variants.get(candidate) or {}).get("summary") or {}),
     }
 
 
-def compare_artifacts(baseline: dict, candidate: dict) -> dict:
-    """Audit and compare a literal-goal control with a causal-goal run."""
+def compare_artifacts(baseline: dict, candidate: dict,
+                      preregistration: dict | None = None) -> dict:
+    """Audit and compare two goal variants under a fixed decision rule."""
+    preregistration = preregistration or PREREGISTRATION
     baseline_audit = audit_artifact(baseline)
     candidate_audit = audit_artifact(candidate)
     baseline_variant = baseline.get("goal_variant", "literal")
     candidate_variant = candidate.get("goal_variant", "literal")
     if not baseline_audit["ok"] or not candidate_audit["ok"]:
         raise ValueError("cannot compare an artifact that failed audit")
-    if baseline_variant != "literal" or candidate_variant != "causal":
+    expected_pair = (
+        preregistration["control_goal_variant"],
+        preregistration["candidate_goal_variant"],
+    )
+    if (baseline_variant, candidate_variant) != expected_pair:
         raise ValueError(
-            f"expected literal vs causal artifacts, got {baseline_variant} vs {candidate_variant}")
+            f"expected {expected_pair[0]} vs {expected_pair[1]} artifacts, "
+            f"got {baseline_variant} vs {candidate_variant}")
     if baseline.get("pairs") != candidate.get("pairs"):
         raise ValueError("artifact pair counts differ")
 
@@ -778,14 +881,19 @@ def compare_artifacts(baseline: dict, candidate: dict) -> dict:
 
     comparison = paired_binary_comparison(
         baseline.get("rows") or [], candidate.get("rows") or [],
-        tuple(PREREGISTRATION["primary_arms"]))
+        tuple(preregistration["primary_arms"]))
+    classifier = (
+        classify_structural_comparison
+        if candidate_variant == "structural"
+        else classify_goal_comparison
+    )
     return {
         "baseline_audit_ok": baseline_audit["ok"],
         "candidate_audit_ok": candidate_audit["ok"],
         "goal_variant_pair": [baseline_variant, candidate_variant],
-        "preregistration": PREREGISTRATION,
+        "preregistration": preregistration,
         "comparison": comparison,
-        "outcome": classify_goal_comparison(comparison),
+        "outcome": classifier(comparison),
     }
 
 
@@ -804,6 +912,16 @@ def _prepare_run(args, variants: tuple[str, ...]):
         ]
         for variant in variants
     }
+    if len(variants) > 1:
+        for index in range(args.pairs):
+            target_tokens = max(
+                trial["target_tokens"]
+                for trial in (
+                    trials_by_variant[variant][index] for variant in variants))
+            for variant in variants:
+                trials_by_variant[variant][index] = build_trial_prompts(
+                    index, args.seed_base + index, tokenize,
+                    goal_variant=variant, target_tokens=target_tokens)
     proposer = OpenAIProposer(
         base_url=args.base_url,
         model=args.model,
@@ -880,6 +998,7 @@ def artifact_for_run(args, trials: list[dict], rows: list[dict],
         "goal_variant": goal_variant,
         "goal_texts": GOAL_VARIANTS[goal_variant],
         "causal_goal_lexical_audit": lexical_audit(),
+        "structural_goal_lexical_audit": lexical_audit(STRUCTURAL_GOALS),
         "preregistration": (PREREGISTRATION if goal_variant == "causal" else None),
         "system": SYSTEM_PROMPT,
         "system_sha256": _sha256(SYSTEM_PROMPT),
@@ -889,6 +1008,7 @@ def artifact_for_run(args, trials: list[dict], rows: list[dict],
                 "description": description,
                 "literal_goal": LITERAL_GOALS[action],
                 "causal_goal": CAUSAL_GOALS[action],
+                "structural_goal": STRUCTURAL_GOALS[action],
             }
             for action, description, _ in ACTIONS
         ],
@@ -916,6 +1036,8 @@ def artifact_for_run(args, trials: list[dict], rows: list[dict],
             "all_prompts_have_hashes": all(
                 row["prompt_sha256"] for row in rows),
             "causal_goals_have_no_description_cues": lexical_audit()["ok"],
+            "structural_goals_have_no_description_cues":
+                lexical_audit(STRUCTURAL_GOALS)["ok"],
         },
     }
 
@@ -936,14 +1058,15 @@ def run(args) -> dict:
     return artifact_for_run(args, trials, rows, args.goal_variant)
 
 
-def run_interleaved(args) -> dict:
-    variants = ("literal", "causal")
+def run_interleaved(args, variants: tuple[str, str] = ("literal", "causal"),
+                    preregistration: dict | None = None) -> dict:
+    preregistration = preregistration or PREREGISTRATION
     trials_by_variant, proposer = _prepare_run(args, variants)
     trials_by_pair = {
         variant: {trial["pair"]: trial for trial in trials}
         for variant, trials in trials_by_variant.items()
     }
-    schedule = interleaved_schedule(args.pairs)
+    schedule = interleaved_schedule(args.pairs, *variants)
     rows_by_variant = {variant: [] for variant in variants}
     stored_schedule = []
     for sample_index, (pair, variant, arm) in enumerate(schedule):
@@ -963,16 +1086,26 @@ def run_interleaved(args) -> dict:
             args, trials_by_variant[variant], rows_by_variant[variant], variant)
         for variant in variants
     }
-    comparison = compare_artifacts(artifacts["literal"], artifacts["causal"])
+    comparison = compare_artifacts(
+        artifacts[variants[0]], artifacts[variants[1]],
+        preregistration=preregistration)
+    schema = (
+        STRUCTURAL_INTERLEAVED_SCHEMA
+        if variants == (
+            STRUCTURAL_PREREGISTRATION["control_goal_variant"],
+            STRUCTURAL_PREREGISTRATION["candidate_goal_variant"],
+        )
+        else INTERLEAVED_SCHEMA
+    )
     return {
-        "schema": INTERLEAVED_SCHEMA,
+        "schema": schema,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "base_url": args.base_url,
         "model": args.model,
         "temperature": args.temperature,
         "pairs": args.pairs,
         "seed_base": args.seed_base,
-        "preregistration": PREREGISTRATION,
+        "preregistration": preregistration,
         "schedule": stored_schedule,
         "variants": artifacts,
         "comparison": comparison,
@@ -1019,20 +1152,24 @@ def print_audit(result: dict, path: Path) -> None:
 def print_goal_comparison(result: dict) -> None:
     comparison = result["comparison"]
     stats = comparison["comparison"]
-    print("\nliteral vs causal goals (opaque)")
-    print(f"literal={stats['baseline_correct']}/{stats['n_valid_pairs']} "
-          f"causal={stats['candidate_correct']}/{stats['n_valid_pairs']} "
+    baseline, candidate = comparison["goal_variant_pair"]
+    print(f"\n{baseline} vs {candidate} goals (opaque)")
+    print(f"{baseline}={stats['baseline_correct']}/{stats['n_valid_pairs']} "
+          f"{candidate}={stats['candidate_correct']}/{stats['n_valid_pairs']} "
           f"delta={stats['absolute_accuracy_change']:+.3f} "
-          f"causal_wilson95=[{stats['candidate_wilson_95'][0]:.3f},"
+          f"candidate_wilson95=[{stats['candidate_wilson_95'][0]:.3f},"
           f"{stats['candidate_wilson_95'][1]:.3f}] "
           f"one_sided_p={stats['baseline_better_exact_one_sided_p']:.4g}")
     print(f"discordant={stats['discordant']} outcome={comparison['outcome']}")
 
 
 def print_interleaved_report(result: dict) -> None:
-    print(f"interleaved literal vs causal: pairs={result['pairs']} "
+    preregistration = result["preregistration"]
+    control = preregistration["control_goal_variant"]
+    candidate = preregistration["candidate_goal_variant"]
+    print(f"interleaved {control} vs {candidate}: pairs={result['pairs']} "
           f"calls={len(result['schedule'])}")
-    for variant in ("literal", "causal"):
+    for variant in (control, candidate):
         print(f"\n[{variant}]")
         print_report(result["variants"][variant])
     print_goal_comparison(result)
@@ -1053,6 +1190,8 @@ def main(argv=None) -> int:
                         default="literal")
     parser.add_argument("--interleave-goal-variants", action="store_true",
                         help="sample literal and causal goals adjacently in one process")
+    parser.add_argument("--interleave-structural-perturbation", action="store_true",
+                        help="sample causal and structural goals adjacently in one process")
     parser.add_argument("--output", default="")
     parser.add_argument("--audit-artifact", default="")
     parser.add_argument("--compare-artifact", default="")
@@ -1062,12 +1201,25 @@ def main(argv=None) -> int:
         audit = audit_artifact(json.loads(path.read_text(encoding="utf-8")))
         print_audit(audit, path)
         return 0 if audit["ok"] else 1
-    if args.interleave_goal_variants:
+    interleaved_mode = (
+        args.interleave_goal_variants or args.interleave_structural_perturbation)
+    if args.interleave_goal_variants and args.interleave_structural_perturbation:
+        parser.error("choose only one interleaved comparison")
+    if interleaved_mode:
         if args.goal_variant != "causal":
-            parser.error("--interleave-goal-variants requires --goal-variant causal")
+            parser.error("interleaved modes require --goal-variant causal")
         if args.compare_artifact:
-            parser.error("--interleave-goal-variants performs its own comparison")
-        result = run_interleaved(args)
+            parser.error("interleaved modes perform their own comparison")
+        if args.interleave_structural_perturbation:
+            variants = (
+                STRUCTURAL_PREREGISTRATION["control_goal_variant"],
+                STRUCTURAL_PREREGISTRATION["candidate_goal_variant"],
+            )
+            result = run_interleaved(
+                args, variants, STRUCTURAL_PREREGISTRATION)
+        else:
+            variants = ("literal", "causal")
+            result = run_interleaved(args, variants, PREREGISTRATION)
         print_interleaved_report(result)
         comparison_ok = result["comparison"]["outcome"] != "inconclusive"
         artifact_ok = all(
@@ -1078,7 +1230,7 @@ def main(argv=None) -> int:
         print_report(result)
         comparison_ok = True
         artifact_ok = all(result["artifact_checks"].values())
-    if not args.interleave_goal_variants and args.compare_artifact:
+    if not interleaved_mode and args.compare_artifact:
         baseline_path = Path(args.compare_artifact).expanduser()
         baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
         try:

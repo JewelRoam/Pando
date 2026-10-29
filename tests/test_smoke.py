@@ -4248,10 +4248,59 @@ class TestActionSemanticsCheck(unittest.TestCase):
         self.assertTrue(audit["ok"], audit)
         self.assertEqual(audit["goals_checked"], len(tool.ACTION_IDS))
         self.assertEqual(set(tool.CAUSAL_GOALS), set(tool.ACTION_IDS))
+        self.assertEqual(set(tool.STRUCTURAL_GOALS), set(tool.ACTION_IDS))
         self.assertEqual(set(tool.LITERAL_GOALS), set(tool.ACTION_IDS))
         self.assertTrue(all(
             tool.CAUSAL_GOALS[action] != tool.LITERAL_GOALS[action]
             for action in tool.ACTION_IDS))
+        structural_audit = tool.lexical_audit(tool.STRUCTURAL_GOALS)
+        self.assertTrue(structural_audit["ok"], structural_audit)
+
+    def test_structural_preregistration_is_directional(self):
+        tool = self._tool()
+
+        def rows(correct: set[int]):
+            return [
+                {
+                    "pair": pair,
+                    "arm": arm,
+                    "valid": True,
+                    "correct": pair in correct,
+                }
+                for pair in range(10)
+                for arm in ("opaque_a", "opaque_b")
+            ]
+
+        fragile = tool.paired_binary_comparison(
+            rows(set(range(10))), rows(set(range(5, 10))))
+        self.assertEqual(
+            tool.classify_structural_comparison(fragile),
+            "structural_fragility_supported")
+
+        robust = tool.paired_binary_comparison(
+            rows(set(range(10))), rows(set(range(9))))
+        self.assertEqual(
+            tool.classify_structural_comparison(robust),
+            "structural_robustness_supported")
+
+    def test_structural_and_causal_prompts_can_be_token_matched_together(self):
+        from unittest.mock import patch
+
+        tool = self._tool()
+        tokenize = lambda text: 10
+        fake_pad = lambda build, target, tokenize: (build(""), target, "")
+        with patch.object(tool, "pad_to_tokens", fake_pad):
+            trials = {
+                variant: tool.build_trial_prompts(
+                    0, 3670, tokenize, goal_variant=variant,
+                    target_tokens=15)
+                for variant in ("causal", "structural")
+            }
+        self.assertEqual(
+            {trial["target_tokens"] for trial in trials.values()}, {15})
+        self.assertTrue(all(
+            set(trial["tokens"].values()) == {15}
+            for trial in trials.values()))
 
     def test_preregistered_goal_comparison_rules_are_directional(self):
         tool = self._tool()
