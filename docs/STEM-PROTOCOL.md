@@ -551,7 +551,7 @@ GET /spore/chunk/<name>/<i>   -> one 64KiB payload chunk
 GET /spore/chunks/<name>/<i>/<n> -> n chunk bytes where all are present
 ```
 
-All are token-gated like the rest. See `THREAT-MODEL.md` for the sandbox
+All are token-gated like the rest. See `pando/lab.py` for the sandbox
 gate and `docs/research/` rounds 90-91 for lineage verification.
 
 ## 10. Minimal third-party stem

@@ -17,7 +17,7 @@
 ## Phase 0 — Blueprint (current)
 - [x] Vision, naming, protocols defined
 - [x] Evidence base collected (see RESEARCH-NOTES.md)
-- [x] Repo scaffolding, LICENSE, threat-model statement
+- [x] Repo scaffolding, LICENSE
 
 ## Phase 1 ' + chr(8212) + ' Standstill Prototype (target: 2-3 weeks)
 

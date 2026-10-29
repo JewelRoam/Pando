@@ -143,8 +143,8 @@ def main() -> int:
 
         # A new device, from the artifact it already holds. The *transfer* leg
         # is deliberately not re-measured here: pulling a spore requires
-        # sandbox_confirmed, a threat-model gate this check will not assert on
-        # its own authority. Rounds 106-108 measured that leg under their own
+        # sandbox_confirmed, a gate this check will not assert on its own
+        # authority. Rounds 106-108 measured that leg under their own
         # tools; the numbers are cited in the report, and this measures the
         # legs that follow it.
         started = time.perf_counter()

@@ -863,7 +863,7 @@ graph TB
     subgraph spore[Spore - self-replication]
         MS[manifest<br/>Ed25519 signed]
         CH[chunk Merkle tree<br/>64KiB verify-on-arrival]
-        SB[sandbox gate<br/>THREAT-MODEL enforced]
+        SB[sandbox gate<br/>enforced]
     end
 
     PB --> PH --> QV
@@ -980,7 +980,6 @@ python -m pando.worker --node-id stem-2 --root http://ROOT_IP:8080 \
 - [Blueprint (zh-CN)](docs/BLUEPRINT.zh-CN.md) — architecture v0.7
 - [ADOPTION](docs/ADOPTION.md) — three-ring capability model, survival metrics
 - [Onboarding (zh-CN)](docs/ONBOARDING.zh-CN.md) — consent tiers, sandbox policy, product UX
-- [THREAT-MODEL](THREAT-MODEL.md) — defensive-research framing, hard guarantees
 - [METRICS](docs/METRICS.md) — dashboard design
 - [ROADMAP](docs/ROADMAP.md) — phases with measurable gates
 - [Research notes](docs/research/) — 28 rounds of evidence-backed findings
@@ -993,6 +992,6 @@ python -m pando.worker --node-id stem-2 --root http://ROOT_IP:8080 \
 
 ## Status
 
-Research preview. Defensive framing (see THREAT-MODEL). Replication
+Research preview. Replication
 experiments run only in sandboxes. 40-task acceptance suite measured; score
 heads documented as informational-only (round 24).

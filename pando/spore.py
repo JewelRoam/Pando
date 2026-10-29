@@ -574,7 +574,7 @@ def generate_signing_key() -> nacl.signing.SigningKey:
 # ---------------------------------------------------------------------------
 # Spore transfer (Phase 2): serve + pull with verify-on-arrival.
 #
-# Sandbox gate (THREAT-MODEL.md): pull_spore refuses to run unless the caller
+# Sandbox gate: pull_spore refuses to run unless the caller
 # passes sandbox_confirmed=True - which pando-lab sets only after detecting
 # a container runtime. The protocol itself has no exploit surface: it only
 # serves files the operator explicitly registered.
@@ -858,7 +858,7 @@ def pull_spore(manifest_url: str, out_dir: Path, verify_key,
                chunk_store: "ChunkStore | None" = None) -> dict:
     """Pull a spore payload with verify-on-arrival for every chunk.
 
-    Refuses without sandbox_confirmed=True (see THREAT-MODEL.md). Verifies:
+    Refuses without sandbox_confirmed=True. Verifies:
     signature over the manifest, per-file Merkle roots, then on-disk files.
 
     Chunks arrive ``batch_chunks`` at a time over one keep-alive connection
@@ -868,8 +868,7 @@ def pull_spore(manifest_url: str, out_dir: Path, verify_key,
     """
     if not sandbox_confirmed:
         raise PermissionError(
-            "spore pull requires sandbox_confirmed=True (container/VM target); "
-            "see THREAT-MODEL.md")
+            "spore pull requires sandbox_confirmed=True (container/VM target)")
 
     headers = ({"Authorization": f"Bearer {auth_token}"}
                if auth_token else {})

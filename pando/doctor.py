@@ -60,8 +60,7 @@ def checks() -> list[dict]:
     add("ok" if sand["sandboxed"] else "locked",
         f"lab sandbox: {sand['kind']}",
         "" if sand["sandboxed"] else
-        "run inside Docker/Podman/WSL for spore experiments "
-        "(see THREAT-MODEL.md)")
+        "run inside Docker/Podman/WSL for spore experiments")
 
     weights = [p for p in [Path("artifacts/laya-en.int8.onnx"),
                            Path("artifacts/laya-en.onnx")] if p.exists()]

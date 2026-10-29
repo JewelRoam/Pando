@@ -1,6 +1,6 @@
 """pando lab: sandbox-gated replication experiments (Ring 2).
 
-Per THREAT-MODEL.md, Spore experiments may only run where the target is
+Spore experiments may only run where the target is
 disposable by construction: inside a container or VM. This module is the
 gate - it detects the sandbox and refuses everything otherwise. It contains
 no exploit surface: the lab only runs the already-public seed/pull protocol
@@ -43,7 +43,7 @@ def require_sandbox() -> dict:
         raise PermissionError(
             "pando lab refused: no disposable sandbox detected "
             f"(kind={info['kind']}). Spore experiments require a container "
-            "or VM - see THREAT-MODEL.md. Run inside Docker with "
+            "or VM. Run inside Docker with "
             "PANDOSI_CONTAINER=1 or a WSL distro.")
     return info
 

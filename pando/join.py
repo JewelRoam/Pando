@@ -177,8 +177,7 @@ def main() -> None:
         except PermissionError as exc:
             raise SystemExit(f"[locked] {exc}")
     if (args.spore_url or args.spore) and not args.sandbox_confirmed:
-        raise SystemExit("spore pull requires --sandbox-confirmed "
-                         "(see THREAT-MODEL.md)")
+        raise SystemExit("spore pull requires --sandbox-confirmed")
 
     cap = capability()
     eus = enumerate_execution_units()
