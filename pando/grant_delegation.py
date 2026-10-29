@@ -1,4 +1,4 @@
-"""Signed delegation of one standing deployment grant between PandoSI hosts.
+"""Signed delegation of one standing deployment grant between PandoRSI hosts.
 
 The human authorizes the *deployment action* once, locally.  Other nodes may
 then receive an expiring, narrowly scoped copy of that decision without a

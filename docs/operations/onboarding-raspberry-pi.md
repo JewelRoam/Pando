@@ -20,7 +20,7 @@ sudo apt install -y python3-venv git
 python3 -V        # expect 3.11+ (Bookworm) or 3.12 (Ubuntu 24.04)
 ```
 
-## 3. Install PandoSI (no root needed)
+## 3. Install PandoRSI (no root needed)
 ```
 python3 -m venv ~/pando
 ~/pando/bin/pip install --upgrade pip

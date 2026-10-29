@@ -12,4 +12,4 @@
 
 ## Repository
 
-https://github.com/JewelRoam/PandoSI (main branch, ~30 commits)
+https://github.com/JewelRoam/PandoRSI (main branch, ~30 commits)

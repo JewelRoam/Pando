@@ -75,7 +75,7 @@ def render_plan(plan: dict) -> str:
         "consent_required": "Requires explicit consent (not run by onboard)",
         "sandbox_required": "Requires disposable sandbox",
     }
-    lines = ["PandoSI onboarding plan (dry run)", "",
+    lines = ["PandoRSI onboarding plan (dry run)", "",
              f"Ring 0 ready: {plan['ring0_ready']}",
              f"Sandbox ready: {plan['sandbox_ready']}",
              f"Next command: {plan['next_command']}", ""]

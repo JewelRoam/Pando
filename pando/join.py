@@ -2,7 +2,7 @@
 
 Flow:
 1. Capability probe (graft) - what can this machine do?
-2. Browse mDNS for an existing PandoSI root (_pando._tcp.local.).
+2. Browse mDNS for an existing PandoRSI root (_pando._tcp.local.).
 3. If a root is found: join as a stem. If not: become root AND stem.
 4. Best available backend: ONNX Laya if weights exist, else mock.
 
@@ -59,7 +59,7 @@ def lan_ip() -> str:
 
 
 def discover_root(timeout_s: float = 3.0) -> dict | None:
-    """Browse mDNS for a PandoSI root; return {'ip', 'port'} or None."""
+    """Browse mDNS for a PandoRSI root; return {'ip', 'port'} or None."""
     from zeroconf import ServiceBrowser, Zeroconf
 
     found: dict | None = None
@@ -135,7 +135,7 @@ def pick_backend(node_id: str) -> tuple[str, dict]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Join or start a PandoSI swarm")
+    parser = argparse.ArgumentParser(description="Join or start a PandoRSI swarm")
     parser.add_argument("--node-id", default=None)
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--backend", default=None,
@@ -473,7 +473,7 @@ def main() -> None:
 
     threading.Thread(target=heartbeat, daemon=True).start()
 
-    print("PandoSI is up. Try:", flush=True)
+    print("PandoRSI is up. Try:", flush=True)
     auth_arg = (f' -H "Authorization: Bearer {args.pairing_token}"'
                 if args.pairing_token else "")
     print(f'  curl -X POST {root_url}/decide{auth_arg} '

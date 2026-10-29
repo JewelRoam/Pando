@@ -84,7 +84,7 @@ def _llm_once(system: str, user: str, max_tokens: int) -> str:
 
 
 SYSTEM = (
-    "You are win-node's local model in the PandoSI fabric (an elastic, "
+    "You are win-node's local model in the PandoRSI fabric (an elastic, "
     "heterogeneous decision fabric; docs live in the repo). Answer briefly, "
     "in the language of the message (Chinese messages get Chinese replies). "
     "You cannot run commands or edit files; if a request needs code work, say "

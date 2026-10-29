@@ -52,7 +52,7 @@ def main() -> int:
                 requirement += f"[{args.extras}]"
             target = (
                 f"{requirement} @ "
-                f"git+https://github.com/JewelRoam/PandoSI.git@{args.git_ref}")
+                f"git+https://github.com/JewelRoam/PandoRSI.git@{args.git_ref}")
         else:
             target = str(ROOT)
             if args.extras:

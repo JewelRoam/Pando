@@ -1,4 +1,4 @@
-# Comms and Seeds: how PandoSI talks, who may join, and what weak always-on devices are for
+# Comms and Seeds: how PandoRSI talks, who may join, and what weak always-on devices are for
 
 Status: design position, 2026-10-17. Companions: docs/design/positions/power-and-competence.md (who gets weight),
 docs/evidence/reflections.md (what moves value), docs/design/surveys/decentralized-comms.md (library landscape, in progress).

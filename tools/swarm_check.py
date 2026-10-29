@@ -1,4 +1,4 @@
-"""Run an isolated multi-process PandoSI swarm and verify elastic shrinkage.
+"""Run an isolated multi-process PandoRSI swarm and verify elastic shrinkage.
 
 This exercises the production CLI path: independent coordinator and worker OS
 processes, token-file pairing, protected root endpoints, real HTTP votes,

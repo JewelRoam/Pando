@@ -82,7 +82,7 @@ def run_lab() -> dict:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="PandoSI sandbox lab (Ring 2)")
+    parser = argparse.ArgumentParser(description="PandoRSI sandbox lab (Ring 2)")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 

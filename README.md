@@ -1,15 +1,15 @@
-# PandoSI
+# PandoRSI
 
 **The forest that is one tree.**
 
-PandoSI is a research project building an elastically scalable, fully
+PandoRSI is a research project building an elastically scalable, fully
 heterogeneous, self-replicating **unified intelligence** — many cheap
 devices, one mind.
 
 - **Pando** — the largest single organism on Earth: an aspen colony of
   ~47,000 stems that looks like a forest but shares one root system.
   Latin: *I spread*.
-- **SI** — Super Intelligence.
+- **RSI** — Recursive Self‑Improvement AI systems.
 
 ## Headline results (all measured; each has a run behind it)
 

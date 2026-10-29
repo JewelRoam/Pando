@@ -6,7 +6,7 @@ Validated on GitHub Actions `ubuntu-latest`, not simulated.
 
 - Commit: `0ffdc7b2cf8ddad425d41f992b10de52c95232b5`
 - Workflow: **Service lifecycle**
-- Run: <https://github.com/JewelRoam/PandoSI/actions/runs/38470391492>
+- Run: <https://github.com/JewelRoam/PandoRSI/actions/runs/38470391492>
 - Result: **success**
 - Platform: Linux
 - Init path: user syworker, no administrator privilege

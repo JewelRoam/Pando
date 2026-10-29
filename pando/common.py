@@ -256,7 +256,7 @@ def read_secret_file(path: str | Path) -> str:
 
 
 def bypass_proxy_for_lan() -> None:
-    """All PandoSI traffic is LAN-local; a system/env proxy must never route
+    """All PandoRSI traffic is LAN-local; a system/env proxy must never route
     it. urllib on Windows honours registry proxies, which black-hole
     loopback/LAN addresses (observed: register POSTs retrying forever)."""
     import os

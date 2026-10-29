@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Recompute PandoSI headline decisions from the in-repo recorded votes.
+"""Recompute PandoRSI headline decisions from the in-repo recorded votes.
 
 The tool is intentionally offline: it reads only ``assets/votes/`` and the
 repository's own gate/advisor artifacts.  Missing vote files are reported,
@@ -170,7 +170,7 @@ def main() -> int:
     failures = []
     missing = []
 
-    print("PandoSI recorded-vote reproduction")
+    print("PandoRSI recorded-vote reproduction")
     print(f"vote directory: {VOTES}")
     print("solo accuracy (choice == expected):")
     print(f"  {'member':12s} {'split':5s} {'expected':>9s} {'observed':>9s}")

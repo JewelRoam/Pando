@@ -1,4 +1,4 @@
-# PandoSI Research Summary — definitive findings
+# PandoRSI Research Summary — definitive findings
 
 ## The question
 

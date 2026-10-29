@@ -2,8 +2,8 @@
 
 ## 1. Executive Summary & Problem Formulation
 
-### 1.1 The PandoSI Operational Reality
-PandoSI is an open, elastic collective intelligence fabric designed to coordinate distributed decision-making across heterogeneous physical devices without a human in the loop and without an un-killable central server. The physical fleet spans vastly asymmetric hardware profiles:
+### 1.1 The PandoRSI Operational Reality
+PandoRSI is an open, elastic collective intelligence fabric designed to coordinate distributed decision-making across heterogeneous physical devices without a human in the loop and without an un-killable central server. The physical fleet spans vastly asymmetric hardware profiles:
 * **High-Power Compute Nodes:** Windows workstations with discrete GPUs (e.g., NVIDIA RTX 3070 running CUDA/OpenVINO), Apple Silicon Macs (M-series running unified memory Metal engines), and occasional cloud compute instances.
 * **Low-Power Always-On Custodians ("Seeds"):** Weak headless network-attached storage (NAS) units (often dual-core x86 or low-tier ARM with 1–2 GB RAM), low-cost SBCs (Raspberry Pi / Rockchip), or idle mini-PCs.
 * **Constrained & Ephemeral Observers:** Mobile devices (Android phones running Termux, iPhones), laptops with intermittent Wi-Fi, and nodes situated behind restrictive symmetric Carrier-Grade NATs (CGNAT) or mobile firewalls.
@@ -15,7 +15,7 @@ To eliminate single points of failure while retaining operational predictability
 
 ```
 +-----------------------------------------------------------------------------+
-|                          PandoSI Protocol Planes                            |
+|                          PandoRSI Protocol Planes                            |
 +-----------------------------------------------------------------------------+
 |  (A) DISCOVERY & ADMISSION                                                  |
 |      - Peer bootstrapping & cryptographic identity (Ed25519)                |
@@ -79,7 +79,7 @@ Highly dynamic. Gossipsub autonomously maintains a degree-bounded mesh per topic
 * **Ops Burden:** High for pure Python; moderate if running a compiled Go/Rust sidecar. Configuring transport parameters, listen multiaddrs, and relay allocations requires non-trivial boilerplate.
 * **Failure Modes:** Relay exhaustion under heavy symmetric NAT traffic; DHT routing table poisoning or routing latency degradation under high peer churn; memory bloat in long-running nodes due to peer-store accumulation.
 
-#### Fit for PandoSI
+#### Fit for PandoRSI
 * **Verdict:** Architecturally ideal as a long-term theoretical target, but disqualified as a pure Python dependency today due to binding immaturity. Viable only if packaged as a compiled Go/Rust sidecar.
 
 ---
@@ -113,7 +113,7 @@ Room membership is managed via explicit state events (`m.room.member` transition
 #### Failure Modes
 State resolution storms during federation recovery; database transaction lockups on write-heavy rooms; severe latency during historical DAG backfills on weak edge hardware.
 
-#### Fit for PandoSI
+#### Fit for PandoRSI
 * **Verdict:** Unsuitable for low-latency decision fabrics or edge seed nodes. Excellent for human-facing audit logs and cross-organization alert federation, but completely misaligned with autonomous, zero-server machine-to-machine quorum.
 
 ---
@@ -153,7 +153,7 @@ Ad-hoc and decentralized. Groups can be organized using ephemeral event tags (e.
   * **Network Partition / Relay Siloing:** If node A publishes exclusively to Relay 1 and node B listens exclusively to Relay 2, they cannot communicate despite being healthy. Complete fanout requires clients to maintain concurrent connections to multiple relays, multiplying bandwidth.
   * **Lack of Causal Ordering:** Events carry Unix timestamps, but relays provide no distributed consensus, state linearization, or conflict resolution.
 
-#### Fit for PandoSI
+#### Fit for PandoRSI
 * **Verdict:** Highly attractive as an auxiliary, out-of-band rendezvous and task-signaling plane. Excellent for broadcasting proposals and observer notifications; incapable of acting as a high-bandwidth model seed channel.
 
 ---
@@ -205,7 +205,7 @@ Near-instantaneous. Peers announce and revoke key-expression declarations dynami
 * **Ops Burden:** Exceptionally low. In peer mode, Zenoh embeds directly into the Python process with zero external daemon requirements. Running a standalone `zenohd` WAN router requires a single static binary consuming ~15 MB of RAM and negligible CPU.
 * **Failure Modes:** If a shared WAN transit router becomes unreachable, WAN-separated peer islands partition into disconnected meshes (though local LAN communication remains 100% operational).
 
-#### Fit for PandoSI
+#### Fit for PandoRSI
 * **Verdict: Exceptional fit for the Data and Quorum Plane.** Zenoh's combination of embedded Python ergonomics, sub-millisecond local latency, and native distributed `get` (scatter-gather RPC matching the STEM vote pattern) makes it a premier candidate for cross-device voting.
 
 ---
@@ -237,12 +237,12 @@ Static/Explicit pairing by default: devices must mutually accept each other's De
 
 #### Operational Burden & Applicability as a Seed Channel
 * **Ops Burden:** Moderate. Requires running the `syncthing` binary as a persistent service/daemon on each participating machine. It features an automated local WebUI (port 8384) and headless CLI controls. Memory consumption ranges from 50 MB to 250 MB depending on indexed folder sizes.
-* **Applicability as a Seed Channel (Honest Assessment):** **Superb for bulk artifact and Spore replication.** In PandoSI, model weights and Spore delta bundles range from 300 MB to several gigabytes. Replicating multi-gigabyte neural checkpoints over raw ephemeral messaging buses is an anti-pattern. Syncthing handles chunk hashing, interrupted transfers, resumed downloads, bandwidth throttling, and NAT hole punching automatically. A weak NAS running Syncthing acts as an autonomous, persistent "Firekeeper" without requiring any Python runtime.
+* **Applicability as a Seed Channel (Honest Assessment):** **Superb for bulk artifact and Spore replication.** In PandoRSI, model weights and Spore delta bundles range from 300 MB to several gigabytes. Replicating multi-gigabyte neural checkpoints over raw ephemeral messaging buses is an anti-pattern. Syncthing handles chunk hashing, interrupted transfers, resumed downloads, bandwidth throttling, and NAT hole punching automatically. A weak NAS running Syncthing acts as an autonomous, persistent "Firekeeper" without requiring any Python runtime.
 
 #### Failure Modes
 File locking conflicts on Windows when local processes hold open handles to active model weights; disk thrashing on low-end NAS devices if thousands of tiny volatile log files are dropped into synchronized directories.
 
-#### Fit for PandoSI
+#### Fit for PandoRSI
 * **Verdict: Top-tier candidate for the Seed Plane (bulk storage and Spore replication).** Not suitable for real-time vote messaging, but exceptionally reliable for keeping weak NAS seeds synchronized with model weights and audit trees.
 
 ---
@@ -278,8 +278,8 @@ Single-writer per feed. In multi-device setups, each device must maintain its ow
 * **Ops Burden:** High for non-Node.js systems. Adopting Hypercore in a Python fabric requires running independent Node.js/Bare processes as IPC sidecars.
 * **Failure Modes:** Storage exhaustion in SSB due to unbounded historical log replication; catastrophic feed invalidation if a writer process crashes and accidentally re-uses an append-only sequence index (log forking).
 
-#### Fit for PandoSI
-* **Verdict:** Mechanically brilliant concepts (particularly Hypercore's sparse Merkle replication), but completely impractical for PandoSI due to total lack of native Python ecosystem support.
+#### Fit for PandoRSI
+* **Verdict:** Mechanically brilliant concepts (particularly Hypercore's sparse Merkle replication), but completely impractical for PandoRSI due to total lack of native Python ecosystem support.
 
 ---
 
@@ -314,8 +314,8 @@ Completely open and decentralized. Nodes continuously join and leave the global 
 #### Failure Modes
 Slow CID resolution (taking 15–90 seconds on public DHTs); DHT connection exhaustion on weak home gateways; silent data disappearance when unpinned caches are garbage-collected.
 
-#### Fit for PandoSI
-* **Verdict: Poor fit.** Extremely heavy operational overhead. PandoSI's in-repo Spore delta mechanism already achieves 15.3x data reduction without the resource bloat or latency penalties of a full IPFS/Kubo stack.
+#### Fit for PandoRSI
+* **Verdict: Poor fit.** Extremely heavy operational overhead. PandoRSI's in-repo Spore delta mechanism already achieves 15.3x data reduction without the resource bloat or latency penalties of a full IPFS/Kubo stack.
 
 ---
 
@@ -355,7 +355,7 @@ Flawless and asynchronous. Nodes can join, disconnect for weeks, perform thousan
   * **Tombstone and History Bloat:** Without periodic compaction or snapshotting, tracking every single historical keystroke/mutation consumes memory and disk over time.
   * **Semantic (Domain-Level) Conflicts:** While mathematical convergence is guaranteed, semantic intent may violate application logic (e.g., if two partitions independently promote different nodes to committee lead, a CRDT will deterministically pick one, but application invariants might require a re-vote).
 
-#### Fit for PandoSI
+#### Fit for PandoRSI
 * **Verdict: Exceptional fit for the Control Plane (Membership Registry, Task State, and Policy Logs).** Pairing an embedded Python CRDT (`pycrdt` or `cr-sqlite`) with an unopinionated transport (such as Zenoh or Git) completely solves multi-master distributed state replication without central servers.
 
 ---
@@ -393,8 +393,8 @@ Three battle-tested peer-to-peer systems designed for autonomy and censorship re
 * **Ops Burden:** High. Radicle requires the `radicle-node` daemon; Briar requires a JVM runtime and Tor daemon; Tox requires C compilation and external TCP relay infrastructure.
 * **Failure Modes:** Tox drops messages if peers are offline; Briar incurs high battery and latency costs due to multi-hop Tor routing; Radicle encounters Git push contention and divergence without active seed coordination.
 
-#### Fit for PandoSI
-* **Radicle:** Conceptually aligned with PandoSI's "Git as the durable log" architecture. Replacing GitHub with a private Radicle seed mesh is a viable future milestone for complete sovereignty.
+#### Fit for PandoRSI
+* **Radicle:** Conceptually aligned with PandoRSI's "Git as the durable log" architecture. Replacing GitHub with a private Radicle seed mesh is a viable future milestone for complete sovereignty.
 * **Tox / Briar:** Disqualified for machine-to-machine inference fabrics due to lack of Python bindings, high latency, and mobile runtime constraints.
 
 ---
@@ -446,8 +446,8 @@ Managed via an out-of-band coordination plane (Tailscale SaaS or self-hosted **H
   * Coordination server downtime prevents *new* nodes from joining (though existing nodes remain connected).
   * Bandwidth limits and latency spikes if hard symmetric NATs force heavy Spore model transfers through relay nodes (DERP/TURN).
 
-#### Fit for PandoSI
-* **Verdict: Top-tier recommendation for immediate physical connectivity.** Eliminates 100% of custom socket/hole-punching development, allowing PandoSI to focus on consensus logic while running standard Python HTTP contracts over an encrypted, direct-mesh network.
+#### Fit for PandoRSI
+* **Verdict: Top-tier recommendation for immediate physical connectivity.** Eliminates 100% of custom socket/hole-punching development, allowing PandoRSI to focus on consensus logic while running standard Python HTTP contracts over an encrypted, direct-mesh network.
 
 ---
 
@@ -479,7 +479,7 @@ However, **they inherently centralize power and failure**:
 1. **Absolute Single Point of Failure (SPOF):** If the broker VM restarts, crashes, or is blocked by an ISP, the entire fabric instantly goes blind.
 2. **Clustered Brokers Do Not Solve Edge Decentralization:** While NATS JetStream supports clustering, the cluster requires a static Raft quorum (requiring an odd number of fixed nodes, low-latency interconnects, and strict anti-partition guarantees). An elastic, heterogeneous fleet of consumer PCs, Macs, and NAS units cannot maintain a Raft broker cluster across consumer WAN connections without constant quorum collapses.
 
-#### Fit for PandoSI
+#### Fit for PandoRSI
 * **Yggdrasil:** Highly compelling zero-coordinator encrypted network layer, but requires root/TUN driver installation on all host machines, introducing platform frictions on mobile and restricted environments.
 * **MQTT / NATS:** Disqualified as the primary architectural backbone. They recreate an epistemic and structural monarchy.
 
@@ -502,7 +502,7 @@ However, **they inherently centralize power and failure**:
 * **Reticulum Network Stack (RNS):** A cryptography-first, delay-tolerant, transport-agnostic mesh networking framework written **natively in pure Python**. It operates without IP addresses, running over TCP, UDP, LoRa, packet radio, or serial interfaces. Destinations are 128-bit cryptographic hashes. It features built-in store-and-forward packet caches and zero-configuration discovery.
 * **ZeroMQ (pyzmq) with CurveZMQ:** High-performance asynchronous messaging sockets (PUB/SUB, ROUTER/DEALER) secured with Curve25519 elliptic-curve cryptography. Highly efficient, but possesses **zero built-in NAT traversal or peer discovery**—peers must know each other's explicit IP addresses or connect through an intermediate forwarder proxy.
 
-#### Fit for PandoSI
+#### Fit for PandoRSI
 * **Iroh:** **The premier 2025–2026 future-proof runtime.** It provides native Python bindings, embeddable user-space operation (zero root/TUN requirements), built-in DERP NAT traversal, and BLAKE3-accelerated model weight streaming.
 * **Reticulum:** Exceptional auxiliary mesh for ultra-low-power, off-grid, or serial-connected edge devices.
 
@@ -510,9 +510,9 @@ However, **they inherently centralize power and failure**:
 
 ## 3. Comparative Evaluation & Multi-Dimensional Matrix
 
-The following matrix synthesizes the surveyed systems across eight critical operational dimensions essential to PandoSI's multi-device collective intelligence architecture:
+The following matrix synthesizes the surveyed systems across eight critical operational dimensions essential to PandoRSI's multi-device collective intelligence architecture:
 
-| System / Technology | Message / Storage Paradigm | NAT Traversal Mechanism | Python Ergonomics | Delivery & Consistency Guarantees | Edge / NAS Resource Footprint | Churn & Partition Resilience | Centralization & Autonomy Hazard | Recommended PandoSI Role | Confidence Rating |
+| System / Technology | Message / Storage Paradigm | NAT Traversal Mechanism | Python Ergonomics | Delivery & Consistency Guarantees | Edge / NAS Resource Footprint | Churn & Partition Resilience | Centralization & Autonomy Hazard | Recommended PandoRSI Role | Confidence Rating |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **libp2p** | Topic Pub/Sub (Gossipsub) & Byte Streams | AutoNAT, STUN, DCUtR Hole Punching, Circuit Relay v2 | **Poor** (`py-libp2p` fragile; requires Go/Rust sidecar) | Best-Effort Epidemic (zero durability) | Moderate-High (peerstore & DHT memory growth) | **High** (dynamic mesh re-grafting) | Minimal (fully decentralized) | Experimental Long-Term Transport | High (Specs) / Med (Python) |
 | **Matrix** | Replicated Room Event DAGs | Outbound HTTPS Client-Server only | **Good** (`matrix-nio` with E2EE Olm) | Strong Causal Durability (persisted in DB) | **Very Poor** (heavy DB I/O, RAM spikes on state res) | Low-Medium (state res CPU storms on split re-merge) | **High** (Homeserver is single point of failure) | Disqualified for Core; OK for Audit Logs | High |
@@ -567,7 +567,7 @@ To overcome these physical boundaries, **three coordination functions cannot be 
 ### 4.3 How to Keep Coordination Non-Authoritative and Replaceable
 The architectural breakthrough lies in understanding that **a central function does not require an authoritative central server**. Centralization is a failure of structural power, not physical topology. 
 
-To prevent coordination instances from becoming brittle authorities or single points of failure, PandoSI enforces three invariant rules:
+To prevent coordination instances from becoming brittle authorities or single points of failure, PandoRSI enforces three invariant rules:
 
 #### Rule 1: Replaceable Redundancy (Any 1 of N Survives)
 Bootstrap and rendezvous endpoints are never hardcoded to a single host. Nodes are configured with a prioritized, heterogeneous list of bootstrap seed providers:
@@ -590,13 +590,13 @@ Instead of relying on commercial cloud infrastructure, low-power, always-on hous
 
 ---
 
-## 5. Recommended PandoSI Stack: Separation of Planes
+## 5. Recommended PandoRSI Stack: Separation of Planes
 
-To achieve immediate operational reliability while charting an evolutionary path toward complete, zero-dependency peer-to-peer autonomy, PandoSI decomposes its communications into three explicit planes.
+To achieve immediate operational reliability while charting an evolutionary path toward complete, zero-dependency peer-to-peer autonomy, PandoRSI decomposes its communications into three explicit planes.
 
 ```
 +-----------------------------------------------------------------------------+
-|                      PandoSI Recommended Architecture                       |
+|                      PandoRSI Recommended Architecture                       |
 +-----------------------------------------------------------------------------+
 |  CONTROL PLANE (Membership, Playbooks, Tasks, Governance)                   |
 |  * Today:  Signed Git Commits / Branches + HTTP Mailbox (Bearer Token)      |
@@ -717,4 +717,4 @@ To empirically validate the resilience, latency, and fault tolerance of the reco
 
 ## 7. Provenance
 
-This document was drafted by an AI agent (**Gemini 3.8 Flash via Antigravity CLI**) on **2026-10-17** under delegation from the **PandoSI maintainers**. It synthesizes architectural designs, empirical codebase evaluations, and verified distributed networking protocols to guide the implementation of PandoSI's autonomous, decentralized communication infrastructure.
+This document was drafted by an AI agent (**Gemini 3.8 Flash via Antigravity CLI**) on **2026-10-17** under delegation from the **PandoRSI maintainers**. It synthesizes architectural designs, empirical codebase evaluations, and verified distributed networking protocols to guide the implementation of PandoRSI's autonomous, decentralized communication infrastructure.

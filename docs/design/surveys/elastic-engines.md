@@ -4,7 +4,7 @@
 
 The generative AI boom has driven massive open-source investment into distributed inference systems. However, industry focus is overwhelmingly concentrated on a specific operational profile: **homogeneous clusters of high-end enterprise GPUs running monolithic 70B+ parameter autoregressive generative models over ultra-low-latency interconnects (NVLink, InfiniBand, or RoCE)**.
 
-PandoSI operates under a fundamentally different physical and architectural reality:
+PandoRSI operates under a fundamentally different physical and architectural reality:
 * **Model Size Profile:** Prefers lightweight, fast decision and policy models ($\le$ 4B parameters, typically 300MB–2GB checkpoints such as Laya) rather than massive generative decoders.
 * **Hardware Profile:** Deploys across highly constrained, heterogeneous consumer and edge devices: Intel/AMD x86 CPUs, integrated GPUs (iGPU), Neural Processing Units (NPUs like Intel NPU / Qualcomm Hexagon), Apple Silicon unified memory (Metal), discrete consumer GPUs (e.g., RTX 3070/4090), and low-cost ARM SBCs (Single Board Computers) or TV-boxes.
 * **Topological Division of Labor:**
@@ -49,7 +49,7 @@ This survey critically evaluates ten primary open-source distributed inference e
 #### Evidence & Confidence
 * *Confidence: High.* Upstream codebase inspection of `ggml-rpc.cpp` and `examples/rpc/rpc-server.cpp` confirms synchronous TCP socket handling, absence of heartbeats/reconnection logic, and master-driven weight transmission.
 
-#### Fit for PandoSI
+#### Fit for PandoRSI
 * **Verdict: Poor fit for distributed WAN / elastic fabric; acceptable for static LAN memory pooling.**
 * `llama.cpp` RPC allows pooling RAM across a Mac and an x86 PC over a LAN, but its static topology and complete lack of fault tolerance disqualify it for elastic swarms.
 
@@ -84,7 +84,7 @@ This survey critically evaluates ten primary open-source distributed inference e
 #### Evidence & Confidence
 * *Confidence: High.* Verified via exo repository architecture documentation, partition strategy sources (`exo/topology/partitioning_strategy.py`), and release issue trackers documenting transport reconnection semantics.
 
-#### Fit for PandoSI
+#### Fit for PandoRSI
 * **Verdict: Strong architectural inspiration for LAN ring partitioning; unusable over WAN for sequential generation.**
 * Exo's memory-weighted partitioning and peer auto-discovery are exemplary for consumer LAN clusters, but its coupling of generation to sequential ring passes breaks across WAN latencies.
 
@@ -120,9 +120,9 @@ This survey critically evaluates ten primary open-source distributed inference e
 #### Evidence & Confidence
 * *Confidence: High.* Verified via published paper ("Petals: Collaborative Inference and Fine-tuning of Large Models", NeurIPS 2023) and Hivemind DHT routing implementation.
 
-#### Fit for PandoSI
+#### Fit for PandoRSI
 * **Verdict: Gold standard for decentralized DHT routing and elastic fault tolerance; wrong paradigm for sub-4B decision models.**
-* PandoSI borrows Petals' DHT routing and dynamic re-routing concepts, but Petals' pipeline-parallel activation passing across WAN is unnecessary overhead for $\le$4B models that can run locally on weak edge nodes.
+* PandoRSI borrows Petals' DHT routing and dynamic re-routing concepts, but Petals' pipeline-parallel activation passing across WAN is unnecessary overhead for $\le$4B models that can run locally on weak edge nodes.
 
 ---
 
@@ -155,8 +155,8 @@ This survey critically evaluates ten primary open-source distributed inference e
 #### Evidence & Confidence
 * *Confidence: High.* Verified via vLLM documentation (`docs.vllm.ai`) and source code (`vllm/distributed/parallel_state.py`).
 
-#### Fit for PandoSI
-* **Verdict: Completely unsuitable for PandoSI's target.**
+#### Fit for PandoRSI
+* **Verdict: Completely unsuitable for PandoRSI's target.**
 * Designed for centralized datacenter throughput on enterprise hardware; lacks elasticity, fault tolerance, and heterogeneous edge device support.
 
 ---
@@ -190,9 +190,9 @@ This survey critically evaluates ten primary open-source distributed inference e
 #### Evidence & Confidence
 * *Confidence: High.* Verified via SGLang documentation and router architecture implementations (`sglang/srt/server.py`, `sglang/router/`).
 
-#### Fit for PandoSI
+#### Fit for PandoRSI
 * **Verdict: Excellent model for the routing tier; unsuitable for on-device heterogeneous model execution.**
-* The dual-tier architecture (static execution engine + elastic cache-aware router) validates PandoSI's separation of Stem (execution) and Root (coordinator/router), but SGLang's engine cannot run on weak edge EU hardware.
+* The dual-tier architecture (static execution engine + elastic cache-aware router) validates PandoRSI's separation of Stem (execution) and Root (coordinator/router), but SGLang's engine cannot run on weak edge EU hardware.
 
 ---
 
@@ -223,7 +223,7 @@ This survey critically evaluates ten primary open-source distributed inference e
 #### Evidence & Confidence
 * *Confidence: High.* Verified via TVM Unity SPMD design papers and MLC-LLM multi-GPU CLI documentation (`mlc_llm chat --overrides "tensor_parallel_shards=2"`).
 
-#### Fit for PandoSI
+#### Fit for PandoRSI
 * **Verdict: Outstanding single-device compiler for edge nodes; lacks cross-device mesh coordination.**
 * MLC-LLM provides excellent standalone runtimes for Apple Silicon or WebGPU, but does not offer distributed coordination across networked devices.
 
@@ -257,7 +257,7 @@ This survey critically evaluates ten primary open-source distributed inference e
 #### Evidence & Confidence
 * *Confidence: High.* Verified via repository codebase, kernel implementations, and technical whitepapers detailing DeepSeek MoE CPU offload.
 
-#### Fit for PandoSI
+#### Fit for PandoRSI
 * **Verdict: Powerful intra-node offloader for MoE on a single PC; irrelevant for distributed edge swarms.**
 * Solves the 671B desktop inference problem via CPU-GPU NUMA pipelining, but does not provide multi-device networking or sub-4B decision swarm logic.
 
@@ -288,7 +288,7 @@ This survey critically evaluates ten primary open-source distributed inference e
 #### Evidence & Confidence
 * *Confidence: High.* Verified via DeepSpeed documentation and source code repositories.
 
-#### Fit for PandoSI
+#### Fit for PandoRSI
 * **Verdict: Completely unsuitable.** Rigid datacenter assumptions, zero consumer edge heterogeneity, non-elastic.
 
 ---
@@ -319,7 +319,7 @@ This survey critically evaluates ten primary open-source distributed inference e
 #### Evidence & Confidence
 * *Confidence: High.* Verified via Hugging Face Accelerate documentation (`huggingface.co/docs/accelerate`).
 
-#### Fit for PandoSI
+#### Fit for PandoRSI
 * **Verdict: Essential local utility for large-model single-node prototyping; useless for networked distributed clusters.**
 
 ---
@@ -343,7 +343,7 @@ This survey critically evaluates ten primary open-source distributed inference e
 #### Heterogeneity
 * **Intel Ecosystem Mastery:** World-class integration across CPU, integrated GPU (iGPU), discrete Arc GPU (dGPU), and Neural Processing Unit (NPU).
 * **Cross-Vendor Limits:** Strictly focuses on Intel hardware (and generic x86/ARM CPUs). Does not natively execute on NVIDIA CUDA or Apple Metal.
-* **Operator Surface Caveat:** In empirical deployments (as documented in PandoSI research), NPU compilers and iGPU drivers frequently reject custom or non-standard operators (such as un-flattened `GatherND` in classification heads), requiring CPU fallback via `HETERO`.
+* **Operator Surface Caveat:** In empirical deployments (as documented in PandoRSI research), NPU compilers and iGPU drivers frequently reject custom or non-standard operators (such as un-flattened `GatherND` in classification heads), requiring CPU fallback via `HETERO`.
 
 #### Networking Assumptions
 * **Interconnect:** Shared host memory and PCIe/CXL bus.
@@ -352,10 +352,10 @@ This survey critically evaluates ten primary open-source distributed inference e
 * **Streaming:** Native streaming generation supported via OpenVINO GenAI C++/Python API.
 
 #### Evidence & Confidence
-* *Confidence: High.* Verified via OpenVINO official documentation and empirical PandoSI hardware test benchmarks (PandoSI blueprint section 2.5: 106ms CPU vs. NPU GatherND compiler rejection).
+* *Confidence: High.* Verified via OpenVINO official documentation and empirical PandoRSI hardware test benchmarks (PandoRSI blueprint section 2.5: 106ms CPU vs. NPU GatherND compiler rejection).
 
-#### Fit for PandoSI
-* **Verdict: Essential local Execution Unit (EU) engine on Intel AI PC nodes; provides the blueprint for PandoSI's local EU abstraction.**
+#### Fit for PandoRSI
+* **Verdict: Essential local Execution Unit (EU) engine on Intel AI PC nodes; provides the blueprint for PandoRSI's local EU abstraction.**
 * While OpenVINO does not solve cross-network clustering, its `HETERO` and `MULTI` modes are the premier local execution primitives for Intel CPU+iGPU+NPU devices.
 
 ---
@@ -388,7 +388,7 @@ This survey critically evaluates ten primary open-source distributed inference e
 #### Evidence & Confidence
 * *Confidence: High.* Codebase review confirms raw C++ socket synchronization barriers (`socket.send`/`socket.recv`) inside layer attention blocks.
 
-#### Fit for PandoSI
+#### Fit for PandoRSI
 * **Verdict: Proof that C++ CPU tensor parallelism over network sockets is possible, but demonstrates why TP over high-latency networks fails.**
 
 ---
@@ -419,8 +419,8 @@ This survey critically evaluates ten primary open-source distributed inference e
 #### Evidence & Confidence
 * *Confidence: High.* Foundation of Petals; verified via Hivemind codebase and academic publications.
 
-#### Fit for PandoSI
-* **Verdict: Gold standard for P2P swarm primitives; too heavyweight as an execution runtime, but the correct model for PandoSI's discovery and decentralized spore replication.**
+#### Fit for PandoRSI
+* **Verdict: Gold standard for P2P swarm primitives; too heavyweight as an execution runtime, but the correct model for PandoRSI's discovery and decentralized spore replication.**
 
 ---
 
@@ -448,16 +448,16 @@ This survey critically evaluates ten primary open-source distributed inference e
 #### Evidence & Confidence
 * *Confidence: High.* Verified via LocalAI documentation (`localai.io/features/p2p`) and backend worker configuration.
 
-#### Fit for PandoSI
-* **Verdict: Good reference for containerized developer P2P ergonomics, but lacks the fine-grained hardware EU compilation and mathematical consensus gating required by PandoSI.**
+#### Fit for PandoRSI
+* **Verdict: Good reference for containerized developer P2P ergonomics, but lacks the fine-grained hardware EU compilation and mathematical consensus gating required by PandoRSI.**
 
 ---
 
 ## 3. Comprehensive Comparison Matrix
 
-The table below contrasts all surveyed systems across PandoSI's critical design dimensions:
+The table below contrasts all surveyed systems across PandoRSI's critical design dimensions:
 
-| Engine / System | Primary Parallelism | Elasticity (Join / Leave) | Heterogeneity Spectrum | Network Assumption | Streaming Support | License | Activity (2025–2026) | Fit for PandoSI Target |
+| Engine / System | Primary Parallelism | Elasticity (Join / Leave) | Heterogeneity Spectrum | Network Assumption | Streaming Support | License | Activity (2025–2026) | Fit for PandoRSI Target |
 |---|---|---|---|---|---|---|---|---|
 | **llama.cpp RPC** | Layer Offload / Pipeline | **Static** (Crashes on node loss) | **High** (Mac Metal + Linux CUDA + CPU) | Fast LAN (<5ms RTT) | Yes | MIT | High | **Low** (No elasticity, zero fault tolerance) |
 | **exo** | Ring Pipeline / Weighted Mem | **Dynamic** (mDNS / libp2p, re-shards) | **High** (Apple MLX + NVIDIA CUDA + CPU) | LAN / Thunderbolt (High Bandwidth) | Yes | GPL-3.0 | Very High | **Medium-High** (LAN only; breaks over WAN) |
@@ -528,7 +528,7 @@ In Pipeline Parallelism (e.g., Petals, exo), layers are partitioned sequentially
   For $K = 5$ nodes across a 100ms WAN, each token requires $4 \times 100\text{ms} = 400\text{ms}$ of idle transit time alone, capping generation speed at $\le 2.5\text{ tokens/second}$, regardless of how fast individual GPUs compute.
 * **The Small-Model Anti-Pattern:**
   For a large 70B model, an individual node cannot fit the weights; users may tolerate 2.5 tokens/sec as the price of admission. 
-  **However, for small models ($\le$ 4B parameters, e.g., PandoSI's Laya):**
+  **However, for small models ($\le$ 4B parameters, e.g., PandoRSI's Laya):**
   * Local forward-pass compute on an Intel Core Ultra CPU or M2 Mac: **10ms – 40ms**.
   * Pipeline network penalty across WAN: **400ms**.
   * The network introduces a **10x to 40x slowdown** over running the model entirely on a single weak device. 
@@ -577,9 +577,9 @@ The following architectural strategies succeed under high WAN latency and unreli
 
 ---
 
-## 5. "What Does Not Exist Yet": Critical Gaps Versus PandoSI
+## 5. "What Does Not Exist Yet": Critical Gaps Versus PandoRSI
 
-A rigorous review of the open-source landscape reveals four foundational architectural gaps between existing inference engines and PandoSI's target:
+A rigorous review of the open-source landscape reveals four foundational architectural gaps between existing inference engines and PandoRSI's target:
 
 ```
 +-------------------------------------------------------------------------------------------------------+
@@ -600,9 +600,9 @@ A rigorous review of the open-source landscape reveals four foundational archite
 
 * **The Reality:** 95% of distributed inference tooling (vLLM, SGLang, DeepSpeed-MII, Petals) is engineered exclusively for **autoregressive text generation** (decoding tokens one by one with massive KV-caches). 
 * **The Missing System:** There is no dedicated open-source distributed engine designed for **fast, classification/decision-head consensus**. 
-  * In a decision fabric (like PandoSI's Laya), the output is not a 500-token stream; it is a single forward pass producing a calibrated discrete action choice and confidence distribution.
+  * In a decision fabric (like PandoRSI's Laya), the output is not a 500-token stream; it is a single forward pass producing a calibrated discrete action choice and confidence distribution.
   * Existing engines force users to spin up massive Python/CUDA runtimes just to evaluate a 400MB encoder-classifier, incurring gigabytes of VRAM overhead and hundreds of milliseconds of framework latency.
-* **PandoSI Requirement:** A minimal, lightweight worker daemon (`worker`) that serves sub-4B models with microsecond local overhead and emits structured JSON decision votes directly into a voting quorum.
+* **PandoRSI Requirement:** A minimal, lightweight worker daemon (`worker`) that serves sub-4B models with microsecond local overhead and emits structured JSON decision votes directly into a voting quorum.
 
 ---
 
@@ -613,7 +613,7 @@ A rigorous review of the open-source landscape reveals four foundational archite
   * MLX handles Apple Silicon unified memory, but cannot speak to an Intel NPU or NVIDIA GPU.
   * `llama.cpp` supports multiple backends, but cannot dynamically split graphs across an NPU and an iGPU on the same host while simultaneously serving an external network quorum.
 * **The Missing System:** An abstraction that treats every on-host accelerator (CPU, iGPU, dGPU, NPU, Apple Neural Engine) as a distinct, addressable **Execution Unit (EU)** that can register, participate in local consensus, or contribute to an elastic network swarm.
-* **PandoSI Requirement:** The `ExecutionUnit` and `Graft` protocol: an AI PC with an Intel Core Ultra (CPU + Arc iGPU + NPU) plus an external USB or PCIe accelerator should automatically enumerate as 3–4 distinct EUs, each capable of hosting an independent Laya replica and voting in the committee.
+* **PandoRSI Requirement:** The `ExecutionUnit` and `Graft` protocol: an AI PC with an Intel Core Ultra (CPU + Arc iGPU + NPU) plus an external USB or PCIe accelerator should automatically enumerate as 3–4 distinct EUs, each capable of hosting an independent Laya replica and voting in the committee.
 
 ---
 
@@ -636,12 +636,12 @@ A rigorous review of the open-source landscape reveals four foundational archite
   * Ed25519 cryptographic author signing.
   * Trust-On-First-Use (TOFU) public-key pinning.
   * Selective chunk re-fetching upon tamper or network drop.
-* **PandoSI Requirement:** The complete SPROUT $\to$ VERIFY $\to$ GRAFT lifecycle documented in `pando/spore.py`, allowing new devices to discover the swarm, download verified weights peer-to-peer, validate model integrity on arrival, and self-activate as voting stems without administrative intervention.
+* **PandoRSI Requirement:** The complete SPROUT $\to$ VERIFY $\to$ GRAFT lifecycle documented in `pando/spore.py`, allowing new devices to discover the swarm, download verified weights peer-to-peer, validate model integrity on arrival, and self-activate as voting stems without administrative intervention.
 
 ---
 
 ## 6. Provenance
 
-This document was drafted by an AI agent (**Gemini 3.8 Flash** via the **Antigravity CLI**) on **2026-10-16**, under explicit delegation from the PandoSI maintainers. 
+This document was drafted by an AI agent (**Gemini 3.8 Flash** via the **Antigravity CLI**) on **2026-10-16**, under explicit delegation from the PandoRSI maintainers. 
 
-The analysis is grounded in direct codebase inspection of the referenced repositories, peer-reviewed distributed systems literature, and empirical hardware validation data recorded in the PandoSI repository (`docs/design/ARCHITECTURE.zh-CN.md`, `docs/design/THEORY-committee.md`, and `docs/operations/ROADMAP.md`).
+The analysis is grounded in direct codebase inspection of the referenced repositories, peer-reviewed distributed systems literature, and empirical hardware validation data recorded in the PandoRSI repository (`docs/design/ARCHITECTURE.zh-CN.md`, `docs/design/THEORY-committee.md`, and `docs/operations/ROADMAP.md`).

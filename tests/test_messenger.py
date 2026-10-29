@@ -1,4 +1,4 @@
-"""PandoSI smoke tests.
+"""PandoRSI smoke tests.
 
 Policy (project decision): minimal mocks, minimal test count. Static analysis
 and research are the default; this file runs only at milestones or on demand.

@@ -181,7 +181,7 @@ def append_index(now: str, output: Path, state: dict, note: str) -> None:
         header = [
             "# Session backup index",
             "",
-            "Timestamped, sanitized snapshots of this PandoSI working session.",
+            "Timestamped, sanitized snapshots of this PandoRSI working session.",
             "",
             "| time | snapshot | source | user/assistant/tool | note |",
             "|---|---|---|---|---|",

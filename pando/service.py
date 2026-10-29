@@ -138,7 +138,7 @@ def _unit_content(platform: str, argv: list[str],
     restart = "on-failure"
     return "\n".join([
         "[Unit]",
-        "Description=PandoSI authenticated swarm worker",
+        "Description=PandoRSI authenticated swarm worker",
         "After=network-online.target",
         "",
         "[Service]",
@@ -345,7 +345,7 @@ def build_service_plan(role: str = "root", *, platform: str = "auto",
 
 def render_plan(plan: dict) -> str:
     lines = [
-        f"PandoSI {plan['role']} service plan ({plan['platform']})",
+        f"PandoRSI {plan['role']} service plan ({plan['platform']})",
         f"Install allowed: {plan['install_allowed']}",
         f"Service: {plan['service_name']}",
         f"Token file: {plan['pairing_token_file']} (not in argv)",

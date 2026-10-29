@@ -59,7 +59,7 @@ Snapshots taken 2026-10-13. Index-sourced items marked (idx); direct reads marke
 
 - Identical-weight replica voting has highly correlated errors; ensemble gains require
   heterogeneous checkpoints / temperatures / schemas.
-  PandoSI Root must enforce >=2 distinct Laya checkpoints per quorum.
+  PandoRSI Root must enforce >=2 distinct Laya checkpoints per quorum.
 
 ## Evolution feasibility (report v2) (idx)
 

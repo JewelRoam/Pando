@@ -328,7 +328,7 @@ def _atomic_write_text(path: Path, text: str) -> None:
 
 def save_grants(grants: dict[str, dict], path: Path | str | None = None) -> Path:
     grant_path = Path(path) if path else default_path()
-    lines = ["# PandoSI authorization ledger.",
+    lines = ["# PandoRSI authorization ledger.",
              "# Each capability must expire; revocation is deletion.", ""]
     for action in sorted(grants):
         lines.append(f"[grants.{action}]")

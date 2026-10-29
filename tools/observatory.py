@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PandoSI observatory: one command, one page, live node state.
+"""PandoRSI observatory: one command, one page, live node state.
 
     python tools/observatory.py
 
@@ -291,7 +291,7 @@ _UNIT_CACHE: dict = {"at": 0.0, "value": None}
 
 
 def local_units() -> dict:
-    """Which PandoSI units are alive *on this machine*, by real inspection."""
+    """Which PandoRSI units are alive *on this machine*, by real inspection."""
     if time.time() - _UNIT_CACHE["at"] < 5 and _UNIT_CACHE["value"]:
         return _UNIT_CACHE["value"]
     units: dict = {"host": socket.gethostname(), "services": [], "source": None}
@@ -2072,7 +2072,7 @@ def main() -> int:
             pass
 
     parser = argparse.ArgumentParser(
-        description="PandoSI observatory: one command, one page.")
+        description="PandoRSI observatory: one command, one page.")
     parser.add_argument("--port", type=int,
                         default=int(os.environ.get("PANDOSI_OBSERVATORY_PORT", "8799")),
                         help="listen port (default 8799)")
@@ -2108,7 +2108,7 @@ def main() -> int:
     }
 
     server = ThreadingHTTPServer(("127.0.0.1", args.port), build_handler(cfg))
-    print(f"PandoSI observatory → http://127.0.0.1:{args.port}", flush=True)
+    print(f"PandoRSI observatory → http://127.0.0.1:{args.port}", flush=True)
     print(f"  mailbox   {cfg['mailbox_url']}"
           f"{'  (token loaded)' if cfg['mailbox_token'] else '  (NO TOKEN - feed will 403)'}",
           flush=True)

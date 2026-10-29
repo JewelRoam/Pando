@@ -1,4 +1,4 @@
-# PandoSI 技术蓝图
+# PandoRSI 技术蓝图
 
 状态：研究预览版已发布（见 [RELEASE-NOTES.md](../operations/RELEASE-NOTES.md)）。目标：形成一套能跑通、可开源、可量化的“弹性异构自复制统一智能”完整方法。
 
@@ -165,12 +165,12 @@ Llama 3.2 1B 10-15 tok/s，2B+ 多数仅 2-8。
 4GB 电视盒零公开整机实测，仅带宽推算：
 1B Q4 实际约 4-8 tok/s，3B+ 大概率 OOM。
 
-**对 PandoSI 的推论**：上述 decode 门槛主要约束自回归 LLM。
+**对 PandoRSI 的推论**：上述 decode 门槛主要约束自回归 LLM。
 决策模型非自回归，一次前向 = 一次决策，
 decode 门槛不适用，换成**单决策延迟预算**
 （P50 <500ms LAN 共识）。因此：
 
-| 设备档位 | 判定 | PandoSI 角色 |
+| 设备档位 | 判定 | PandoRSI 角色 |
 |---|---|---|
 | Pi 5 / x86 桌面（≥4GB） | 确定可跑 Laya | worker |
 | **AI PC (Core Ultra 7 255H)** | **已实测**: CPU 106ms + iGPU 25.6ms(多桶) | **双 EU 异构共识 ✅** |

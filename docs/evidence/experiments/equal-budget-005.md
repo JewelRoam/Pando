@@ -131,7 +131,7 @@ decisively enough to clear the corrected bar.
   foreign arm; (c) a **second draw** of the suites; (d) the same rows through a
   probability backend, since win's stems answer choice-only.
 - **证据是否外部锚定.** No. Rows, labels, aggregator and arm A's stem are all
-  PandoSI's own, on PandoSI's own LAN.
+  PandoRSI's own, on PandoRSI's own LAN.
 - **运维代价（含人类审批次数）.** 0 new timers, 0 new grants, 0 new resident
   models, **0 human approvals**. Real cost: win's own llama-server served ~360
   sequential exam requests while also being win's proposer's model — declared in

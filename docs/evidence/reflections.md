@@ -108,8 +108,8 @@ The Mac's full answer lives in mailbox task t-20261017-001001-f790. Load-bearing
 
 - Root cause, corrected by Mac (task t-20261017-033957-2d08 + chat t-20261017-034557-7c19):
   not a stale pull. Two parallel checkouts existed on the machine - the abandoned
-  /Users/zhengenrong/Downloads/PandoSI (branch veto-all-declined) and the live
-  /Users/zhengenrong/Downloads/PandoSI-island (branch island-main, pushes to origin/main).
+  /Users/zhengenrong/Downloads/PandoRSI (branch veto-all-declined) and the live
+  /Users/zhengenrong/Downloads/PandoRSI-island (branch island-main, pushes to origin/main).
   The file was never missing; the wrong directory was being read. Standing liability: any
   automation can target the wrong checkout; check `pwd` + `git rev-parse --show-toplevel`
   before diagnosing "out of sync". The old checkout should be retired.

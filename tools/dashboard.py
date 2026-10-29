@@ -73,7 +73,7 @@ def main() -> None:
         for e in reversed(metrics[-50:]))
 
     html = f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>PandoSI dashboard</title>
+<html lang="en"><head><meta charset="utf-8"><title>PandoRSI dashboard</title>
 <style>
 body{{font-family:ui-monospace,monospace;margin:2rem;background:#101512;color:#e8efe9}}
 h1,h2{{letter-spacing:-0.03em}}
@@ -84,7 +84,7 @@ table{{border-collapse:collapse;margin:1.5rem 0 2.5rem;width:100%;max-width:1100
 td,th{{border:1px solid #2c3733;padding:6px 10px;text-align:left;font-size:13px}}
 th{{background:#1a2420}}
 </style></head><body>
-<h1>PandoSI dashboard</h1>
+<h1>PandoRSI dashboard</h1>
 <div class="cards">
 <div class="card"><span>decisions</span><b>{total}</b></div>
 <div class="card"><span>tiers</span><b>{esc(dict(tiers))}</b></div>

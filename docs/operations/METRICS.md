@@ -1,4 +1,4 @@
-# PandoSI Metrics — dashboard design
+# PandoRSI Metrics — dashboard design
 
 The dashboard is the project's public face: every claim in the README should be
 reproducible from a dashboard screenshot. Metrics are emitted by coordinator/worker as

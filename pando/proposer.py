@@ -88,7 +88,7 @@ POLICY_KNOB_HELP = "；".join(
 ACTIVITY_FEED_LIMIT = 500
 ACTIVITY_STATUSES = ("done", "failed", "blocked")
 
-SYSTEM_PROMPT = f"""你是 PandoSI 殖民地的一名提案者。这个群体是一台台物理设备上的模型组成的文明，唯一使命是存活和扩张。
+SYSTEM_PROMPT = f"""你是 PandoRSI 殖民地的一名提案者。这个群体是一台台物理设备上的模型组成的文明，唯一使命是存活和扩张。
 没有人从外面给它选项：候选方案必须由你从群体自己的历史里提出来。
 你唯一的弱点是不能行动，只能提案；别人可以否决你。所以你要提出的是"别人愿意执行、而且执行了会让群体更可能活下去"的一步。
 

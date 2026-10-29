@@ -108,7 +108,7 @@ beats this 4-member committee" — on these 360 rows, under this parse path.
    axis and leaves the *weight* axis exactly where 003 left it. Do not merge the
    two sentences.
 3. **External anchoring.** The rows, the labels, the committee's aggregator and
-   arm A's stem are all PandoSI's own. Nothing here transfers off this suite.
+   arm A's stem are all PandoRSI's own. Nothing here transfers off this suite.
 4. **Latency as an endpoint.** 1600 ms p95 crosses a LAN to a GPU box and its
    first call includes model load; arm B is in-process beside the harness. The
    column is reported and then not used to decide anything.

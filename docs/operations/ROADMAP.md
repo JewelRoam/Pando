@@ -1,4 +1,4 @@
-# PandoSI Roadmap
+# PandoRSI Roadmap
 
 ## Achievements (2026-10-14)
 
@@ -102,7 +102,7 @@ Goal: swarm self-trains its own checkpoints.
 
 ## Git workflow (project decision 2026-10-13)
 
-- Remote: https://github.com/JewelRoam/PandoSI.git (main branch).
+- Remote: https://github.com/JewelRoam/PandoRSI.git (main branch).
 - Commit + push at every milestone: after each research round that changes the
   blueprint, after each new module, and before/after any smoke-test milestone.
 - Commit messages: imperative, one-line summary + short body listing artifacts.

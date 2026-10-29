@@ -1,4 +1,4 @@
-"""worker: a PandoSI decision worker node.
+"""worker: a PandoRSI decision worker node.
 
 Runs an HTTP service exposing /decide, /health, /graft. Registers with a
 coordinator coordinator and heartbeats periodically.
@@ -272,7 +272,7 @@ def heartbeat_loop(stem: Stem, root_url: str,
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="PandoSI stem worker")
+    parser = argparse.ArgumentParser(description="PandoRSI stem worker")
     parser.add_argument("--node-id", required=True)
     parser.add_argument("--checkpoint", default=None,
                         help="lineage/checkpoint identity; defaults by backend")

@@ -58,7 +58,7 @@ schtasks /Create /SC ONLOGON /RL LIMITED
 ```
 
 and failed with `Access is denied` in a normal user session. That made the
-adapter violate PandoSI's zero-privilege onboarding rule. The final Windows
+adapter violate PandoRSI's zero-privilege onboarding rule. The final Windows
 adapter therefore uses the user Startup folder and user-owned files; it does
 not request administrator or Task Scheduler logon-trigger privileges.
 

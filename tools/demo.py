@@ -1,4 +1,4 @@
-"""PandoSI end-to-end demo: clone-to-first-vote in one command.
+"""PandoRSI end-to-end demo: clone-to-first-vote in one command.
 
 Starts a root + 3 mock stems, sends 3 decisions through the consensus,
 renders the dashboard, and tears down. Mock backend = no model weights
@@ -28,7 +28,7 @@ def start(args):
 
 
 def main() -> None:
-    print("PandoSI demo: root + 3 mock stems + 3 consensus votes", flush=True)
+    print("PandoRSI demo: root + 3 mock stems + 3 consensus votes", flush=True)
     procs = [start(["-m", "pando.coordinator", "--port", PORT,
                     "--pairing-token", TOKEN]),
              start(["-m", "pando.worker", "--node-id", "stem0",

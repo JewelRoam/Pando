@@ -1,6 +1,6 @@
-# The PandoSI stem wire contract
+# The PandoRSI stem wire contract
 
-This is the whole protocol a worker must speak to join a PandoSI quorum.
+This is the whole protocol a worker must speak to join a PandoRSI quorum.
 It is deliberately small and JSON-over-HTTP, so a device joins with
 whatever runtime it already has — OpenVINO, ONNX Runtime, native PyTorch,
 a shell script, anything that can serve HTTP. Nothing in the contract

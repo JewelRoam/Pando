@@ -165,10 +165,10 @@
     "both_online_at_finish": true
   },
   "commands": {
-    "condition_a": "/Users/zhengenrong/Downloads/PandoSI/.venv/bin/python /private/tmp/pandosi-task-012/tools/llm_decision_check.py --suite /private/tmp/pandosi-task-012/assets/heldout4_test.jsonl --variant b --base-url http://127.0.0.1:8082/v1 --api-key-file /Users/zhengenrong/.pandosi/llm-api-8b.token --model qwen3-8b-instruct --timeout 180 --out /Users/zhengenrong/.pandosi/task012/condition-a-votes.json --summary-out /Users/zhengenrong/.pandosi/task012/condition-a-summary.json",
-    "condition_b": "/Users/zhengenrong/Downloads/PandoSI/.venv/bin/python /private/tmp/pandosi-task-012/tools/llm_decision_check.py --suite /private/tmp/pandosi-task-012/assets/heldout4_test.jsonl --variant b --base-url http://127.0.0.1:8082/v1 --api-key-file /Users/zhengenrong/.pandosi/llm-api-8b.token --model qwen3-8b-instruct --timeout 180 --out /Users/zhengenrong/.pandosi/task012/condition-b-votes.json --summary-out /Users/zhengenrong/.pandosi/task012/condition-b-summary.json",
+    "condition_a": "/Users/zhengenrong/Downloads/PandoRSI/.venv/bin/python /private/tmp/pandosi-task-012/tools/llm_decision_check.py --suite /private/tmp/pandosi-task-012/assets/heldout4_test.jsonl --variant b --base-url http://127.0.0.1:8082/v1 --api-key-file /Users/zhengenrong/.pandosi/llm-api-8b.token --model qwen3-8b-instruct --timeout 180 --out /Users/zhengenrong/.pandosi/task012/condition-a-votes.json --summary-out /Users/zhengenrong/.pandosi/task012/condition-a-summary.json",
+    "condition_b": "/Users/zhengenrong/Downloads/PandoRSI/.venv/bin/python /private/tmp/pandosi-task-012/tools/llm_decision_check.py --suite /private/tmp/pandosi-task-012/assets/heldout4_test.jsonl --variant b --base-url http://127.0.0.1:8082/v1 --api-key-file /Users/zhengenrong/.pandosi/llm-api-8b.token --model qwen3-8b-instruct --timeout 180 --out /Users/zhengenrong/.pandosi/task012/condition-b-votes.json --summary-out /Users/zhengenrong/.pandosi/task012/condition-b-summary.json",
     "stop_4b": "kill -TERM 70733 70730  # 4B proxy then 4B server; both PIDs confirmed absent",
-    "restore_4b": "/Users/zhengenrong/Downloads/PandoSI/.venv/bin/python /Users/zhengenrong/.pandosi/llm-daemon.py && /Users/zhengenrong/Downloads/PandoSI/.venv/bin/python /Users/zhengenrong/.pandosi/llm-proxy-daemon.py"
+    "restore_4b": "/Users/zhengenrong/Downloads/PandoRSI/.venv/bin/python /Users/zhengenrong/.pandosi/llm-daemon.py && /Users/zhengenrong/Downloads/PandoRSI/.venv/bin/python /Users/zhengenrong/.pandosi/llm-proxy-daemon.py"
   },
   "artifacts": {
     "condition_a_summary": "/Users/zhengenrong/.pandosi/task012/condition-a-summary.json",

@@ -1,4 +1,4 @@
-# PandoSI on Android TV boxes (Termux route)
+# PandoRSI on Android TV boxes (Termux route)
 
 Community-verified path (termux-packages #31634: python-onnxruntime works on
 Android; the import warning is harmless). No app packaging, no root.
@@ -11,9 +11,9 @@ Android; the import warning is harmless). No app packaging, no root.
 pkg update && pkg install python
 pip install pynacl zeroconf onnxruntime
 # 3. Copy the repo (from a PC on the same LAN):
-#    on PC:  scp -r D:/PandoSI/pando box:/data/data/com.termux/files/home/
+#    on PC:  scp -r D:/PandoRSI/pando box:/data/data/com.termux/files/home/
 # 4. Join the swarm:
-cd ~/PandoSI  # or wherever
+cd ~/PandoRSI  # or wherever
 python -m pando.join --node-id tvbox1 --root http://<root-ip>:8080
 ```
 

@@ -1,4 +1,4 @@
-"""One way to open URLs in PandoSI.
+"""One way to open URLs in PandoRSI.
 
 Every component used to carry its own no-proxy opener (12 copies on
 2026-10-17) and they drifted - one covered only the LAN IP, another missed

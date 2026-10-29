@@ -1,9 +1,9 @@
-# PandoSI Adoption Design — how an open-source swarm project gets used
+# PandoRSI Adoption Design — how an open-source swarm project gets used
 
 ## Design philosophy
 
 PyTorch won because `pip install torch` + 3 lines of code worked on day one.
-PandoSI's adoption follows the same law: **the first useful experience must
+PandoRSI's adoption follows the same law: **the first useful experience must
 require zero privilege, zero drivers, and under five minutes.**
 
 ## The three-ring capability model

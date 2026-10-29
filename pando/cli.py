@@ -1,4 +1,4 @@
-"""Unified command-line entry point for PandoSI."""
+"""Unified command-line entry point for PandoRSI."""
 
 from __future__ import annotations
 

@@ -110,7 +110,7 @@ def checks() -> list[dict]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="PandoSI capability report")
+    parser = argparse.ArgumentParser(description="PandoRSI capability report")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--plan", action="store_true",
                         help="print only the safe onboarding plan as JSON")

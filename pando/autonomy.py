@@ -1,4 +1,4 @@
-"""Observe -> decide -> act: the half of the loop PandoSI did not have.
+"""Observe -> decide -> act: the half of the loop PandoRSI did not have.
 
 Round 98 measured Laya's built-in act head on eight states through both
 ecosystems: it returns 1.0 for everything, so the model cannot decide

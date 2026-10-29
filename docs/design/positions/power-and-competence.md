@@ -8,7 +8,7 @@ measurements already say, the position we adopt, and the experiments that could 
 - Structural power: who can admit, exclude, define policy, hold keys, survive others' exits.
 - Epistemic weight: how much a given answer counts for a given decision, right now.
 
-PandoSI decentralizes the first and *measures* the second. Confusing them produces the two classic traps:
+PandoRSI decentralizes the first and *measures* the second. Confusing them produces the two classic traps:
 "every voice is equal" (epistemic relativism, measurably worse) and "the best member decides" (an epistemic
 monarchy that is structurally centralizing and fails open on the king's blind spots).
 

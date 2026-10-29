@@ -1,4 +1,4 @@
-"""coordinator: the PandoSI consensus coordinator.
+"""coordinator: the PandoRSI consensus coordinator.
 
 Maintains a registry of stems (lazy expiry), fans decisions out concurrently
 to a checkpoint-diverse quorum, and aggregates votes via common.aggregate.
@@ -1273,7 +1273,7 @@ class Root:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="PandoSI root coordinator")
+    parser = argparse.ArgumentParser(description="PandoRSI root coordinator")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--serve-spore", default=None,
                         help="payload file to serve for spore pulls")

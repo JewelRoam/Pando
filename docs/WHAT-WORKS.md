@@ -637,7 +637,7 @@ All items verified on real hardware/software.
 - **The first real LLM tier — deployed, evaluated, and honestly not yet a
   win**: the Mac node (via the task mailbox) deployed Qwen3-4B-Instruct
   Q4_K_M on llama.cpp with Metal (~45 tok/s, OpenAI-compatible, key-guarded)
-  and ran it as a PandoSI decision worker over split D: **0.7375 zero-shot
+  and ran it as a PandoRSI decision worker over split D: **0.7375 zero-shot
   with 100% parse success** — within a point of untuned Laya, far under the
   fine-tuned member's 0.9417. Seated into the fleet, its raw confidence
   (mean 0.9586 against 0.7375 accuracy, ECE 0.2211) swings the gate wide

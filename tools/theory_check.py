@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Machine-checked committee theory verification for PandoSI.
+"""Machine-checked committee theory verification for PandoRSI.
 
 This tool loads every recorded vote file in assets/votes/, estimates member
-accuracies and error correlations (phi coefficient), simulates the three PandoSI
+accuracies and error correlations (phi coefficient), simulates the three PandoRSI
 voting policies (plain majority, assent gate, and veto witness fallback), and
 verifies the theoretical predictions derived in docs/design/THEORY-committee.md.
 

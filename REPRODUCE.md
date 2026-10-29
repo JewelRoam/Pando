@@ -1,4 +1,4 @@
-# Reproducing PandoSI results
+# Reproducing PandoRSI results
 
 Every number in this repository traces to a reproducible experiment.
 This guide walks through each one, from simplest to most complex.

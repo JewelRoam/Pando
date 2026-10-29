@@ -1,4 +1,4 @@
-"""Verify that a built PandoSI wheel contains code and small runtime assets."""
+"""Verify that a built PandoRSI wheel contains code and small runtime assets."""
 
 from __future__ import annotations
 

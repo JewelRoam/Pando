@@ -47,7 +47,7 @@ def main() -> int:
     rows = [(path.name, *describe(path)) for path in files]
     rows.sort(key=lambda row: sort_key(row[1]))
 
-    lines = ["# PandoSI research round index",
+    lines = ["# PandoRSI research round index",
              "Rebuilt by tools/build_research_index.py; one row per file.",
              "",
              "| file | round | title |",

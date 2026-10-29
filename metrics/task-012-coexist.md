@@ -45,7 +45,7 @@ Status: done
 
 ## 产出
 
-- 必需的合并 summary：`/Users/zhengenrong/Downloads/PandoSI/metrics/task-012-coexist.json`
+- 必需的合并 summary：`/Users/zhengenrong/Downloads/PandoRSI/metrics/task-012-coexist.json`
 - 两份详细 summary：`~/.pandosi/task012/condition-{a,b}-summary.json`
 - 两份原始 votes：`~/.pandosi/task012/condition-{a,b}-votes.json`
 - 运行日志：`~/.pandosi/task012/condition-{a,b}.log`
@@ -55,7 +55,7 @@ Status: done
 
 ```bash
 # A：同驻
-/Users/zhengenrong/Downloads/PandoSI/.venv/bin/python \
+/Users/zhengenrong/Downloads/PandoRSI/.venv/bin/python \
   /private/tmp/pandosi-task-012/tools/llm_decision_check.py \
   --suite /private/tmp/pandosi-task-012/assets/heldout4_test.jsonl \
   --variant b --base-url http://127.0.0.1:8082/v1 \
@@ -69,6 +69,6 @@ kill -TERM 70733 70730
 # 然后重复上面命令，输出改为 condition-b-*。
 
 # 恢复 4B
-/Users/zhengenrong/Downloads/PandoSI/.venv/bin/python /Users/zhengenrong/.pandosi/llm-daemon.py
-/Users/zhengenrong/Downloads/PandoSI/.venv/bin/python /Users/zhengenrong/.pandosi/llm-proxy-daemon.py
+/Users/zhengenrong/Downloads/PandoRSI/.venv/bin/python /Users/zhengenrong/.pandosi/llm-daemon.py
+/Users/zhengenrong/Downloads/PandoRSI/.venv/bin/python /Users/zhengenrong/.pandosi/llm-proxy-daemon.py
 ```

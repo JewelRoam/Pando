@@ -3,7 +3,7 @@
 
 Why this exists
 ---------------
-Every result PandoSI has produced so far compares the swarm to *itself* or to
+Every result PandoRSI has produced so far compares the swarm to *itself* or to
 a worse swarm. The claim the project actually makes - that a committee of
 small models is competitive with one larger model that fits the same memory -
 has never been measured, because the fleet never held a big model and a

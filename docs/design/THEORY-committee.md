@@ -2,13 +2,13 @@
 
 ## 1. Executive Summary & Foundational Motivation
 
-PandoSI deploys heterogeneous ensembles of lightweight decision models ("neurons" and "stems") that reach collective judgments via an HTTP/JSON root service. Unlike conventional machine-learning ensembles operating in unconstrained server clusters, PandoSI runs across resource-limited, heterogeneous edge nodes (e.g., Intel AI PC CPU/iGPU/NPU, desktop CUDA GPUs, and LAN-connected Apple Silicon Mac endpoints).
+PandoRSI deploys heterogeneous ensembles of lightweight decision models ("neurons" and "stems") that reach collective judgments via an HTTP/JSON root service. Unlike conventional machine-learning ensembles operating in unconstrained server clusters, PandoRSI runs across resource-limited, heterogeneous edge nodes (e.g., Intel AI PC CPU/iGPU/NPU, desktop CUDA GPUs, and LAN-connected Apple Silicon Mac endpoints).
 
 In this environment, two conflicting dynamics govern decision quality:
 1. **The Condorcet Dividend**: Aggregating independent opinions reduces decision variance and exponentially suppresses error rates.
 2. **The Correlation Penalty & Redundancy Cliff**: Replicating model weights or fine-tuning descendants from identical base checkpoints introduces strong positive error correlation ($\phi \to 1.0$), transforming nominally distinct votes into redundant echo chambers. Furthermore, seating weak voters can actively outvote competent experts on difficult tasks.
 
-To reconcile these tensions, PandoSI implements three concrete decision policies:
+To reconcile these tensions, PandoRSI implements three concrete decision policies:
 * **Policy (a) Plain Majority Vote**: Symmetric aggregation with probability-mass tie-breaking.
 * **Policy (b) Majority + Assent Gate**: Autonomous execution tier (`auto`) requiring strict consensus and explicit assent from the registered domain expert (the *witness*).
 * **Policy (c) Veto Witness Fallback**: Safety-critical routing where any non-auto row falls back directly to the designated witness.
@@ -65,7 +65,7 @@ $$P(c_1, \dots, c_k) = \prod_{i=1}^k p_i^{c_i} (1 - p_i)^{1 - c_i} \left[ 1 + \s
 
 ---
 
-## 3. Consensus Policies in PandoSI
+## 3. Consensus Policies in PandoRSI
 
 ### 3.1 Offline Mechanics, Tie-Breaking, and Neutral Votes
 
@@ -100,7 +100,7 @@ $$P_{\text{plain}}^{\text{corr}} = \Phi\left( \frac{\sum_{i=1}^k p_i - k/2}{\sqr
 
 ### 3.3 Policy (b): Majority + Assent Gate
 
-Policy (b) formalizes PandoSI's autonomous execution tier (`tier = "auto"`).
+Policy (b) formalizes PandoRSI's autonomous execution tier (`tier = "auto"`).
 In `pando/coordinator.py` and `reproduce_headlines.py`:
 1. Agreement threshold: $\frac{\text{top count}}{k} \ge 0.60$.
 2. Confidence threshold: $\bar{q}_{\text{top}} \ge 0.60$.
@@ -294,4 +294,4 @@ While the mathematical model accurately reflects offline recorded votes, operati
 
 ## 8. Provenance
 
-This document was drafted by an AI agent (Gemini 3.8 Flash via Antigravity CLI) on **2026-10-16** under delegation from the PandoSI maintainers. All mathematical formulations and numeric claims were machine-checked and verified against the in-repo recorded votes by `tools/theory_check.py`.
+This document was drafted by an AI agent (Gemini 3.8 Flash via Antigravity CLI) on **2026-10-16** under delegation from the PandoRSI maintainers. All mathematical formulations and numeric claims were machine-checked and verified against the in-repo recorded votes by `tools/theory_check.py`.
