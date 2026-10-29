@@ -892,6 +892,7 @@ class TestSmoke(unittest.TestCase):
         # A declared category decides, so a question whose *text* looks
         # innocent still gets the demanding floor (round 112).
         tmp = Path(tempfile.mkdtemp(prefix="pando-category-"))
+        self.addCleanup(__import__("shutil").rmtree, tmp, True)
         path = tmp / "categorised.toml"
         path.write_text(
             '[meta]\nname = "categorised"\nversion = 1\n\n'
@@ -932,6 +933,7 @@ class TestSmoke(unittest.TestCase):
                                    generate_signing_key, pull_spore)
 
         tmp = Path(tempfile.mkdtemp(prefix="pando-delta-"))
+        self.addCleanup(__import__("shutil").rmtree, tmp, True)
         base = tmp / "parent"
         child_dir = tmp / "child"
         base.mkdir()
@@ -997,6 +999,7 @@ class TestSmoke(unittest.TestCase):
                                    generate_signing_key, pull_spore)
 
         tmp = Path(tempfile.mkdtemp(prefix="pando-batch-"))
+        self.addCleanup(__import__("shutil").rmtree, tmp, True)
         payload = tmp / "model.bin"
         # 151 chunks: several batches, with a short final chunk.
         body = secrets.token_bytes(150 * 64 * 1024 + 1234)
@@ -1047,6 +1050,7 @@ class TestSmoke(unittest.TestCase):
         from pando.spore import artifact_digest
 
         tmp = Path(tempfile.mkdtemp(prefix="pando-reproduce-"))
+        self.addCleanup(__import__("shutil").rmtree, tmp, True)
         payload = tmp / "model.onnx"
         payload.write_bytes(b"pando-reproduction-policy" * 512)
         digest = artifact_digest(payload)
@@ -1124,6 +1128,7 @@ class TestSmoke(unittest.TestCase):
                                       verify_playbook_signature)
 
         tmp = Path(tempfile.mkdtemp(prefix="pando-signed-"))
+        self.addCleanup(__import__("shutil").rmtree, tmp, True)
         path = tmp / "signed.toml"
         path.write_text(
             '[meta]\nname = "signed"\nversion = 1\n\n'
@@ -1179,6 +1184,7 @@ class TestSmoke(unittest.TestCase):
         from pando.playbook import load_playbook, resolve_admitted_lineages
 
         tmp = Path(tempfile.mkdtemp(prefix="pando-lineage-"))
+        self.addCleanup(__import__("shutil").rmtree, tmp, True)
         playbook_path = tmp / "declared.toml"
         playbook_path.write_text(
             '[meta]\nname = "declared"\nversion = 1\n\n'

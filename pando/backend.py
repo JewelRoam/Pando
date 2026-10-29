@@ -51,7 +51,8 @@ class MockBackend:
         # A real device serves one decision at a time; an unsynchronised
         # sleep is infinitely parallel and hides the capacity limit entirely.
         self.serialize = bool(serialize)
-        self._gate = None
+        import threading
+        self._gate = threading.Lock()
 
     def decide(self, req: DecisionRequest) -> Vote:
         if not req.candidates:
@@ -59,9 +60,6 @@ class MockBackend:
         if self.delay_ms:
             import time
             if self.serialize:
-                import threading
-                if self._gate is None:
-                    self._gate = threading.Lock()
                 with self._gate:
                     time.sleep(self.delay_ms / 1000.0)
             else:
@@ -306,39 +304,7 @@ class OpenAIChoiceBackend:
         self.prompt_variant = "b"
         self.timeout = float(timeout)
         self.probability = float(probability)
-        self._transport = transport or self._default_transport
-
-    @staticmethod
-    def _default_transport(url: str, payload: dict, api_key: str,
-                           timeout: float) -> dict:
-        import json
-        import urllib.error
-        import urllib.request
-
-        from .common import bypass_proxy_for_lan
-
-        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        headers = {"Content-Type": "application/json"}
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
-        request = urllib.request.Request(url, data=data, headers=headers,
-                                         method="POST")
-        # LAN/loopback traffic must not be surrendered to a system proxy.
-        bypass_proxy_for_lan()
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        try:
-            with opener.open(request, timeout=timeout) as response:
-                body = response.read()
-        except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", "replace")
-            raise RuntimeError(f"HTTP {exc.code}: {detail}") from exc
-        except urllib.error.URLError as exc:
-            raise RuntimeError(f"unreachable: {exc}") from exc
-        try:
-            return json.loads(body)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(
-                f"invalid JSON response: {body[:500]!r}") from exc
+        self._transport = transport or _transport
 
     def _user_prompt(self, req: DecisionRequest) -> str:
         return (
@@ -390,6 +356,40 @@ class OpenAIChoiceBackend:
         if not text:
             raise RuntimeError("model returned an empty message")
         return text
+
+
+def _transport(url: str, payload: dict, api_key: str,
+               timeout: float) -> dict:
+    """POST `payload` to `url` and return the parsed JSON body.
+
+    Routes through net.open_url so the project proxy rules (LAN/loopback
+    go direct, public hosts keep the system proxy) apply uniformly.
+    """
+    import json
+    import urllib.error
+    import urllib.request
+
+    from . import net
+
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    request = urllib.request.Request(url, data=data, headers=headers,
+                                     method="POST")
+    try:
+        with net.open_url(request, timeout=timeout) as response:
+            body = response.read()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")
+        raise RuntimeError(f"HTTP {exc.code}: {detail}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"unreachable: {exc}") from exc
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"invalid JSON response: {body[:500]!r}") from exc
 
 
 class _OVLazySession:

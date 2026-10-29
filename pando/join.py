@@ -469,7 +469,11 @@ def main() -> None:
                             headers=auth_headers(args.pairing_token)),
                         timeout=3)
             except Exception:
-                pass
+                # Heartbeat failures are expected during coordinator restarts;
+                # log at debug level so they are visible but not noisy.
+                import logging
+                logging.getLogger(__name__).debug(
+                    "heartbeat to %s failed", root_url, exc_info=True)
 
     threading.Thread(target=heartbeat, daemon=True).start()
 

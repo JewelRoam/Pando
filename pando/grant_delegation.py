@@ -66,9 +66,11 @@ def _require_text(payload: dict, key: str, limit: int = 2000) -> str:
     return value.strip()
 
 
-def verify_envelope(envelope: dict, *, expected_pubkey: str = MAC_OPERATOR_PUBKEY,
+def verify_envelope(envelope: dict, *, expected_pubkey: str | None = None,
                     now: dt.datetime | None = None) -> dict:
     """Validate the exact wire shape, lifetime and pinned signature."""
+    if expected_pubkey is None:
+        expected_pubkey = MAC_OPERATOR_PUBKEY
     if not isinstance(envelope, dict):
         raise DelegationError("delegation envelope must be a JSON object")
     if set(envelope) != ENVELOPE_FIELDS:
@@ -159,9 +161,11 @@ def _delegated_fields(payload: dict) -> dict:
 
 
 def install_envelope(envelope: dict, grants_path: Path | str | None = None, *,
-                     expected_pubkey: str = MAC_OPERATOR_PUBKEY,
+                     expected_pubkey: str | None = None,
                      now: dt.datetime | None = None) -> dict:
     """Verify and install a delegation, preserving a human-authored grant."""
+    if expected_pubkey is None:
+        expected_pubkey = MAC_OPERATOR_PUBKEY
     payload = verify_envelope(envelope, expected_pubkey=expected_pubkey, now=now)
     path = Path(grants_path) if grants_path else default_grants_path()
     current = load_grants(path).get(ACTION)
@@ -226,7 +230,7 @@ def operator_status(grant_path: Path | str | None = None,
 
 def refresh_and_install(urls: list[str] | tuple[str, ...], *,
                         token_file: Path | str, grants_path: Path | str | None = None,
-                        expected_pubkey: str = MAC_OPERATOR_PUBKEY,
+                        expected_pubkey: str | None = None,
                         timeout: float = 8.0,
                         now: dt.datetime | None = None) -> dict:
     """Fetch from the first answering grant shelf and update local state safely.
@@ -236,6 +240,8 @@ def refresh_and_install(urls: list[str] | tuple[str, ...], *,
     revocation, and even then only a grant carrying this module's origin is
     deleted.
     """
+    if expected_pubkey is None:
+        expected_pubkey = MAC_OPERATOR_PUBKEY
     ordered = list(dict.fromkeys(str(url).rstrip("/") for url in urls
                                  if str(url or "").strip()))
     if not ordered:

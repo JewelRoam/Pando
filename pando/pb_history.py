@@ -1,8 +1,13 @@
 """Playbook version history: an append-only hash chain.
 
 Each entry: {seq, hash, parent, playbook_hash, ts}
-where hash = sha256(parent + playbook_hash + ts + seq). The chain makes any
-tampering with past entries detectable (verify_chain recomputes every hash).
+where hash = sha256(parent + playbook_hash + ts + seq).
+
+Honest security claim: this chain detects *tampering* with past entries
+(it is an integrity check).  It does NOT prove *authenticity* — anyone can
+compute a sha256 and forge a valid-looking chain.  If you need provenance,
+sign the chain head with an out-of-band key.
+
 This is the file layer of the evolution loop (Phase 5): playbook v(n+1)
 declares parent = v(n) hash, so a lineage is auditable end to end.
 """
@@ -58,7 +63,7 @@ def load_entries(history_path: Path) -> list[dict]:
     return entries
 
 
-def verify_chain(history_path: Path, genesis_parent: str = GENESIS_PARENT) -> tuple[bool, list[str]]:
+def check_integrity(history_path: Path, genesis_parent: str = GENESIS_PARENT) -> tuple[bool, list[str]]:
     """Recompute every hash; return (ok, problems)."""
     problems: list[str] = []
     parent = genesis_parent

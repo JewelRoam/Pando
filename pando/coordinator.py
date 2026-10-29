@@ -1415,7 +1415,7 @@ def main() -> None:
         root.set_auth_token(args.auth_token)
         print(f"kill-switch enabled (token set)", flush=True)
     if args.playbook:
-        from .pb_history import verify_chain
+        from .pb_history import check_integrity
         from .playbook import (load_verified_playbook,
                                resolve_admitted_lineages, resolve_blocs,
                                resolve_combiner)
@@ -1466,7 +1466,7 @@ def main() -> None:
                       f"{attested}", flush=True)
         pb_hash = root.playbook.hash()
         if args.history:
-            ok, problems = verify_chain(Path(args.history))
+            ok, problems = check_integrity(Path(args.history))
             if not ok:
                 raise SystemExit(
                     f"SECURITY: playbook history chain FAILED verification: {problems}")

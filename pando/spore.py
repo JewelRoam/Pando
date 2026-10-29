@@ -589,6 +589,18 @@ def split_chunks(data: bytes, chunk_size: int = CHUNK_SIZE) -> list[bytes]:
     return [data[i:i + chunk_size] for i in range(0, len(data), chunk_size)]
 
 
+def _resolve_in(out_dir: Path, name: str) -> Path:
+    """Resolve `name` inside `out_dir`, rejecting path traversal.
+
+    The manifest is signed so a trusted signer will not embed "../", but a
+    defensive check costs nothing and makes the invariant explicit.
+    """
+    target = (out_dir / name).resolve()
+    if not str(target).startswith(str(out_dir.resolve())):
+        raise ValueError(f"path escapes out_dir: {name!r}")
+    return target
+
+
 class SporeServer:
     """Serves a signed manifest and file chunks over HTTP (LAN, trusted).
 
@@ -768,7 +780,7 @@ def _pull_cdc(client: "SporeClient", manifest: dict, out_dir: Path,
             + time.perf_counter() - transfer_started, 3)
 
         assemble_started = time.perf_counter()
-        target = out_dir / name
+        target = _resolve_in(out_dir, name)
         target.parent.mkdir(parents=True, exist_ok=True)
         with target.open("wb") as handle:
             for index, digest in enumerate(hashes):
@@ -900,7 +912,7 @@ def pull_spore(manifest_url: str, out_dir: Path, verify_key,
             return _pull_cdc(client, manifest, out_dir, chunk_store,
                              batch_chunks, stats)
         for name, entry in manifest["files"].items():
-            target = out_dir / name
+            target = _resolve_in(out_dir, name)
             target.parent.mkdir(parents=True, exist_ok=True)
             with target.open("wb") as fh:
                 start = 0
