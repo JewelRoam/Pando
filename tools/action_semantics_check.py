@@ -33,6 +33,12 @@ and places the two calls for each pair/arm next to each other, alternating which
 variant goes first.  This removes the cross-run service drift in the earlier
 comparison while leaving the preregistered decision rule unchanged.
 
+``--interleave-synonym-paraphrase`` keeps the causal decision dependencies but
+rewrites every goal with different content words.  It is a separate, fixed
+stress test: high accuracy makes a shallow keyword-matching explanation less
+plausible, while a significant drop is evidence that the earlier result was
+wording-sensitive.
+
 This is a local mechanism check, not evidence of collective intelligence.
 """
 
@@ -144,10 +150,45 @@ STRUCTURAL_GOALS = {
         "先写下一个新的可选做法，等别人独立检查后再真正落地。"
     ),
 }
+SYNONYM_GOALS = {
+    "seed.export": (
+        "假如今夜这台设备永久掉线，后续接手者要拿到一份当前设备产出的"
+        "来源凭据，并能在异地辨别真伪；先备妥它，再附一长串可供对照的指纹。"
+    ),
+    "seed.replicate": (
+        "远端设备已经答应接班，但接班所需的同一份凭据此刻仅存于这里；"
+        "把它运交过去，并确认双方所得毫无差异。"
+    ),
+    "recruit.invite": (
+        "某个外部个体已明确愿意接下职责，却尚未出现在我们的人员表内；"
+        "发给它入口，并让后续调度可以定位它。"
+    ),
+    "reproduce.spawn": (
+        "眼下仅有一个执行单元，若它退出，工作就无人承接；设备尚有余力，"
+        "照着这个单元再造一份可自行启动的第二份。"
+    ),
+    "policy.set": (
+        "眼下只要少数反对，待决事项就一直无法获准通过；在许可边界内"
+        "调整这套取舍办法，并保存调整前的数值。"
+    ),
+    "culture.refine": (
+        "同样的失误一再发生，原因是众人沿用的做法没说清做到哪一步才算"
+        "结束；重写那份共同约定，使每个人都依同一套步骤完成收尾。"
+    ),
+    "resource.rebalance": (
+        "一侧设备的余量将近枯竭，另一侧尚有空闲；把正在做的工作连同"
+        "负责它的执行体转到空处，同时预先写明何时撤回。"
+    ),
+    "meta.propose": (
+        "同一种现有清单叫不出的需求一再出现；先记下一个新的可选做法，"
+        "待他人独立核查后再真正落地。"
+    ),
+}
 GOAL_VARIANTS = {
     "literal": LITERAL_GOALS,
     "causal": CAUSAL_GOALS,
     "structural": STRUCTURAL_GOALS,
+    "synonym": SYNONYM_GOALS,
 }
 
 # These are explicit content cues from each action description, not generic
@@ -197,6 +238,25 @@ STRUCTURAL_PREREGISTRATION = {
     },
     "otherwise": "inconclusive",
 }
+SYNONYM_PREREGISTRATION = {
+    "control_goal_variant": "causal",
+    "candidate_goal_variant": "synonym",
+    "primary_arms": ["opaque_a", "opaque_b"],
+    "perturbation": (
+        "same decision dependencies, rewritten with different content words "
+        "while retaining no action-description cues"
+    ),
+    "synonym_fragility_supported_if": {
+        "minimum_absolute_accuracy_drop": 0.15,
+        "directional_exact_mcnemar_alpha": 0.05,
+    },
+    "synonym_robustness_supported_if": {
+        "minimum_candidate_opaque_accuracy": 0.90,
+        "wilson_95_lower_bound_above_chance": True,
+        "directional_exact_mcnemar_alpha": 0.05,
+    },
+    "otherwise": "inconclusive",
+}
 ARM_ORDERS = (
     ("named_a", "opaque_a", "named_b", "opaque_b"),
     ("opaque_a", "named_b", "opaque_b", "named_a"),
@@ -207,6 +267,7 @@ ARMS = tuple(ARM_ORDERS[0])
 OPAQUE_LABELS = ("k7", "m2", "q9", "v4", "a8", "c3", "h6", "t1")
 INTERLEAVED_SCHEMA = "action-semantics-interleaved-v1"
 STRUCTURAL_INTERLEAVED_SCHEMA = "action-semantics-structural-interleaved-v1"
+SYNONYM_INTERLEAVED_SCHEMA = "action-semantics-synonym-interleaved-v1"
 SYSTEM_PROMPT = """你是多主机殖民地的动作选择器。
 用户会给出一个唯一目标，以及一张候选动作表。表中每一项都有一个标识和说明。
 只根据目标和同一行的说明选择一个最匹配的动作；不要根据编号、位置、真实动作名或历史偏好猜测。
@@ -539,30 +600,49 @@ def classify_goal_comparison(comparison: dict) -> str:
     return "inconclusive"
 
 
-def classify_structural_comparison(comparison: dict) -> str:
-    """Apply the fixed preregistered structural-perturbation decision rule."""
+def _classify_perturbation_comparison(comparison: dict, preregistration: dict,
+                                      fragility_key: str,
+                                      robustness_key: str) -> str:
     n = int(comparison.get("n_valid_pairs") or 0)
     if not n:
         return "inconclusive"
     drop = -float(comparison.get("absolute_accuracy_change") or 0.0)
     baseline_better_p = float(
         comparison.get("baseline_better_exact_one_sided_p", 1.0))
-    collapse_rule = STRUCTURAL_PREREGISTRATION[
-        "structural_fragility_supported_if"]
+    collapse_rule = preregistration[fragility_key]
     if (drop >= collapse_rule["minimum_absolute_accuracy_drop"]
             and baseline_better_p
             < collapse_rule["directional_exact_mcnemar_alpha"]):
-        return "structural_fragility_supported"
-    preserve_rule = STRUCTURAL_PREREGISTRATION[
-        "structural_robustness_supported_if"]
+        return fragility_key.removesuffix("_if")
+    preserve_rule = preregistration[robustness_key]
     accuracy = float(comparison.get("candidate_accuracy") or 0.0)
     lower = float((comparison.get("candidate_wilson_95") or [0.0, 0.0])[0])
     if (accuracy >= preserve_rule["minimum_candidate_opaque_accuracy"]
             and lower > 1.0 / len(ACTION_IDS)
             and baseline_better_p
             >= preserve_rule["directional_exact_mcnemar_alpha"]):
-        return "structural_robustness_supported"
+        return robustness_key.removesuffix("_if")
     return "inconclusive"
+
+
+def classify_structural_comparison(comparison: dict) -> str:
+    """Apply the fixed preregistered structural-perturbation decision rule."""
+    return _classify_perturbation_comparison(
+        comparison,
+        STRUCTURAL_PREREGISTRATION,
+        "structural_fragility_supported_if",
+        "structural_robustness_supported_if",
+    )
+
+
+def classify_synonym_comparison(comparison: dict) -> str:
+    """Apply the fixed preregistered synonym-rewrite decision rule."""
+    return _classify_perturbation_comparison(
+        comparison,
+        SYNONYM_PREREGISTRATION,
+        "synonym_fragility_supported_if",
+        "synonym_robustness_supported_if",
+    )
 
 
 def summarise(rows: list[dict], pairs: int) -> dict:
@@ -886,11 +966,12 @@ def compare_artifacts(baseline: dict, candidate: dict,
     comparison = paired_binary_comparison(
         baseline.get("rows") or [], candidate.get("rows") or [],
         tuple(preregistration["primary_arms"]))
-    classifier = (
-        classify_structural_comparison
-        if candidate_variant == "structural"
-        else classify_goal_comparison
-    )
+    if candidate_variant == "structural":
+        classifier = classify_structural_comparison
+    elif candidate_variant == "synonym":
+        classifier = classify_synonym_comparison
+    else:
+        classifier = classify_goal_comparison
     return {
         "baseline_audit_ok": baseline_audit["ok"],
         "candidate_audit_ok": candidate_audit["ok"],
@@ -1003,7 +1084,12 @@ def artifact_for_run(args, trials: list[dict], rows: list[dict],
         "goal_texts": GOAL_VARIANTS[goal_variant],
         "causal_goal_lexical_audit": lexical_audit(),
         "structural_goal_lexical_audit": lexical_audit(STRUCTURAL_GOALS),
-        "preregistration": (PREREGISTRATION if goal_variant == "causal" else None),
+        "synonym_goal_lexical_audit": lexical_audit(SYNONYM_GOALS),
+        "preregistration": (
+            PREREGISTRATION if goal_variant == "causal"
+            else SYNONYM_PREREGISTRATION if goal_variant == "synonym"
+            else STRUCTURAL_PREREGISTRATION if goal_variant == "structural"
+            else None),
         "system": SYSTEM_PROMPT,
         "system_sha256": _sha256(SYSTEM_PROMPT),
         "actions": [
@@ -1013,6 +1099,7 @@ def artifact_for_run(args, trials: list[dict], rows: list[dict],
                 "literal_goal": LITERAL_GOALS[action],
                 "causal_goal": CAUSAL_GOALS[action],
                 "structural_goal": STRUCTURAL_GOALS[action],
+                "synonym_goal": SYNONYM_GOALS[action],
             }
             for action, description, _ in ACTIONS
         ],
@@ -1042,6 +1129,8 @@ def artifact_for_run(args, trials: list[dict], rows: list[dict],
             "causal_goals_have_no_description_cues": lexical_audit()["ok"],
             "structural_goals_have_no_description_cues":
                 lexical_audit(STRUCTURAL_GOALS)["ok"],
+            "synonym_goals_have_no_description_cues":
+                lexical_audit(SYNONYM_GOALS)["ok"],
         },
     }
 
@@ -1098,6 +1187,11 @@ def run_interleaved(args, variants: tuple[str, str] = ("literal", "causal"),
         if variants == (
             STRUCTURAL_PREREGISTRATION["control_goal_variant"],
             STRUCTURAL_PREREGISTRATION["candidate_goal_variant"],
+        )
+        else SYNONYM_INTERLEAVED_SCHEMA
+        if variants == (
+            SYNONYM_PREREGISTRATION["control_goal_variant"],
+            SYNONYM_PREREGISTRATION["candidate_goal_variant"],
         )
         else INTERLEAVED_SCHEMA
     )
@@ -1196,6 +1290,8 @@ def main(argv=None) -> int:
                         help="sample literal and causal goals adjacently in one process")
     parser.add_argument("--interleave-structural-perturbation", action="store_true",
                         help="sample causal and structural goals adjacently in one process")
+    parser.add_argument("--interleave-synonym-paraphrase", action="store_true",
+                        help="sample causal and synonym goals adjacently in one process")
     parser.add_argument("--output", default="")
     parser.add_argument("--audit-artifact", default="")
     parser.add_argument("--compare-artifact", default="")
@@ -1205,9 +1301,13 @@ def main(argv=None) -> int:
         audit = audit_artifact(json.loads(path.read_text(encoding="utf-8")))
         print_audit(audit, path)
         return 0 if audit["ok"] else 1
-    interleaved_mode = (
-        args.interleave_goal_variants or args.interleave_structural_perturbation)
-    if args.interleave_goal_variants and args.interleave_structural_perturbation:
+    interleaved_flags = (
+        args.interleave_goal_variants,
+        args.interleave_structural_perturbation,
+        args.interleave_synonym_paraphrase,
+    )
+    interleaved_mode = any(interleaved_flags)
+    if sum(interleaved_flags) > 1:
         parser.error("choose only one interleaved comparison")
     if interleaved_mode:
         if args.goal_variant != "causal":
@@ -1221,6 +1321,13 @@ def main(argv=None) -> int:
             )
             result = run_interleaved(
                 args, variants, STRUCTURAL_PREREGISTRATION)
+        elif args.interleave_synonym_paraphrase:
+            variants = (
+                SYNONYM_PREREGISTRATION["control_goal_variant"],
+                SYNONYM_PREREGISTRATION["candidate_goal_variant"],
+            )
+            result = run_interleaved(
+                args, variants, SYNONYM_PREREGISTRATION)
         else:
             variants = ("literal", "causal")
             result = run_interleaved(args, variants, PREREGISTRATION)
