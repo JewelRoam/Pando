@@ -3,6 +3,11 @@
 This is a research repository. The bar for a change is not "it runs" - it is
 "the claim is traceable".
 
+**Agents (human or model) read [AGENTS.md](AGENTS.md) first.** The rules
+there are mechanical on purpose: this project expects contributions from
+models of very different sizes, and the architecture survives only if the
+smallest of them can follow every rule.
+
 ## Ground rules
 
 1. **Prediction first.** Write the expected number down (in the task, the
