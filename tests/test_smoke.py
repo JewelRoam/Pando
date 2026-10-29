@@ -15479,3 +15479,109 @@ class TestHistoricalActionBlindReview(unittest.TestCase):
         response["items"][0]["choice"] = "Z"
         with self.assertRaisesRegex(ValueError, "invalid choice"):
             tool.score_review(packet, key, prereg, response)
+
+
+class TestHistoricalActionModelReview(unittest.TestCase):
+    """The second-model collector must stay blind and replayable."""
+
+    def _tools(self):
+        import importlib.util
+        root = Path(__file__).resolve().parents[1]
+        paths = {
+            "blind": root / "tools" / "historical_action_blind_review.py",
+            "model": root / "tools" / "historical_action_model_review.py",
+        }
+        modules = {}
+        for name, path in paths.items():
+            spec = importlib.util.spec_from_file_location(
+                f"historical_action_model_review_{name}", path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            modules[name] = module
+        return modules["blind"], modules["model"]
+
+    def _packet(self, blind):
+        return {
+            "schema": blind.PACKET_SCHEMA,
+            "preregistration_sha256": "d" * 64,
+            "source_artifact_sha256": "e" * 64,
+            "items": [
+                {
+                    "review_id": "R01",
+                    "goal": "需要把可验证副本送到另一台主机",
+                    "choices": [
+                        {"choice": choice, "description": description}
+                        for choice, description in zip(
+                            [chr(ord("A") + i) for i in range(8)],
+                            [info[1] for info in blind.SEM.ACTIONS])
+                    ],
+                },
+                {
+                    "review_id": "R02",
+                    "goal": "共享流程反复缺少验收步骤",
+                    "choices": [
+                        {"choice": choice, "description": description}
+                        for choice, description in zip(
+                            [chr(ord("A") + i) for i in range(8)],
+                            [info[1] for info in blind.SEM.ACTIONS])
+                    ],
+                },
+            ],
+        }
+
+    def test_protocol_is_deterministic_and_does_not_leak_action_ids(self):
+        blind, tool = self._tools()
+        packet = self._packet(blind)
+        first = tool.build_protocol(packet)
+        second = tool.build_protocol(packet)
+        self.assertEqual(first, second)
+        self.assertEqual(first["item_count"], 2)
+        prompts = "\n".join(tool.item_prompt(item) for item in packet["items"])
+        for action in blind.ACTIONS:
+            self.assertNotIn(action, prompts)
+        self.assertEqual(first["reviewer"]["model"],
+                         "qwen3-4b-instruct-2507")
+
+    def test_parser_requires_a_valid_letter_and_confidence(self):
+        _, tool = self._tools()
+        parsed = tool.parse_reviewer_output(
+            '```json\n{"choice":"b","confidence":"HIGH","notes":"理由"}\n```',
+            set("ABCDEFGH"))
+        self.assertEqual(parsed, {
+            "choice": "B", "confidence": "high", "notes": "理由"})
+        with self.assertRaisesRegex(ValueError, "invalid choice"):
+            tool.parse_reviewer_output(
+                '{"choice":"Z","confidence":"high"}', set("ABCDEFGH"))
+        with self.assertRaisesRegex(ValueError, "invalid confidence"):
+            tool.parse_reviewer_output(
+                '{"choice":"A","confidence":"certain"}', set("ABCDEFGH"))
+
+    def test_collection_audit_replays_prompts_and_answers(self):
+        blind, tool = self._tools()
+        packet = self._packet(blind)
+        protocol = tool.build_protocol(packet)
+        rows = []
+        for item in packet["items"]:
+            prompt = tool.item_prompt(item)
+            rows.append({
+                "review_id": item["review_id"],
+                "prompt": prompt,
+                "prompt_sha256": tool._sha_text(prompt),
+                "raw_response": '{"choice":"A","confidence":"medium","notes":""}',
+                "parsed": {
+                    "choice": "A", "confidence": "medium", "notes": "",
+                },
+            })
+        response = tool.assemble_response(packet, protocol, rows)
+        collection = {
+            "schema": tool.COLLECTION_SCHEMA,
+            "status": "complete",
+            "packet_sha256": tool._sha_json(packet),
+            "protocol_sha256": tool._sha_json(protocol),
+            "rows": rows,
+        }
+        audit = tool.audit_collection(packet, protocol, collection, response)
+        self.assertTrue(audit["ok"], audit)
+        rows[0]["prompt"] = "tampered"
+        audit = tool.audit_collection(packet, protocol, collection, response)
+        self.assertFalse(audit["ok"])
