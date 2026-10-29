@@ -1070,10 +1070,14 @@ def main(argv=None) -> int:
         result = run_interleaved(args)
         print_interleaved_report(result)
         comparison_ok = result["comparison"]["outcome"] != "inconclusive"
+        artifact_ok = all(
+            all(artifact["artifact_checks"].values())
+            for artifact in result["variants"].values())
     else:
         result = run(args)
         print_report(result)
         comparison_ok = True
+        artifact_ok = all(result["artifact_checks"].values())
     if not args.interleave_goal_variants and args.compare_artifact:
         baseline_path = Path(args.compare_artifact).expanduser()
         baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
@@ -1090,7 +1094,7 @@ def main(argv=None) -> int:
         path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n",
                         encoding="utf-8")
         print(f"\nwrote {path}")
-    return 0 if all(result["artifact_checks"].values()) and comparison_ok else 1
+    return 0 if artifact_ok and comparison_ok else 1
 
 
 if __name__ == "__main__":
