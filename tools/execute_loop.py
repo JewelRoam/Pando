@@ -41,7 +41,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     # The service starts this file by path (not ``-m tools.execute_loop``), so
     # the repository root is not guaranteed to be importable.  The Windows
-    # dispatcher in particular runs it from ``D:\PandoRSI\tools``.
+    # dispatcher in particular runs it from ``<repo>\tools``.
     sys.path.insert(0, str(ROOT))
 
 from pando.grant_delegation import refresh_and_install  # noqa: E402

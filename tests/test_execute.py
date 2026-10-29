@@ -3999,9 +3999,11 @@ class TestResidentPullAllPlatforms(unittest.TestCase):
         # The node writes its own lists on first boot, so no human paste and
         # no other machine is needed to start pulling. Same two-part shape as
         # the dummy key above it: create if absent, then leave it alone.
+        self.assertIn("$repo = if ($env:PANDO_REPO)", text)
+        self.assertIn("$models = if ($env:PANDO_MODELS_DIR)", text)
         for variable, filename in (("$codeSources", "code-sources.txt"),
                                    ("$seedSources", "seed-sources.txt")):
-            self.assertIn(f"{variable} = 'D:\\PandoRSI\\models\\{filename}'", text)
+            self.assertIn(f"{variable} = Join-Path $models '{filename}'", text)
         self.assertEqual(text.count("if (-not (Test-Path $codeSources))"), 1)
         self.assertEqual(text.count("if (-not (Test-Path $seedSources))"), 1)
         # Tailscale is written before the home-LAN address on purpose: it is
@@ -4011,8 +4013,8 @@ class TestResidentPullAllPlatforms(unittest.TestCase):
         self.assertLess(text.index("100.92.184.4:8478  # mac"),
                         text.index("192.168.31.41:8478 # mac"))
         # And the two consumers are pointed at them.
-        self.assertIn("'--peer-file', 'D:\\PandoRSI\\models\\code-sources.txt'", text)
-        self.assertIn("'--from-file', 'D:\\PandoRSI\\models\\seed-sources.txt'", text)
+        self.assertIn("'--peer-file', $codeSources", text)
+        self.assertIn("'--from-file', $seedSources", text)
         self.assertIn("'--node-id', 'win'", text)
 
     def test_the_mac_agent_and_the_pi5_units_read_the_same_flag(self):
@@ -4047,7 +4049,23 @@ class TestResidentPullAllPlatforms(unittest.TestCase):
         mailbox = text.split("$mailboxArgs = @(")[1].split("\n#")[0]
         self.assertIn("agent_mailbox.py", mailbox)
         self.assertIn("'--code-repo', \"$repo\"", mailbox)
-        self.assertIn("'--code-cache', 'D:\\PandoRSI\\models\\code.bundle'", mailbox)
+        self.assertIn("'--code-cache', (Join-Path $models 'code.bundle')", mailbox)
+
+    def test_windows_operational_scripts_have_no_hardcoded_local_paths(self):
+        root = self._root()
+        for relative in (
+            "tools/win_node_supervisor.ps1",
+            "tools/win_stack_restart.ps1",
+            "tools/win_restart_clients.ps1",
+            "tools/win_yi_probe.ps1",
+            "tools/PandoRSI-Node.vbs.disabled",
+        ):
+            text = (root / relative).read_text(encoding="utf-8")
+            self.assertNotRegex(
+                text,
+                r"(?i)(?:^|[^A-Za-z])[A-Z]:[\\/]",
+                f"{relative} must derive its roots instead of naming a drive",
+            )
 
 
     def test_the_executor_reads_a_shelf_list_on_every_platform(self):

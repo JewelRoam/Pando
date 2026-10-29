@@ -435,11 +435,19 @@ class TestCodeSync(unittest.TestCase):
         The point of resolving by probe instead of by branch is that a unit
         definition, a LaunchAgent and a supervisor entry can pass the same
         empty flag and each host still finds its own file -- ``~/.pandosi`` on
-        the Mac, ``~/.pando`` on the Pi, ``D:\\PandoRSI\\models`` on Windows. A
+        the Mac, ``~/.pando`` on the Pi, ``<repo>/models`` on Windows. A
         host with none keeps the old behaviour exactly, and an explicit flag
         keeps the last word over the probe.
         """
         sync = self._load()
+        self.assertEqual(
+            sync.SOURCE_FILES["code"][-1],
+            str(sync.MODELS_DIR / "code-sources.txt"),
+        )
+        self.assertEqual(
+            sync.SOURCE_FILES["seed"][-1],
+            str(sync.MODELS_DIR / "seed-sources.txt"),
+        )
         real = sync.SOURCE_FILES
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

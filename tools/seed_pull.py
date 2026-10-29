@@ -181,7 +181,7 @@ def main(argv: list[str] | None = None) -> int:
     token = Path(args.token_file).expanduser().read_text(encoding="utf-8").strip()
     # `--from-file` may be empty: then the conventional names are probed, so
     # the same unit definition serves a host whose state directory is
-    # `~/.pandosi`, `~/.pando` or `D:\PandoRSI\models`.
+    # `~/.pandosi`, `~/.pando` or the checkout's `models` directory.
     bases = list(args.bases) + source_list(
         source_file(args.from_file, kind="seed"))
     ledger = Path(args.ledger).expanduser() if args.ledger else None

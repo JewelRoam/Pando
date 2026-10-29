@@ -11,9 +11,18 @@
 # live in exactly one place (tools/code_sync.py, CLIENT_UNITS), and this script
 # is one line of delegation to it. Keep it that way.
 $ErrorActionPreference = 'Continue'
-$repo = 'D:\PandoRSI'
+$repo = if ($env:PANDO_REPO) {
+  [IO.Path]::GetFullPath($env:PANDO_REPO)
+} else {
+  Split-Path -Parent $PSScriptRoot
+}
+$models = if ($env:PANDO_MODELS_DIR) {
+  [IO.Path]::GetFullPath($env:PANDO_MODELS_DIR)
+} else {
+  Join-Path $repo 'models'
+}
 $python = (Get-Command python).Source
-$log = 'D:\PandoRSI\models\logs\restart-clients.log'
+$log = Join-Path $models 'logs\restart-clients.log'
 New-Item -ItemType Directory -Force -Path (Split-Path $log) | Out-Null
 
 $out = & $python "$repo\tools\code_sync.py" --restart-clients --platform windows 2>&1

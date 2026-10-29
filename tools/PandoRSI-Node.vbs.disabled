@@ -1,1 +1,15 @@
-CreateObject("WScript.Shell").Run "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""D:\PandoRSI\tools\win_node_supervisor.ps1""", 0, False
+Option Explicit
+
+Dim fso, shell, scriptDir, repo, supervisor, command
+Set fso = CreateObject("Scripting.FileSystemObject")
+Set shell = CreateObject("WScript.Shell")
+
+repo = shell.Environment("Process")("PANDO_REPO")
+If Len(repo) = 0 Then
+  scriptDir = fso.GetParentFolderName(WScript.ScriptFullName)
+  repo = fso.GetParentFolderName(scriptDir)
+End If
+
+supervisor = fso.BuildPath(repo, "tools\win_node_supervisor.ps1")
+command = "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & supervisor & """"
+shell.Run command, 0, False

@@ -20,7 +20,10 @@ are not all the same kind of thing. Read this index before adding another.
 | `win_yi_probe.ps1`, `ctx_guard_probe.py` | one-shot hardware probes (Yi CPU load; llama-server VRAM/context guard). |
 | `pi5_llm_member.sh`, `pi5-systemd/`, `mac-launchd/` | per-host service units for the pi5 and the Mac. |
 
-Rule: operational tools carry no machine addresses; hosts live in
+Rule: operational tools carry no machine-local absolute paths or addresses.
+Derive the checkout from the script location, default mutable files under the
+checkout's ignored `models/` or `~/.pando`, and allow `PANDO_REPO`,
+`PANDO_MODELS_DIR` and `PANDO_STATE_DIR` overrides. Hosts live in
 `~/.pandosi/hosts.json` (shape in `hosts.example.json`).
 
 ## Fabric invariants (run locally; CI is a second copy)

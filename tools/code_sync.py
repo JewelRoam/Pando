@@ -33,6 +33,13 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+MODELS_DIR = Path(
+    os.environ.get("PANDO_MODELS_DIR")
+    or os.environ.get("PANDOSI_MODELS_DIR")
+    or REPO_ROOT / "models"
+).expanduser()
+
 # Client processes only. A model server is not on this list, on purpose.
 #
 # ``pandosi-react`` belongs here: pi5 installs this checkout into its venv, and
@@ -277,10 +284,10 @@ def source_list(path: str) -> list[str]:
 SOURCE_FILES: dict[str, tuple[str, ...]] = {
     "code": ("~/.pandosi/code-sources.txt",
              "~/.pando/code-sources.txt",
-             "D:/PandoRSI/models/code-sources.txt"),
+             str(MODELS_DIR / "code-sources.txt")),
     "seed": ("~/.pandosi/seed-sources.txt",
              "~/.pando/seed-sources.txt",
-             "D:/PandoRSI/models/seed-sources.txt"),
+             str(MODELS_DIR / "seed-sources.txt")),
 }
 
 
@@ -290,7 +297,8 @@ def source_file(explicit: str = "", *, kind: str = "code") -> str:
     ``explicit`` is the flag and always wins, so a unit that names its own
     file keeps the last word. With no flag the conventional names are probed,
     which is what lets one unit definition run unmodified on a host whose
-    state directory is ``~/.pandosi``, ``~/.pando`` or ``D:\\PandoRSI\\models``.
+    state directory is ``~/.pandosi``, ``~/.pando`` or the checkout's
+    ``models`` directory (override with ``PANDO_MODELS_DIR``).
     Returning "" rather than raising keeps the case that matters most safe:
     a node with no sources file behaves exactly as it did before this
     existed, and the primary fetch is untouched.

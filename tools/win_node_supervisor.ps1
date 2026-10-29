@@ -4,14 +4,27 @@
 # that exits. Written for Windows PowerShell 5.1 compatibility.
 $ErrorActionPreference = 'Continue'
 $env:HF_HUB_OFFLINE = '1'   # the ONNX member resolves repo files from local cache
-$repo = 'D:\PandoRSI'
-$logs = 'D:\PandoRSI\models\logs'
-$stateDir = Join-Path $env:USERPROFILE '.pando'
+$repo = if ($env:PANDO_REPO) {
+  [IO.Path]::GetFullPath($env:PANDO_REPO)
+} else {
+  Split-Path -Parent $PSScriptRoot
+}
+$models = if ($env:PANDO_MODELS_DIR) {
+  [IO.Path]::GetFullPath($env:PANDO_MODELS_DIR)
+} else {
+  Join-Path $repo 'models'
+}
+$stateDir = if ($env:PANDO_STATE_DIR) {
+  [IO.Path]::GetFullPath($env:PANDO_STATE_DIR)
+} else {
+  Join-Path $env:USERPROFILE '.pando'
+}
+$logs = Join-Path $models 'logs'
 New-Item -ItemType Directory -Force -Path $logs | Out-Null
 New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
 $python = (Get-Command python).Source
-$token = "$repo\artifacts\lan-experiment\root-pairing.token"
-$dummyKey = 'D:\PandoRSI\models\llm-dummy.token'
+$token = Join-Path $repo 'artifacts\lan-experiment\root-pairing.token'
+$dummyKey = Join-Path $models 'llm-dummy.token'
 if (-not (Test-Path $dummyKey)) {
   Set-Content -LiteralPath $dummyKey -Value 'x' -Encoding ascii
 }
@@ -26,7 +39,7 @@ if (-not (Test-Path $dummyKey)) {
 # address below it only works when both ends are on the home network, and on
 # 2026-10-19 the Mac left that network (192.168.31.41 -> 172.24.19.146) and
 # silently killed every unit on this node whose only peer was the LAN one.
-$codeSources = 'D:\PandoRSI\models\code-sources.txt'
+$codeSources = Join-Path $models 'code-sources.txt'
 if (-not (Test-Path $codeSources)) {
   Set-Content -LiteralPath $codeSources -Encoding ascii -Value @(
     '# Fallback code bundles for tools/node_code_watch.py.',
@@ -35,7 +48,7 @@ if (-not (Test-Path $codeSources)) {
     'http://192.168.31.41:8478/code.bundle # mac, home LAN'
   )
 }
-$seedSources = 'D:\PandoRSI\models\seed-sources.txt'
+$seedSources = Join-Path $models 'seed-sources.txt'
 if (-not (Test-Path $seedSources)) {
   Set-Content -LiteralPath $seedSources -Encoding ascii -Value @(
     '# Fallback outbox bases for tools/seed_pull.py.',
@@ -52,8 +65,8 @@ if (-not (Test-Path $seedSources)) {
 # reaches the Mac from wherever it is; using it costs nothing when both ends
 # are still on the same LAN. The Windows node's own advertise-host stays
 # 192.168.31.100 -- that is this box's address, not the Mac's.
-$llamaExe = 'D:\PandoRSI\models\llama-cuda\llama-server.exe'
-$llamaArgs = @('-m', 'D:\PandoRSI\models\gemma-4-12b-it-Q4_K_M.gguf', '-ngl', '99',
+$llamaExe = Join-Path $models 'llama-cuda\llama-server.exe'
+$llamaArgs = @('-m', (Join-Path $models 'gemma-4-12b-it-Q4_K_M.gguf'), '-ngl', '99',
   '-c', '4096', '-fa', 'on', '-ctk', 'q8_0', '-ctv', 'q8_0', '--parallel', '1',
   '--jinja', '--reasoning', 'off', '--host', '0.0.0.0',
   '--port', '8086', '-t', '8', '--alias', 'gemma-4-12b-it-Q4_K_M')
@@ -64,17 +77,17 @@ $gemmaArgs = @('-m', 'pando.worker', '--node-id', 'win-gemma-12b', '--backend',
   '--pairing-token-file', $token, '--host', '0.0.0.0', '--advertise-host',
   '192.168.31.100')
 $layaArgs = @('-m', 'pando.worker', '--node-id', 'win-laya-int8', '--backend',
-  'onnx', '--onnx-path', 'D:\PandoRSI\artifacts\laya-en.int8.onnx',
+  'onnx', '--onnx-path', (Join-Path $repo 'artifacts\laya-en.int8.onnx'),
   '--checkpoint', 'laya-en', '--root', 'http://127.0.0.1:8790',
   '--pairing-token-file', $token, '--host', '0.0.0.0', '--advertise-host',
   '192.168.31.100')
 $workerArgs = @("$repo\tools\win_worker.py")
 $mailboxArgs = @("$repo\tools\agent_mailbox.py", 'serve', '--port', '8778',
-  '--dir', 'D:\PandoRSI\models\mailbox-win',
+  '--dir', (Join-Path $models 'mailbox-win'),
   '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
   '--grant-file', "$stateDir\grants.toml",
   '--code-repo', "$repo",
-  '--code-cache', 'D:\PandoRSI\models\code.bundle')
+  '--code-cache', (Join-Path $models 'code.bundle'))
 # The resident proposer: the Windows node must initiate on its own, not only
 # answer polled work. Multi-mailbox: publish to both, read the union, so a
 # sleeping Mac-hosted mailbox can no longer silence the colony (2026-10-17).
@@ -85,12 +98,12 @@ $thinkArgs = @('-m', 'pando.proposer', '--node-id', 'win-gpu-proposer',
   '--mailbox', 'http://100.92.184.4:8776',
   '--mailbox-fallback', 'http://127.0.0.1:8778',
   '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
-  '--ledger', 'D:\PandoRSI\models\win-gpu-think-ledger.jsonl',
+  '--ledger', (Join-Path $models 'win-gpu-think-ledger.jsonl'),
   '--interval', '120', '--explore-every', '5', '--activity-every', '4')
 # Yi-1.5-9B on CPU: a second, different-bloodline local model. It votes as a
 # fabric member and runs its own proposer so the win node initiates with two
 # independent minds, not one.
-$yiLlamaArgs = @('-m', 'D:\PandoRSI\models\Yi-1.5-9B-Chat-Q4_K_M.gguf',
+$yiLlamaArgs = @('-m', (Join-Path $models 'Yi-1.5-9B-Chat-Q4_K_M.gguf'),
   '-ngl', '0', '-c', '1024', '--parallel', '1', '--jinja',
   '--host', '127.0.0.1', '--port', '8087', '-t', '10',
   '--alias', 'yi-1.5-9b-q4km')
@@ -105,7 +118,7 @@ $yiThinkArgs = @('-m', 'pando.proposer', '--node-id', 'win-cpu-proposer',
   '--mailbox', 'http://100.92.184.4:8776',
   '--mailbox-fallback', 'http://127.0.0.1:8778',
   '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
-  '--ledger', 'D:\PandoRSI\models\win-cpu-think-ledger.jsonl',
+  '--ledger', (Join-Path $models 'win-cpu-think-ledger.jsonl'),
   '--interval', '240', '--explore-every', '5', '--activity-every', '8',
   '--history-window', '4')
 $observatoryArgs = @("$repo\tools\observatory.py", '--port', '8799')
@@ -118,7 +131,7 @@ $chatArgs = @('-m', 'pando.messenger',
   '--mailbox', 'http://100.92.184.4:8776',
   '--mailbox-fallback', 'http://127.0.0.1:8778',
   '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
-  '--ledger', 'D:\PandoRSI\models\chat-ledger.jsonl',
+  '--ledger', (Join-Path $models 'chat-ledger.jsonl'),
   '--interval', '20')
 # Asks only the decision models registered on THIS root for 赞同/搁置/反对,
 # so every proposal collects one reaction per local role. It never calls a
@@ -129,7 +142,7 @@ $reactArgs = @('-m', 'pando.reactor',
   '--mailbox', 'http://100.92.184.4:8776',
   '--mailbox-fallback', 'http://127.0.0.1:8778',
   '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
-  '--ledger', 'D:\PandoRSI\models\reaction-ledger.jsonl',
+  '--ledger', (Join-Path $models 'reaction-ledger.jsonl'),
   '--interval', '40')
 # The island root runs under the same logon supervisor as everything else:
 # before this entry it was a hand-started process that would not survive a
@@ -156,10 +169,10 @@ $executorArgs = @("$repo\tools\execute_loop.py", '300',
 # never decrypts a seed, starts a model, or accepts a non-sealed bundle.
 $seedPullArgs = @("$repo\tools\seed_pull.py", '--from',
   'http://100.92.184.4:8478',
-  '--from-file', 'D:\PandoRSI\models\seed-sources.txt',
+  '--from-file', $seedSources,
   '--token-file', "$repo\metrics\lan-check\mac-mailbox.token",
-  '--inbox', 'D:\PandoRSI\models\seed-inbox',
-  '--ledger', 'D:\PandoRSI\models\seed-receive-ledger.jsonl',
+  '--inbox', (Join-Path $models 'seed-inbox'),
+  '--ledger', (Join-Path $models 'seed-receive-ledger.jsonl'),
   '--node-id', 'win')
 # The missing local half of "who updates the code". The node has no cloud
 # operator any more, so nothing would fetch a pushed commit. This process
@@ -171,7 +184,7 @@ $seedPullArgs = @("$repo\tools\seed_pull.py", '--from',
 $codeWatchArgs = @("$repo\tools\node_code_watch.py", '--repo', "$repo",
   '--remote', 'origin',
   '--peer', 'http://100.92.184.4:8478/code.bundle',
-  '--peer-file', 'D:\PandoRSI\models\code-sources.txt',
+  '--peer-file', $codeSources,
   '--peer-token-file', "$repo\metrics\lan-check\mac-mailbox.token",
   '--on-update', 'clients',
   # Start-Process joins ArgumentList with spaces; a command value with
@@ -180,7 +193,7 @@ $codeWatchArgs = @("$repo\tools\node_code_watch.py", '--repo', "$repo",
   '--client-cmd', "`"powershell -NoProfile -ExecutionPolicy Bypass -File $repo\tools\win_restart_clients.ps1`"",
   '--node-cmd', "`"powershell -NoProfile -ExecutionPolicy Bypass -File $repo\tools\win_stack_restart.ps1`"",
   '--supervisor', "$repo\tools\win_node_supervisor.ps1",
-  '--ledger', 'D:\PandoRSI\models\code-sync-ledger.jsonl',
+  '--ledger', (Join-Path $models 'code-sync-ledger.jsonl'),
   # Push evidence that this node, rather than only the Mac's copy of a bundle,
   # observed a HEAD. The first valid key is pinned by the receiver; the path
   # is the same token-protected mailbox route the other residents use.
@@ -197,11 +210,11 @@ $codeWatchArgs = @("$repo\tools\node_code_watch.py", '--repo', "$repo",
 # has grown; a stall stops that one process and the loop respawns it. No
 # scheduler is involved -- this is the loop that is already running.
 $thinkWatch = @(
-  @{ ledger = 'D:\PandoRSI\models\win-gpu-think-ledger.jsonl'; stall = 900
-     cooldown = 'D:\PandoRSI\models\think-watchdog-gpu.cooldown'
+  @{ ledger = (Join-Path $models 'win-gpu-think-ledger.jsonl'); stall = 900
+     cooldown = (Join-Path $models 'think-watchdog-gpu.cooldown')
      match = 'win-gpu-proposer' },
-  @{ ledger = 'D:\PandoRSI\models\win-cpu-think-ledger.jsonl'; stall = 1200
-     cooldown = 'D:\PandoRSI\models\think-watchdog-cpu.cooldown'
+  @{ ledger = (Join-Path $models 'win-cpu-think-ledger.jsonl'); stall = 1200
+     cooldown = (Join-Path $models 'think-watchdog-cpu.cooldown')
      match = 'win-cpu-proposer' }
 )
 $watchdog = "$repo\tools\think_watchdog.py"
@@ -215,8 +228,8 @@ $exes = @($llamaExe, $python, $python, $python, $python, $llamaExe, $python,
 $argsList = @($llamaArgs, $gemmaArgs, $layaArgs, $workerArgs, $mailboxArgs,
   $yiLlamaArgs, $yiStemArgs, $thinkArgs, $yiThinkArgs, $observatoryArgs, $chatArgs,
   $reactArgs, $executorArgs, $rootArgs, $seedPullArgs, $codeWatchArgs)
-$cwds = @('D:\PandoRSI\models\llama-cuda', $repo, $repo, $repo, $repo,
-  'D:\PandoRSI\models\llama-cuda', $repo, $repo, $repo, $repo, $repo, $repo, $repo,
+$cwds = @((Join-Path $models 'llama-cuda'), $repo, $repo, $repo, $repo,
+  (Join-Path $models 'llama-cuda'), $repo, $repo, $repo, $repo, $repo, $repo, $repo,
   $repo, $repo, $repo)
 
 $procs = @{}

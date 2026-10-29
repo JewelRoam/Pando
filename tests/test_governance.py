@@ -1712,7 +1712,8 @@ class TestDelegatedOperatorGrant(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         windows = (root / "tools" / "win_node_supervisor.ps1").read_text(
             encoding="utf-8")
-        self.assertIn("Join-Path $env:USERPROFILE '.pandosi'", windows)
+        self.assertIn("$stateDir = if ($env:PANDO_STATE_DIR)", windows)
+        self.assertIn("Join-Path $env:USERPROFILE '.pando'", windows)
         self.assertIn("'--state-dir', \"$stateDir\"", windows)
         self.assertIn("'--grant-url', 'http://100.92.184.4:8776/operator-grant'",
                       windows)
