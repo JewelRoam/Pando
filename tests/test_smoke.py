@@ -10478,8 +10478,10 @@ class TestSeedReceive(unittest.TestCase):
             self.assertFalse((repo / "inbox-must-not-exist").exists())
 
     def test_the_executor_stages_a_copy_without_opening_a_socket(self):
-        source = (Path(__file__).resolve().parents[1] / "pando" /
-                  "execute.py").read_text(encoding="utf-8")
+        package = Path(__file__).resolve().parents[1] / "pando" / "execute"
+        source = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in sorted(package.glob("*.py")))
         self.assertIn("offer_replication", source)
         self.assertNotIn("urlopen", source)
         self.assertNotIn("import socket", source)
