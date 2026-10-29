@@ -30,6 +30,15 @@ def total_ram_gb() -> float:
         stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
         ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
         return stat.ullTotalPhys / 1024 ** 3
+    if platform.system() == "Darwin":
+        try:
+            out = subprocess.run(["sysctl", "-n", "hw.memsize"],
+                                 capture_output=True, text=True, timeout=2,
+                                 check=False)
+            if out.returncode == 0 and out.stdout.strip():
+                return int(out.stdout.strip()) / 1024 ** 3
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            pass
     try:
         with open("/proc/meminfo", encoding="ascii") as fh:
             for line in fh:
