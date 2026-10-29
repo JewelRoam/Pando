@@ -341,14 +341,17 @@ def _default_tokenize_url(base_url: str) -> str:
 
 def pad_to_tokens(build, target: int, tokenize) -> tuple[str, int, str]:
     """Find a neutral suffix that makes one prompt exactly ``target`` tokens."""
-    for pad in PAD_CANDIDATES:
+    candidates = list(PAD_CANDIDATES)
+    # The hand-listed candidates cover the earlier experiments, but some
+    # tokenizers leave gaps for long prompts.  Repeated ASCII ``x`` tokens are
+    # neutral length control and empirically advance one token at a time near
+    # these prompt sizes.
+    candidates.extend(" x" * count for count in range(1, 257))
+    for pad in candidates:
         text = build(pad)
         count = tokenize(text)
         if count == target:
             return text, count, pad
-        # Character length is not a perfectly monotone proxy for token count
-        # (a longer suffix can tokenize one token shorter), so do not stop at
-        # the first overshoot.
     raise RuntimeError(f"could not token-match prompt to {target} tokens")
 
 

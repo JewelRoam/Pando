@@ -4302,6 +4302,14 @@ class TestActionSemanticsCheck(unittest.TestCase):
             set(trial["tokens"].values()) == {15}
             for trial in trials.values()))
 
+    def test_pad_to_tokens_falls_back_beyond_hand_listed_pads(self):
+        tool = self._tool()
+        text, count, pad = tool.pad_to_tokens(
+            lambda suffix: suffix, 400, len)
+        self.assertEqual(count, 400)
+        self.assertEqual(text, pad)
+        self.assertEqual(pad, " x" * 200)
+
     def test_preregistered_goal_comparison_rules_are_directional(self):
         tool = self._tool()
 
