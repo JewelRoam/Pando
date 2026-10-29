@@ -758,7 +758,10 @@ def summarise(rows: list[dict], pairs: int) -> dict:
 
 def audit_artifact(data: dict) -> dict:
     """Recompute the artifact's prompts, selections, and paired summary."""
-    if data.get("schema") in (INTERLEAVED_SCHEMA, STRUCTURAL_INTERLEAVED_SCHEMA):
+    if data.get("schema") in (
+            INTERLEAVED_SCHEMA,
+            STRUCTURAL_INTERLEAVED_SCHEMA,
+            SYNONYM_INTERLEAVED_SCHEMA):
         return audit_interleaved_artifact(data)
     pairs = int(data.get("pairs") or 0)
     rows = data.get("rows") or []

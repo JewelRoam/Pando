@@ -4404,6 +4404,20 @@ class TestActionSemanticsCheck(unittest.TestCase):
             "causal": 16,
         }))
 
+    def test_synonym_schema_dispatches_to_interleaved_audit(self):
+        from unittest.mock import patch
+
+        tool = self._tool()
+        sentinel = {"ok": True}
+        with patch.object(
+                tool, "audit_interleaved_artifact", return_value=sentinel
+        ) as audit:
+            result = tool.audit_artifact({
+                "schema": tool.SYNONYM_INTERLEAVED_SCHEMA,
+            })
+        self.assertIs(result, sentinel)
+        audit.assert_called_once()
+
     def test_interleaved_artifact_audit_checks_call_order_and_comparison(self):
         tool = self._tool()
         rows_by_variant = {"literal": [], "causal": []}
