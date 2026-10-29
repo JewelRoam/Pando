@@ -15249,3 +15249,105 @@ class TestVoteVerdictOnThePage(unittest.TestCase):
             cell = obs._verdict_cell(verdict["members"]["win-laya-int8"], "decision")
             self.assertEqual(cell["verdict"], "落后")
             self.assertTrue(cell["verdict_bad"])
+
+
+class TestHistoricalActionReplay(unittest.TestCase):
+    """tools/historical_action_replay.py - frozen real-mailbox replay."""
+
+    def _tool(self):
+        import importlib.util
+        path = (Path(__file__).resolve().parents[1]
+                / "tools" / "historical_action_replay.py")
+        spec = importlib.util.spec_from_file_location(
+            "historical_action_replay", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def _write_mailbox(self, root: Path):
+        import json
+        tool = self._tool()
+        tasks = root / "tasks"
+        tasks.mkdir()
+        duplicate = "同一份跨主机共享目标，必须全局去重，不能带两个标签。"
+        for action_index, action in enumerate(tool.ACTIONS):
+            for index in range(10):
+                author = "author-a" if index % 2 == 0 else "author-b"
+                goal = duplicate if index == 0 and action_index > 0 else (
+                    f"第{action_index}类动作的第{index}个真实历史目标，"
+                    "描述跨主机资源与治理选择。")
+                created = ("2026-10-28T12:00:00" if index < 9
+                           else "2026-10-29T00:00:00")
+                task_id = f"t-{action_index:02d}-{index:02d}"
+                body = json.dumps({
+                    "kind": "proposal",
+                    "payload": {"action": action, "goal": goal},
+                }, ensure_ascii=False)
+                record = {
+                    "id": task_id,
+                    "from": author,
+                    "title": f"[proposal] {task_id} {action} by {author}",
+                    "body": body,
+                    "created_at": created,
+                }
+                (tasks / f"{task_id}.json").write_text(
+                    json.dumps(record, ensure_ascii=False), encoding="utf-8")
+        return tasks, tool
+
+    def test_selection_is_balanced_deduplicated_and_frozen(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tasks, tool = self._write_mailbox(Path(tmp))
+            manifest = tool.select_historical(tasks)
+            self.assertEqual(len(manifest["items"]), tool.TOTAL_SAMPLES)
+            self.assertEqual(
+                {item["action"] for item in manifest["items"]},
+                set(tool.ACTIONS))
+            self.assertEqual(
+                {sum(item["action"] == action
+                     for item in manifest["items"])
+                 for action in tool.ACTIONS},
+                {tool.PER_ACTION})
+            self.assertTrue(all(
+                item["created_at"] <= tool.SOURCE_CUTOFF
+                for item in manifest["items"]))
+            self.assertEqual(
+                len({item["goal"] for item in manifest["items"]}),
+                tool.TOTAL_SAMPLES)
+            self.assertTrue(tool.audit_manifest(manifest, tasks)["ok"])
+
+            manifest["items"][0]["goal"] += "篡改"
+            audit = tool.audit_manifest(manifest, tasks)
+            self.assertFalse(audit["ok"])
+            self.assertFalse(audit["checks"]["manifest_digest"])
+            self.assertFalse(audit["checks"]["source_match"])
+
+    def test_summary_requires_both_thresholds_for_support(self):
+        tool = self._tool()
+
+        def rows(n, opaque_correct):
+            out = []
+            for index in range(n):
+                out.append({
+                    "pair": index, "arm": "named", "valid": True,
+                    "correct": True, "author": "a",
+                    "task_id": f"t{index}",
+                })
+                out.append({
+                    "pair": index, "arm": "opaque", "valid": True,
+                    "correct": index < opaque_correct, "author": "a",
+                    "task_id": f"t{index}",
+                })
+            return out
+
+        supported = tool.summarise(rows(64, 64), 64)
+        self.assertEqual(supported["outcome"],
+                         "historical_label_agreement_supported")
+        self.assertFalse(supported["named_label_effect"])
+
+        ambiguous = tool.summarise(rows(64, 47), 64)
+        self.assertEqual(ambiguous["arms"]["opaque"]["accuracy"], 47 / 64)
+        self.assertEqual(ambiguous["outcome"], "inconclusive")
+
+        named_effect = tool.summarise(rows(64, 0), 64)
+        self.assertTrue(named_effect["named_label_effect"])
+        self.assertEqual(named_effect["outcome"], "inconclusive")
