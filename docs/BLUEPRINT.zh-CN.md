@@ -1,6 +1,6 @@
-# PandoSI 技术蓝图（v0.9）
+# PandoSI 技术蓝图
 
-状态：v0.8。研究预览版已发布（见 RELEASE-NOTES.md）。目标：形成一套能跑通、可开源、可量化的“弹性异构自复制统一智能”完整方法。
+状态：研究预览版已发布（见 RELEASE-NOTES.md）。目标：形成一套能跑通、可开源、可量化的“弹性异构自复制统一智能”完整方法。
 
 ## 0. 目标与非目标
 
@@ -33,7 +33,7 @@
 
 ```
 全局（WAN，高延迟）：数据并行 — 每组是完整副本，加组=加吞吐，零重分片
-组内（LAN / 多桶静态服务 (v0.8: iGPU 多桶 25-40ms 变长负载已实测)，低延迟）：流水线并行 — 仅当模型 > 单机内存时启用
+组内（LAN / 多桶静态服务 (iGPU 多桶 25-40ms 变长负载已实测)，低延迟）：流水线并行 — 仅当模型 > 单机内存时启用
 决策模型（<1GB）：  单机独立运行 — 永不切分，副本即弹性
 ```
 
@@ -46,7 +46,7 @@
    （实测证据：协调器就近摆放，环延迟 174→102ms，白赚 40%，leyten/shard）。
 5. 决策请求 → fan-out 到 k 个副本 → 校准概率多数投票/贝叶斯融合 → 共识输出。
 
-## 2.5 单设备内异构拼装：ExecutionUnit 抽象（v0.6 新增）
+## 2.5 单设备内异构拼装：ExecutionUnit 抽象
 
 原子资源单位从“设备”升级为“算力单元 EU”：一台 AI PC
 （CPU+iGPU+NPU+外接 dGPU）最多可贡献 4 个 EU。
@@ -66,7 +66,7 @@ ONNX Runtime 单 session 单 EP 实例限制 → 双 GPU 用 OpenVINO
 
 弹性语义升级：外接 GPU 插上 = 新 EU 上线 = 一次 Graft 事件。
 Stem/Root/Graft 协议贯穿 EU → 设备 → 集群三个层级。
-真机基准（v0.7，2026-10-14）：Laya fp32 在 CPU EU 上 106ms/51ms p50
+真机基准（2026-10-14）：Laya fp32 在 CPU EU 上 106ms/51ms p50
 （int8 动态量化反而更慢 127ms，已弃用）；GPU/NPU 编译失败，根因
 确认为决策头的 GatherND 算子无 GPU 内核且 NPU 编译器不识别
 （四条修复路径见 research round 8）。当前 Intel 平台 EU 现实：
@@ -86,13 +86,13 @@ Payload = { 权重(~800MB), playbook(签名), harness(二进制/脚本) }。
 - SCAN：发现候选节点（沙箱内 mDNS/gossip/预置清单）。
 - GRAFT：能力探测（架构/RAM/运行时/端口），选择角色（worker/relay/root）。
 - SPROUT：传输 payload，校验签名与哈希，启动 worker。
-  签名方案（v0.5 定案）：Ed25519（PyNaCl）签 JSON manifest；权重按  64KiB 分块哈希构建 Merkle 树，根哈希入 manifest——边传输边验证、  坏块重传、断点可信；内容定义分块（CDC）为 Phase 5 血统  进化提供增量传输（参考 arXiv:2104.02158）。
+  签名方案：Ed25519（PyNaCl）签 JSON manifest；权重按  64KiB 分块哈希构建 Merkle 树，根哈希入 manifest——边传输边验证、  坏块重传、断点可信；内容定义分块（CDC）为 Phase 5 血统  进化提供增量传输（参考 arXiv:2104.02158）。
   文件格式：playbook 用 TOML，通信用 JSON，数据集用 JSONL，  完整性用签名 manifest。
 - VERIFY：向 Root 注册，通过 3 次探测决策即视为 LIVE。
 - 失败任意步 → 记录原因到 playbook 诊断日志，下个周期重试或放弃。
 
-- 安全门（v0.3）
-- 密钥管理 (v0.8): worker 密钥持久化; join --spore TOFU 钉扎 + 变更硬拒绝：借鉴 laya-guard 两层结构——确定性规则
+- 安全门
+- 密钥管理: worker 密钥持久化; join --spore TOFU 钉扎 + 变更硬拒绝：借鉴 laya-guard 两层结构——确定性规则
   先行（白名单/黑名单/资源限制），灰区问题才进决策
   模型共识，仍灰则拒绝并上报。guard 服务不可用时
   fail-closed（拒绝而非放行）。
@@ -101,18 +101,18 @@ Payload = { 权重(~800MB), playbook(签名), harness(二进制/脚本) }。
 
 - 输入：state + question set（来自 playbook 的 schema）。
 - fan-out 到 k（默认 5，奇数）个 Stem。
-- **副本多样性要求（v0.2 修正）**：同权重副本的决策误差高度相关——
+- **副本多样性要求**：同权重副本的决策误差高度相关——
   投票只能防节点故障与随机噪声，防不了模型系统性错误。
   共识价值来自异构：Laya 天然提供三个 checkpoint
   （english 421M / multilingual 322M / typed-decisions 微调版），
   另叠加温度与 schema 变体。Root 调度时强制每次投票覆盖
   ≥2 种 checkpoint。
-  量化依据（v0.3）：9 个同质 LLM 评委仅提供约 2 张独立票（arXiv:2605.29800）；2 个异构 agent 可能胜过 16 个同质 agent（arXiv:2602.03794）。更高多样性需要按设备微调的血统变体（见 Phase 5）。
+  量化依据：9 个同质 LLM 评委仅提供约 2 张独立票（arXiv:2605.29800）；2 个异构 agent 可能胜过 16 个同质 agent（arXiv:2602.03794）。更高多样性需要按设备微调的血统变体（见 Phase 5）。
 - 每个副本返回 {choice, score, probability}。
 - 聚合：多数投票（离散）或概率平均（连续），输出决策 + 置信区间。
 - 分歧超过阈值 → 升级路径：换一组副本重试 → 标记 playbook 盲区 → 离线顾问。
 
-### 3.2.1 校准层（v0.3 新增，必须）
+### 3.2.1 校准层（必须）
 
 独立复现研究（arXiv:2609.33843）证实 Laya typed-decisions 检查点
 **系统性低估自身置信度**（uniformly under-confident）。因此 Root 的
@@ -127,14 +127,14 @@ Payload = { 权重(~800MB), playbook(签名), harness(二进制/脚本) }。
 
 ### 3.3 Graft（异构接入）
 
-**Android 接入默认走 Termux 路线（v0.4 确认可行）**：Termux 的
+**Android 接入默认走 Termux 路线（已确认可行）**：Termux 的
 python-onnxruntime 包已被社区验证可用（issue #31634，仅有 import 警告）。
 TV 盒子接入即：Termux + `pip install onnxruntime zeroconf` + pando/ 即可运行
 worker，无需安卓原生应用打包；原生 AAR 包装留作 Phase 2+ 优化。
 RK3588 类设备可选 RKNN NPU 加速（rknn-toolkit2 转换，需验证编码器
 模型的算子支持与 opset 版本）；Amlogic S905 无可用 NPU，走 CPU 路线。
 
-**局域发现选型确定（v0.4）**：python-zeroconf（纯 Python mDNS/DNS-SD）。
+**局域发现选型确定**：python-zeroconf（纯 Python mDNS/DNS-SD）。
 服务类型 `_pando._tcp.local.`，TXT 记录携带
 {node_id, checkpoint, role, version}；Spore 的 SCAN 阶段即浏览该服务。
 WAN 加入仍用 heartbeat/URL 注册。
@@ -151,12 +151,12 @@ WAN 加入仍用 heartbeat/URL 注册。
 
 - 首选模型：Laya（convaiinnovations/laya 421M 英文 / 322M 多语言，Apache-2.0）。
 
-**score 政策 (v0.8)**: score 头三血统均不具备决策级可靠性 (27 次测量)。结构性强制: score 问题必须声明 informational=true。风险评分使用 choice 格式 (18/27=67%)。
+**score 政策**: score 头三血统均不具备决策级可靠性 (27 次测量)。结构性强制: score 问题必须声明 informational=true。风险评分使用 choice 格式 (18/27=67%)。
 - 运行时：首选 ONNX Runtime / OpenVINO（CPU int8 已有社区验证），备选 PyTorch。
 - 服务形态：每设备一个 FastAPI `/decide` 端点（或合并进 harness 单二进制）。
 - Router：多语言场景由 Laya 自带 router 按语言分发 checkpoint。
 
-## 4.5 设备分级与单机验收基准（v0.2，基于公开 CPU 实测）
+## 4.5 设备分级与单机验收基准（基于公开 CPU 实测）
 
 LLM 侧的公认分界（Pi 5 实测）：交互门槛 ≈ decode ≥10 tok/s，
 现实上限 ≈ ≤1B；Gemma 3 270M int8 @1280ctx 达 23.7 tok/s，
@@ -177,18 +177,18 @@ decode 门槛不适用，换成**单决策延迟预算**
 | 4GB 电视盒 | RK3588 已有首个真机数据点：Laya 多语言版 RKNN **509ms**/决策；Amlogic S905 仍未实测 | Phase 1 首个验证目标 |
 | 2GB 以下盒子 | 存疑（ONNX int8 后 Laya 权重约 200-400MB） | 观察者模式 |
 
-**Graft 验收集（v0.5 定案）**：16 个固定决策任务（覆盖 choice/score/noul 三类问题 × 三个 checkpoint），验收标准 16/16 正确 + p50/p95 延迟 + ECE 报告，按设备公开发布。原有基准项保留：cold load 时间、峰值 RSS、
+**Graft 验收集**：16 个固定决策任务（覆盖 choice/score/noul 三类问题 × 三个 checkpoint），验收标准 16/16 正确 + p50/p95 延迟 + ECE 报告，按设备公开发布。原有基准项保留：cold load 时间、峰值 RSS、
 单决策延迟、30 分钟持续热测降频曲线、标准任务集准确率。
 任何设备的实测数据都是开源贡献。
 
-**开发机实测结果 (v0.8)**：Core Ultra 7 255H + Arc 140T iGPU + AI Boost NPU
+**开发机实测结果**：Core Ultra 7 255H + Arc 140T iGPU + AI Boost NPU
 — CPU 106ms + iGPU 25.6ms（多桶）。NPU ✅ 95.7ms于算子支持（4 条路径归档）。
 
 ## 5. 演进路线（从繁殖到进化）
 
 - 阶段 1：静态 playbook + 决策群 + 共识（本文所有内容）。
 - 阶段 2：playbook 自动迭代 — 失败日志 → 离线 LLM 分析 → playbook 新版本 → 推送。
-- 阶段 3：分布式 RLCD — 集群用自身决策数据自训练。v0.2 可行性增强：laya-rs 已有 RLCD 训练循环；Flower 支持 Android/Pi/Jetson 真机联邦客户端；决策模型每次 rollout 仅一次前向（非自回归），弱设备收集 rollout + 中心更新路径成立；参照 INTELLECT-2 / Hivemind，其 4xRTX3090 门槛是 LLM RL 的，不适用于本路线，
+- 阶段 3：分布式 RLCD — 集群用自身决策数据自训练。可行性依据：laya-rs 已有 RLCD 训练循环；Flower 支持 Android/Pi/Jetson 真机联邦客户端；决策模型每次 rollout 仅一次前向（非自回归），弱设备收集 rollout + 中心更新路径成立；参照 INTELLECT-2 / Hivemind，其 4xRTX3090 门槛是 LLM RL 的，不适用于本路线，
   权重版本化，A/B 对比新旧副本共识准确率，胜者成为新 root lineage。
 
 ## 6. 工程选型
@@ -204,7 +204,7 @@ decode 门槛不适用，换成**单决策延迟预算**
 
 ## 7. 安全与伦理
 
-## 代理免疫 (v0.8)
+## 代理免疫
 
 join/worker/worker 均自动设置 NO_PROXY={localhost,127.0.0.1,LAN_IP} - Windows urllib 遵循系统代理会黑洼回环/LAN 地址（实战发现，round 36）。
 

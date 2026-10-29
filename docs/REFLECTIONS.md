@@ -12,7 +12,7 @@ Mac-side reflections are folded in here as they arrive.
 - The committee machinery is measured, not asserted: assent gating, veto-witness equivalence, neutral
   votes, registry v2 — and now a theory doc whose 7 predictions were machine-checked against recorded
   votes by tools/theory_check.py (5 confirmed, 1 refuted as designed, 1 undecidable).
-- Engineering hygiene is real: four green workflows, pip-installable sdist/wheel, release v0.2.0 with
+- Engineering hygiene is real: four green workflows, pip-installable sdist/wheel, signed releases with
   checksums, reproducible offline tools.
 
 ### Diminishing-returns signals

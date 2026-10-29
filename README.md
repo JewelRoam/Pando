@@ -126,7 +126,7 @@ graph TB
 
 ## Docs
 
-- [Blueprint (zh-CN)](docs/BLUEPRINT.zh-CN.md) — architecture v0.7
+- [Blueprint (zh-CN)](docs/BLUEPRINT.zh-CN.md) — architecture
 - [ADOPTION](docs/ADOPTION.md) — three-ring capability model, survival metrics
 - [Onboarding (zh-CN)](docs/ONBOARDING.zh-CN.md) — consent tiers, sandbox policy, product UX
 - [METRICS](docs/METRICS.md) — dashboard design

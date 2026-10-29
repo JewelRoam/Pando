@@ -1,4 +1,4 @@
-# PandoSI Research Summary — definitive findings (v0.1)
+# PandoSI Research Summary — definitive findings
 
 ## The question
 

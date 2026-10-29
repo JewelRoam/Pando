@@ -100,7 +100,7 @@ Linux / ARM / Raspberry Pi；按 attention heads 做 tensor parallel。
 SwarmLLM 
 浏览器端极早期 
 WebGPU + WebRTC；报告称 Qwen3.8 27B 跨 MacBook + iPhone 达 10.7 tok/s。 
-浏览器设备可拼接并用 speculative chains 降低 hop 成本；v0.2.0，尚非 turnkey。 
+浏览器设备可拼接并用 speculative chains 降低 hop 成本；尚非 turnkey。 
 MIT 开源、每 token 报告约 10KB；早期 demo 不能等同于通用容错系统。 
 说明 ↗ 
 vLLM Elastic EP 

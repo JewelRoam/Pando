@@ -107,7 +107,7 @@ Goal: swarm self-trains its own checkpoints.
   blueprint, after each new module, and before/after any smoke-test milestone.
 - Commit messages: imperative, one-line summary + short body listing artifacts.
 - Never commit model weights, metrics/, or secrets (see .gitignore).
-- Initial commit: e25d141 (v0.5 blueprint + skeleton + release scaffolding).
+- Initial commit: e25d141 (blueprint + skeleton + release scaffolding).
 
 ## Session-log backup policy (2026-10-14)
 

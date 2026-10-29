@@ -4,7 +4,7 @@
 
 ## Where we are
 
-PandoSI v0.1 research preview is **feature-complete for Phase 1-2** and
+PandoSI research preview is **feature-complete for Phase 1-2** and
 **Phase 5 data layer is verified**. The system runs on a single Intel AI PC
 (Core Ultra 7 255H) with three heterogeneous execution units (CPU, iGPU,
 NPU) all voting in the same consensus quorum.

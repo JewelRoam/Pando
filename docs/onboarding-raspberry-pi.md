@@ -24,11 +24,9 @@ python3 -V        # expect 3.11+ (Bookworm) or 3.12 (Ubuntu 24.04)
 ```
 python3 -m venv ~/pando
 ~/pando/bin/pip install --upgrade pip
-# path A: the released wheel (pure python; works on arm64)
-~/pando/bin/pip install https://github.com/JewelRoam/PandoSI/releases/download/v0.2.0/pandosi-0.2.0-py3-none-any.whl
-# path B: from source
-#   git clone https://github.com/JewelRoam/PandoSI ~/PandoSI
-#   ~/pando/bin/pip install -e ~/PandoSI
+# from source
+#   git clone https://github.com/JewelRoam/Pando ~/Pando
+#   ~/pando/bin/pip install -e ~/Pando
 ~/pando/bin/pandosi --help
 ```
 

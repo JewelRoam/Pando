@@ -146,7 +146,7 @@ def assign_role(cap: dict) -> str:
 
 
 def enumerate_execution_units() -> list[dict]:
-    """Enumerate ExecutionUnits (blueprint v0.6): CPU, iGPU, dGPU, NPU.
+    """Enumerate ExecutionUnits (blueprint): CPU, iGPU, dGPU, NPU.
 
     Prefers OpenVINO device enumeration when installed; falls back to
     best-effort detection so a bare CPU box still reports one EU.

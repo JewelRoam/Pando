@@ -1,6 +1,6 @@
 """Spore payload integrity: chunking, Merkle tree, Ed25519 manifests.
 
-Design (blueprint v0.5):
+Design (blueprint):
 - The signed artifact is a small JSON manifest, never the weights themselves.
 - Weights/files are split into 64KiB chunks; each chunk is SHA-256 hashed;
   chunk hashes form a binary Merkle tree whose root goes into the manifest.

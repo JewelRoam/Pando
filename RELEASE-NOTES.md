@@ -1,4 +1,4 @@
-# PandoSI v0.1 research preview — release notes (2026-10-14)
+# PandoSI research preview — release notes (2026-10-14)
 
 ## What shipped
 
