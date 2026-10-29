@@ -15585,3 +15585,151 @@ class TestHistoricalActionModelReview(unittest.TestCase):
         rows[0]["prompt"] = "tampered"
         audit = tool.audit_collection(packet, protocol, collection, response)
         self.assertFalse(audit["ok"])
+
+
+class TestHistoricalActionGoalControl(unittest.TestCase):
+    """The goal-permutation control must be frozen and replayable."""
+
+    def _tools(self):
+        import importlib.util
+        root = Path(__file__).resolve().parents[1]
+        path = root / "tools" / "historical_action_goal_control.py"
+        spec = importlib.util.spec_from_file_location(
+            "historical_action_goal_control", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def _packet(self, tool):
+        descriptions = [info[1] for info in tool.BLIND.SEM.ACTIONS]
+        goals = [
+            "需要把可验证副本送到另一台主机",
+            "共享流程反复缺少验收步骤",
+        ]
+        return {
+            "schema": tool.BLIND.PACKET_SCHEMA,
+            "preregistration_sha256": "d" * 64,
+            "source_artifact_sha256": "e" * 64,
+            "items": [
+                {
+                    "review_id": f"R{index + 1:02d}",
+                    "goal": goal,
+                    "choices": [
+                        {"choice": chr(ord("A") + position),
+                         "description": descriptions[(position + index) % 8]}
+                        for position in range(8)
+                    ],
+                }
+                for index, goal in enumerate(goals)
+            ],
+        }
+
+    def _fixture(self):
+        tool = self._tools()
+        packet = self._packet(tool)
+        base_protocol = tool.MODEL.build_protocol(packet)
+        key = {
+            "schema": tool.BLIND.KEY_SCHEMA,
+            "packet_sha256": tool._sha_json(packet),
+            "items": {},
+        }
+        base_rows = []
+        for index, item in enumerate(packet["items"]):
+            # The descriptions are cyclically offset, so decode by name.
+            description_to_action = {
+                description: action
+                for action, description, _ in tool.BLIND.SEM.ACTIONS
+            }
+            ordered_actions = [
+                description_to_action[choice["description"]]
+                for choice in item["choices"]
+            ]
+            choice_to_action = {
+                choice["choice"]: action
+                for choice, action in zip(item["choices"], ordered_actions)
+            }
+            key["items"][item["review_id"]] = {
+                "historical_action": ordered_actions[index % 8],
+                "named_model_action": ordered_actions[(index + 1) % 8],
+                "opaque_model_action": ordered_actions[(index + 2) % 8],
+                "choice_to_action": choice_to_action,
+            }
+            base_rows.append({
+                "review_id": item["review_id"],
+                "opaque_match": True,
+                "historical_match": index == 0,
+            })
+        key["preregistration_sha256"] = "d" * 64
+        key["packet_sha256"] = tool._sha_json(packet)
+        base_result = {
+            "packet_sha256": tool._sha_json(packet),
+            "reviewer": base_protocol["reviewer"]["name"],
+            "categories": {"opaque_current": 2, "historical": 1},
+            "rows": base_rows,
+        }
+        protocol = tool.build_protocol(packet, base_protocol, base_result)
+        rows = []
+        for expected in tool.control_prompts(packet):
+            review_id = expected["review_id"]
+            action = key["items"][review_id]["historical_action"]
+            choice = next(
+                choice for choice, mapped in
+                key["items"][review_id]["choice_to_action"].items()
+                if mapped == action)
+            parsed = {"choice": choice, "confidence": "high", "notes": ""}
+            rows.append({
+                "offset": expected["offset"],
+                "review_id": review_id,
+                "goal_source_review_id": expected["goal_source_review_id"],
+                "prompt": expected["prompt"],
+                "prompt_sha256": tool._sha_text(expected["prompt"]),
+                "raw_response": json.dumps(parsed, ensure_ascii=False),
+                "parsed": parsed,
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                "latency_ms": 1.0,
+            })
+        collection = {
+            "schema": tool.COLLECTION_SCHEMA,
+            "status": "complete",
+            "packet_sha256": tool._sha_json(packet),
+            "protocol_sha256": tool._sha_json(protocol),
+            "reviewer_name": protocol["reviewer"]["name"],
+            "rows": rows,
+            "totals": {
+                "calls": 2,
+                "latency_ms": 2.0,
+                "usage": {"prompt_tokens": 2, "completion_tokens": 2},
+            },
+        }
+        return tool, packet, base_protocol, base_result, key, protocol, collection
+
+    def test_protocol_is_deterministic_and_uses_every_shift(self):
+        tool, packet, base_protocol, base_result, _, protocol, _ = self._fixture()
+        rebuilt = tool.build_protocol(packet, base_protocol, base_result)
+        self.assertEqual(protocol, rebuilt)
+        self.assertEqual(protocol["control"]["offsets"], [1])
+        self.assertEqual(protocol["control"]["prompts"], 2)
+        self.assertEqual(protocol["observed"]["opaque_current_matches"], 2)
+        prompts = "\n".join(row["prompt"] for row in tool.control_prompts(packet))
+        for action in tool.BLIND.ACTIONS:
+            self.assertNotIn(action, prompts)
+
+    def test_collection_audit_and_score_decode_the_hidden_key(self):
+        tool, packet, _, base_result, key, protocol, collection = self._fixture()
+        audit = tool.audit_collection(packet, protocol, collection)
+        self.assertTrue(audit["ok"], audit)
+        result = tool.score(packet, key, protocol, base_result, collection)
+        self.assertEqual(result["observed"]["opaque_current_matches"], 2)
+        self.assertEqual(result["control"]["opaque_current_match_counts"], [0])
+        self.assertEqual(result["primary_decision"]["outcome"],
+                         "goal_specificity_not_supported")
+        collection["rows"][0]["prompt"] = "tampered"
+        self.assertFalse(tool.audit_collection(
+            packet, protocol, collection)["ok"])
+
+    def test_cyclic_shift_p_counts_observed_and_null_arms(self):
+        tool = self._tools()
+        self.assertAlmostEqual(tool.cyclic_shift_p(3, [1, 2, 3]), 0.5)
+        self.assertAlmostEqual(tool.cyclic_shift_p(4, [1, 2, 3]), 0.25)
+        with self.assertRaises(ValueError):
+            tool.cyclic_shift_p(1, [])
