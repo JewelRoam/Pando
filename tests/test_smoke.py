@@ -15351,3 +15351,131 @@ class TestHistoricalActionReplay(unittest.TestCase):
         named_effect = tool.summarise(rows(64, 0), 64)
         self.assertTrue(named_effect["named_label_effect"])
         self.assertEqual(named_effect["outcome"], "inconclusive")
+
+
+class TestHistoricalActionBlindReview(unittest.TestCase):
+    """Blind adjudication keeps replay labels out of the reviewer packet."""
+
+    def _tool(self):
+        import importlib.util
+        path = (Path(__file__).resolve().parents[1]
+                / "tools" / "historical_action_blind_review.py")
+        spec = importlib.util.spec_from_file_location(
+            "historical_action_blind_review", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def _artifact(self, tool):
+        items = [
+            {
+                "task_id": "t-blind-01",
+                "goal": "一次故障后要让接班者拿到可验证凭据 seed.export r2365",
+                "action": "seed.export", "author": "secret-author-7",
+            },
+            {
+                "task_id": "t-blind-02", "goal": "另一台机器已经答应接手同一份凭据",
+                "action": "seed.replicate", "author": "secret-author-8",
+            },
+        ]
+        rows = []
+        selected = (
+            ("resource.rebalance", "reproduce.spawn"),
+            ("policy.set", "culture.refine"),
+        )
+        for pair, (named, opaque) in enumerate(selected):
+            for arm, action in (("named", named), ("opaque", opaque)):
+                rows.append({
+                    "pair": pair,
+                    "arm": arm,
+                    "task_id": items[pair]["task_id"],
+                    "expected_action": items[pair]["action"],
+                    "selected_action": action,
+                    "valid": True,
+                    "correct": False,
+                })
+        return {
+            "schema": tool.HIST.ARTIFACT_SCHEMA,
+            "manifest": {"items": items},
+            "rows": rows,
+            "summary": {"samples": 2, "paired": {"neither_correct": 2}},
+        }
+
+    def test_packet_hides_labels_and_is_reproducible(self):
+        import json
+        tool = self._tool()
+        artifact = self._artifact(tool)
+        first = tool.prepare_review(artifact, "a" * 64)
+        second = tool.prepare_review(artifact, "a" * 64)
+        self.assertEqual(first, second)
+        prereg, packet, key = first
+        audit = tool.audit_review(packet, key, prereg, artifact)
+        self.assertTrue(audit["ok"], audit)
+        self.assertEqual(len(packet["items"]), 2)
+        blob = json.dumps(packet, ensure_ascii=False)
+        for action in tool.ACTIONS:
+            self.assertNotIn(action, blob)
+        self.assertNotIn("r2365", blob)
+        self.assertNotIn("t-blind-01", blob)
+        self.assertNotIn("secret-author-7", blob)
+        self.assertEqual(
+            len(packet["response_template"]["items"]), len(packet["items"]))
+        self.assertTrue(all(
+            len(item["choices"]) == len(tool.ACTIONS)
+            for item in packet["items"]))
+
+    def test_audit_rejects_a_leaked_action_identifier(self):
+        import copy
+        tool = self._tool()
+        prereg, packet, key = tool.prepare_review(
+            self._artifact(tool), "b" * 64)
+        leaked = copy.deepcopy(packet)
+        leaked["items"][0]["notes"] = "请选 meta.propose"
+        audit = tool.audit_review(leaked, key, prereg)
+        self.assertFalse(audit["ok"])
+        self.assertEqual(audit["leaked_action_ids"], ["meta.propose"])
+
+    def test_primary_decision_uses_exact_two_sided_test(self):
+        tool = self._tool()
+        supported = tool.decide_review(10, 0)
+        self.assertEqual(
+            supported["outcome"], "historical_label_noise_supported")
+        self.assertLess(supported["exact_two_sided_p"], 0.05)
+        reverse = tool.decide_review(0, 10)
+        self.assertEqual(
+            reverse["outcome"], "historical_label_noise_not_supported")
+        self.assertEqual(
+            tool.decide_review(6, 4)["outcome"], "inconclusive")
+
+    def test_score_decodes_choices_without_seeing_labels(self):
+        tool = self._tool()
+        prereg, packet, key = tool.prepare_review(
+            self._artifact(tool), "c" * 64)
+        response_items = []
+        for index, item in enumerate(packet["items"]):
+            review_id = item["review_id"]
+            hidden = key["items"][review_id]
+            target = (hidden["opaque_model_action"] if index == 0
+                      else hidden["historical_action"])
+            choice = next(
+                choice for choice, action in hidden["choice_to_action"].items()
+                if action == target)
+            response_items.append({
+                "review_id": review_id,
+                "choice": choice,
+                "confidence": "high",
+                "notes": "",
+            })
+        response = {
+            "schema": tool.RESPONSE_SCHEMA,
+            "reviewer": "independent-test",
+            "completed_at": "2026-10-29T14:00:00+08:00",
+            "items": response_items,
+        }
+        result = tool.score_review(packet, key, prereg, response)
+        self.assertEqual(result["categories"]["opaque_current"], 1)
+        self.assertEqual(result["categories"]["historical"], 1)
+        self.assertEqual(result["primary_decision"]["outcome"], "inconclusive")
+        response["items"][0]["choice"] = "Z"
+        with self.assertRaisesRegex(ValueError, "invalid choice"):
+            tool.score_review(packet, key, prereg, response)
