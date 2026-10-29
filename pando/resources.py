@@ -10,7 +10,7 @@ from pathlib import Path
 
 def asset_root() -> Path:
     candidates: list[Path] = []
-    configured = os.environ.get("PANDOSI_ASSETS")
+    configured = os.environ.get("PANDO_ASSETS")
     if configured:
         candidates.append(Path(configured))
     candidates.append(Path.cwd() / "assets")

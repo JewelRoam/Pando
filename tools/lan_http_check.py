@@ -113,9 +113,13 @@ def main() -> int:
         save_grant("lan_listen", f"0.0.0.0:{root_port}",
                    "temporary-local-lan-check", "lan-http-check",
                    expires.isoformat(), path=grants_path)
+        host_config = work / "host.toml"
+        host_config.write_text(
+            f"[paths]\ngrants = \"{grants_path.as_posix()}\"\n",
+            encoding="utf-8")
         env = {
             **os.environ,
-            "PANDOSI_GRANTS": str(grants_path),
+            "PANDO_HOST_CONFIG": str(host_config),
             "PYTHONIOENCODING": "utf-8",
         }
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) \

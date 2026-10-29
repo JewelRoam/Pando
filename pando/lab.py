@@ -23,8 +23,8 @@ def detect_sandbox() -> dict:
     if Path("/run/.containerenv").exists():
         evidence.append("/run/.containerenv present")
     import os
-    if os.environ.get("PANDOSI_CONTAINER") == "1":
-        evidence.append("PANDOSI_CONTAINER=1 (operator attestation)")
+    if os.environ.get("PANDO_CONTAINER") == "1":
+        evidence.append("PANDO_CONTAINER=1 (operator attestation)")
     if os.name != "nt" and Path("/proc/version").exists():
         try:
             version = Path("/proc/version").read_text(errors="ignore").lower()
@@ -44,7 +44,7 @@ def require_sandbox() -> dict:
             "pando lab refused: no disposable sandbox detected "
             f"(kind={info['kind']}). Spore experiments require a container "
             "or VM. Run inside Docker with "
-            "PANDOSI_CONTAINER=1 or a WSL distro.")
+            "PANDO_CONTAINER=1 or a WSL distro.")
     return info
 
 

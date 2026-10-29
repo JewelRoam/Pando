@@ -382,7 +382,7 @@ readable (`pando/coordinator.py:117-133`). Missing, malformed, and empty
 registries all become an empty mapping rather than a guess
 (`pando/coordinator.py:104-107`). The default path is
 `assets/registry/accuracies.json`, overridable with the
-`PANDOSI_ASSENT_REGISTRY` environment variable
+`PANDO_ASSENT_REGISTRY` environment variable
 (`pando/coordinator.py:52-53`, `:90-98`).
 
 Current members: `english`, `ft-v3`, `mac-llm`, `mac-llm-8b`, each with

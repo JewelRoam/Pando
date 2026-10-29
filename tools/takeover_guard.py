@@ -146,12 +146,15 @@ def assess_activity(tasks: Iterable[dict], now: datetime, *,
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--url", default=os.environ.get(
-        "PANDOSI_MAILBOX_URL", "http://127.0.0.1:8776"))
+    from pando import hostconfig
+    config = hostconfig.load()
+    mailboxes = hostconfig.mailbox_urls(config)
+    parser.add_argument("--url", default=mailboxes[0] if mailboxes
+                        else "http://127.0.0.1:8776")
     parser.add_argument("--token", default=os.environ.get(
-        "PANDOSI_MAILBOX_TOKEN"))
-    parser.add_argument("--token-file", default=os.environ.get(
-        "PANDOSI_MAILBOX_TOKEN_FILE", "~/.pando/mailbox.token"))
+        "PANDO_MAILBOX_TOKEN"))
+    parser.add_argument("--token-file", default=str(hostconfig.path_value(
+        config, "mailbox_token_file", "~/.pando/mailbox.token")))
     parser.add_argument("--timeout", type=float, default=10.0)
     parser.add_argument("--window-seconds", type=int, default=600)
     parser.add_argument("--identity", default="mac-codex")

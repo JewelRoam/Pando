@@ -17,7 +17,7 @@ any runner:
 
 The child checks always run under the interpreter the runner uses (3.12),
 never the shell's default interpreter. Resolution order is
-``PANDOSI_CI_PYTHON``, ``.venv-ci312``, then the current interpreter when it is
+``PANDO_CI_PYTHON``, ``.venv-ci312``, then the current interpreter when it is
 already 3.12. A mismatch fails before any check with setup instructions.
 """
 
@@ -66,14 +66,14 @@ def _ci_python() -> str:
     default can hide syntax/stdlib differences and, worse, make a green local
     run meaningless for the runner. The first matching source wins.
     """
-    configured = os.environ.get("PANDOSI_CI_PYTHON")
+    configured = os.environ.get("PANDO_CI_PYTHON")
     if configured:
         candidate = shutil.which(configured) or configured
         version = _python_version(candidate)
         if version != CI_PYTHON:
             actual = version or "unavailable"
             raise RuntimeError(
-                f"PANDOSI_CI_PYTHON={configured!r} is Python {actual}, "
+                f"PANDO_CI_PYTHON={configured!r} is Python {actual}, "
                 f"but CI uses {CI_PYTHON}")
         return candidate
 
@@ -96,7 +96,7 @@ def _ci_python() -> str:
     actual = current or "unavailable"
     raise RuntimeError(
         f"local_ci must run child checks under Python {CI_PYTHON}, but the "
-        f"current interpreter is {actual}. Set PANDOSI_CI_PYTHON to a 3.12 "
+        f"current interpreter is {actual}. Set PANDO_CI_PYTHON to a 3.12 "
         "executable or create .venv-ci312 from one. Example: "
         "python3.12 -m venv .venv-ci312 && "
         "PIP_CONSTRAINT=constraints.txt .venv-ci312/bin/python -m pip install "

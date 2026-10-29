@@ -24,14 +24,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from pando import hostconfig  # noqa: E402
 from pando.net import (open_url, response_json,  # noqa: E402
                        response_text, should_request_gzip)
 
 # Connection info lives in per-machine config, not in the repo (doctrine
-# 2026-10-17). Pass --url or set PANDOSI_MAILBOX_URL; the bare default is the
-# localhost convention only.
-DEFAULT_URL = "http://127.0.0.1:8776"
-DEFAULT_TOKEN_FILE = "metrics/lan-check/mac-mailbox.token"
+# 2026-10-17): hosts.json names the mailboxes, host.toml names the token
+# file. The bare default is the localhost convention only.
+_CONFIG = hostconfig.load()
+_MAILBOXES = hostconfig.mailbox_urls(_CONFIG)
+DEFAULT_URL = _MAILBOXES[0] if _MAILBOXES else "http://127.0.0.1:8776"
+DEFAULT_TOKEN_FILE = str(hostconfig.path_value(
+    _CONFIG, "mailbox_token_file", "~/.pando/mailbox.token"))
 
 
 def _request(args, method: str, path: str,
@@ -176,12 +180,10 @@ def main() -> int:
         except (AttributeError, OSError, ValueError):
             pass
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--url", default=os.environ.get(
-        "PANDOSI_MAILBOX_URL", DEFAULT_URL))
+    parser.add_argument("--url", default=DEFAULT_URL)
     parser.add_argument("--token", default=os.environ.get(
-        "PANDOSI_MAILBOX_TOKEN"))
-    parser.add_argument("--token-file", default=os.environ.get(
-        "PANDOSI_MAILBOX_TOKEN_FILE", DEFAULT_TOKEN_FILE))
+        "PANDO_MAILBOX_TOKEN"))
+    parser.add_argument("--token-file", default=DEFAULT_TOKEN_FILE)
     parser.add_argument("--timeout", type=float, default=10)
     sub = parser.add_subparsers(dest="verb", required=True)
 

@@ -22,10 +22,10 @@ GRANT_ACTIONS = ("lan_listen", "lab_replication", "service_autostart",
 
 
 def default_path() -> Path:
-    configured = os.environ.get("PANDOSI_GRANTS")
-    if configured:
-        return Path(configured)
-    primary = Path.home() / ".pando" / "grants.toml"
+    from . import hostconfig
+    primary = hostconfig.path_value(
+        hostconfig.load(), "grants",
+        str(Path.home() / ".pando" / "grants.toml"))
     if not primary.exists():
         # Rename shim: ledgers written before the pandosi -> pando rename live
         # in ~/.pandosi/. Resolve to the legacy file (reads AND writes, so the

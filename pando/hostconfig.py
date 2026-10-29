@@ -26,13 +26,27 @@ Schema (every section optional)::
     [delegation]
     operator_pubkey = "..."    # whose signed grants this host installs
 
+    [paths]                    # state file locations (defaults under ~/.pando)
+    hosts_file = "~/.pando/hosts.json"
+    grants = "~/.pando/grants.toml"
+    identity = "~/.pando/identity.json"
+    mailbox_token_file = "~/.pando/mailbox.token"
+
+    [seed]
+    pubkey = "..."             # hex verify key pinned for spore pulls
+
     [profiles."dynamic.threshold.adjustment"]
     node_id = "..."
     target_host = "..."
+
+Adjacency (which mailboxes and roots this host talks to) lives in
+``hosts.json`` -- the table other tools already exchange. This file holds
+what the host *is* and *trusts*: pins, paths, deployment wiring.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import tomllib
 from pathlib import Path
@@ -112,3 +126,39 @@ def profile_params(config: dict, name: str) -> dict:
     """Fleet-supplied parameter overrides for one catalogue profile."""
     section = _section(config, "profiles", name)
     return dict(section)
+
+
+def path_value(config: dict, key: str, default: str) -> Path:
+    """A ``[paths]`` override, expanded; the built-in default otherwise."""
+    section = _section(config, "paths")
+    value = section.get(key)
+    if value is None:
+        return Path(default).expanduser()
+    return Path(_require_text(section, key, "paths")).expanduser()
+
+
+def seed_pubkey(config: dict) -> str | None:
+    """The hex verify key this host pins for spore pulls, or ``None``."""
+    section = _section(config, "seed")
+    if not section:
+        return None
+    return _require_text(section, "pubkey", "seed")
+
+
+def hosts_table(config: dict) -> dict:
+    """This host's ``hosts.json`` adjacency table (``{}`` when unreadable)."""
+    target = path_value(config, "hosts_file", "~/.pando/hosts.json")
+    try:
+        data = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def mailbox_urls(config: dict) -> list[str]:
+    """The mailboxes this host talks to, in order; empty when unconfigured."""
+    urls = hosts_table(config).get("mailboxes")
+    if not isinstance(urls, list):
+        return []
+    return [str(url).strip() for url in urls
+            if isinstance(url, str) and str(url).strip()]

@@ -8,7 +8,8 @@ themselves live in per-machine config:
 
     ~/.pando/hosts.json   {"mailboxes": ["<url>", ...]}
 
-overridable with PANDOSI_HOSTS (inline JSON) or PANDOSI_HOSTS_FILE.
+from the hosts file named in the host config ([paths] hosts_file,
+default ~/.pando/hosts.json).
 Without any config the resolver only tries localhost conventions. See
 hosts.example.json for the shape (placeholders only - no real hosts).
 
@@ -36,13 +37,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from pando.net import open_url  # noqa: E402 - repo root must be importable
 
 CONFIG_PATH = Path(os.environ.get(
-    "PANDOSI_HOSTS_FILE", "~/.pando/hosts.json")).expanduser()
+    "PANDO_HOSTS_FILE", "~/.pando/hosts.json")).expanduser()
 DEFAULT_LOCAL = ["http://127.0.0.1:8776", "http://127.0.0.1:8778"]
 
 
 def load_candidates() -> list[str]:
     """Mailbox URLs from per-machine config - never from the repository."""
-    inline = os.environ.get("PANDOSI_HOSTS", "").strip()
+    inline = os.environ.get("PANDO_HOSTS", "").strip()
     if inline:
         try:
             parsed = json.loads(inline)

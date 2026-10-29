@@ -55,8 +55,8 @@ from pando.net import open_url  # noqa: E402 - repo root must be importable
 from pando.proposal_mail import proposal_age_seconds  # noqa: E402
 from pando.proposal_mail import publish_proposal  # noqa: E402
 
-PANDO_DIR = Path(os.environ.get("PANDOSI_HOME", "~/.pandosi")).expanduser()
-DEFAULT_MAILBOX = os.environ.get("PANDOSI_MAILBOX_URL", "http://127.0.0.1:8776")
+PANDO_DIR = Path(os.environ.get("PANDO_HOME", "~/.pando")).expanduser()
+DEFAULT_MAILBOX = "http://127.0.0.1:8776"
 _BODY_CACHE: dict[str, str] = {}
 _STATE_CACHE: dict = {"at": 0.0, "value": None}
 _STATE_LOCK = threading.Lock()
@@ -157,9 +157,6 @@ def _first_healthy_mailbox(default: str, hosts: dict) -> str:
 
 
 def discover_root_url() -> str | None:
-    env = os.environ.get("PANDOSI_ROOT_URL")
-    if env:
-        return env
     hosts = _read_hosts()
     for key in ("island_root_url", "island_root", "roots"):
         value = hosts.get(key)
@@ -172,7 +169,7 @@ def discover_root_url() -> str | None:
 
 def discover_pairing_token(explicit: str | None) -> str | None:
     return _read_token(
-        explicit or os.environ.get("PANDOSI_PAIRING_TOKEN"),
+        explicit or os.environ.get("PANDO_PAIRING_TOKEN"),
         [PANDO_DIR / "pairing.token", PANDO_DIR / "root.token"],
     )
 
@@ -184,7 +181,6 @@ def _root_sources(hosts: dict, explicit: str | None = None) -> list[dict]:
     ``island_root_url`` remains the single-root fallback so an old hosts.json
     keeps working unchanged.
     """
-    explicit = explicit or os.environ.get("PANDOSI_ROOT_URL")
     if explicit:
         return [{"name": "island root", "url": explicit.rstrip("/"),
                  "token": discover_pairing_token(None)}]
@@ -2074,7 +2070,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="PandoRSI observatory: one command, one page.")
     parser.add_argument("--port", type=int,
-                        default=int(os.environ.get("PANDOSI_OBSERVATORY_PORT", "8799")),
+                        default=int(os.environ.get("PANDO_OBSERVATORY_PORT", "8799")),
                         help="listen port (default 8799)")
     parser.add_argument("--mailbox", default=None,
                         help="mailbox base URL (default: the first candidate "
@@ -2086,15 +2082,17 @@ def main() -> int:
     args = parser.parse_args()
 
     hosts = _read_hosts()
-    mailbox = (args.mailbox or os.environ.get("PANDOSI_MAILBOX_URL")
-               or DEFAULT_MAILBOX)
+    mailboxes = hosts.get("mailboxes") if isinstance(hosts, dict) else None
+    configured = mailboxes[0] if isinstance(mailboxes, list) and mailboxes \
+        else DEFAULT_MAILBOX
+    mailbox = args.mailbox or configured
     if not args.mailbox and mailbox == DEFAULT_MAILBOX:
         mailbox = _first_healthy_mailbox(mailbox, hosts)
 
     roots = _root_sources(hosts, args.root)
     cfg = {
         "mailbox_url": mailbox,
-        "mailbox_token": _read_token(os.environ.get("PANDOSI_MAILBOX_TOKEN"),
+        "mailbox_token": _read_token(os.environ.get("PANDO_MAILBOX_TOKEN"),
                                      [PANDO_DIR / "mailbox.token"]),
         "roots": roots,
         "pairing_token": discover_pairing_token(None),

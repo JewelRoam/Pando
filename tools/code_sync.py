@@ -36,7 +36,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MODELS_DIR = Path(
     os.environ.get("PANDO_MODELS_DIR")
-    or os.environ.get("PANDOSI_MODELS_DIR")
+    or os.environ.get("PANDO_MODELS_DIR")
     or REPO_ROOT / "models"
 ).expanduser()
 

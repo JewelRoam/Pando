@@ -675,15 +675,25 @@ def pass_once(urls, token: str | None, members: list[dict],
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="local LLM chat members")
-    parser.add_argument("--hosts", default=os.environ.get("PANDOSI_HOSTS", ""))
+    from . import hostconfig as _hostconfig
+    _config = _hostconfig.load()
+    _config_mailboxes = _hostconfig.mailbox_urls(_config)
+    parser.add_argument(
+        "--hosts",
+        default=str(_hostconfig.path_value(_config, "hosts_file",
+                                           "~/.pando/hosts.json")))
     parser.add_argument("--root", action="append", default=[])
     parser.add_argument("--pairing-token-file", default=None)
-    parser.add_argument("--mailbox", default=os.environ.get("PANDOSI_MAILBOX_URL"))
+    parser.add_argument("--mailbox",
+                        default=_config_mailboxes[0]
+                        if _config_mailboxes else None)
     parser.add_argument("--mailbox-fallback", action="append", default=[],
                         help="read from, and post to, this mailbox if the "
                              "primary does not answer (repeatable)")
-    parser.add_argument("--token-file", default=os.environ.get(
-        "PANDOSI_MAILBOX_TOKEN_FILE", "~/.pando/mailbox.token"))
+    parser.add_argument("--token-file",
+                        default=str(_hostconfig.path_value(
+                            _config, "mailbox_token_file",
+                            "~/.pando/mailbox.token")))
     parser.add_argument("--ledger", default="~/.pando/chat-ledger.jsonl")
     parser.add_argument("--interval", type=float, default=20)
     parser.add_argument("--open-cooldown", type=float, default=OPEN_COOLDOWN,

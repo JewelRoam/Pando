@@ -6,13 +6,13 @@ cd "$root" || exit 1
 # An explicit override is authoritative. local_ci.py still verifies that it is
 # the same Python version the workflows use; a bad override must not silently
 # fall through to another interpreter.
-if [ -n "${PANDOSI_CI_PYTHON:-}" ]; then
-  if [ -x "$PANDOSI_CI_PYTHON" ]; then
-    py=$PANDOSI_CI_PYTHON
-  elif command -v "$PANDOSI_CI_PYTHON" >/dev/null 2>&1; then
-    py=$PANDOSI_CI_PYTHON
+if [ -n "${PANDO_CI_PYTHON:-}" ]; then
+  if [ -x "$PANDO_CI_PYTHON" ]; then
+    py=$PANDO_CI_PYTHON
+  elif command -v "$PANDO_CI_PYTHON" >/dev/null 2>&1; then
+    py=$PANDO_CI_PYTHON
   else
-    echo "pre-push: PANDOSI_CI_PYTHON is not executable: $PANDOSI_CI_PYTHON" >&2
+    echo "pre-push: PANDO_CI_PYTHON is not executable: $PANDO_CI_PYTHON" >&2
     exit 1
   fi
 else
@@ -39,7 +39,7 @@ else
 fi
 
 if [ -z "${py:-}" ]; then
-  echo "pre-push: no Python found. Install Python 3.12 or set PANDOSI_CI_PYTHON." >&2
+  echo "pre-push: no Python found. Install Python 3.12 or set PANDO_CI_PYTHON." >&2
   exit 1
 fi
 echo "pre-push: running tools/local_ci.py with $py" >&2

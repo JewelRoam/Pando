@@ -11,7 +11,7 @@ them is a regression.
 
 Candidates come from per-machine config, never from the repository:
 
-- `~/.pandosi/hosts.json` (or `PANDOSI_HOSTS` / `PANDOSI_HOSTS_FILE`),
+- `~/.pando/hosts.json` (or `PANDO_HOSTS` / `PANDO_HOSTS_FILE`),
   shape: `{"mailboxes": ["<url>", ...]}` - see `hosts.example.json`;
 - fallback without config: `http://127.0.0.1:8776` and
   `http://127.0.0.1:8778` (localhost conventions only - no machine

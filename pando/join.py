@@ -156,9 +156,9 @@ def main() -> None:
                         help="confirm this target is a sandbox (required for spore)")
     parser.add_argument("--root", default=None,
                         help="explicit root URL (skips mDNS discovery)")
-    parser.add_argument("--pairing-token", default=os.getenv("PANDOSI_PAIRING_TOKEN"),
+    parser.add_argument("--pairing-token", default=os.getenv("PANDO_PAIRING_TOKEN"),
                         help="secret required by a pairing-enabled root "
-                             "(default: PANDOSI_PAIRING_TOKEN)")
+                             "(default: PANDO_PAIRING_TOKEN)")
     parser.add_argument("--onnx-path", default=None,
                         help="use this ONNX file as the decision backend")
     parser.add_argument("--checkpoint", default=None,
@@ -209,7 +209,7 @@ def main() -> None:
         if pairing_required(root_url) and not args.pairing_token:
             raise SystemExit(
                 f"root {root_url} requires --pairing-token "
-                "(or PANDOSI_PAIRING_TOKEN); refusing automatic join")
+                "(or PANDO_PAIRING_TOKEN); refusing automatic join")
     else:
         listen_host = "0.0.0.0" if args.lan else "127.0.0.1"
         scope = "LAN" if args.lan else "loopback"
@@ -253,7 +253,7 @@ def main() -> None:
 
         # 1) Obtain the seed's verify key.
         #    --spore (root mode): fetch from the root, pin on first use.
-        #    --spore-url (explicit seed): must come from PANDOSI_SEED_PUBKEY.
+        #    --spore-url (explicit seed): must come from the host config.
         if args.spore:
             with open_url(urllib.request.Request(
                     f"{args.spore_url}/spore/pubkey",
@@ -274,10 +274,12 @@ def main() -> None:
                 pin_file.write_text(seed_pub_hex, encoding="utf-8")
                 print("[TOFU] root pubkey pinned:", seed_pub_hex, flush=True)
         else:
-            seed_pub_hex = os.environ.get("PANDOSI_SEED_PUBKEY")
+            from . import hostconfig
+            seed_pub_hex = hostconfig.seed_pubkey(hostconfig.load())
             if not seed_pub_hex:
                 raise SystemExit(
-                    "set PANDOSI_SEED_PUBKEY (seed verify key hex)")
+                    "no seed verify key: set seed.pubkey in the host config "
+                    "(~/.pando/host.toml)")
 
         verify_key = nacl.signing.VerifyKey(bytes.fromhex(seed_pub_hex))
 

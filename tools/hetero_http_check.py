@@ -120,7 +120,7 @@ def main() -> int:
     if not en_dynamic.exists():
         raise SystemExit(f"missing ONNX graph: {en_dynamic}")
 
-    hf_home = os.environ.get("PANDOSI_HF_HOME", str(ROOT / ".hf-cache"))
+    hf_home = os.environ.get("PANDO_HF_HOME", str(ROOT / ".hf-cache"))
     base_env = {
         **os.environ,
         "HF_HOME": hf_home,

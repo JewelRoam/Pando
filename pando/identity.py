@@ -6,7 +6,8 @@ the public key is the durable claim, so a token holder cannot re-register an
 existing member's id with a fresh key, and a root started with
 --require-identity refuses any unsigned registration at all.
 
-The identity lives in ~/.pando/identity.json (override with PANDOSI_IDENTITY).
+The identity lives in ~/.pando/identity.json (override with [paths] identity
+in the host config).
 PyNaCl already ships as a hard dependency, so this adds no new requirements.
 """
 
@@ -81,8 +82,9 @@ def verify(pubkey_b64: str, payload: dict, sig_b64: str) -> bool:
 
 
 def default_path() -> Path:
-    return Path(os.environ.get("PANDOSI_IDENTITY",
-                               DEFAULT_IDENTITY_PATH)).expanduser()
+    from . import hostconfig
+    return hostconfig.path_value(hostconfig.load(), "identity",
+                                 DEFAULT_IDENTITY_PATH)
 
 
 def load_or_create(path: str | Path | None = None) -> Identity:

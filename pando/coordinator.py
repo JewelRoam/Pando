@@ -54,7 +54,7 @@ LATENCY_BAND_MS = 25.0
 # The measured-accuracy registry is deliberately data, not a model: a
 # checkpoint is eligible for auto-assent only when a recorded evaluation
 # names it. Unknown members are ignored rather than assigned a prior.
-ASSENT_REGISTRY_ENV = "PANDOSI_ASSENT_REGISTRY"
+ASSENT_REGISTRY_ENV = "PANDO_ASSENT_REGISTRY"
 ASSENT_REGISTRY_DEFAULT = ("registry", "accuracies.json")
 
 
@@ -84,7 +84,7 @@ def load_accuracy_registry(
 
     ``source`` may be a registry path, an already-parsed payload, or ``None``
     for the checked-in ``assets/registry/accuracies.json`` (overridable with
-    ``PANDOSI_ASSENT_REGISTRY``). Missing, malformed, and empty registries
+    ``PANDO_ASSENT_REGISTRY``). Missing, malformed, and empty registries
     all become an empty mapping so callers can fall back to no-assent
     behavior without treating bad data as a reason to guess.
     """

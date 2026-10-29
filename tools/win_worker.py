@@ -7,8 +7,14 @@ never edits files. When a task clearly needs code work it marks the task
 blocked with the model's explanation.
 
 State: ~/.pando/win_worker_state.json (seen ids, counters).
-Env: PANDOSI_MAILBOX_URL / PANDOSI_MAILBOX_TOKEN_FILE, WORKER_LLM_URL,
-     WORKER_MODEL, WORKER_NAME, WORKER_POLL_SECONDS.
+Config: the mailbox comes from hosts.json like every other tool; the worker
+itself is a ``[win_worker]`` section in host.toml::
+
+    [win_worker]
+    llm_url = "http://127.0.0.1:8086/v1"
+    model = "gemma-4-12b"
+    name = "win-codex"
+    poll_seconds = 15
 """
 
 from __future__ import annotations
@@ -21,15 +27,24 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-MAILBOX_URL = os.environ.get(
-    "PANDOSI_MAILBOX_URL",
-    "https://without-belongs-disks-committed.trycloudflare.com")
-TOKEN_FILE = os.environ.get(
-    "PANDOSI_MAILBOX_TOKEN_FILE", "metrics/lan-check/mac-mailbox.token")
-LLM_URL = os.environ.get("WORKER_LLM_URL", "http://127.0.0.1:8086/v1")
-MODEL = os.environ.get("WORKER_MODEL", "gemma-4-12b")
-NAME = os.environ.get("WORKER_NAME", "win-codex")
-POLL = float(os.environ.get("WORKER_POLL_SECONDS", "15"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from pando import hostconfig  # noqa: E402
+
+_CONFIG = hostconfig.load()
+_MAILBOXES = hostconfig.mailbox_urls(_CONFIG)
+if not _MAILBOXES:
+    raise SystemExit(
+        "no mailbox configured: hosts.json names none; this worker "
+        "deliberately carries no default address")
+MAILBOX_URL = _MAILBOXES[0]
+TOKEN_FILE = str(hostconfig.path_value(
+    _CONFIG, "mailbox_token_file", "~/.pando/mailbox.token"))
+_WORKER = _CONFIG.get("win_worker") or {}
+LLM_URL = str(_WORKER.get("llm_url", "http://127.0.0.1:8086/v1"))
+MODEL = str(_WORKER.get("model", "gemma-4-12b"))
+NAME = str(_WORKER.get("name", "win-codex"))
+POLL = float(_WORKER.get("poll_seconds", 15))
 STATE = Path(os.environ.get("WORKER_STATE", "~/.pando/win_worker_state.json")
              ).expanduser()
 CODE_HINTS = ("commit", "implement", "refactor", "deploy", "unit test",

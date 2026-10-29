@@ -7,7 +7,7 @@ outside can see it**. Before flipping it public, three measured facts matter:
 1. **Two live secrets sit in tracked files AND in git history.**
    - The Mac island pairing token: 77 files (76 x `docs/archive/session-logs/*` plus
      `experiments/mac_group_check.py`). The script no longer hardcodes it (it reads
-     `PANDOSI_MAC_TOKEN`), but every history revision still contains it.
+     `PANDO_MAC_TOKEN`), but every history revision still contains it.
    - The Mac mailbox bearer token: ~70 x `docs/archive/session-logs/*`. This is the
      token that guards the task mailbox / group chat behind the public tunnel.
 2. **`docs/archive/session-logs/` holds 206 tracked files** - the full internal

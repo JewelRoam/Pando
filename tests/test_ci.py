@@ -114,7 +114,7 @@ class TestLocalCi(unittest.TestCase):
 
         module = self._module()
         with mock.patch.dict(os.environ,
-                             {"PANDOSI_CI_PYTHON": "/ci/python312"}, clear=False), \
+                             {"PANDO_CI_PYTHON": "/ci/python312"}, clear=False), \
                 mock.patch.object(module, "_python_version", return_value="3.12"), \
                 mock.patch.object(module.shutil, "which", return_value=None):
             self.assertEqual(module._ci_python(), "/ci/python312")
@@ -139,7 +139,7 @@ class TestLocalCi(unittest.TestCase):
 
         module = self._module()
         with mock.patch.dict(os.environ,
-                             {"PANDOSI_CI_PYTHON": "/wrong/python"}, clear=False), \
+                             {"PANDO_CI_PYTHON": "/wrong/python"}, clear=False), \
                 mock.patch.object(module, "_python_version", return_value="3.14"), \
                 mock.patch.object(module.shutil, "which", return_value=None):
             with self.assertRaisesRegex(RuntimeError, "3.12"):
@@ -261,7 +261,7 @@ class TestLocalCi(unittest.TestCase):
         # missing developer venv must not be the thing that blocks a push.
         self.assertIn(".venv-ci312/bin/python", text)
         self.assertIn(".venv-ci312/Scripts/python.exe", text)
-        self.assertIn("PANDOSI_CI_PYTHON", text)
+        self.assertIn("PANDO_CI_PYTHON", text)
         self.assertIn("python3.12", text)
         self.assertNotIn("no project venv", text)
         if os.name != "nt":

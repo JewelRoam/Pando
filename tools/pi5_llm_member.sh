@@ -12,18 +12,20 @@
 #   bash tools/pi5_llm_member.sh serve     # llama-server (foreground; wrap in setsid/syworker)
 #   bash tools/pi5_llm_member.sh stem      # the fabric member (foreground; needs a running serve)
 #
-# Overridables: PANDOSI_PI_LLAMA, PANDOSI_PI_MODEL, PANDOSI_PI_PORT, PANDOSI_ROOT,
-#               PANDOSI_PAIRING_TOKEN_FILE, PANDOSI_NODE_ID, PANDOSI_PY, PANDOSI_CHECKPOINT
+# Bring-up overrides (one-shot launch knobs; persistent wiring belongs in
+# the host config): PANDO_PI_LLAMA, PANDO_PI_MODEL, PANDO_PI_PORT,
+# PANDO_PAIRING_TOKEN_FILE, PANDO_NODE_ID, PANDO_PY, PANDO_CHECKPOINT.
+# PANDO_ROOT is REQUIRED for `stem`: the repo names no fleet address.
 set -e
 
-LLAMA_DIR="${PANDOSI_PI_LLAMA:-$HOME/llama/llama-b11700}"
-MODEL="${PANDOSI_PI_MODEL:-$HOME/models/Qwen3-1.7B-Q4_K_M.gguf}"
-PORT="${PANDOSI_PI_PORT:-8085}"
-ROOT="${PANDOSI_ROOT:-http://192.168.31.100:8790}"
-TOKEN_FILE="${PANDOSI_PAIRING_TOKEN_FILE:-$HOME/.pando/pairing.token}"
-NODE_ID="${PANDOSI_NODE_ID:-$(hostname)-llm}"
-VENV_PY="${PANDOSI_PY:-$HOME/pando/bin/python}"
-CHECKPOINT="${PANDOSI_CHECKPOINT:-qwen3-1.7b-q4km}"
+LLAMA_DIR="${PANDO_PI_LLAMA:-$HOME/llama/llama-b11700}"
+MODEL="${PANDO_PI_MODEL:-$HOME/models/Qwen3-1.7B-Q4_K_M.gguf}"
+PORT="${PANDO_PI_PORT:-8085}"
+ROOT="${PANDO_ROOT:-}"
+TOKEN_FILE="${PANDO_PAIRING_TOKEN_FILE:-$HOME/.pando/pairing.token}"
+NODE_ID="${PANDO_NODE_ID:-$(hostname)-llm}"
+VENV_PY="${PANDO_PY:-$HOME/pando/bin/python}"
+CHECKPOINT="${PANDO_CHECKPOINT:-qwen3-1.7b-q4km}"
 
 case "${1:-}" in
   serve)
@@ -35,6 +37,11 @@ case "${1:-}" in
       --chat-template-kwargs '{"enable_thinking": false}'
     ;;
   stem)
+    if [ -z "$ROOT" ]; then
+      echo "PANDO_ROOT is required (the fabric root URL); the repo carries" >&2
+      echo "no fleet address - yours is in this host's own notes." >&2
+      exit 2
+    fi
     # An empty *string argument* disables auth; an empty *file* is rejected.
     exec "$VENV_PY" -m pando.worker --node-id "$NODE_ID" --backend openai \
       --openai-url "http://127.0.0.1:$PORT/v1" --openai-model qwen3-1.7b \
