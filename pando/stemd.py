@@ -27,8 +27,7 @@ class _PandoHTTPServer(ThreadingHTTPServer):
 
 from contextlib import nullcontext
 
-from .backend import (MockBackend, OnnxLayaBackend,
-                     OpenAIChoiceBackend, TorchLayaBackend)
+from . import backend as _backend_mod
 from .common import DECIDING_ROLE, DecisionRequest, PROPOSING_ROLE, ROLES
 from .graft import assign_role, capability
 from .resources import asset_path
@@ -335,6 +334,9 @@ def main() -> None:
         except ValueError as exc:
             raise SystemExit(str(exc))
 
+    # Dispatch through the backend registry so a new backend only
+    # registers a factory in pando.backend; this if/elif stays the size
+    # of "how does this CLI name its arguments", not "what backends exist".
     if args.backend == "onnx":
         print(f"loading ONNX Laya from {args.onnx_path} ...", flush=True)
         from .spore import artifact_digest
@@ -346,18 +348,18 @@ def main() -> None:
             print(f"artifact sha256 {digest}", flush=True)
         pad_to = args.pad_to if args.pad_to is not None \
             else (256 if args.device != "CPU" else None)
-        backend = OnnxLayaBackend(args.node_id, args.onnx_path,
-                                  repo=args.repo, device=args.device,
-                                  pad_to=pad_to,
-                                  checkpoint=args.checkpoint)
+        backend = _backend_mod.create_backend(
+            "onnx", args.node_id, onnx_path=args.onnx_path,
+            repo=args.repo, device=args.device, pad_to=pad_to,
+            checkpoint=args.checkpoint)
         backend.artifact_digest = digest
         print("model loaded", flush=True)
-    elif args.backend == "laya":
+    elif args.backend == "laya" or args.backend == "torch":
         print(f"loading torch Laya from {args.model} on {args.device} ...",
               flush=True)
-        backend = TorchLayaBackend(args.node_id, model=args.model,
-                                   device=args.device,
-                                   checkpoint=args.checkpoint)
+        backend = _backend_mod.create_backend(
+            "torch", args.node_id, model=args.model, device=args.device,
+            checkpoint=args.checkpoint)
         print("model loaded", flush=True)
     elif args.backend == "openai":
         from .common import read_secret_file
@@ -367,8 +369,8 @@ def main() -> None:
                 api_key = read_secret_file(args.openai_key_file)
             except ValueError as exc:
                 raise SystemExit(str(exc))
-        backend = OpenAIChoiceBackend(
-            args.node_id, args.openai_url, api_key=api_key,
+        backend = _backend_mod.create_backend(
+            "openai", args.node_id, base_url=args.openai_url, api_key=api_key,
             model=args.openai_model, checkpoint=args.checkpoint or "openai",
             prompt_variant="b", timeout=60.0,
             probability=args.openai_probability)
@@ -378,16 +380,15 @@ def main() -> None:
         # The cheap, independent member (rounds 122-125): stdlib only, so a
         # device that cannot hold a neural graph can still contribute a vote
         # whose errors do not travel with the family's.
-        from .textmodel import TextModel
         print(f"loading text model from {args.text_model} ...", flush=True)
-        backend = TextModel.load(args.text_model)
-        if args.checkpoint:
-            backend.checkpoint = args.checkpoint
+        backend = _backend_mod.create_backend(
+            "text", args.node_id, text_model=args.text_model,
+            checkpoint=args.checkpoint)
         print(f"text model loaded: {backend.summary()}", flush=True)
     else:
-        backend = MockBackend(args.node_id, args.checkpoint or "mock",
-                              delay_ms=args.delay_ms,
-                              serialize=args.serialize)
+        backend = _backend_mod.create_backend(
+            "mock", args.node_id, checkpoint=args.checkpoint or "mock",
+            delay_ms=args.delay_ms, serialize=args.serialize)
     stem = Stem(args.node_id, backend, host=args.host, port=args.port,
                 advertise_host=args.advertise_host,
                 serialize=not args.parallel)

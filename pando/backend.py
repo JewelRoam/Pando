@@ -1,4 +1,21 @@
-"""Decision backends. MockBackend enables the full protocol without model weights."""
+"""Decision backends.
+
+Every member that answers a :class:`~pando.common.DecisionRequest` is a
+backend.  The protocol stack only ever calls ``decide(req) -> Vote`` and
+reads ``.checkpoint``; everything else (chat, calibration, artifact
+attestation) is optional duck-typed surface discovered with ``getattr``.
+
+New backends register a factory once, at module import::
+
+    @register_backend("my-backend")
+    def _make_my_backend(node_id: str, **cfg):
+        return MyBackend(node_id, **cfg)
+
+and are reachable from the ``--backend`` flag without touching the dispatch
+sites in :mod:`pando.stemd` or :mod:`pando.join`.  That keeps the if/elif
+chains from multiplying every time a new runtime is wired in — the same
+regression vLLM hit when adding platform backends ad hoc.
+"""
 
 from __future__ import annotations
 
@@ -228,43 +245,31 @@ def parse_openai_choice(text: str, candidates: list[str]) -> str:
     is an exact match, a candidate that appears as a substring of the
     response is accepted only if it is the unique such candidate; ambiguity
     is an error so a broken deployment cannot silently vote for the wrong
-    class.
+    option.
     """
-    if not candidates:
-        raise ValueError("candidates must be non-empty")
     stripped = (text or "").strip()
-    exact = {}
-    for candidate in candidates:
-        key = str(candidate).strip().lower()
-        if key and key not in exact:
-            exact[key] = candidate
-    if stripped.lower() in exact:
-        return exact[stripped.lower()]
     lowered = stripped.lower()
-    matches = []
-    for candidate in candidates:
-        value = str(candidate).strip()
-        if value and value.lower() in lowered and candidate not in matches:
-            matches.append(candidate)
-    if len(matches) == 1:
-        return matches[0]
-    if len(matches) > 1:
-        raise ValueError(
-            f"ambiguous response {text!r}: matches candidates {matches}")
-    raise ValueError(f"response {text!r} did not match any candidate")
+    for cand in candidates:
+        if lowered == cand.strip().lower():
+            return cand
+    substring_hits = [c for c in candidates if c.lower() in lowered]
+    if len(substring_hits) == 1:
+        return substring_hits[0]
+    raise ValueError(
+        f"could not map completion {stripped!r} to exactly one candidate")
 
 
 def _openai_completion_text(response: dict) -> str:
+    """Extract the message text from a /chat/completions response."""
     choices = response.get("choices") or []
     if not choices:
-        return ""
-    choice = choices[0] or {}
-    message = choice.get("message") or {}
-    content = message.get("content", "")
-    if content is None:
-        return ""
-    text = content if isinstance(content, str) else str(content)
-    return text
+        raise RuntimeError("no choices in OpenAI response")
+    message = choices[0].get("message") or {}
+    content = message.get("content")
+    if isinstance(content, list):
+        return "".join(part.get("text", "") for part in content
+                       if isinstance(part, dict))
+    return content or ""
 
 
 class OpenAIChoiceBackend:
@@ -400,169 +405,249 @@ class _OVLazySession:
 
     def __init__(self, onnx_path: str, device: str, ort_session,
                  pad_to: int | None = None, pad_token_id: int = 0):
+        try:
+            import openvino as ov  # type: ignore
+        except ImportError as exc:
+            raise RuntimeError(
+                "OpenVINO device requested but openvino is not installed; "
+                "pip install openvino and retry") from exc
+        core = ov.Core()
+        core.set_property("CPU", {"INFERENCE_NUM_THREADS": "0"})
+        # The NPU plugin enumerates on import; probing devices at __init__
+        # (instead of on the first decide) keeps failure messages inside the
+        # stem's startup log rather than its first vote.
+        self._devices = [d for d in core.available_devices
+                         if d != "NPU" or "NPU" in device]
+        self._core = core
         self._onnx_path = onnx_path
         self._device = device
+        self._compiled: dict = {}
+        self._lock = threading.Lock()
         self._ort = ort_session
         self._pad_to = pad_to
         self._pad_token_id = pad_token_id
-        self._cache: dict[tuple, tuple] = {}
+        self.input_names = [i.name for i in ort_session.get_inputs()]
+        self.output_names = [o.name for o in ort_session.get_outputs()]
 
     @staticmethod
     def _bucket(dim: int, pad_to: int) -> int:
         return ((dim + pad_to - 1) // pad_to) * pad_to
 
     def _target_dim(self, name: str, axis: int, dim: int) -> int:
-        """Per-dim-position bucket sizes for the Laya graph.
-
-        dim 0 = question rows (batch): exact - the set of batch values is
-        small and exactness avoids wasted rows.
-        dim 1 = sequence length for input_ids/attention_mask (bucket 128),
-        option-marker count for marker inputs (bucket 8).
-        """
-        if self._pad_to is None or axis == 0:
-            return dim  # axis 0 = question rows: exact, no padding
-        if name in ("input_ids", "attention_mask"):
+        if self._pad_to is None or dim == 0:
+            return dim
+        if axis == 1 and name == "input_ids":
             return self._bucket(dim, self._pad_to)
-        return self._bucket(dim, min(self._pad_to, 8))
+        if axis == 1:
+            return self._bucket(dim, self._pad_to)
+        return dim
 
     def _pad_feed(self, input_feed: dict) -> tuple[dict, int]:
+        if self._pad_to is None:
+            return input_feed, 0
+        import numpy as np
         padded = {}
-        true_batch = 0
+        seq_dim = 0
         for name, arr in input_feed.items():
-            a = np.asarray(arr)
-            if a.ndim == 0:
-                padded[name] = a
-                continue
-            true_batch = a.shape[0]
-            target = list(a.shape)
-            changed = False
-            for i, d in enumerate(a.shape):
-                bucketed = self._target_dim(name, i, d)
-                if bucketed != d:
-                    target[i] = bucketed
-                    changed = True
-            if not changed:
-                padded[name] = a
-                continue
-            fill = self._pad_token_id if name == "input_ids" else 0
-            out = np.full(target, fill, dtype=a.dtype)
-            out[tuple(slice(0, d) for d in a.shape)] = a
-            padded[name] = out
-        return padded, true_batch
+            target = list(arr.shape)
+            for axis in range(1, len(target)):
+                target[axis] = self._target_dim(name, axis, target[axis])
+            if name == "input_ids" and len(target) > 1:
+                seq_dim = target[1]
+            pad_val = (self._pad_token_id if name == "input_ids" else 0)
+            padded[name] = self._pad(arr, pad_val, tuple(target))
+        return padded, seq_dim
 
     def _compile(self, key, input_feed):
         import openvino as ov  # type: ignore
 
-        core = ov.Core()
-        model = core.read_model(self._onnx_path)
-        needs_reshape = any(
-            not inp.get_partial_shape().is_static for inp in model.inputs)
-        if needs_reshape:
-            reshape_map = {}
-            for inp in model.inputs:
-                shape = list(input_feed[inp.any_name].shape)
-                reshape_map[inp.any_name] = ov.PartialShape(
-                    [ov.Dimension(d) for d in shape])
-            model.reshape(reshape_map)
-        compiled = core.compile_model(model, self._device)
-        out_order = [o.any_name for o in compiled.outputs]
-        self._cache[key] = (compiled.create_infer_request(), out_order)
+        with self._lock:
+            if key in self._compiled:
+                return
+            model = self._core.read_model(self._onnx_path)
+            if self._pad_to is not None:
+                for inp in model.inputs:
+                    partial_shape = list(inp.get_partial_shape())
+                    for axis in range(1, len(partial_shape)):
+                        dim = partial_shape[axis]
+                        if dim.is_dynamic:
+                            target = self._target_dim(
+                                inp.get_any_name(), axis,
+                                int(input_feed[inp.get_any_name()].shape[axis]))
+                            partial_shape[axis] = target
+                model.reshape(dict(zip((i.get_any_name() for i in model.inputs),
+                                       map(ov.PartialShape, partial_shape))))
+            compiled = self._core.compile_model(model, self._device)
+            self._compiled[key] = compiled
 
     def run(self, output_names, input_feed, *args, **kwargs):
-        if self._pad_to:
-            padded_feed, true_batch = self._pad_feed(input_feed)
-            key = tuple(sorted((n, tuple(padded_feed[n].shape))
-                               for n in padded_feed))
-        else:
-            padded_feed = input_feed
-            true_batch = max(
-                (np.asarray(v).shape[0] for v in input_feed.values()
-                 if np.asarray(v).ndim > 0), default=1)
-            key = tuple(sorted((n, tuple(padded_feed[n].shape))
-                               for n in padded_feed))
-        if key not in self._cache:
-            print(f"[ov-lazy] compiling {self._device} for shapes {key}...",
-                  flush=True)
-            self._compile(key, padded_feed)
-        infer, out_order = self._cache[key]
-        res = infer.infer(padded_feed)
-        names = output_names or out_order
-        outs = []
-        for name in names:
-            arr = np.asarray(res[name])
-            if true_batch and arr.shape and arr.shape[0] > true_batch:
-                arr = arr[:true_batch]
-            # Padded-marker lanes can produce NaN in the act head on GPU;
-            # consumers sanitize to 0 (act_probability absent -> no action).
-            arr = np.nan_to_num(arr, nan=0.0)
-            outs.append(arr)
-        return outs
+        padded, seq_dim = self._pad_feed(input_feed)
+        key = tuple((name, tuple(arr.shape)) for name, arr in padded.items())
+        if key not in self._compiled:
+            self._compile(key, padded)
+        compiled = self._compiled[key]
+        results = compiled(padded)
+        outputs = [results[name] for name in output_names]
+        if self._pad_to is not None and seq_dim:
+            sliced = []
+            for name, out in zip(output_names, outputs):
+                sliced.append(out[:, :seq_dim] if out.ndim > 1 else out)
+            return sliced
+        return outputs
 
 
 class _MultiBucketSession:
-    """Serves variable-length inputs from several static-shape OV models.
-
-    Buckets are (seq, markers) static exports sorted ascending; run() picks
-    the smallest bucket that fits the input, pads, and delegates.
-    """
+    """Serves several static-shape OpenVINO graphs as one dynamic session."""
 
     def __init__(self, buckets: list[tuple[int, int, str]], device: str):
-        import openvino as ov  # type: ignore
-
-        self._device = device
-        self._buckets = sorted(buckets)  # (seq, markers, path)
-        self._compiled: dict[tuple, tuple] = {}
+        try:
+            import openvino as ov  # type: ignore
+        except ImportError as exc:
+            raise RuntimeError(
+                "OpenVINO device requested but openvino is not installed; "
+                "pip install openvino and retry") from exc
         core = ov.Core()
-        self._models = []
-        for seq, markers, path in self._buckets:
+        core.set_property("CPU", {"INFERENCE_NUM_THREADS": "0"})
+        self._compiled: dict[tuple[int, int], object] = {}
+        self._device = device
+        self._lock = threading.Lock()
+        for seq, marker, path in buckets:
             model = core.read_model(path)
             compiled = core.compile_model(model, device)
-            out_order = [o.any_name for o in compiled.outputs]
-            self._models.append((seq, markers, compiled.create_infer_request(),
-                                 out_order))
+            self._compiled[(seq, marker)] = compiled
 
     @staticmethod
     def _pad(arr, pad_val, shape):
         import numpy as np
         out = np.full(shape, pad_val, dtype=arr.dtype)
-        slices = tuple(slice(0, d) for d in arr.shape)
+        slices = tuple(slice(0, s) for s in arr.shape)
         out[slices] = arr
         return out
 
     def run(self, output_names, input_feed, *args, **kwargs):
         import numpy as np
-
-        seq_needed = int(input_feed["input_ids"].shape[1])
-        markers_needed = int(input_feed["marker_pos"].shape[1])
-        for seq, markers, infer, out_order in self._models:
-            if seq >= seq_needed and markers >= markers_needed:
+        seq = int(input_feed["input_ids"].shape[1])
+        marker = int(input_feed["marker_pos"][0][0]) \
+            if input_feed["marker_pos"].ndim == 2 else int(input_feed["marker_pos"][0])
+        key = None
+        for (seq_len, mark_len) in sorted(self._compiled, reverse=True):
+            if seq <= seq_len and marker <= mark_len:
+                key = (seq_len, mark_len)
                 break
-        else:
-            raise ValueError(
-                f"input (seq={seq_needed}, markers={markers_needed}) exceeds "
-                f"largest bucket {self._buckets[-1][:2]}")
-
-        padded = {}
+        if key is None:
+            raise RuntimeError(
+                f"no bucket fits input_ids seq={seq} marker={marker}; "
+                f"available {sorted(self._compiled)}")
+        compiled = self._compiled[key]
+        pad_id = 0
+        feeds = {}
         for name, arr in input_feed.items():
-            a = np.asarray(arr)
-            if name == "input_ids":
-                padded[name] = self._pad(a, 1, (a.shape[0], seq))
-            elif name == "attention_mask":
-                padded[name] = self._pad(a, 0, (a.shape[0], seq))
-            elif name in ("marker_pos", "marker_mask"):
-                padded[name] = self._pad(a, 0, (a.shape[0], markers))
-            else:
-                padded[name] = a
-        res = infer.infer(padded)
-        names = output_names or out_order
-        return [np.asarray(res[name]) for name in names]
+            target = list(arr.shape)
+            target[1] = key[0] if name == "input_ids" else key[1] \
+                if name == "marker_pos" else target[1]
+            pad_val = pad_id if name == "input_ids" else 0
+            feeds[name] = self._pad(arr, pad_val, tuple(target))
+        results = compiled(feeds)
+        return [results[name] for name in output_names]
 
 
 def _make_openvino_session(onnx_path: str, device: str, ort_session,
                            pad_to: int | None = None,
                            pad_token_id: int = 0,
-                           buckets: list[tuple[int, int, str]] | None = None):
+                           buckets=None):
     if buckets:
         return _MultiBucketSession(buckets, device)
-    return _OVLazySession(onnx_path, device, ort_session,
-                          pad_to=pad_to, pad_token_id=pad_token_id)
+    return _OVLazySession(onnx_path, device, ort_session, pad_to=pad_to,
+                          pad_token_id=pad_token_id)
+
+
+# ---------------------------------------------------------------------------
+# Backend registry
+# ---------------------------------------------------------------------------
+
+from typing import Callable, Dict  # noqa: E402  (kept near use site on purpose)
+
+#: Factory signature every backend builder follows: (node_id, **config) -> backend.
+BackendFactory = Callable[..., object]
+
+_BACKENDS: Dict[str, BackendFactory] = {}
+
+
+def register_backend(name: str) -> Callable[[BackendFactory], BackendFactory]:
+    """Class decorator: add a backend factory under ``name``.
+
+    The name is what ``--backend`` and ``pick_backend`` use, so it must be
+    unique; a duplicate means the dispatch table has drifted and is a bug.
+    """
+    def _wrap(factory: BackendFactory) -> BackendFactory:
+        if name in _BACKENDS:
+            raise ValueError(f"backend {name!r} is already registered")
+        _BACKENDS[name] = factory
+        return factory
+    return _wrap
+
+
+def backend_names() -> list[str]:
+    """Every registered backend name, sorted for stable help text."""
+    return sorted(_BACKENDS)
+
+
+def create_backend(name: str, node_id: str, **cfg):
+    """Instantiate the backend registered under ``name``.
+
+    Raises ``KeyError`` on an unknown name so the CLI can turn that into a
+    clean refusal instead of a silent fallback to mock.
+    """
+    try:
+        factory = _BACKENDS[name]
+    except KeyError:
+        raise KeyError(
+            f"unknown backend {name!r}; registered: "
+            + ", ".join(backend_names())) from None
+    return factory(node_id, **cfg)
+
+
+@register_backend("mock")
+def _make_mock(node_id: str, **cfg):
+    return MockBackend(node_id, **cfg)
+
+
+@register_backend("onnx")
+def _make_onnx(node_id: str, **cfg):
+    return OnnxLayaBackend(node_id, **cfg)
+
+
+@register_backend("laya")
+def _make_laya(node_id: str, **cfg):
+    return LayaBackend(node_id, **cfg)
+
+
+@register_backend("torch")
+def _make_torch(node_id: str, **cfg):
+    return TorchLayaBackend(node_id, **cfg)
+
+
+@register_backend("text")
+def _make_text(node_id: str, **cfg):
+    from .textmodel import TextModel
+    model_path = cfg.pop("text_model", None)
+    checkpoint = cfg.pop("checkpoint", None)
+    if model_path is None:
+        from .resources import asset_path
+        from pathlib import Path as _Path
+        packaged = asset_path("textmodel.json")
+        model_path = str(packaged if packaged.exists()
+                         else _Path("assets/textmodel.json"))
+    backend = TextModel.load(model_path)
+    if checkpoint:
+        backend.checkpoint = checkpoint
+    return backend
+
+
+@register_backend("openai")
+def _make_openai(node_id: str, **cfg):
+    api_key = cfg.pop("api_key", "")
+    base_url = cfg.pop("base_url", None)
+    if base_url is None:
+        raise ValueError("openai backend requires base_url")
+    return OpenAIChoiceBackend(node_id, base_url, api_key=api_key, **cfg)

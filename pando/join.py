@@ -354,26 +354,21 @@ def main() -> None:
         backend_cfg = {"onnx_path": str(pulled_file)}
         backend_name = "onnx"
 
-    import importlib
-    backend_mod = importlib.import_module(".backend", __package__)
+    from .backend import create_backend
     if backend_name == "onnx":
-        backend = backend_mod.OnnxLayaBackend(
-            node_id, checkpoint=args.checkpoint, **backend_cfg)
+        backend = create_backend("onnx", node_id,
+                                 checkpoint=args.checkpoint, **backend_cfg)
         # Attest what this node is actually running, or a root that declares
         # artifact digests will refuse it (round 103).
         backend.artifact_digest = artifact_digest(
             Path(backend_cfg["onnx_path"]))
         print(f"artifact sha256 {backend.artifact_digest}", flush=True)
-    elif backend_name == "text":
-        from .textmodel import TextModel
-        model_path = backend_cfg.get("text_model", str(TEXT_MODEL))
-        backend = TextModel.load(model_path)
-        if args.checkpoint:
-            backend.checkpoint = args.checkpoint
-        print(f"text member loaded from {model_path}: "
-              f"{backend.summary()}", flush=True)
     else:
-        backend = backend_mod.MockBackend(node_id, **backend_cfg)
+        backend = create_backend(backend_name, node_id,
+                                 checkpoint=args.checkpoint, **backend_cfg)
+        describe = getattr(backend, "summary", None)
+        if callable(describe):
+            print(f"text member loaded: {describe()}", flush=True)
 
     stem_host = "0.0.0.0" if args.lan else "127.0.0.1"
     stems = [Stem(node_id, backend, host=stem_host, port=0)]
@@ -382,8 +377,9 @@ def main() -> None:
         bucket_files = sorted(
             Path("artifacts").glob("laya-en-static*-fixed.onnx"))
         if bucket_files and any(u["kind"] == "GPU" for u in eus):
-            gpu_backend = backend_mod.OnnxLayaBackend(
-                node_id + "-gpu", str(bucket_files[-1]),
+            from .backend import create_backend as _mk
+            gpu_backend = _mk(
+                "onnx", node_id + "-gpu", onnx_path=str(bucket_files[-1]),
                 repo="convaiinnovations/laya", device="GPU",
                 onnx_buckets=[str(b) for b in bucket_files],
                 checkpoint=f"{args.checkpoint}-gpu" if args.checkpoint else None)
@@ -395,8 +391,9 @@ def main() -> None:
         # NPU stem: needs the IsNaN-free static graph
         npu_file = Path("artifacts/laya-en-static-nonisnan.onnx")
         if npu_file.exists() and any(u["kind"] == "NPU" for u in eus):
-            npu_backend = backend_mod.OnnxLayaBackend(
-                node_id + "-npu", str(npu_file),
+            from .backend import create_backend as _mk
+            npu_backend = _mk(
+                "onnx", node_id + "-npu", onnx_path=str(npu_file),
                 repo="convaiinnovations/laya", device="NPU",
                 pad_to=256,
                 checkpoint=f"{args.checkpoint}-npu" if args.checkpoint else None)
