@@ -4250,6 +4250,8 @@ class TestActionSemanticsCheck(unittest.TestCase):
         self.assertEqual(set(tool.CAUSAL_GOALS), set(tool.ACTION_IDS))
         self.assertEqual(set(tool.STRUCTURAL_GOALS), set(tool.ACTION_IDS))
         self.assertEqual(set(tool.SYNONYM_GOALS), set(tool.ACTION_IDS))
+        self.assertEqual(set(tool.JOINT_GOALS), set(tool.ACTION_IDS))
+        self.assertEqual(set(tool.JOINT_DESCRIPTIONS), set(tool.ACTION_IDS))
         self.assertEqual(set(tool.LITERAL_GOALS), set(tool.ACTION_IDS))
         self.assertTrue(all(
             tool.CAUSAL_GOALS[action] != tool.LITERAL_GOALS[action]
@@ -4258,8 +4260,16 @@ class TestActionSemanticsCheck(unittest.TestCase):
         self.assertTrue(structural_audit["ok"], structural_audit)
         synonym_audit = tool.lexical_audit(tool.SYNONYM_GOALS)
         self.assertTrue(synonym_audit["ok"], synonym_audit)
+        joint_audit = tool.lexical_audit(tool.JOINT_GOALS)
+        self.assertTrue(joint_audit["ok"], joint_audit)
         self.assertTrue(all(
             tool.SYNONYM_GOALS[action] != tool.CAUSAL_GOALS[action]
+            for action in tool.ACTION_IDS))
+        self.assertTrue(all(
+            tool.JOINT_GOALS[action] != tool.CAUSAL_GOALS[action]
+            and tool.JOINT_DESCRIPTIONS[action]
+            != tool.ACTION_INFO[action][0]
+            and action not in tool.JOINT_DESCRIPTIONS[action]
             for action in tool.ACTION_IDS))
 
     def test_structural_preregistration_is_directional(self):

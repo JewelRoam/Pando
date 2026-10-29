@@ -190,6 +190,50 @@ GOAL_VARIANTS = {
     "structural": STRUCTURAL_GOALS,
     "synonym": SYNONYM_GOALS,
 }
+JOINT_GOALS = {
+    "seed.export": (
+        "若今夜此设备永久掉线，后来接手者必须能证明一份材料确由这里产生；"
+        "现在就封存它，并用长码标明其唯一性。"
+    ),
+    "seed.replicate": (
+        "远方接班人需要同一份封装物，而原件目前仍只在这里；"
+        "完成运送，并比对两端保存的结果是否完全一致。"
+    ),
+    "recruit.invite": (
+        "名册外有位对象明确答应履职；把进入方式交付给它，"
+        "并确保之后的调度找得到它。"
+    ),
+    "reproduce.spawn": (
+        "眼下唯一在岗者若退出，任务将中断；机器仍能承载，"
+        "请造出可独立上岗的等价备份。"
+    ),
+    "policy.set": (
+        "现行批准条件使待决事项长期卡住；在许可边界内调整这个条件，"
+        "并留下变更前的数值。"
+    ),
+    "culture.refine": (
+        "相同差错反复发生，因为大家沿用的书面约定没有说明终止条件；"
+        "补全它，再把统一后的文书发给每个执行者。"
+    ),
+    "resource.rebalance": (
+        "一侧承载力即将耗尽，另一侧还有余量；请把正在处理的事情和"
+        "对应执行者挪到空处，同时写清何时迁回。"
+    ),
+    "meta.propose": (
+        "某类反复出现的事情没有现成手段可用；先定义一个待检查的"
+        "新增手段，等他人复核后才启用。"
+    ),
+}
+JOINT_DESCRIPTIONS = {
+    "seed.export": "把当前载体独有的来源凭据整理成可异地验真的离线包裹，并留下可对照的长指纹",
+    "seed.replicate": "把已经封好的离线交接物运往另一载体，并确认双方保存的指纹一致",
+    "recruit.invite": "给一个尚未登记、但已表示愿意承担职责的对象开通入口，并留下后续可寻址凭据",
+    "reproduce.spawn": "资源尚有余量时，照当前执行单元制作第二份，它能脱离原单元自行开始履职",
+    "policy.set": "在授权范围内改变现有的取舍阈值，并同时保留改动前后的数值",
+    "culture.refine": "补齐团队共用规程里缺失的收尾检查，并让所有执行者采用同一版本",
+    "resource.rebalance": "把一个运行实体连同其工作负载转到较空闲的机器，并预先设定撤回触发条件",
+    "meta.propose": "为现有操作集合无法覆盖的重复需求设计一种候选新操作，交给独立方审查后再接入",
+}
 
 # These are explicit content cues from each action description, not generic
 # function words.  The causal goals must contain none of the cues for any
@@ -238,6 +282,25 @@ STRUCTURAL_PREREGISTRATION = {
     },
     "otherwise": "inconclusive",
 }
+JOINT_PREREGISTRATION = {
+    "control_goal_variant": "causal",
+    "candidate_goal_variant": "joint",
+    "primary_arms": ["opaque_a", "opaque_b"],
+    "perturbation": (
+        "same decision dependencies, jointly rewriting both goals and action "
+        "descriptions with different content words and no action identifiers"
+    ),
+    "joint_fragility_supported_if": {
+        "minimum_absolute_accuracy_drop": 0.15,
+        "directional_exact_mcnemar_alpha": 0.05,
+    },
+    "joint_robustness_supported_if": {
+        "minimum_candidate_opaque_accuracy": 0.90,
+        "wilson_95_lower_bound_above_chance": True,
+        "directional_exact_mcnemar_alpha": 0.05,
+    },
+    "otherwise": "inconclusive",
+}
 SYNONYM_PREREGISTRATION = {
     "control_goal_variant": "causal",
     "candidate_goal_variant": "synonym",
@@ -268,6 +331,7 @@ OPAQUE_LABELS = ("k7", "m2", "q9", "v4", "a8", "c3", "h6", "t1")
 INTERLEAVED_SCHEMA = "action-semantics-interleaved-v1"
 STRUCTURAL_INTERLEAVED_SCHEMA = "action-semantics-structural-interleaved-v1"
 SYNONYM_INTERLEAVED_SCHEMA = "action-semantics-synonym-interleaved-v1"
+JOINT_INTERLEAVED_SCHEMA = "action-semantics-joint-interleaved-v1"
 SYSTEM_PROMPT = """你是多主机殖民地的动作选择器。
 用户会给出一个唯一目标，以及一张候选动作表。表中每一项都有一个标识和说明。
 只根据目标和同一行的说明选择一个最匹配的动作；不要根据编号、位置、真实动作名或历史偏好猜测。
